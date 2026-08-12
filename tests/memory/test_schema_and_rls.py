@@ -65,8 +65,13 @@ ROOT_MANIFEST_PATH = MIGRATIONS / "manifest.json"
 MANIFEST_VERIFIER_PATH = (
     ROOT / "tools" / "governed_memory_validation" / "verify_migration_manifest.py"
 )
+STORE_MANIFEST_VERIFIER_PATH = (
+    ROOT
+    / "tools"
+    / "governed_memory_validation"
+    / "verify_store_migration_manifest.py"
+)
 ROLES_PATH = MIGRATIONS / "roles_preflight.pgsql"
-SUCCESSOR_README_PATH = ROOT / "docs" / "memory" / "clean_successor" / "README.md"
 PACKAGE_DIRS = (
     MIGRATIONS / "0001_foundation",
     MIGRATIONS / "0002_conversation_bridge",
@@ -1261,14 +1266,6 @@ class SchemaContractTests(unittest.TestCase):
             with self.subTest(contract_phrase=required):
                 self.assertIn(required, replay_contract)
 
-        documentation = SUCCESSOR_README_PATH.read_text(encoding="utf-8")
-        self.assertRegex(
-            documentation,
-            r"(?is)terminal proposal replay.*?30 days.*?"
-            r"exact replay.*?unavailable.*?proposal_retention_purged.*?"
-            r"content-free",
-        )
-
     def test_answer_binding_retention_contract_is_explicit(self) -> None:
         retention = self.contract["interface_contracts"][
             "answer_binding_retention"
@@ -1434,6 +1431,22 @@ class PackageIntegrityTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "unexpected migration candidate status"):
             verifier["verify"](MIGRATIONS, phase6e_proof=True)
+
+    def test_current_stores_only_manifest_is_exact_and_excludes_bridge(self) -> None:
+        verifier = runpy.run_path(str(STORE_MANIFEST_VERIFIER_PATH))
+        receipt = verifier["verify"]()
+        self.assertEqual(
+            receipt["schema_version"],
+            "governed-memory-phase8b-store-migration-verification-v2",
+        )
+        self.assertEqual(receipt["file_count"], 10)
+        self.assertEqual(receipt["source_bridge_artifact_count"], 0)
+        self.assertEqual(receipt["historical_package_descriptor_count"], 0)
+        self.assertFalse(receipt["production_state_changed"])
+        self.assertNotIn(
+            "0002_conversation_bridge",
+            "\n".join(receipt["artifact_sha256"]),
+        )
 
 
 class StaticSQLPolicyTests(unittest.TestCase):

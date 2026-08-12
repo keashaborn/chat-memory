@@ -19,7 +19,7 @@ import re
 from typing import Final
 
 from .authority_state import AuthorityState, HASH_RE
-from .authority_v2 import (
+from .authority import (
     AuthorityVerificationError,
     canonical_json_bytes,
     _execution_capability_evidence,

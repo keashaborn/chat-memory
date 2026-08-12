@@ -1,260 +1,299 @@
 from __future__ import annotations
 
-"""Deterministic disposable backend for Phase 8A controller proof."""
+"""Sealed, in-memory backend for the Phase 8B disposable proof.
+
+This backend has no host adapter, command runner, socket, environment, secret,
+installation, or activation surface.  It models one deterministic fault at a
+time so the Phase 8B controller algorithm can be exercised without claiming a
+process-crash, durable-recovery, composite-fault, or live-system proof.
+"""
 
 from collections import Counter
-from dataclasses import replace
+from dataclasses import dataclass
+from typing import Final
 
 from .controller import (
-    ControllerInterruption,
     EXECUTION_MODE,
-    INSTALL_STEPS,
-    RETAINED_INSTALL_EFFECTS,
-    ROLLBACK_PREREQUISITES,
-    ROLLBACK_STEPS,
-    RollbackFacts,
+    JournalEvent,
+    JournalRecord,
+    PlanStep,
+    STORES_ONLY_PLAN,
     StepState,
-    _SYNTHETIC_BACKEND_SEAL,
 )
 
 
+SYNTHETIC_BACKEND_SCHEMA_VERSION: Final = (
+    "governed-memory-phase8b-sealed-synthetic-backend-v1"
+)
+
+FAULT_NONE: Final = "none"
+FAULT_FAIL_BEFORE_EFFECT: Final = "fail_before_effect"
+FAULT_FAIL_AFTER_EFFECT: Final = "fail_after_effect"
+FAULT_INTERRUPT_BEFORE_EFFECT: Final = "interrupt_before_effect"
+FAULT_INTERRUPT_AFTER_EFFECT: Final = "interrupt_after_effect"
+FAULT_INTERRUPT_AFTER_APPLIED_JOURNAL: Final = (
+    "interrupt_after_applied_journal"
+)
+FAULT_INTERRUPT_BEFORE_COMPENSATION: Final = (
+    "interrupt_before_compensation"
+)
+FAULT_INTERRUPT_AFTER_COMPENSATION: Final = (
+    "interrupt_after_compensation"
+)
+
+ALLOWED_FAULT_POINTS: Final = frozenset(
+    {
+        FAULT_NONE,
+        FAULT_FAIL_BEFORE_EFFECT,
+        FAULT_FAIL_AFTER_EFFECT,
+        FAULT_INTERRUPT_BEFORE_EFFECT,
+        FAULT_INTERRUPT_AFTER_EFFECT,
+        FAULT_INTERRUPT_AFTER_APPLIED_JOURNAL,
+        FAULT_INTERRUPT_BEFORE_COMPENSATION,
+        FAULT_INTERRUPT_AFTER_COMPENSATION,
+    }
+)
+
+_COMPENSATION_FAULTS: Final = frozenset(
+    {
+        FAULT_INTERRUPT_BEFORE_COMPENSATION,
+        FAULT_INTERRUPT_AFTER_COMPENSATION,
+    }
+)
+_EFFECT_FAULTS: Final = ALLOWED_FAULT_POINTS - _COMPENSATION_FAULTS
+_PLAN_STEP_IDS: Final = tuple(step.step_id for step in STORES_ONLY_PLAN)
+_COMPENSABLE_STEP_IDS: Final = tuple(
+    step.step_id for step in STORES_ONLY_PLAN if step.compensable
+)
+_CONSTRUCTION_SEAL = object()
+
+
+class SyntheticBackendError(RuntimeError):
+    """Content-free refusal raised by the sealed synthetic backend."""
+
+
 class SyntheticEffectFailure(RuntimeError):
-    pass
+    """Ordinary modeled effect failure caught by the controller."""
+
+
+class SyntheticInterruption(BaseException):
+    """In-process interruption marker deliberately not caught as Exception.
+
+    This is not an operating-system process crash and never claims to be one.
+    """
+
+
+@dataclass(frozen=True, slots=True)
+class SyntheticScenario:
+    scenario_id: str
+    family: str
+    fault_point: str
+    target_step_id: str | None
+    trigger_failure_step_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.scenario_id, str)
+            or not self.scenario_id
+            or len(self.scenario_id) > 160
+            or not self.scenario_id.isascii()
+            or not isinstance(self.family, str)
+            or not self.family
+            or len(self.family) > 80
+            or not self.family.isascii()
+            or self.fault_point not in ALLOWED_FAULT_POINTS
+        ):
+            raise SyntheticBackendError("synthetic_scenario_invalid")
+        if self.fault_point == FAULT_NONE:
+            if self.target_step_id is not None or self.trigger_failure_step_id is not None:
+                raise SyntheticBackendError("synthetic_scenario_invalid")
+            return
+        if self.target_step_id not in _PLAN_STEP_IDS:
+            raise SyntheticBackendError("synthetic_target_step_invalid")
+        if self.fault_point in _COMPENSATION_FAULTS:
+            if (
+                self.target_step_id not in _COMPENSABLE_STEP_IDS
+                or self.trigger_failure_step_id not in _PLAN_STEP_IDS
+            ):
+                raise SyntheticBackendError(
+                    "synthetic_compensation_scenario_invalid"
+                )
+            target_position = _PLAN_STEP_IDS.index(self.target_step_id)
+            trigger_position = _PLAN_STEP_IDS.index(
+                self.trigger_failure_step_id
+            )
+            if target_position >= trigger_position:
+                raise SyntheticBackendError(
+                    "synthetic_compensation_scenario_invalid"
+                )
+        elif (
+            self.fault_point not in _EFFECT_FAULTS
+            or self.trigger_failure_step_id is not None
+        ):
+            raise SyntheticBackendError("synthetic_scenario_invalid")
+
+    def projection(self) -> dict[str, str | None]:
+        return {
+            "scenario_id": self.scenario_id,
+            "family": self.family,
+            "fault_point": self.fault_point,
+            "target_step_id": self.target_step_id,
+            "trigger_failure_step_id": self.trigger_failure_step_id,
+        }
 
 
 class SyntheticBackend:
-    """In-memory state model; it cannot address a host or provider."""
+    """Exact hermetic backend; construction is restricted to this module."""
 
-    controller_mode = EXECUTION_MODE
-    _phase8a_synthetic_seal = _SYNTHETIC_BACKEND_SEAL
+    execution_mode: Final = EXECUTION_MODE
+    schema_version: Final = SYNTHETIC_BACKEND_SCHEMA_VERSION
 
     def __init__(
         self,
+        scenario: SyntheticScenario,
         *,
-        crash_after_intent_step: str | None = None,
-        crash_after_effect_step: str | None = None,
-        crash_after_journal_commit_step: str | None = None,
-        fail_effect_step: str | None = None,
-        fail_after_effect_step: str | None = None,
-        rollback_facts: RollbackFacts | None = None,
+        _seal: object | None = None,
     ) -> None:
-        self.crash_after_intent_step = crash_after_intent_step
-        self.crash_after_effect_step = crash_after_effect_step
-        self.crash_after_journal_commit_step = crash_after_journal_commit_step
-        self.fail_effect_step = fail_effect_step
-        self.fail_after_effect_step = fail_after_effect_step
-        self._rollback_facts = rollback_facts or RollbackFacts()
-        self._states: dict[tuple[str, str], StepState] = {}
-        self._probe_overrides: dict[tuple[str, str], StepState] = {}
-        self._consumed_crashes: set[tuple[str, str, str]] = set()
-        self.effects: list[tuple[str, str]] = []
-        self.checkpoints: list[tuple[str, str, str]] = []
-        self.execution_counts: Counter[tuple[str, str]] = Counter()
-        self._applied_install_effects: set[str] = set()
-        self._root_resources: set[str] = set()
-        self.provider_calls = 0
-        self.source_postgresql_actions = 0
-        self.runtime_application_starts = 0
-        self.network_calls = 0
-
-    # Verification-only effects are discharged when their underlying exact
-    # resources are removed.  The final postflight receipt, exact named roots,
-    # legacy-secret quarantine, and service identity are deliberately retained.
-    _ROLLBACK_CLEARS = {
-        **ROLLBACK_PREREQUISITES,
-        "R03_REMOVE_HTTP_UNIT": (
-            *ROLLBACK_PREREQUISITES["R03_REMOVE_HTTP_UNIT"],
-            "I25_DAEMON_RELOAD_VERIFY_APP_UNITS_DORMANT",
-        ),
-        "R12_STOP_REMOVE_POSTGRES_CONTAINER": (
-            *ROLLBACK_PREREQUISITES["R12_STOP_REMOVE_POSTGRES_CONTAINER"],
-            "I14_START_VERIFY_STORES",
-            "I27_COLD_RESTART_SAME_VOLUMES_PROOF",
-        ),
-    }
-    _RETAINED_AFTER_ROLLBACK = frozenset(
-        (*RETAINED_INSTALL_EFFECTS, "I29_SEAL_INACTIVE_POSTFLIGHT")
-    )
-    _ROOTS_CREATED_BY_I06 = frozenset(
-        {
-            "install_root",
-            "environment_root",
-            "runtime_environment_root",
-            "state_root",
-            "backup_root",
+        if _seal is not _CONSTRUCTION_SEAL or type(scenario) is not SyntheticScenario:
+            raise SyntheticBackendError(
+                "synthetic_backend_construction_not_authorized"
+            )
+        self._scenario = scenario
+        self._records: list[JournalRecord] = []
+        self._states = {
+            step.step_id: StepState.BEFORE for step in STORES_ONLY_PLAN
         }
-    )
-    _ROOTS_RETAINED_AFTER_ROLLBACK = _ROOTS_CREATED_BY_I06
-
-    def clone(self) -> SyntheticBackend:
-        clone = SyntheticBackend(rollback_facts=self._rollback_facts)
-        clone.crash_after_intent_step = self.crash_after_intent_step
-        clone.crash_after_effect_step = self.crash_after_effect_step
-        clone.crash_after_journal_commit_step = (
-            self.crash_after_journal_commit_step
-        )
-        clone.fail_effect_step = self.fail_effect_step
-        clone.fail_after_effect_step = self.fail_after_effect_step
-        clone._states = dict(self._states)
-        clone._probe_overrides = dict(self._probe_overrides)
-        clone._consumed_crashes = set(self._consumed_crashes)
-        clone.effects = list(self.effects)
-        clone.checkpoints = list(self.checkpoints)
-        clone.execution_counts = Counter(self.execution_counts)
-        clone._applied_install_effects = set(self._applied_install_effects)
-        clone._root_resources = set(self._root_resources)
-        return clone
-
-    def clear_faults(self) -> None:
-        self.crash_after_intent_step = None
-        self.crash_after_effect_step = None
-        self.crash_after_journal_commit_step = None
-        self.fail_effect_step = None
-        self.fail_after_effect_step = None
-
-    def probe(self, operation: str, step_id: str) -> StepState:
-        self._validate_step(operation, step_id)
-        override = self._probe_overrides.get((operation, step_id))
-        if override is not None:
-            return override
-        return self._states.get((operation, step_id), StepState.BEFORE)
-
-    def execute(self, operation: str, step_id: str) -> None:
-        self._validate_step(operation, step_id)
-        key = (operation, step_id)
-        if self.probe(operation, step_id) is not StepState.BEFORE:
-            raise SyntheticEffectFailure("synthetic_effect_not_before")
-        if self.fail_effect_step == step_id:
-            self.fail_effect_step = None
-            raise SyntheticEffectFailure("synthetic_effect_failure:" + step_id)
-        if operation == "install":
-            self._applied_install_effects.add(step_id)
-            if step_id == "I06_CREATE_OWNED_ROOTS":
-                self._root_resources.update(self._ROOTS_CREATED_BY_I06)
-        elif step_id == "R20_VERIFY_FINAL_ABSENCE":
-            remaining = self.resources_remaining
-            if remaining:
-                raise SyntheticEffectFailure(
-                    "synthetic_candidate_resources_remain:"
-                    + ",".join(remaining)
-                )
-        else:
-            for install_step in self._ROLLBACK_CLEARS.get(step_id, ()):
-                self._applied_install_effects.discard(install_step)
-                self._states[("install", install_step)] = StepState.BEFORE
-        self._states[key] = StepState.AFTER
-        self.execution_counts[key] += 1
-        self.effects.append(key)
-
-    def checkpoint(self, operation: str, step_id: str, event: str) -> None:
-        self._validate_step(operation, step_id)
-        if event not in {
-            "after_intent",
-            "after_effect",
-            "after_journal_commit",
-        }:
-            raise SyntheticEffectFailure("synthetic_checkpoint_invalid")
-        self.checkpoints.append((operation, step_id, event))
-        if event == "after_effect" and self.fail_after_effect_step == step_id:
-            self.fail_after_effect_step = None
-            raise SyntheticEffectFailure(
-                "synthetic_post_effect_failure:" + step_id
-            )
-        configured = {
-            "after_intent": self.crash_after_intent_step,
-            "after_effect": self.crash_after_effect_step,
-            "after_journal_commit": self.crash_after_journal_commit_step,
-        }[event]
-        crash_key = (operation, step_id, event)
-        if configured == step_id and crash_key not in self._consumed_crashes:
-            self._consumed_crashes.add(crash_key)
-            raise ControllerInterruption(
-                "synthetic_process_death:" + operation + ":" + step_id + ":" + event
-            )
-
-    def rollback_facts(self) -> RollbackFacts:
-        return self._rollback_facts
-
-    def set_rollback_facts(self, **changes: object) -> None:
-        allowed = set(RollbackFacts.__dataclass_fields__)
-        if set(changes) - allowed:
-            raise ValueError("synthetic_rollback_fact_invalid")
-        self._rollback_facts = replace(self._rollback_facts, **changes)
-
-    def set_probe_override(
-        self,
-        operation: str,
-        step_id: str,
-        state: StepState | str,
-    ) -> None:
-        self._validate_step(operation, step_id)
-        try:
-            normalized = state if isinstance(state, StepState) else StepState(state)
-        except ValueError as error:
-            raise ValueError("synthetic_probe_state_invalid") from error
-        self._probe_overrides[(operation, step_id)] = normalized
-
-    def clear_probe_override(self, operation: str, step_id: str) -> None:
-        self._probe_overrides.pop((operation, step_id), None)
-
-    def seed_unowned_effect(self, operation: str, step_id: str) -> None:
-        self._validate_step(operation, step_id)
-        self._states[(operation, step_id)] = StepState.AFTER
-
-    def effect_count(self, operation: str, step_id: str) -> int:
-        return self.execution_counts[(operation, step_id)]
+        self._counts: Counter[str] = Counter()
+        self._fault_fired = False
+        self._trigger_failure_fired = False
 
     @property
-    def resources_remaining(self) -> tuple[str, ...]:
-        effects = {
-            "install_effect:" + step_id
-            for step_id in (
-                self._applied_install_effects
-                - self._RETAINED_AFTER_ROLLBACK
-            )
-        }
-        roots = {
-            "root:" + root
-            for root in (
-                self._root_resources
-                - self._ROOTS_RETAINED_AFTER_ROLLBACK
-            )
-        }
-        return tuple(sorted(effects | roots))
+    def scenario(self) -> SyntheticScenario:
+        return self._scenario
 
     @property
-    def retained_resources(self) -> tuple[str, ...]:
-        resources = {
-            "root:" + root
-            for root in (
-                self._root_resources
-                & self._ROOTS_RETAINED_AFTER_ROLLBACK
-            )
-        }
-        if "I04_QUARANTINE_LEGACY_SECRET" in self._applied_install_effects:
-            resources.add("legacy_secret_quarantine")
-        if "I05_CREATE_SERVICE_IDENTITY" in self._applied_install_effects:
-            resources.add("service_identity")
-        if "I29_SEAL_INACTIVE_POSTFLIGHT" in self._applied_install_effects:
-            resources.add("inactive_postflight_receipt")
-        return tuple(sorted(resources))
+    def fault_fired(self) -> bool:
+        return self._fault_fired
 
     @property
-    def retained_effects(self) -> tuple[str, ...]:
+    def operation_counts(self) -> dict[str, int]:
+        return {
+            key: self._counts[key]
+            for key in (
+                "journal_append",
+                "probe",
+                "apply",
+                "compensate",
+                "ordinary_failure",
+                "interruption",
+            )
+        }
+
+    @property
+    def state_projection(self) -> tuple[tuple[str, str], ...]:
         return tuple(
-            sorted(
-                self._applied_install_effects
-                & self._RETAINED_AFTER_ROLLBACK
-            )
+            (step_id, self._states[step_id].value)
+            for step_id in _PLAN_STEP_IDS
         )
+
+    def journal_records(self) -> tuple[JournalRecord, ...]:
+        return tuple(self._records)
+
+    def append_journal(self, record: JournalRecord) -> None:
+        if type(record) is not JournalRecord:
+            raise SyntheticBackendError("synthetic_journal_record_invalid")
+        self._counts["journal_append"] += 1
+        self._records.append(record)
+        if (
+            not self._fault_fired
+            and self._scenario.fault_point
+            == FAULT_INTERRUPT_AFTER_APPLIED_JOURNAL
+            and record.event == JournalEvent.APPLIED.value
+            and record.step_id == self._scenario.target_step_id
+        ):
+            self._fault_fired = True
+            self._counts["interruption"] += 1
+            raise SyntheticInterruption(
+                "synthetic_in_process_interruption_after_applied_journal"
+            )
+
+    def probe(self, step: PlanStep) -> StepState:
+        self._validate_step(step)
+        self._counts["probe"] += 1
+        return self._states[step.step_id]
+
+    def apply(self, step: PlanStep) -> None:
+        self._validate_step(step)
+        self._counts["apply"] += 1
+        if (
+            not self._trigger_failure_fired
+            and self._scenario.trigger_failure_step_id == step.step_id
+        ):
+            self._trigger_failure_fired = True
+            self._counts["ordinary_failure"] += 1
+            raise SyntheticEffectFailure(
+                "synthetic_compensation_trigger_failure"
+            )
+        if not self._fault_fired and self._scenario.target_step_id == step.step_id:
+            if self._scenario.fault_point == FAULT_FAIL_BEFORE_EFFECT:
+                self._fire_failure("synthetic_failure_before_effect")
+            if self._scenario.fault_point == FAULT_INTERRUPT_BEFORE_EFFECT:
+                self._fire_interruption(
+                    "synthetic_in_process_interruption_before_effect"
+                )
+        self._states[step.step_id] = StepState.AFTER
+        if not self._fault_fired and self._scenario.target_step_id == step.step_id:
+            if self._scenario.fault_point == FAULT_FAIL_AFTER_EFFECT:
+                self._fire_failure("synthetic_failure_after_effect")
+            if self._scenario.fault_point == FAULT_INTERRUPT_AFTER_EFFECT:
+                self._fire_interruption(
+                    "synthetic_in_process_interruption_after_effect"
+                )
+
+    def compensate(self, step: PlanStep) -> None:
+        self._validate_step(step)
+        if not step.compensable:
+            raise SyntheticBackendError(
+                "synthetic_noncompensable_step_refused"
+            )
+        self._counts["compensate"] += 1
+        if not self._fault_fired and self._scenario.target_step_id == step.step_id:
+            if (
+                self._scenario.fault_point
+                == FAULT_INTERRUPT_BEFORE_COMPENSATION
+            ):
+                self._fire_interruption(
+                    "synthetic_in_process_interruption_before_compensation"
+                )
+        self._states[step.step_id] = StepState.BEFORE
+        if not self._fault_fired and self._scenario.target_step_id == step.step_id:
+            if (
+                self._scenario.fault_point
+                == FAULT_INTERRUPT_AFTER_COMPENSATION
+            ):
+                self._fire_interruption(
+                    "synthetic_in_process_interruption_after_compensation"
+                )
+
+    def _fire_failure(self, code: str) -> None:
+        self._fault_fired = True
+        self._counts["ordinary_failure"] += 1
+        raise SyntheticEffectFailure(code)
+
+    def _fire_interruption(self, code: str) -> None:
+        self._fault_fired = True
+        self._counts["interruption"] += 1
+        raise SyntheticInterruption(code)
 
     @staticmethod
-    def _validate_step(operation: str, step_id: str) -> None:
-        if operation == "install":
-            allowed = INSTALL_STEPS
-        elif operation in {"rollback", "compensation"}:
-            allowed = ROLLBACK_STEPS
-        else:
-            raise SyntheticEffectFailure("synthetic_operation_invalid")
-        if step_id not in allowed:
-            raise SyntheticEffectFailure("synthetic_step_invalid")
+    def _validate_step(step: PlanStep) -> None:
+        if type(step) is not PlanStep or step.step_id not in _PLAN_STEP_IDS:
+            raise SyntheticBackendError("synthetic_step_invalid")
+
+
+def _construct_exact_synthetic_backend(
+    scenario: SyntheticScenario,
+) -> SyntheticBackend:
+    """Construct the sole backend accepted by the disposable harness."""
+
+    return SyntheticBackend(scenario, _seal=_CONSTRUCTION_SEAL)

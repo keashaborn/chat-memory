@@ -10,9 +10,9 @@ import tempfile
 import unittest
 from unittest import mock
 
-from tools.governed_memory_install import authority_v2
+from tools.governed_memory_install import authority
 from tools.governed_memory_install.authority_state import AuthorityState
-from tools.governed_memory_install.controller_v2 import (
+from tools.governed_memory_install.controller import (
     EXECUTION_MODE,
     JournalEvent,
     JournalRecord,
@@ -22,13 +22,13 @@ from tools.governed_memory_install.controller_v2 import (
     STORES_ONLY_PLAN,
     validate_plan,
 )
-from tools.governed_memory_install.durable_journal_v2 import (
-    DurableJournalV2,
-    DurableJournalV2AnchorError,
-    DurableJournalV2IntegrityError,
-    DurableJournalV2SecurityError,
+from tools.governed_memory_install.journal import (
+    DurableJournal,
+    DurableJournalAnchorError,
+    DurableJournalIntegrityError,
+    DurableJournalSecurityError,
 )
-from tools.governed_memory_install.execution_capability_v2 import (
+from tools.governed_memory_install.execution_capability import (
     ClaimedExecutionBindingError,
     _claimed_execution_binding_evidence,
     claim_phase8b_execution_binding,
@@ -153,7 +153,7 @@ class _Fixture:
             "exact_targets_sha256": self.exact_targets_sha256,
         }
         self.scope_json = _canonical(self.scope)
-        evidence = authority_v2.CryptographicallyValidScopeNotExecution(
+        evidence = authority.CryptographicallyValidScopeNotExecution(
             result_type="cryptographically_valid_scope_not_execution",
             operation="dormant_install",
             authorization_namespace="test.phase8b",
@@ -168,9 +168,9 @@ class _Fixture:
             not_before="2026-08-11T12:00:00Z",
             expires_at="2026-08-11T12:10:00Z",
         )
-        self.verified_capability = authority_v2._VerifiedDormantInstallCapability(
+        self.verified_capability = authority._VerifiedDormantInstallCapability(
             evidence,
-            authority_v2._EXECUTION_CAPABILITY_TOKEN,
+            authority._EXECUTION_CAPABILITY_TOKEN,
         )
 
     def claimed_binding(self) -> object:
@@ -222,7 +222,7 @@ class Phase8BDurableJournalTests(unittest.TestCase):
 
     def _record(
         self,
-        journal: DurableJournalV2,
+        journal: DurableJournal,
         *,
         sequence: int,
         prior: str,
@@ -334,10 +334,10 @@ class Phase8BDurableJournalTests(unittest.TestCase):
     def test_forged_binding_is_rejected_before_journal_path_access(self) -> None:
         missing = Path(self.temporary.name) / "does-not-exist" / "journal"
         with self.assertRaisesRegex(
-            DurableJournalV2SecurityError,
+            DurableJournalSecurityError,
             "binding_invalid",
         ):
-            DurableJournalV2(
+            DurableJournal(
                 missing,
                 claimed_execution_binding=object(),
                 authority_state=self.fixture.state,
@@ -348,10 +348,10 @@ class Phase8BDurableJournalTests(unittest.TestCase):
 
         wrong = self.path.with_name("other.jsonl")
         with self.assertRaisesRegex(
-            DurableJournalV2SecurityError,
+            DurableJournalSecurityError,
             "path_invalid",
         ):
-            DurableJournalV2(
+            DurableJournal(
                 wrong,
                 claimed_execution_binding=self.binding,
                 authority_state=self.fixture.state,
@@ -363,10 +363,10 @@ class Phase8BDurableJournalTests(unittest.TestCase):
     def test_forged_or_released_global_lock_refuses_before_path_access(self) -> None:
         missing = Path(self.temporary.name) / "no-journal-parent" / "journal"
         with self.assertRaisesRegex(
-            DurableJournalV2SecurityError,
+            DurableJournalSecurityError,
             "lock_not_held",
         ):
-            DurableJournalV2(
+            DurableJournal(
                 missing,
                 claimed_execution_binding=self.binding,
                 authority_state=self.fixture.state,
@@ -376,10 +376,10 @@ class Phase8BDurableJournalTests(unittest.TestCase):
         held = self.fixture.execution_lock.held_capability()
         self.fixture.execution_lock.close()
         with self.assertRaisesRegex(
-            DurableJournalV2SecurityError,
+            DurableJournalSecurityError,
             "lock_not_held",
         ):
-            DurableJournalV2(
+            DurableJournal(
                 missing,
                 claimed_execution_binding=self.binding,
                 authority_state=self.fixture.state,
@@ -389,7 +389,7 @@ class Phase8BDurableJournalTests(unittest.TestCase):
         self.assertFalse(missing.parent.exists())
 
     def test_append_is_canonical_fsynced_anchored_and_exactly_resumable(self) -> None:
-        with DurableJournalV2(
+        with DurableJournal(
             self.path,
             claimed_execution_binding=self.binding,
             authority_state=self.fixture.state,
@@ -399,7 +399,7 @@ class Phase8BDurableJournalTests(unittest.TestCase):
         ) as journal:
             record = self._record(journal, sequence=1, prior="0" * 64)
             with mock.patch(
-                "tools.governed_memory_install.durable_journal_v2.os.fsync",
+                "tools.governed_memory_install.journal.os.fsync",
                 wraps=os.fsync,
             ) as fsync:
                 journal.append_journal(record)
@@ -411,7 +411,7 @@ class Phase8BDurableJournalTests(unittest.TestCase):
         metadata = self.path.stat(follow_symlinks=False)
         self.assertEqual(metadata.st_mode & 0o777, 0o600)
         self.assertEqual(metadata.st_nlink, 1)
-        with DurableJournalV2(
+        with DurableJournal(
             self.path,
             claimed_execution_binding=self.binding,
             authority_state=self.fixture.state,
@@ -421,7 +421,7 @@ class Phase8BDurableJournalTests(unittest.TestCase):
             self.assertEqual(reopened.journal_records(), (record,))
 
     def test_forged_append_is_refused_without_file_or_anchor_advance(self) -> None:
-        with DurableJournalV2(
+        with DurableJournal(
             self.path,
             claimed_execution_binding=self.binding,
             authority_state=self.fixture.state,
@@ -437,12 +437,12 @@ class Phase8BDurableJournalTests(unittest.TestCase):
                 prior_record_sha256="0" * 64,
             )
             with self.assertRaisesRegex(
-                DurableJournalV2IntegrityError,
+                DurableJournalIntegrityError,
                 "append_binding_invalid",
             ):
                 journal.append_journal(forged)
             with self.assertRaisesRegex(
-                DurableJournalV2IntegrityError,
+                DurableJournalIntegrityError,
                 "record_type_invalid",
             ):
                 journal.append_journal(object())  # type: ignore[arg-type]
@@ -452,7 +452,7 @@ class Phase8BDurableJournalTests(unittest.TestCase):
 
     def test_released_lock_refuses_an_already_open_journal(self) -> None:
         alternate = _Fixture(Path(self.temporary.name) / "released-open")
-        journal: DurableJournalV2 | None = None
+        journal: DurableJournal | None = None
         try:
             binding = alternate.claimed_binding()
             journal_path = Path(
@@ -460,7 +460,7 @@ class Phase8BDurableJournalTests(unittest.TestCase):
             )
             journal_path.parent.mkdir(parents=True, mode=0o700)
             os.chmod(journal_path.parent, 0o700)
-            journal = DurableJournalV2(
+            journal = DurableJournal(
                 journal_path,
                 claimed_execution_binding=binding,
                 authority_state=alternate.state,
@@ -469,7 +469,7 @@ class Phase8BDurableJournalTests(unittest.TestCase):
             )
             alternate.execution_lock.close()
             with self.assertRaisesRegex(
-                DurableJournalV2SecurityError,
+                DurableJournalSecurityError,
                 "lock_not_held",
             ):
                 journal.journal_records()
@@ -479,7 +479,7 @@ class Phase8BDurableJournalTests(unittest.TestCase):
             alternate.close()
 
     def test_exactly_one_complete_file_entry_ahead_repairs_anchor(self) -> None:
-        with DurableJournalV2(
+        with DurableJournal(
             self.path,
             claimed_execution_binding=self.binding,
             authority_state=self.fixture.state,
@@ -497,7 +497,7 @@ class Phase8BDurableJournalTests(unittest.TestCase):
         with self.path.open("ab", buffering=0) as stream:
             stream.write(_encoded_record(second))
             os.fsync(stream.fileno())
-        with DurableJournalV2(
+        with DurableJournal(
             self.path,
             claimed_execution_binding=self.binding,
             authority_state=self.fixture.state,
@@ -510,7 +510,7 @@ class Phase8BDurableJournalTests(unittest.TestCase):
             self.assertEqual(repaired.journal_records(), (first, second))
 
     def test_missing_anchor_with_exactly_one_complete_entry_repairs(self) -> None:
-        with DurableJournalV2(
+        with DurableJournal(
             self.path,
             claimed_execution_binding=self.binding,
             authority_state=self.fixture.state,
@@ -528,7 +528,7 @@ class Phase8BDurableJournalTests(unittest.TestCase):
                     ).journal_binding_sha256,
                 ),
             )
-        with DurableJournalV2(
+        with DurableJournal(
             self.path,
             claimed_execution_binding=self.binding,
             authority_state=self.fixture.state,
@@ -538,7 +538,7 @@ class Phase8BDurableJournalTests(unittest.TestCase):
             self.assertEqual(repaired.journal_records(), (first,))
 
     def test_anchor_ahead_and_multi_entry_gap_are_refused(self) -> None:
-        with DurableJournalV2(
+        with DurableJournal(
             self.path,
             claimed_execution_binding=self.binding,
             authority_state=self.fixture.state,
@@ -550,10 +550,10 @@ class Phase8BDurableJournalTests(unittest.TestCase):
         self.path.write_bytes(b"")
         os.chmod(self.path, 0o600)
         with self.assertRaisesRegex(
-            DurableJournalV2AnchorError,
+            DurableJournalAnchorError,
             "anchor_mismatch",
         ):
-            DurableJournalV2(
+            DurableJournal(
                 self.path,
                 claimed_execution_binding=self.binding,
                 authority_state=self.fixture.state,
@@ -570,7 +570,7 @@ class Phase8BDurableJournalTests(unittest.TestCase):
             )
             second_path.parent.mkdir(parents=True, mode=0o700)
             os.chmod(second_path.parent, 0o700)
-            with DurableJournalV2(
+            with DurableJournal(
                 second_path,
                 claimed_execution_binding=second_binding,
                 authority_state=alternate.state,
@@ -587,10 +587,10 @@ class Phase8BDurableJournalTests(unittest.TestCase):
             second_path.write_bytes(_encoded_record(one) + _encoded_record(two))
             os.chmod(second_path, 0o600)
             with self.assertRaisesRegex(
-                DurableJournalV2AnchorError,
+                DurableJournalAnchorError,
                 "anchor_mismatch",
             ):
-                DurableJournalV2(
+                DurableJournal(
                     second_path,
                     claimed_execution_binding=second_binding,
                     authority_state=alternate.state,
@@ -600,7 +600,7 @@ class Phase8BDurableJournalTests(unittest.TestCase):
             alternate.close()
 
     def test_truncation_mutation_reorder_and_replacement_are_refused(self) -> None:
-        with DurableJournalV2(
+        with DurableJournal(
             self.path,
             claimed_execution_binding=self.binding,
             authority_state=self.fixture.state,
@@ -620,8 +620,8 @@ class Phase8BDurableJournalTests(unittest.TestCase):
 
         self.path.write_bytes(original[:-1])
         os.chmod(self.path, 0o600)
-        with self.assertRaisesRegex(DurableJournalV2IntegrityError, "truncated"):
-            DurableJournalV2(
+        with self.assertRaisesRegex(DurableJournalIntegrityError, "truncated"):
+            DurableJournal(
                 self.path,
                 claimed_execution_binding=self.binding,
                 authority_state=self.fixture.state,
@@ -631,8 +631,8 @@ class Phase8BDurableJournalTests(unittest.TestCase):
         mutated = original.replace(first.step_id.encode("ascii"), b"I01_MUTATED", 1)
         self.path.write_bytes(mutated)
         os.chmod(self.path, 0o600)
-        with self.assertRaises(DurableJournalV2IntegrityError):
-            DurableJournalV2(
+        with self.assertRaises(DurableJournalIntegrityError):
+            DurableJournal(
                 self.path,
                 claimed_execution_binding=self.binding,
                 authority_state=self.fixture.state,
@@ -642,8 +642,8 @@ class Phase8BDurableJournalTests(unittest.TestCase):
         lines = original.splitlines(keepends=True)
         self.path.write_bytes(lines[1] + lines[0])
         os.chmod(self.path, 0o600)
-        with self.assertRaises(DurableJournalV2IntegrityError):
-            DurableJournalV2(
+        with self.assertRaises(DurableJournalIntegrityError):
+            DurableJournal(
                 self.path,
                 claimed_execution_binding=self.binding,
                 authority_state=self.fixture.state,
@@ -652,7 +652,7 @@ class Phase8BDurableJournalTests(unittest.TestCase):
 
         self.path.write_bytes(original)
         os.chmod(self.path, 0o600)
-        with DurableJournalV2(
+        with DurableJournal(
             self.path,
             claimed_execution_binding=self.binding,
             authority_state=self.fixture.state,
@@ -663,7 +663,7 @@ class Phase8BDurableJournalTests(unittest.TestCase):
             self.path.write_bytes(original)
             os.chmod(self.path, 0o600)
             with self.assertRaisesRegex(
-                DurableJournalV2SecurityError,
+                DurableJournalSecurityError,
                 "file_invalid|file_replaced",
             ):
                 journal.journal_records()
@@ -672,10 +672,10 @@ class Phase8BDurableJournalTests(unittest.TestCase):
         os.chmod(self.path.parent, 0o755)
         try:
             with self.assertRaisesRegex(
-                DurableJournalV2SecurityError,
+                DurableJournalSecurityError,
                 "directory_invalid",
             ):
-                DurableJournalV2(
+                DurableJournal(
                     self.path,
                     claimed_execution_binding=self.binding,
                     authority_state=self.fixture.state,
@@ -685,7 +685,7 @@ class Phase8BDurableJournalTests(unittest.TestCase):
         finally:
             os.chmod(self.path.parent, 0o700)
 
-        with DurableJournalV2(
+        with DurableJournal(
             self.path,
             claimed_execution_binding=self.binding,
             authority_state=self.fixture.state,
@@ -694,8 +694,8 @@ class Phase8BDurableJournalTests(unittest.TestCase):
         ):
             pass
         os.chmod(self.path, 0o644)
-        with self.assertRaisesRegex(DurableJournalV2SecurityError, "file_invalid"):
-            DurableJournalV2(
+        with self.assertRaisesRegex(DurableJournalSecurityError, "file_invalid"):
+            DurableJournal(
                 self.path,
                 claimed_execution_binding=self.binding,
                 authority_state=self.fixture.state,
@@ -704,8 +704,8 @@ class Phase8BDurableJournalTests(unittest.TestCase):
         os.chmod(self.path, 0o600)
         hardlink = self.path.parent / "hardlink"
         os.link(self.path, hardlink)
-        with self.assertRaisesRegex(DurableJournalV2SecurityError, "file_invalid"):
-            DurableJournalV2(
+        with self.assertRaisesRegex(DurableJournalSecurityError, "file_invalid"):
+            DurableJournal(
                 self.path,
                 claimed_execution_binding=self.binding,
                 authority_state=self.fixture.state,
@@ -715,8 +715,8 @@ class Phase8BDurableJournalTests(unittest.TestCase):
         original = self.path.with_suffix(".real")
         self.path.rename(original)
         self.path.symlink_to(original.name)
-        with self.assertRaisesRegex(DurableJournalV2SecurityError, "file_invalid"):
-            DurableJournalV2(
+        with self.assertRaisesRegex(DurableJournalSecurityError, "file_invalid"):
+            DurableJournal(
                 self.path,
                 claimed_execution_binding=self.binding,
                 authority_state=self.fixture.state,

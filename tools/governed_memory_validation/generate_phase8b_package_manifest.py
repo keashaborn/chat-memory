@@ -10,7 +10,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from tools.governed_memory_install.package_v3 import (  # noqa: E402
+from tools.governed_memory_install.package import (  # noqa: E402
     EXPECTED_ARTIFACTS,
     artifact_sha256,
 )

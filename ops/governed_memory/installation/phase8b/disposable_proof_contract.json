@@ -5,7 +5,7 @@
   "proof_scope": "synthetic_in_process_model_only",
   "entrypoint": "tools/governed_memory_validation/run_phase8b_disposable_proof.py",
   "execution_boundary": {
-    "backend": "sealed_in_memory_synthetic_backend_v2_api_boundary",
+    "backend": "sealed_in_memory_synthetic_backend_api_boundary",
     "backend_is_constructed_internally": true,
     "backend_injection_allowed": false,
     "live_mode_exists": false,

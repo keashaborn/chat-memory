@@ -45,7 +45,7 @@ MIGRATION_VERIFIER_RELATIVE: Final = (
     "tools/governed_memory_validation/verify_store_migration_manifest.py"
 )
 CONTROLLER_MODEL_RELATIVE: Final = (
-    "tools/governed_memory_install/controller_v2.py"
+    "tools/governed_memory_install/controller.py"
 )
 EXECUTION_CONTRACT_RELATIVE: Final = (
     "ops/governed_memory/installation/phase8b/execution_contract.json"
@@ -67,7 +67,7 @@ EXPECTED_PLAN_CANONICAL_SHA256: Final = (
     "65f9be1d974bfeb6f047b6c33c3fd5a2c4df1a7eeec3df274e75488168de75e2"
 )
 EXPECTED_CONTROLLER_SOURCE_SHA256: Final = (
-    "9fa3b1a1098fe886363ad9ce23d0fecb04cf1298a6cd78456b3af5801ce8f414"
+    "41215dd2676c8b8cee8e62ff7c83af83ddadaec4dbe72aae5001635cf231353e"
 )
 EXPECTED_CONTROLLER_MODEL_SHA256: Final = (
     "601288e31fd1b485e57ef5fd4676f9477942db0c3aa3c911de1d002361c49243"
@@ -79,7 +79,7 @@ EXPECTED_CONTROLLER_RUNTIME_CONTRACT_CANONICAL_SHA256: Final = (
     "f12c9e52bfd4adacaff9715ea7b9a3b097286df5bcc613344c47cb80ff84a315"
 )
 EXPECTED_PROOF_CONTRACT_CANONICAL_SHA256: Final = (
-    "22b29fe079ad813cb2082af8ad3d6830127174c29dea0e1dbb3db7176bf4f1b8"
+    "48b2b6ebd9edf7ed8d60bc52df5df363b583da52c33567b7eaf08db8c7ff4a3f"
 )
 EXPECTED_PROOF_SCHEMA_CANONICAL_SHA256: Final = (
     "3dbc0e9a3e927ec3a17734fae67f02dd0d1567c0c4220f3ae61954a4ee301d67"
@@ -211,22 +211,22 @@ EXPECTED_ARTIFACTS: Final = frozenset(
         "ops/governed_memory/qdrant_alias.create.json",
         "ops/governed_memory/qdrant_collection.create.json",
         "tools/governed_memory_install/__init__.py",
-        "tools/governed_memory_install/authority_v2.py",
+        "tools/governed_memory_install/authority.py",
         "tools/governed_memory_install/authority_state.py",
-        "tools/governed_memory_install/controller_v2.py",
+        "tools/governed_memory_install/controller.py",
         "tools/governed_memory_install/disposable_proof_harness.py",
-        "tools/governed_memory_install/durable_journal_v2.py",
+        "tools/governed_memory_install/journal.py",
         "tools/governed_memory_install/execution_authority.py",
-        "tools/governed_memory_install/execution_capability_v2.py",
+        "tools/governed_memory_install/execution_capability.py",
         "tools/governed_memory_install/execution_lock.py",
         "tools/governed_memory_install/host_boundary.py",
         "tools/governed_memory_install/image_preflight.py",
         "tools/governed_memory_install/linux_plan.py",
-        "tools/governed_memory_install/package_v3.py",
+        "tools/governed_memory_install/package.py",
         "tools/governed_memory_install/resource_identity.py",
         "tools/governed_memory_install/secure_file.py",
         "tools/governed_memory_install/store_supervisor.py",
-        "tools/governed_memory_install/synthetic_backend_v2.py",
+        "tools/governed_memory_install/synthetic_backend.py",
         "tools/governed_memory_validation/generate_phase8b_package_manifest.py",
         "tools/governed_memory_validation/run_phase8b_disposable_proof.py",
         "tools/governed_memory_validation/verify_store_migration_manifest.py",
@@ -249,7 +249,7 @@ FORBIDDEN_ARTIFACT_MARKERS: Final = (
 )
 
 
-class PackageV3Error(ValueError):
+class PackageError(ValueError):
     """Closed, content-free package verification refusal."""
 
 
@@ -261,7 +261,7 @@ def _strict_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     result: dict[str, object] = {}
     for key, value in pairs:
         if key in result:
-            raise PackageV3Error("phase8b_package_duplicate_json_key")
+            raise PackageError("phase8b_package_duplicate_json_key")
         result[key] = value
     return result
 
@@ -272,7 +272,7 @@ def _reject_nonfinite(value: str) -> None:
 
 def _relative_parts(relative: object) -> tuple[str, ...]:
     if type(relative) is not str or not relative or "\\" in relative:
-        raise PackageV3Error("phase8b_package_artifact_path_invalid")
+        raise PackageError("phase8b_package_artifact_path_invalid")
     pure = PurePosixPath(relative)
     parts = pure.parts
     if (
@@ -281,14 +281,14 @@ def _relative_parts(relative: object) -> tuple[str, ...]:
         or str(pure) != relative
         or any(part in {"", ".", ".."} for part in parts)
     ):
-        raise PackageV3Error("phase8b_package_artifact_path_invalid")
+        raise PackageError("phase8b_package_artifact_path_invalid")
     return parts
 
 
 def _nofollow() -> int:
     flag = getattr(os, "O_NOFOLLOW", 0)
     if flag == 0:
-        raise PackageV3Error("phase8b_package_nofollow_unavailable")
+        raise PackageError("phase8b_package_nofollow_unavailable")
     return flag
 
 
@@ -310,7 +310,7 @@ def _read_repository_file(relative: str) -> bytes:
         descriptors.append(file_fd)
         info = os.fstat(file_fd)
         if not stat.S_ISREG(info.st_mode):
-            raise PackageV3Error("phase8b_package_artifact_path_invalid")
+            raise PackageError("phase8b_package_artifact_path_invalid")
         chunks: list[bytes] = []
         while True:
             block = os.read(file_fd, 1024 * 1024)
@@ -319,7 +319,7 @@ def _read_repository_file(relative: str) -> bytes:
             chunks.append(block)
         return b"".join(chunks)
     except OSError as error:
-        raise PackageV3Error("phase8b_package_artifact_path_invalid") from error
+        raise PackageError("phase8b_package_artifact_path_invalid") from error
     finally:
         for descriptor in reversed(descriptors):
             os.close(descriptor)
@@ -335,10 +335,10 @@ def _read_path(path: Path) -> bytes:
         try:
             descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | _nofollow())
         except OSError as error:
-            raise PackageV3Error("phase8b_package_document_path_invalid") from error
+            raise PackageError("phase8b_package_document_path_invalid") from error
         try:
             if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-                raise PackageV3Error("phase8b_package_document_path_invalid")
+                raise PackageError("phase8b_package_document_path_invalid")
             chunks: list[bytes] = []
             while True:
                 block = os.read(descriptor, 1024 * 1024)
@@ -363,9 +363,9 @@ def _parse_json(raw: bytes) -> dict[str, object]:
         json.JSONDecodeError,
         _NonFiniteJsonValue,
     ) as error:
-        raise PackageV3Error("phase8b_package_json_invalid") from error
+        raise PackageError("phase8b_package_json_invalid") from error
     if type(value) is not dict:
-        raise PackageV3Error("phase8b_package_json_root_invalid")
+        raise PackageError("phase8b_package_json_root_invalid")
     return value
 
 
@@ -376,7 +376,7 @@ def _load(path: Path) -> dict[str, object]:
 def _load_verified_json(relative: str, expected_sha256: str) -> dict[str, object]:
     raw = _read_repository_file(relative)
     if hashlib.sha256(raw).hexdigest() != expected_sha256:
-        raise PackageV3Error("phase8b_package_member_changed_after_hash")
+        raise PackageError("phase8b_package_member_changed_after_hash")
     return _parse_json(raw)
 
 
@@ -390,7 +390,7 @@ def _canonical_sha256(value: object) -> str:
             allow_nan=False,
         ).encode("ascii")
     except (TypeError, ValueError, UnicodeError) as error:
-        raise PackageV3Error("phase8b_package_json_invalid") from error
+        raise PackageError("phase8b_package_json_invalid") from error
     return hashlib.sha256(encoded).hexdigest()
 
 
@@ -400,9 +400,9 @@ def artifact_sha256(relative: str) -> str:
 
 def _verify_contract(contract: dict[str, object]) -> None:
     if set(contract) != EXPECTED_CONTRACT_KEYS:
-        raise PackageV3Error("phase8b_contract_shape_invalid")
+        raise PackageError("phase8b_contract_shape_invalid")
     if _canonical_sha256(contract) != EXPECTED_CONTRACT_CANONICAL_SHA256:
-        raise PackageV3Error("phase8b_contract_semantics_invalid")
+        raise PackageError("phase8b_contract_semantics_invalid")
     if (
         contract.get("schema_version")
         != "governed-memory-phase8b-inactive-execution-contract-v2"
@@ -413,7 +413,7 @@ def _verify_contract(contract: dict[str, object]) -> None:
         )
         or contract.get("server") != "seebx"
     ):
-        raise PackageV3Error("phase8b_contract_identity_invalid")
+        raise PackageError("phase8b_contract_identity_invalid")
     scope = contract.get("scope")
     if type(scope) is not dict or any(
         scope.get(key) is not False
@@ -428,7 +428,7 @@ def _verify_contract(contract: dict[str, object]) -> None:
             "current_approval_is_future_live_proof_authority",
         )
     ):
-        raise PackageV3Error("phase8b_contract_authority_boundary_invalid")
+        raise PackageError("phase8b_contract_authority_boundary_invalid")
     migration = contract.get("migration_policy")
     if (
         type(migration) is not dict
@@ -437,14 +437,14 @@ def _verify_contract(contract: dict[str, object]) -> None:
         or migration.get("source_postgresql_reads") != 0
         or migration.get("source_postgresql_writes") != 0
     ):
-        raise PackageV3Error("phase8b_contract_migration_boundary_invalid")
+        raise PackageError("phase8b_contract_migration_boundary_invalid")
     secret = contract.get("secret_policy")
     if (
         type(secret) is not dict
         or secret.get("legacy_pilot_env_may_be_read_stat_hashed_renamed_or_deleted")
         is not False
     ):
-        raise PackageV3Error("phase8b_contract_secret_boundary_invalid")
+        raise PackageError("phase8b_contract_secret_boundary_invalid")
     authority = contract.get("authority_policy")
     recovery = contract.get("recovery_policy")
     blockers = contract.get("remaining_blockers")
@@ -469,14 +469,14 @@ def _verify_contract(contract: dict[str, object]) -> None:
             not in blockers
         )
     ):
-        raise PackageV3Error("phase8b_contract_package_claim_boundary_invalid")
+        raise PackageError("phase8b_contract_package_claim_boundary_invalid")
 
 
 def _verify_plan(plan: dict[str, object]) -> None:
     if set(plan) != EXPECTED_PLAN_KEYS:
-        raise PackageV3Error("phase8b_plan_shape_invalid")
+        raise PackageError("phase8b_plan_shape_invalid")
     if _canonical_sha256(plan) != EXPECTED_PLAN_CANONICAL_SHA256:
-        raise PackageV3Error("phase8b_plan_semantics_invalid")
+        raise PackageError("phase8b_plan_semantics_invalid")
     if (
         plan.get("schema_version")
         != "governed-memory-phase8b-stores-controller-plan-v3"
@@ -487,27 +487,27 @@ def _verify_plan(plan: dict[str, object]) -> None:
         )
         or plan.get("server") != "seebx"
     ):
-        raise PackageV3Error("phase8b_plan_identity_invalid")
+        raise PackageError("phase8b_plan_identity_invalid")
     steps = plan.get("install_steps")
     if type(steps) is not list or len(steps) != len(EXPECTED_CONTROLLER_STEP_IDS):
-        raise PackageV3Error("phase8b_plan_step_count_invalid")
+        raise PackageError("phase8b_plan_step_count_invalid")
     observed_ids: list[str] = []
     for expected_id, step in zip(EXPECTED_CONTROLLER_STEP_IDS, steps, strict=True):
         if type(step) is not dict or set(step) != {"id", "effect", "rollback"}:
-            raise PackageV3Error("phase8b_plan_step_shape_invalid")
+            raise PackageError("phase8b_plan_step_shape_invalid")
         if step.get("id") != expected_id:
-            raise PackageV3Error("phase8b_plan_step_order_invalid")
+            raise PackageError("phase8b_plan_step_order_invalid")
         if any(
             type(step.get(key)) is not str or not step.get(key)
             for key in ("effect", "rollback")
         ):
-            raise PackageV3Error("phase8b_plan_step_shape_invalid")
+            raise PackageError("phase8b_plan_step_shape_invalid")
         observed_ids.append(expected_id)
     if tuple(observed_ids) != EXPECTED_CONTROLLER_STEP_IDS:
-        raise PackageV3Error("phase8b_plan_step_order_invalid")
+        raise PackageError("phase8b_plan_step_order_invalid")
     live = plan.get("live_execution")
     if live != EXPECTED_LIVE_EXECUTION:
-        raise PackageV3Error("phase8b_plan_live_surface_invalid")
+        raise PackageError("phase8b_plan_live_surface_invalid")
 
 
 def _verify_extension_contracts(observed: dict[str, str]) -> None:
@@ -534,7 +534,7 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
         (proof_schema, EXPECTED_PROOF_SCHEMA_CANONICAL_SHA256),
     )
     if any(_canonical_sha256(value) != wanted for value, wanted in exact):
-        raise PackageV3Error("phase8b_extension_contract_semantics_invalid")
+        raise PackageError("phase8b_extension_contract_semantics_invalid")
 
     boundary = execution.get("execution_boundary")
     binding = execution.get("binding_policy")
@@ -623,7 +623,7 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
         )
         or proof_schema.get("additionalProperties") is not False
     ):
-        raise PackageV3Error("phase8b_extension_contract_boundary_invalid")
+        raise PackageError("phase8b_extension_contract_boundary_invalid")
 
 
 def _load_verified_module(
@@ -636,17 +636,17 @@ def _load_verified_module(
 
     raw = _read_repository_file(relative)
     if hashlib.sha256(raw).hexdigest() != expected_sha256:
-        raise PackageV3Error("phase8b_verified_module_changed_after_hash")
+        raise PackageError("phase8b_verified_module_changed_after_hash")
     module = ModuleType(module_name)
     module.__file__ = str(ROOT / relative)
     module.__package__ = module_name.rpartition(".")[0]
     if module_name in sys.modules:
-        raise PackageV3Error("phase8b_verified_module_namespace_collision")
+        raise PackageError("phase8b_verified_module_namespace_collision")
     sys.modules[module_name] = module
     try:
         exec(compile(raw, module.__file__, "exec"), module.__dict__)
     except Exception as error:
-        raise PackageV3Error("phase8b_verified_module_invalid") from error
+        raise PackageError("phase8b_verified_module_invalid") from error
     finally:
         sys.modules.pop(module_name, None)
     return module
@@ -659,7 +659,7 @@ def _load_verified_controller_module(
 ) -> ModuleType:
     """Load the controller model without importing repository dependencies.
 
-    ``controller_v2`` imports three lock types that are irrelevant to plan
+    ``controller`` imports three lock types that are irrelevant to plan
     validation.  Supplying a closed synthetic dependency prevents verification
     from executing an unpinned repository module through that relative import.
     Every callable in the stub refuses use, so the loader cannot accidentally
@@ -667,7 +667,7 @@ def _load_verified_controller_module(
     """
 
     package_name = "_phase8b_verified_controller_package"
-    module_name = package_name + ".controller_v2"
+    module_name = package_name + ".controller"
     lock_name = package_name + ".execution_lock"
 
     class _ExecutionLockError(RuntimeError):
@@ -690,7 +690,7 @@ def _load_verified_controller_module(
         lock_name: lock_module,
     }
     if any(name in sys.modules for name in inserted):
-        raise PackageV3Error("phase8b_verified_module_namespace_collision")
+        raise PackageError("phase8b_verified_module_namespace_collision")
     sys.modules.update(inserted)
     try:
         return _load_verified_module(
@@ -714,14 +714,14 @@ def _verify_controller_binding(
             controller_plan
         )
     except Exception as error:
-        raise PackageV3Error("phase8b_controller_model_invalid") from error
+        raise PackageError("phase8b_controller_model_invalid") from error
     if (
         controller_hash != EXPECTED_CONTROLLER_MODEL_SHA256
         or tuple(step["id"] for step in controller_projection)
         != EXPECTED_CONTROLLER_STEP_IDS
         or plan["install_steps"] != controller_projection
     ):
-        raise PackageV3Error("phase8b_controller_plan_binding_invalid")
+        raise PackageError("phase8b_controller_plan_binding_invalid")
     return controller_hash
 
 
@@ -731,7 +731,7 @@ def _verify_migration_binding(
     try:
         receipt = module.verify()
     except Exception as error:
-        raise PackageV3Error("phase8b_migration_verifier_failed") from error
+        raise PackageError("phase8b_migration_verifier_failed") from error
     expected_keys = {
         "schema_version",
         "state",
@@ -745,7 +745,7 @@ def _verify_migration_binding(
         "production_state_changed",
     }
     if type(receipt) is not dict or set(receipt) != expected_keys:
-        raise PackageV3Error("phase8b_migration_receipt_invalid")
+        raise PackageError("phase8b_migration_receipt_invalid")
     if (
         receipt.get("schema_version")
         != "governed-memory-phase8b-store-migration-verification-v2"
@@ -765,30 +765,30 @@ def _verify_migration_binding(
         or receipt.get("migration_bindings_canonical_sha256")
         != EXPECTED_MIGRATION_BINDINGS_CANONICAL_SHA256
     ):
-        raise PackageV3Error("phase8b_migration_receipt_invalid")
+        raise PackageError("phase8b_migration_receipt_invalid")
     migration_artifacts = receipt.get("artifact_sha256")
     if type(migration_artifacts) is not dict:
-        raise PackageV3Error("phase8b_migration_receipt_invalid")
+        raise PackageError("phase8b_migration_receipt_invalid")
     package_migration_artifacts: set[str] = set()
     for relative, digest in migration_artifacts.items():
         if type(relative) is not str or type(digest) is not str:
-            raise PackageV3Error("phase8b_migration_receipt_invalid")
+            raise PackageError("phase8b_migration_receipt_invalid")
         package_relative = (
             relative
             if relative.startswith("ops/")
             else "governed-memory-migrations/" + relative
         )
         if observed.get(package_relative) != digest:
-            raise PackageV3Error("phase8b_migration_package_binding_invalid")
+            raise PackageError("phase8b_migration_package_binding_invalid")
         package_migration_artifacts.add(package_relative)
     if package_migration_artifacts != EXPECTED_MIGRATION_ARTIFACTS:
-        raise PackageV3Error("phase8b_migration_package_binding_invalid")
+        raise PackageError("phase8b_migration_package_binding_invalid")
     return receipt
 
 
 def _verify_manifest(manifest: dict[str, object]) -> dict[str, str]:
     if set(manifest) != {"schema_version", "state", "artifacts"}:
-        raise PackageV3Error("phase8b_package_manifest_shape_invalid")
+        raise PackageError("phase8b_package_manifest_shape_invalid")
     if (
         manifest.get("schema_version")
         != "governed-memory-phase8b-inactive-execution-package-manifest-v2"
@@ -798,16 +798,16 @@ def _verify_manifest(manifest: dict[str, object]) -> dict[str, str]:
             "pending_not_staged_not_installed_not_authorized"
         )
     ):
-        raise PackageV3Error("phase8b_package_manifest_identity_invalid")
+        raise PackageError("phase8b_package_manifest_identity_invalid")
     artifacts = manifest.get("artifacts")
     if type(artifacts) is not dict or set(artifacts) != EXPECTED_ARTIFACTS:
-        raise PackageV3Error("phase8b_package_artifact_set_invalid")
+        raise PackageError("phase8b_package_artifact_set_invalid")
     if any(
         marker in relative
         for relative in artifacts
         for marker in FORBIDDEN_ARTIFACT_MARKERS
     ):
-        raise PackageV3Error("phase8b_package_forbidden_artifact")
+        raise PackageError("phase8b_package_forbidden_artifact")
     observed: dict[str, str] = {}
     for relative, wanted in artifacts.items():
         if (
@@ -815,10 +815,10 @@ def _verify_manifest(manifest: dict[str, object]) -> dict[str, str]:
             or type(wanted) is not str
             or HASH_RE.fullmatch(wanted) is None
         ):
-            raise PackageV3Error("phase8b_package_artifact_entry_invalid")
+            raise PackageError("phase8b_package_artifact_entry_invalid")
         actual = artifact_sha256(relative)
         if actual != wanted:
-            raise PackageV3Error("phase8b_package_hash_mismatch:" + relative)
+            raise PackageError("phase8b_package_hash_mismatch:" + relative)
         observed[relative] = actual
     return observed
 

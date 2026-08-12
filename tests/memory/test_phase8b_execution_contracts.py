@@ -127,12 +127,20 @@ class Phase8BExecutionContractTests(unittest.TestCase):
         self.assertNotIn("fastapi", text)
         self.assertNotIn("asyncpg", text)
 
-    def test_current_phase8b_doc_is_separate_from_hash_pinned_history(self) -> None:
+    def test_current_inactive_package_doc_is_canonical_and_truthful(self) -> None:
         current = (
             ROOT / "docs/memory/clean_successor/PHASE8B_INACTIVE_REMEDIATION.md"
         ).read_text(encoding="utf-8")
-        self.assertIn("Phase 8B inactive remediation package", current)
-        self.assertIn("proof-pending", current)
+        self.assertIn("tools/governed_memory_install/package.py", current)
+        self.assertIn(
+            "does not contain a complete live installation, rollback, or",
+            current,
+        )
+        self.assertIn(
+            "prior root-level Phase 8A successor-install package and executable stack were",
+            current,
+        )
+        self.assertIn("separate Memory v1/v5 repository runtime", current)
 
 
 if __name__ == "__main__":

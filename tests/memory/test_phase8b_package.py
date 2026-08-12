@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from tools.governed_memory_install import controller_v2, package_v3
+from tools.governed_memory_install import controller, package
 from tools.governed_memory_validation import (
     generate_phase8b_package_manifest,
     verify_store_migration_manifest,
@@ -19,7 +19,7 @@ from tools.governed_memory_validation import (
 ROOT = Path(__file__).resolve().parents[2]
 
 
-class Phase8BPackageV3Tests(unittest.TestCase):
+class Phase8BPackageTests(unittest.TestCase):
     def _verify_generated_manifest(self) -> dict[str, object]:
         manifest = generate_phase8b_package_manifest.generate()
         with tempfile.TemporaryDirectory() as temporary:
@@ -28,15 +28,15 @@ class Phase8BPackageV3Tests(unittest.TestCase):
                 json.dumps(manifest, indent=2) + "\n",
                 encoding="ascii",
             )
-            with patch.object(package_v3, "MANIFEST", path):
-                return package_v3.verify()
+            with patch.object(package, "MANIFEST", path):
+                return package.verify()
 
     def test_current_members_verify_as_inactive_execution_package(self) -> None:
         receipt = self._verify_generated_manifest()
         self.assertEqual(receipt["schema_version"], (
             "governed-memory-phase8b-package-verification-v3"
         ))
-        self.assertEqual(receipt["artifact_count"], len(package_v3.EXPECTED_ARTIFACTS))
+        self.assertEqual(receipt["artifact_count"], len(package.EXPECTED_ARTIFACTS))
         self.assertTrue(receipt["durable_journal_adapter_packaged"])
         self.assertTrue(receipt["guarded_synthetic_proof_harness_packaged"])
         self.assertFalse(receipt["synthetic_proof_executed_by_verifier"])
@@ -63,52 +63,52 @@ class Phase8BPackageV3Tests(unittest.TestCase):
         self.assertFalse(receipt["activation_performed_by_verifier"])
         self.assertEqual(
             receipt["contract_canonical_sha256"],
-            package_v3.EXPECTED_CONTRACT_CANONICAL_SHA256,
+            package.EXPECTED_CONTRACT_CANONICAL_SHA256,
         )
         self.assertEqual(
             receipt["plan_canonical_sha256"],
-            package_v3.EXPECTED_PLAN_CANONICAL_SHA256,
+            package.EXPECTED_PLAN_CANONICAL_SHA256,
         )
         self.assertEqual(
             receipt["controller_model_sha256"],
-            package_v3.EXPECTED_CONTROLLER_MODEL_SHA256,
+            package.EXPECTED_CONTROLLER_MODEL_SHA256,
         )
         self.assertEqual(
             receipt["controller_source_sha256"],
-            package_v3.EXPECTED_CONTROLLER_SOURCE_SHA256,
+            package.EXPECTED_CONTROLLER_SOURCE_SHA256,
         )
         self.assertEqual(
             receipt["execution_contract_canonical_sha256"],
-            package_v3.EXPECTED_EXECUTION_CONTRACT_CANONICAL_SHA256,
+            package.EXPECTED_EXECUTION_CONTRACT_CANONICAL_SHA256,
         )
         self.assertEqual(
             receipt["controller_runtime_contract_canonical_sha256"],
-            package_v3.EXPECTED_CONTROLLER_RUNTIME_CONTRACT_CANONICAL_SHA256,
+            package.EXPECTED_CONTROLLER_RUNTIME_CONTRACT_CANONICAL_SHA256,
         )
         self.assertEqual(
             receipt["proof_contract_canonical_sha256"],
-            package_v3.EXPECTED_PROOF_CONTRACT_CANONICAL_SHA256,
+            package.EXPECTED_PROOF_CONTRACT_CANONICAL_SHA256,
         )
         self.assertEqual(
             receipt["proof_schema_canonical_sha256"],
-            package_v3.EXPECTED_PROOF_SCHEMA_CANONICAL_SHA256,
+            package.EXPECTED_PROOF_SCHEMA_CANONICAL_SHA256,
         )
         self.assertEqual(
             receipt["migration_verifier_source_sha256"],
-            package_v3.EXPECTED_MIGRATION_VERIFIER_SOURCE_SHA256,
+            package.EXPECTED_MIGRATION_VERIFIER_SOURCE_SHA256,
         )
         artifacts = set(receipt["artifact_sha256"])
-        self.assertEqual(artifacts, package_v3.EXPECTED_ARTIFACTS)
-        for forbidden in package_v3.FORBIDDEN_ARTIFACT_MARKERS:
+        self.assertEqual(artifacts, package.EXPECTED_ARTIFACTS)
+        for forbidden in package.FORBIDDEN_ARTIFACT_MARKERS:
             self.assertFalse(any(forbidden in path for path in artifacts))
 
     def test_checked_in_manifest_is_exact_generated_manifest(self) -> None:
         checked_in = json.loads(
-            package_v3.MANIFEST.read_text(encoding="ascii")
+            package.MANIFEST.read_text(encoding="ascii")
         )
         self.assertEqual(checked_in, generate_phase8b_package_manifest.generate())
-        self.assertEqual(package_v3.verify()["artifact_count"], len(
-            package_v3.EXPECTED_ARTIFACTS
+        self.assertEqual(package.verify()["artifact_count"], len(
+            package.EXPECTED_ARTIFACTS
         ))
 
     def test_verifier_generator_and_local_migration_binding_are_hash_bound(
@@ -121,13 +121,13 @@ class Phase8BPackageV3Tests(unittest.TestCase):
             "ops/governed_memory/installation/phase8b/disposable_proof_contract.json",
             "ops/governed_memory/installation/phase8b/disposable_proof_receipt.schema.json",
             "ops/governed_memory/installation/phase8b/execution_contract.json",
-            "tools/governed_memory_install/package_v3.py",
+            "tools/governed_memory_install/package.py",
             "tools/governed_memory_install/disposable_proof_harness.py",
-            "tools/governed_memory_install/durable_journal_v2.py",
-            "tools/governed_memory_install/execution_capability_v2.py",
+            "tools/governed_memory_install/journal.py",
+            "tools/governed_memory_install/execution_capability.py",
             "tools/governed_memory_install/secure_file.py",
-            "tools/governed_memory_install/synthetic_backend_v2.py",
-            "tools/governed_memory_install/authority_v2.py",
+            "tools/governed_memory_install/synthetic_backend.py",
+            "tools/governed_memory_install/authority.py",
             "tools/governed_memory_validation/generate_phase8b_package_manifest.py",
             "tools/governed_memory_validation/run_phase8b_disposable_proof.py",
             "tools/governed_memory_validation/verify_store_migration_manifest.py",
@@ -143,7 +143,7 @@ class Phase8BPackageV3Tests(unittest.TestCase):
 
     def test_imported_local_package_initializers_are_manifest_bound(self) -> None:
         required: set[str] = set()
-        for relative in package_v3.EXPECTED_ARTIFACTS:
+        for relative in package.EXPECTED_ARTIFACTS:
             if not relative.endswith(".py"):
                 continue
             parent = PurePosixPath(relative).parent
@@ -156,28 +156,45 @@ class Phase8BPackageV3Tests(unittest.TestCase):
             required,
             {"tools/governed_memory_install/__init__.py"},
         )
-        self.assertTrue(required.issubset(package_v3.EXPECTED_ARTIFACTS))
+        self.assertTrue(required.issubset(package.EXPECTED_ARTIFACTS))
 
-    def test_phase8a_historical_package_is_not_rewritten(self) -> None:
+    def test_retired_modules_are_absent_and_historical_manifest_is_unbound(
+        self,
+    ) -> None:
         old_manifest = ROOT / "ops/governed_memory/installation/package_manifest.json"
-        old_verifier = ROOT / "tools/governed_memory_install/inactive_installation.py"
-        self.assertTrue(old_manifest.is_file())
-        self.assertTrue(old_verifier.is_file())
         self.assertNotIn(
             str(old_manifest.relative_to(ROOT)),
-            package_v3.EXPECTED_ARTIFACTS,
+            package.EXPECTED_ARTIFACTS,
         )
-        self.assertNotIn(
-            str(old_verifier.relative_to(ROOT)),
-            package_v3.EXPECTED_ARTIFACTS,
-        )
-        self.assertNotIn(
-            "tools/governed_memory_install/authority.py",
-            package_v3.EXPECTED_ARTIFACTS,
-        )
-        self.assertIn(
+        retired = {
             "tools/governed_memory_install/authority_v2.py",
-            package_v3.EXPECTED_ARTIFACTS,
+            "tools/governed_memory_install/controller_linux.py",
+            "tools/governed_memory_install/controller_v2.py",
+            "tools/governed_memory_install/durable_journal_v2.py",
+            "tools/governed_memory_install/execution_capability_v2.py",
+            "tools/governed_memory_install/inactive_installation.py",
+            "tools/governed_memory_install/package_v3.py",
+            "tools/governed_memory_install/synthetic_backend_v2.py",
+        }
+        canonical = {
+            "tools/governed_memory_install/authority.py",
+            "tools/governed_memory_install/controller.py",
+            "tools/governed_memory_install/execution_capability.py",
+            "tools/governed_memory_install/journal.py",
+            "tools/governed_memory_install/package.py",
+            "tools/governed_memory_install/synthetic_backend.py",
+        }
+        self.assertTrue(canonical.issubset(package.EXPECTED_ARTIFACTS))
+        self.assertTrue(retired.isdisjoint(package.EXPECTED_ARTIFACTS))
+        for relative in retired:
+            self.assertFalse((ROOT / relative).exists(), relative)
+
+    def test_manifest_contains_no_versioned_successor_module_paths(self) -> None:
+        self.assertFalse(
+            any(
+                "_v2.py" in path or "_v3.py" in path
+                for path in package.EXPECTED_ARTIFACTS
+            )
         )
 
     def test_manifest_rejects_extra_forbidden_or_hash_tampering(self) -> None:
@@ -199,51 +216,51 @@ class Phase8BPackageV3Tests(unittest.TestCase):
         cases.append(bad_hash)
         for candidate in cases:
             with self.subTest(candidate=len(candidate["artifacts"])):
-                with self.assertRaises(package_v3.PackageV3Error):
-                    package_v3._verify_manifest(candidate)
+                with self.assertRaises(package.PackageError):
+                    package._verify_manifest(candidate)
 
     def test_contract_and_plan_are_exact_closed_and_controller_bound(self) -> None:
-        contract = json.loads(package_v3.CONTRACT.read_text(encoding="utf-8"))
-        package_v3._verify_contract(contract)
+        contract = json.loads(package.CONTRACT.read_text(encoding="utf-8"))
+        package._verify_contract(contract)
         contract["scope"]["current_phase_installs_or_activates"] = True
         with self.assertRaisesRegex(
-            package_v3.PackageV3Error,
+            package.PackageError,
             "contract_semantics_invalid",
         ):
-            package_v3._verify_contract(contract)
+            package._verify_contract(contract)
 
-        contract = json.loads(package_v3.CONTRACT.read_text(encoding="utf-8"))
+        contract = json.loads(package.CONTRACT.read_text(encoding="utf-8"))
         contract["scope"]["unexpected"] = False
         with self.assertRaisesRegex(
-            package_v3.PackageV3Error,
+            package.PackageError,
             "contract_semantics_invalid",
         ):
-            package_v3._verify_contract(contract)
+            package._verify_contract(contract)
 
-        plan = json.loads(package_v3.PLAN.read_text(encoding="utf-8"))
-        package_v3._verify_plan(plan)
-        model_hash = package_v3._verify_controller_binding(plan, controller_v2)
-        self.assertEqual(model_hash, package_v3.EXPECTED_CONTROLLER_MODEL_SHA256)
+        plan = json.loads(package.PLAN.read_text(encoding="utf-8"))
+        package._verify_plan(plan)
+        model_hash = package._verify_controller_binding(plan, controller)
+        self.assertEqual(model_hash, package.EXPECTED_CONTROLLER_MODEL_SHA256)
         plan["live_execution"]["install_command_exposed"] = True
         with self.assertRaisesRegex(
-            package_v3.PackageV3Error,
+            package.PackageError,
             "plan_semantics_invalid",
         ):
-            package_v3._verify_plan(plan)
+            package._verify_plan(plan)
 
-        plan = json.loads(package_v3.PLAN.read_text(encoding="utf-8"))
+        plan = json.loads(package.PLAN.read_text(encoding="utf-8"))
         plan["install_steps"][0]["effect"] = "different_but_well_formed_effect"
         with self.assertRaisesRegex(
-            package_v3.PackageV3Error,
+            package.PackageError,
             "controller_plan_binding_invalid",
         ):
-            package_v3._verify_controller_binding(plan, controller_v2)
+            package._verify_controller_binding(plan, controller)
 
     def test_verified_controller_loader_is_dependency_closed(self) -> None:
-        controller = package_v3._load_verified_controller_module(
-            package_v3.CONTROLLER_MODEL_RELATIVE,
-            expected_sha256=package_v3.artifact_sha256(
-                package_v3.CONTROLLER_MODEL_RELATIVE
+        controller = package._load_verified_controller_module(
+            package.CONTROLLER_MODEL_RELATIVE,
+            expected_sha256=package.artifact_sha256(
+                package.CONTROLLER_MODEL_RELATIVE
             ),
         )
         projection = controller.plan_install_steps_projection(
@@ -252,7 +269,7 @@ class Phase8BPackageV3Tests(unittest.TestCase):
         self.assertEqual(len(projection), 20)
         self.assertEqual(
             tuple(step["id"] for step in projection),
-            package_v3.EXPECTED_CONTROLLER_STEP_IDS,
+            package.EXPECTED_CONTROLLER_STEP_IDS,
         )
         self.assertRegex(
             controller.validate_plan(controller.STORES_ONLY_PLAN),
@@ -275,9 +292,9 @@ class Phase8BPackageV3Tests(unittest.TestCase):
             member.write_bytes(b"member")
             (root / "directory-link").symlink_to(safe, target_is_directory=True)
             (safe / "file-link").symlink_to(member)
-            with patch.object(package_v3, "ROOT", root):
+            with patch.object(package, "ROOT", root):
                 self.assertEqual(
-                    package_v3.artifact_sha256("safe/member"),
+                    package.artifact_sha256("safe/member"),
                     "e31ab643c44f7a0ec824b59d1194d60dac334200d845e61d2d289daa0f087ea4",
                 )
                 for relative in (
@@ -286,10 +303,10 @@ class Phase8BPackageV3Tests(unittest.TestCase):
                 ):
                     with self.subTest(relative=relative):
                         with self.assertRaisesRegex(
-                            package_v3.PackageV3Error,
+                            package.PackageError,
                             "artifact_path_invalid",
                         ):
-                            package_v3.artifact_sha256(relative)
+                            package.artifact_sha256(relative)
 
     def test_migration_verifier_binds_local_descriptor_and_excludes_history(
         self,
@@ -322,13 +339,13 @@ class Phase8BPackageV3Tests(unittest.TestCase):
     def test_package_rejects_nested_migration_receipt_drift(self) -> None:
         observed = generate_phase8b_package_manifest.generate()["artifacts"]
         receipt = verify_store_migration_manifest.verify()
-        accepted = package_v3._verify_migration_binding(
+        accepted = package._verify_migration_binding(
             observed,
             SimpleNamespace(verify=lambda: copy.deepcopy(receipt)),
         )
         self.assertEqual(
             accepted["manifest_sha256"],
-            observed[package_v3.MIGRATION_MANIFEST_RELATIVE],
+            observed[package.MIGRATION_MANIFEST_RELATIVE],
         )
 
         bad_manifest = copy.deepcopy(receipt)
@@ -340,8 +357,8 @@ class Phase8BPackageV3Tests(unittest.TestCase):
         extra["unexpected"] = False
         for drifted in (bad_manifest, bad_child, extra):
             with self.subTest(drifted=set(drifted)):
-                with self.assertRaises(package_v3.PackageV3Error):
-                    package_v3._verify_migration_binding(
+                with self.assertRaises(package.PackageError):
+                    package._verify_migration_binding(
                         observed,
                         SimpleNamespace(verify=lambda value=drifted: value),
                     )

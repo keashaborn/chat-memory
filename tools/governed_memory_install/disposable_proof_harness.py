@@ -21,9 +21,9 @@ import stat
 import sys
 from typing import Final
 
-from .controller_v2 import (
+from .controller import (
     CompletedStateError,
-    ControllerReceiptV2,
+    ControllerReceipt,
     InstallationCompensatedError,
     Phase8BStoresController,
     STORES_ONLY_PLAN,
@@ -31,7 +31,7 @@ from .controller_v2 import (
     validate_plan,
 )
 from .execution_lock import GlobalExecutionLock
-from .synthetic_backend_v2 import (
+from .synthetic_backend import (
     FAULT_FAIL_AFTER_EFFECT,
     FAULT_FAIL_BEFORE_EFFECT,
     FAULT_INTERRUPT_AFTER_APPLIED_JOURNAL,
@@ -40,11 +40,11 @@ from .synthetic_backend_v2 import (
     FAULT_INTERRUPT_BEFORE_COMPENSATION,
     FAULT_INTERRUPT_BEFORE_EFFECT,
     FAULT_NONE,
-    SyntheticBackendV2,
+    SyntheticBackend,
     SyntheticEffectFailure,
     SyntheticInterruption,
-    SyntheticScenarioV2,
-    _construct_exact_synthetic_backend_v2,
+    SyntheticScenario,
+    _construct_exact_synthetic_backend,
 )
 
 
@@ -69,10 +69,10 @@ CONTROLLER_PLAN_PATH: Final = (
 )
 BACKEND_SOURCE_PATH: Final = (
     REPOSITORY_ROOT
-    / "tools/governed_memory_install/synthetic_backend_v2.py"
+    / "tools/governed_memory_install/synthetic_backend.py"
 )
 CONTROLLER_SOURCE_PATH: Final = (
-    REPOSITORY_ROOT / "tools/governed_memory_install/controller_v2.py"
+    REPOSITORY_ROOT / "tools/governed_memory_install/controller.py"
 )
 EXECUTION_LOCK_SOURCE_PATH: Final = (
     REPOSITORY_ROOT / "tools/governed_memory_install/execution_lock.py"
@@ -420,10 +420,10 @@ def _validate_disposable_root(root: Path) -> Path:
     return resolved
 
 
-def _scenario_matrix() -> tuple[SyntheticScenarioV2, ...]:
+def _scenario_matrix() -> tuple[SyntheticScenario, ...]:
     steps = tuple(step.step_id for step in STORES_ONLY_PLAN)
-    scenarios: list[SyntheticScenarioV2] = [
-        SyntheticScenarioV2(
+    scenarios: list[SyntheticScenario] = [
+        SyntheticScenario(
             scenario_id="S000_HAPPY_PATH",
             family=FAMILY_HAPPY_PATH,
             fault_point=FAULT_NONE,
@@ -444,7 +444,7 @@ def _scenario_matrix() -> tuple[SyntheticScenarioV2, ...]:
     for family, fault_point in families:
         for step_id in steps:
             scenarios.append(
-                SyntheticScenarioV2(
+                SyntheticScenario(
                     scenario_id=f"S{sequence:03d}_{family}_{step_id}",
                     family=family,
                     fault_point=fault_point,
@@ -467,7 +467,7 @@ def _scenario_matrix() -> tuple[SyntheticScenarioV2, ...]:
             if not step.compensable:
                 continue
             scenarios.append(
-                SyntheticScenarioV2(
+                SyntheticScenario(
                     scenario_id=f"S{sequence:03d}_{family}_{step.step_id}",
                     family=family,
                     fault_point=fault_point,
@@ -480,7 +480,7 @@ def _scenario_matrix() -> tuple[SyntheticScenarioV2, ...]:
 
 
 def _verify_scenario_matrix(
-    scenarios: tuple[SyntheticScenarioV2, ...],
+    scenarios: tuple[SyntheticScenario, ...],
 ) -> dict[str, int]:
     _require(len(STORES_ONLY_PLAN) == EXPECTED_PLAN_STEP_COUNT, "proof_plan_count_invalid")
     _require(len(scenarios) == EXPECTED_SCENARIO_COUNT, "proof_scenario_count_invalid")
@@ -536,7 +536,7 @@ def _expected_compensation(applied: tuple[str, ...]) -> tuple[str, ...]:
 
 
 def _verify_states(
-    backend: SyntheticBackendV2,
+    backend: SyntheticBackend,
     *,
     applied: tuple[str, ...],
     compensated: tuple[str, ...],
@@ -553,7 +553,7 @@ def _verify_states(
         _require(observed[step.step_id] == expected, "proof_state_projection_invalid")
 
 
-def _verify_complete_receipt(receipt: ControllerReceiptV2) -> None:
+def _verify_complete_receipt(receipt: ControllerReceipt) -> None:
     expected = tuple(step.step_id for step in STORES_ONLY_PLAN)
     _require(receipt.outcome == "inactive_stores_installation_complete", "proof_complete_outcome_invalid")
     _require(receipt.applied_step_ids == expected, "proof_complete_steps_invalid")
@@ -561,7 +561,7 @@ def _verify_complete_receipt(receipt: ControllerReceiptV2) -> None:
 
 
 def _run_case(
-    scenario: SyntheticScenarioV2,
+    scenario: SyntheticScenario,
     *,
     case_index: int,
     disposable_root: Path,
@@ -569,7 +569,7 @@ def _run_case(
     case_root = disposable_root / f"case-{case_index:03d}"
     case_root.mkdir(mode=0o700)
     os.chmod(case_root, 0o700)
-    backend = _construct_exact_synthetic_backend_v2(scenario)
+    backend = _construct_exact_synthetic_backend(scenario)
     attempt_id = f"phase8b-proof-{case_index:03d}"
     outcome: str
     applied: tuple[str, ...]

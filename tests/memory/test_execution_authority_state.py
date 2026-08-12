@@ -14,7 +14,7 @@ import unittest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from tools.governed_memory_install import authority_v2 as authority
+from tools.governed_memory_install import authority as authority
 
 from tools.governed_memory_install.authority_state import (
     AuthorityReplayError,
@@ -129,7 +129,7 @@ def execution_capability() -> object:
             "source_postgres_connection_count": 0,
             "source_postgres_read_count": 0,
             "source_postgres_write_count": 0,
-            "source_preparation_phase": "8C_separate_authorization_required",
+            "source_preparation_phase": "separate_source_preparation_authorization_required",
         },
         "store_policy": {
             "postgresql": "fresh_isolated_empty",

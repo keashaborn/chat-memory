@@ -83,7 +83,7 @@ _SOURCE_BOUNDARY = {
     "source_postgres_connection_count": 0,
     "source_postgres_read_count": 0,
     "source_postgres_write_count": 0,
-    "source_preparation_phase": "8C_separate_authorization_required",
+    "source_preparation_phase": "separate_source_preparation_authorization_required",
 }
 _STORE_POLICY = {
     "postgresql": "fresh_isolated_empty",
@@ -158,6 +158,73 @@ class CryptographicallyValidScopeNotExecution:
     trust_bundle_sha256: str
     not_before: str
     expires_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class DormantInstallExpectedBindings:
+    """Locally observed immutable bindings required by the signed scope."""
+
+    candidate_git_commit: str
+    candidate_git_tree: str
+    package_manifest_sha256: str
+    controller_contract_sha256: str
+    execution_plan_sha256: str
+    exact_targets_sha256: str
+
+    def __post_init__(self) -> None:
+        if (
+            not _is_commit(self.candidate_git_commit)
+            or not _is_commit(self.candidate_git_tree)
+            or not all(
+                _is_hash(value)
+                for value in (
+                    self.package_manifest_sha256,
+                    self.controller_contract_sha256,
+                    self.execution_plan_sha256,
+                    self.exact_targets_sha256,
+                )
+            )
+        ):
+            raise AuthorityVerificationError("authority_expected_bindings_invalid")
+
+
+_EXECUTION_CAPABILITY_TOKEN = object()
+
+
+class _VerifiedDormantInstallCapability:
+    """Opaque signature-verifier output accepted by execution authority.
+
+    The older public evidence dataclass remains intentionally descriptive and
+    structurally constructible.  It is never accepted at the execution
+    boundary.  Only this module can mint this private-token-bearing object.
+    """
+
+    __slots__ = ("_evidence", "_token")
+
+    def __init__(
+        self,
+        evidence: CryptographicallyValidScopeNotExecution,
+        token: object,
+    ) -> None:
+        if token is not _EXECUTION_CAPABILITY_TOKEN:
+            raise AuthorityVerificationError("execution_capability_invalid")
+        self._evidence = evidence
+        self._token = token
+
+    def __repr__(self) -> str:
+        return "VerifiedDormantInstallCapability(<content-redacted>)"
+
+
+def _execution_capability_evidence(
+    value: object,
+) -> CryptographicallyValidScopeNotExecution:
+    if (
+        type(value) is not _VerifiedDormantInstallCapability
+        or value._token is not _EXECUTION_CAPABILITY_TOKEN
+        or type(value._evidence) is not CryptographicallyValidScopeNotExecution
+    ):
+        raise AuthorityVerificationError("execution_capability_invalid")
+    return value._evidence
 
 
 def canonical_json_bytes(value: object) -> bytes:
@@ -410,7 +477,7 @@ def _public_key_from_trust_bundle(
     return Ed25519PublicKey.from_public_bytes(selected)
 
 
-def verify_dormant_install_authority(
+def _verify_dormant_install_signature_evidence(
     scope_json: bytes | str,
     authorization_json: bytes | str,
     trust_bundle_json: bytes | str,
@@ -420,24 +487,15 @@ def verify_dormant_install_authority(
     expected_scope_id: str,
     expected_key_id: str,
     expected_trust_bundle_sha256: str,
-    now: datetime,
-    nonce_used: Callable[[str], bool],
+    expected_bindings: DormantInstallExpectedBindings | None = None,
 ) -> CryptographicallyValidScopeNotExecution:
-    """Verify a signed Phase 8B scope without conferring execution authority."""
+    """Verify exact signed bytes without deciding current nonce authority."""
 
     _require(
         _is_hash(expected_key_id)
         and _is_hash(expected_trust_bundle_sha256),
         "authority_expectation_invalid",
     )
-    _require(
-        isinstance(now, datetime)
-        and now.tzinfo is not None
-        and now.utcoffset() == timezone.utc.utcoffset(now),
-        "authority_clock_invalid",
-    )
-    _require(callable(nonce_used), "authority_nonce_callback_invalid")
-
     scope = _parse_canonical_document(
         scope_json, invalid_code="dormant_install_scope_invalid"
     )
@@ -447,6 +505,8 @@ def verify_dormant_install_authority(
         expected_thread_id=expected_thread_id,
         expected_scope_id=expected_scope_id,
     )
+    if expected_bindings is not None:
+        _verify_expected_scope_bindings(scope, expected_bindings)
     scope_bytes = canonical_json_bytes(scope)
     scope_sha256 = hashlib.sha256(scope_bytes).hexdigest()
 
@@ -520,11 +580,6 @@ def verify_dormant_install_authority(
         <= MAX_AUTHORIZATION_LIFETIME_SECONDS,
         "authorization_validity_invalid",
     )
-    _require(
-        not_before <= now < expires_at,
-        "authorization_not_current",
-    )
-
     signature_bytes = _decode_canonical_base64(
         signature.get("value_base64"),
         expected_bytes=64,
@@ -534,15 +589,6 @@ def verify_dormant_install_authority(
         public_key.verify(signature_bytes, canonical_json_bytes(payload))
     except InvalidSignature as error:
         raise AuthorityVerificationError("authorization_signature_invalid") from error
-
-    try:
-        already_used = nonce_used(nonce)
-    except Exception as error:
-        raise AuthorityVerificationError(
-            "authorization_nonce_state_unavailable"
-        ) from error
-    _require(isinstance(already_used, bool), "authorization_nonce_state_invalid")
-    _require(not already_used, "authorization_nonce_replayed")
 
     authorization_sha256 = canonical_json_sha256(envelope)
     return CryptographicallyValidScopeNotExecution(
@@ -562,16 +608,123 @@ def verify_dormant_install_authority(
     )
 
 
+def verify_dormant_install_authority(
+    scope_json: bytes | str,
+    authorization_json: bytes | str,
+    trust_bundle_json: bytes | str,
+    *,
+    expected_namespace: str,
+    expected_thread_id: str,
+    expected_scope_id: str,
+    expected_key_id: str,
+    expected_trust_bundle_sha256: str,
+    now: datetime,
+    nonce_used: Callable[[str], bool],
+) -> CryptographicallyValidScopeNotExecution:
+    """Return descriptive current/unused signature evidence, never a permit."""
+
+    _require(
+        isinstance(now, datetime)
+        and now.tzinfo is not None
+        and now.utcoffset() == timezone.utc.utcoffset(now),
+        "authority_clock_invalid",
+    )
+    _require(callable(nonce_used), "authority_nonce_callback_invalid")
+    evidence = _verify_dormant_install_signature_evidence(
+        scope_json,
+        authorization_json,
+        trust_bundle_json,
+        expected_namespace=expected_namespace,
+        expected_thread_id=expected_thread_id,
+        expected_scope_id=expected_scope_id,
+        expected_key_id=expected_key_id,
+        expected_trust_bundle_sha256=expected_trust_bundle_sha256,
+    )
+    not_before = _parse_timestamp(evidence.not_before)
+    expires_at = _parse_timestamp(evidence.expires_at)
+    _require(not_before <= now < expires_at, "authorization_not_current")
+    try:
+        already_used = nonce_used(evidence.nonce)
+    except Exception as error:
+        raise AuthorityVerificationError(
+            "authorization_nonce_state_unavailable"
+        ) from error
+    _require(isinstance(already_used, bool), "authorization_nonce_state_invalid")
+    _require(not already_used, "authorization_nonce_replayed")
+    return evidence
+
+
+def _verify_expected_scope_bindings(
+    scope: Mapping[str, object],
+    expected: DormantInstallExpectedBindings,
+) -> None:
+    if type(expected) is not DormantInstallExpectedBindings:
+        raise AuthorityVerificationError("authority_expected_bindings_invalid")
+    exact = {
+        "candidate_git_commit": expected.candidate_git_commit,
+        "candidate_git_tree": expected.candidate_git_tree,
+        "package_manifest_sha256": expected.package_manifest_sha256,
+        "controller_contract_sha256": expected.controller_contract_sha256,
+        "execution_plan_sha256": expected.execution_plan_sha256,
+        "exact_targets_sha256": expected.exact_targets_sha256,
+    }
+    if any(scope.get(key) != value for key, value in exact.items()):
+        raise AuthorityVerificationError("authority_local_binding_mismatch")
+
+
+def verify_dormant_install_execution_capability(
+    scope_json: bytes | str,
+    authorization_json: bytes | str,
+    trust_bundle_json: bytes | str,
+    *,
+    expected_namespace: str,
+    expected_thread_id: str,
+    expected_scope_id: str,
+    expected_key_id: str,
+    expected_trust_bundle_sha256: str,
+    expected_bindings: DormantInstallExpectedBindings,
+) -> object:
+    """Verify exact signed bytes and local bindings without using live time.
+
+    This is the only verifier that mints the opaque input accepted by
+    ``claim_execution_authority``.  It intentionally does not decide whether a
+    nonce is new, used, current, or resumable.  Those decisions require the
+    held global lock, one trusted clock reading, and the atomic durable nonce
+    ledger, and therefore belong exclusively to the execution-authority layer.
+
+    Re-verifying the same signed bytes after expiry is safe: a new claim will
+    still fail, while an exact already-claimed execution can recover.
+    """
+
+    evidence = _verify_dormant_install_signature_evidence(
+        scope_json,
+        authorization_json,
+        trust_bundle_json,
+        expected_namespace=expected_namespace,
+        expected_thread_id=expected_thread_id,
+        expected_scope_id=expected_scope_id,
+        expected_key_id=expected_key_id,
+        expected_trust_bundle_sha256=expected_trust_bundle_sha256,
+        expected_bindings=expected_bindings,
+    )
+    return _VerifiedDormantInstallCapability(
+        evidence,
+        _EXECUTION_CAPABILITY_TOKEN,
+    )
+
+
 __all__ = [
     "ALLOWED_SECRET_NAMES",
     "AUTHORIZATION_OPERATION",
     "AUTHORIZATION_PHASE",
     "AuthorityVerificationError",
     "CryptographicallyValidScopeNotExecution",
+    "DormantInstallExpectedBindings",
     "FORBIDDEN_SECRET_CLASSES",
     "MAX_AUTHORIZATION_LIFETIME_SECONDS",
     "RESULT_TYPE",
     "canonical_json_bytes",
     "canonical_json_sha256",
     "verify_dormant_install_authority",
+    "verify_dormant_install_execution_capability",
 ]

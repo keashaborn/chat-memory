@@ -1,4 +1,4 @@
-"""Phase 8A promoted proof and immutable inactive-runtime identity checks."""
+"""Current inactive-package and immutable application-runtime identity checks."""
 
 from __future__ import annotations
 
@@ -41,7 +41,6 @@ HISTORICAL_PHASE6E_RUNTIME_BUILD_RECEIPT = (
 )
 DISPOSABLE_RUNNER = VALIDATION_TOOLS / "run_disposable_successor.sh"
 PHASE7C_DISPOSABLE_PROOF = OPS / "phase7c_disposable_proof_receipt.json"
-PHASE8A_DISPOSABLE_PROOF = OPS / "phase8a_disposable_proof_receipt.json"
 POSTGRES_BOOTSTRAP = VALIDATION_TOOLS / "postgres_bootstrap.pgsql"
 SCHEMA_CONTRACT = ROOT / "governed-memory-migrations" / "schema_contract.json"
 README = ROOT / "docs" / "memory" / "clean_successor" / "README.md"
@@ -160,8 +159,6 @@ EXPECTED_TEST_FILES = {
     "test_http_service.py",
     "test_http_store.py",
     "test_https_transport.py",
-    "test_inactive_installation_package.py",
-    "test_inactive_installation_controller.py",
     "test_installation_authority.py",
     "test_intake_boundary.py",
     "test_lifecycle.py",
@@ -169,8 +166,8 @@ EXPECTED_TEST_FILES = {
     "test_openai_adapters.py",
     "test_pilot_marker.py",
     "test_execution_authority_state.py",
-    "test_phase8b_controller_v2.py",
-    "test_phase8b_package_v3.py",
+    "test_phase8b_controller.py",
+    "test_phase8b_package.py",
     "test_phase8b_resource_identity_security.py",
     "test_phase8b_store_package.py",
     "test_projection.py",
@@ -234,7 +231,7 @@ def _literal_exports(path: Path) -> tuple[str, ...]:
     return values[0]
 
 
-class Phase8ARuntimeInventoryTests(unittest.TestCase):
+class CurrentRuntimeInventoryTests(unittest.TestCase):
     def load_manifest(self) -> dict[str, object]:
         return json.loads(RUNTIME_MANIFEST.read_text(encoding="utf-8"))
 
@@ -257,30 +254,49 @@ class Phase8ARuntimeInventoryTests(unittest.TestCase):
         self.assertFalse(receipt["production_state_changed"])
         self.assertFalse(receipt["legacy_environment_imported"])
 
-    def test_runtime_manifest_preserves_phase8a_at_execution_snapshot(self) -> None:
+    def test_runtime_manifest_separates_application_and_store_evidence(self) -> None:
         manifest = self.load_manifest()
         self.assertEqual(
             manifest["phase"],
-            "phase8a_inactive_installation_controller_packaged_proof_pending_"
-            "activation_blocked",
+            "phase8d_repository_only_phase8a_successor_installation_stack_"
+            "retired_"
+            "current_inactive_store_package_activation_blocked",
         )
         self.assertFalse(manifest["production_state_changed"])
         self.assertFalse(manifest["legacy_imports_allowed"])
         activation = manifest["activation"]
         self.assertFalse(activation["production_authorized"])
         for key in (
+            "retained_phase7a_snapshot_installed_services",
+            "retained_phase7a_snapshot_running_services",
+            "retained_phase7a_snapshot_enabled_services",
+            "retained_phase7a_snapshot_installed_timers",
+            "retained_phase7a_snapshot_enabled_timers",
+        ):
+            self.assertEqual(activation[key], [])
+        self.assertFalse(
+            activation["phase8d_live_successor_service_state_reverified"]
+        )
+        for stale_live_key in (
             "installed_services",
             "running_services",
             "enabled_services",
             "installed_timers",
             "enabled_timers",
         ):
-            self.assertEqual(activation[key], [])
-        validation = manifest["disposable_validation"]
+            self.assertNotIn(stale_live_key, activation)
+        validation = manifest["phase7c_application_validation"]
         self.assertEqual(
-            validation["scope"], "successor_disposable_only"
+            validation["scope"],
+            "retained_phase7c_application_runtime_and_deletion_proof",
         )
-        self.assertTrue(validation["current_full_proof_complete"])
+        self.assertEqual(
+            validation["evidence_role"],
+            "application_evidence_not_current_store_installation_or_live_proof",
+        )
+        self.assertTrue(validation["phase7c_proof_complete"])
+        self.assertFalse(validation["reusable_as_current_store_installation_proof"])
+        self.assertFalse(validation["reusable_as_live_proof"])
         self.assertFalse(validation["disposable_revalidation_required"])
         self.assertEqual(
             validation["runner_path"],
@@ -348,133 +364,71 @@ class Phase8ARuntimeInventoryTests(unittest.TestCase):
         self.assertEqual(validation["production_endpoint_calls"], 0)
         self.assertEqual(validation["provider_external_calls"], 0)
         self.assertFalse(validation["persistent_resources_created"])
-        controller = manifest["installation_controller_validation"]
-        self.assertEqual(controller["scope"], "phase8a_synthetic_controller_only")
+        current = manifest["inactive_store_package"]
+        self.assertEqual(current["scope"], "current_inactive_stores_only_package")
         self.assertEqual(
-            controller["state"],
-            "packaged_proof_pending_not_installed_not_authorized",
+            current["state"],
+            "static_verified_synthetic_harness_executed_separately_passed_not_"
+            "promoted_no_phase8d_installation_not_authorized",
         )
-        self.assertEqual(controller["package_artifact_count"], 59)
-        self.assertEqual(controller["required_disposable_scenario_count"], 336)
+        self.assertEqual(current["package_artifact_count"], 44)
+        self.assertTrue(current["static_package_verification_complete"])
+        self.assertTrue(current["synthetic_proof_harness_packaged"])
+        self.assertTrue(current["synthetic_proof_executed_for_current_package"])
+        self.assertFalse(current["synthetic_proof_executed_by_release_guard"])
+        self.assertEqual(current["synthetic_proof_scenario_count"], 131)
         self.assertEqual(
-            controller["installation_decision_receipt_schema_version"],
-            "governed-memory-installation-decision-receipt-v2",
+            current["synthetic_proof_outcome"],
+            "synthetic_matrix_passed_repository_only_not_live_proof",
         )
         self.assertEqual(
-            controller["phase8b_migration_execution_contract"],
-            {
-                "psql_variable_name": "governed_memory_inactive_installation",
-                "psql_variable_value": "on",
-                "canonical_roles_preflight_requires_variable": True,
-                "canonical_migrations": [
-                    "governed_memory_foundation_0001",
-                    "governed_memory_owner_claim_detail_0003",
-                    "governed_memory_pilot_marker_0004",
-                ],
-                "source_postgresql_steps": [],
-                "source_conversation_bridge_included": False,
-                "omission_defaults_to_active_mode_and_invalidates_inactive_installation": (
-                    True
-                ),
-                "evaluator_verifies_execution": False,
-            },
+            current["synthetic_proof_receipt_sha256"],
+            "ce9a57f6f01c670dfbc030bff812b99bfb13e9782f406d7e576f0d89af1f33c6",
         )
-        for source_count_key in (
-            "phase8b_source_connection_count_required",
-            "phase8b_source_catalog_read_count_required",
-            "phase8b_source_application_row_read_count_required",
-            "phase8b_source_write_count_required",
+        self.assertEqual(
+            current["synthetic_proof_execution_record"],
+            "ops/governed_memory/history/phase8d/"
+            "phase8a_successor_installation_stack_retirement.json",
+        )
+        self.assertFalse(current["synthetic_proof_full_receipt_persisted"])
+        self.assertFalse(current["synthetic_proof_receipt_promoted"])
+        self.assertFalse(current["live_installation_proof_complete"])
+        self.assertFalse(current["installation_executor_packaged"])
+        self.assertFalse(current["rollback_executor_packaged"])
+        self.assertFalse(current["activation_executor_packaged"])
+        self.assertFalse(current["phase8d_installation_performed"])
+        self.assertFalse(current["live_installation_state_reverified_by_phase8d"])
+        self.assertFalse(current["installation_authorized"])
+        self.assertFalse(current["activation_authorized"])
+        self.assertFalse(current["production_state_changed"])
+        infrastructure = manifest["infrastructure"]
+        self.assertEqual(
+            infrastructure["phase7c_disposable_application_compose"],
+            "ops/governed_memory/compose.candidate.yaml",
+        )
+        self.assertEqual(
+            infrastructure["phase7c_disposable_application_compose_role"],
+            "retained_application_validation_input_not_current_inactive_store_"
+            "composition",
+        )
+        self.assertFalse(infrastructure["persistent_composition_packaged"])
+        self.assertFalse(infrastructure["phase8d_live_store_state_reverified"])
+        self.assertFalse(
+            infrastructure[
+                "retained_phase7a_snapshot_postgresql_persistent_resource_created"
+            ]
+        )
+        self.assertFalse(
+            infrastructure[
+                "retained_phase7a_snapshot_qdrant_persistent_resource_created"
+            ]
+        )
+        for retired_key in (
+            "compose_candidate",
+            "persistent_compose_candidate",
+            "compose_scope",
         ):
-            self.assertEqual(controller[source_count_key], 0, source_count_key)
-        self.assertTrue(
-            controller[
-                "phase8b_all_exact_targets_required_in_every_observation_stage"
-            ]
-        )
-        self.assertEqual(
-            controller["phase8b_required_empty_rollback_retained_targets"],
-            [
-                "install_root",
-                "environment_root",
-                "runtime_environment_root",
-                "state_root",
-                "backup_root",
-                "legacy_secret_quarantine_path_template",
-            ],
-        )
-        self.assertEqual(
-            controller["phase8b_required_application_unit_postflight_state"],
-            "installed_disabled_inactive",
-        )
-        self.assertEqual(
-            controller["phase8b_required_store_supervisor_postflight_state"],
-            "installed_enabled_active_store_only",
-        )
-        self.assertFalse(controller["phase8b_store_supervisor_is_application_runtime"])
-        self.assertEqual(
-            controller["phase8b_installation_blockers"],
-            [
-                "separate_phase8b_dormant_installation_approval_required",
-                (
-                    "final_candidate_commit_tree_package_controller_and_plan_not_"
-                    "externally_signed"
-                ),
-                "external_owner_public_key_trust_anchor_not_installed",
-                "legacy_secret_exact_transition_receipt_absent",
-                "fresh_store_secret_generation_receipt_absent",
-                "persistent_qdrant_digest_not_authorized",
-                "runtime_wheel_and_offline_dependency_wheelhouse_not_packaged",
-                "store_supervisor_artifact_not_packaged",
-                "encrypted_backup_restore_adapter_artifact_not_packaged",
-                "trusted_clock_and_atomic_single_use_nonce_claim_not_packaged",
-                "canonical_global_execution_lock_not_packaged",
-                "external_journal_seal_anchor_not_packaged",
-                "exact_live_probe_adapter_not_packaged",
-                "same_filesystem_quarantine_preflight_adapter_not_packaged",
-                "canonical_cluster_rollback_not_disposable_postgresql_executed",
-                "linux_execution_backend_hard_disabled",
-                "exact_live_preflight_receipt_absent",
-            ],
-        )
-        self.assertFalse(controller["current_disposable_proof_executed"])
-        self.assertFalse(controller["current_disposable_proof_complete"])
-        self.assertIsNone(controller["current_disposable_proof_result"])
-        self.assertIsNone(controller["current_proof_receipt"])
-        self.assertIsNone(controller["current_proof_receipt_sha256"])
-        self.assertFalse(controller["live_backend_packaged"])
-        self.assertFalse(controller["live_execution_surface_exposed"])
-        self.assertFalse(controller["installation_authorized"])
-        self.assertFalse(controller["activation_authorized"])
-
-    def test_external_phase8a_proof_is_promoted_without_package_rewrite(self) -> None:
-        wrapper = json.loads(PHASE8A_DISPOSABLE_PROOF.read_text(encoding="utf-8"))
-        self.assertEqual(
-            wrapper["state"],
-            "disposable_proof_passed_metadata_promoted_inactive_not_"
-            "installed_not_authorized",
-        )
-        self.assertEqual(
-            wrapper["immutable_package_snapshot"]["package_artifact_count"], 59
-        )
-        self.assertTrue(
-            wrapper["immutable_package_snapshot"][
-                "embedded_proof_pending_labels_are_frozen_execution_snapshot"
-            ]
-        )
-        self.assertEqual(wrapper["proof_summary"]["controller_scenario_count"], 336)
-        self.assertEqual(
-            wrapper["proof_summary"]["postgresql16_positive_scenario_count"], 21
-        )
-        self.assertEqual(
-            wrapper["proof_summary"]["postgresql16_refusal_scenario_count"], 5
-        )
-        self.assertFalse(wrapper["authority"]["installation_authorized"])
-        self.assertFalse(wrapper["authority"]["activation_authorized"])
-        self.assertTrue(
-            wrapper["deferred_revalidation"][
-                "phase7c_failure_path_revalidation_required"
-            ]
-        )
+            self.assertNotIn(retired_key, infrastructure)
 
     def test_current_validation_runtime_is_exact(self) -> None:
         runtime = self.load_manifest()["validation_runtime"]
@@ -734,7 +688,6 @@ class Phase8ARuntimeInventoryTests(unittest.TestCase):
             _file_names(VALIDATION_TOOLS),
             {
                 "postgres_bootstrap.pgsql",
-                "run_disposable_installation_controller.py",
                 "run_disposable_successor.sh",
                 "runtime_packages.json",
                 "generate_phase8b_package_manifest.py",
@@ -752,27 +705,21 @@ class Phase8ARuntimeInventoryTests(unittest.TestCase):
             {
                 "__init__.py",
                 "authority.py",
-                "authority_v2.py",
                 "authority_state.py",
                 "controller.py",
-                "controller_linux.py",
-                "controller_v2.py",
                 "disposable_proof_harness.py",
-                "durable_journal_v2.py",
                 "execution_authority.py",
-                "execution_capability_v2.py",
+                "execution_capability.py",
                 "execution_lock.py",
                 "host_boundary.py",
                 "image_preflight.py",
-                "inactive_installation.py",
                 "journal.py",
                 "linux_plan.py",
-                "package_v3.py",
+                "package.py",
                 "resource_identity.py",
                 "secure_file.py",
                 "store_supervisor.py",
                 "synthetic_backend.py",
-                "synthetic_backend_v2.py",
             },
         )
 
@@ -806,22 +753,19 @@ class Phase8ARuntimeInventoryTests(unittest.TestCase):
             },
         )
 
-    def test_docs_describe_phase8a_promoted_and_phase7c_retained_proof(self) -> None:
+    def test_docs_describe_current_inactive_boundary(self) -> None:
         normalized = " ".join(README.read_text(encoding="utf-8").split())
         for required in (
-            "Phase 8A promoted proof metadata",
-            "Retained Phase 7C successor proof",
-            "CPython 3.12.3 Linux runtime",
-            "Attempt 4 passed against pre-promotion candidate commit",
+            "Phase 8D",
+            "Phase 7C",
+            "phase8b/package_manifest.json",
             "structured LifeSwitch data",
-            "do not authorize installation, rollback, activation, or cleanup",
-            "zero source PostgreSQL connections",
-            "All 336 closed controller scenarios passed",
-            "21 positive and 5 refusal scenarios passed",
-            "roles_preflight.pgsql:39",
-            "0002_conversation_bridge/forward.pgsql:20",
+            "performed no installation or activation",
+            "did not re-establish current live absence",
+            "not live proof",
         ):
             self.assertIn(required, normalized)
+        self.assertNotIn("successor remains inactive, uninstalled", normalized)
         runner = (
             VALIDATION_TOOLS / "run_disposable_successor.sh"
         ).read_text(encoding="utf-8")
@@ -836,7 +780,7 @@ class Phase8ARuntimeInventoryTests(unittest.TestCase):
             runner,
         )
         self.assertIn("retired_phase6e_preliminary_proof_mode_refused", runner)
-        self.assertNotIn("phase6e_disposable_deletion_validated_inactive_activation_blocked", README.read_text(encoding="utf-8"))
+        self.assertNotIn("Phase 8A promoted proof metadata", normalized)
 
     def test_provider_asset_allowlist_is_exact(self) -> None:
         self.assertEqual(

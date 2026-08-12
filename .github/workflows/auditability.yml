@@ -57,8 +57,17 @@ jobs:
             brains python -m unittest discover -s tests/memory -p 'test_*.py'
           docker compose -f docker-compose.ci.yml exec -T \
             -e PYTHONPATH=/app \
+            brains python tools/governed_memory_install/package.py verify-package
+          docker compose -f docker-compose.ci.yml exec -T \
+            -e PYTHONPATH=/app \
+            brains python tools/governed_memory_validation/verify_store_migration_manifest.py
+          docker compose -f docker-compose.ci.yml exec -T \
+            -e PYTHONPATH=/app \
             brains python tools/governed_memory_validation/verify_migration_manifest.py \
-              --preliminary-disposable-proof governed-memory-migrations
+              governed-memory-migrations
+          docker compose -f docker-compose.ci.yml exec -T \
+            -e PYTHONPATH=/app \
+            brains python tools/governed_memory_release/release_guard.py verify-artifacts
 
       - name: Legacy quarantine - run focused Memory V1 Python tests
         run: |

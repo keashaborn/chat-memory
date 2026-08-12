@@ -6,7 +6,6 @@ from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
-from pathlib import Path
 import socket
 import subprocess
 import unittest
@@ -16,13 +15,8 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from tools.governed_memory_install import authority
-from tools.governed_memory_install import authority_v2
 
 
-ROOT = Path(__file__).resolve().parents[2]
-SCHEMA_ROOT = (
-    ROOT / "ops" / "governed_memory" / "installation" / "authority"
-)
 NAMESPACE = "governed-memory.installation.phase8b.v1"
 THREAD_ID = "019fe927-8367-7f52-86f2-e2b5b43a2390"
 SCOPE_ID = "phase8b-fresh-stores-000001"
@@ -65,7 +59,7 @@ class InstallationAuthorityTests(unittest.TestCase):
                 "source_postgres_read_count": 0,
                 "source_postgres_write_count": 0,
                 "source_preparation_phase": (
-                    "8C_separate_authorization_required"
+                    "separate_source_preparation_authorization_required"
                 ),
             },
             "store_policy": {
@@ -199,8 +193,8 @@ class InstallationAuthorityTests(unittest.TestCase):
             nonce_used=nonce_used,
         )
 
-    def _expected_bindings(self) -> authority_v2.DormantInstallExpectedBindings:
-        return authority_v2.DormantInstallExpectedBindings(
+    def _expected_bindings(self) -> authority.DormantInstallExpectedBindings:
+        return authority.DormantInstallExpectedBindings(
             candidate_git_commit=str(self.scope["candidate_git_commit"]),
             candidate_git_tree=str(self.scope["candidate_git_tree"]),
             package_manifest_sha256=str(self.scope["package_manifest_sha256"]),
@@ -216,7 +210,7 @@ class InstallationAuthorityTests(unittest.TestCase):
         *,
         scope: dict[str, object] | None = None,
         authorization_document: dict[str, object] | None = None,
-        expected_bindings: authority_v2.DormantInstallExpectedBindings | None = None,
+        expected_bindings: authority.DormantInstallExpectedBindings | None = None,
     ) -> object:
         actual_scope = self.scope if scope is None else scope
         actual_authorization = (
@@ -224,7 +218,7 @@ class InstallationAuthorityTests(unittest.TestCase):
             if authorization_document is None
             else authorization_document
         )
-        return authority_v2.verify_dormant_install_execution_capability(
+        return authority.verify_dormant_install_execution_capability(
             self._canonical(actual_scope),
             self._canonical(actual_authorization),
             self._canonical(self.bundle),
@@ -232,7 +226,7 @@ class InstallationAuthorityTests(unittest.TestCase):
             expected_thread_id=THREAD_ID,
             expected_scope_id=SCOPE_ID,
             expected_key_id=self.key_id,
-            expected_trust_bundle_sha256=authority_v2.canonical_json_sha256(
+            expected_trust_bundle_sha256=authority.canonical_json_sha256(
                 self.bundle
             ),
             expected_bindings=(
@@ -287,7 +281,7 @@ class InstallationAuthorityTests(unittest.TestCase):
         )
         self.assertNotIn(NONCE, repr(capability))
 
-        wrong = authority_v2.DormantInstallExpectedBindings(
+        wrong = authority.DormantInstallExpectedBindings(
             candidate_git_commit="0" * 40,
             candidate_git_tree="b" * 40,
             package_manifest_sha256="c" * 64,
@@ -296,7 +290,7 @@ class InstallationAuthorityTests(unittest.TestCase):
             exact_targets_sha256="f" * 64,
         )
         with self.assertRaisesRegex(
-            authority_v2.AuthorityVerificationError,
+            authority.AuthorityVerificationError,
             "authority_local_binding_mismatch",
         ):
             self._execution_capability(expected_bindings=wrong)
@@ -545,67 +539,6 @@ class InstallationAuthorityTests(unittest.TestCase):
                         scope=invalid_scope,
                         authorization_document=authorization_document,
                     )
-
-    def test_all_authority_schemas_are_recursively_closed(self) -> None:
-        expected = {
-            "dormant_install_scope.schema.json",
-            "external_authorization.schema.json",
-            "installation_execution_receipt.schema.json",
-            "recovery_proof.schema.json",
-        }
-        self.assertEqual(
-            {path.name for path in SCHEMA_ROOT.glob("*.json")}, expected
-        )
-
-        def assert_closed(value: object) -> None:
-            if isinstance(value, dict):
-                if value.get("type") == "object":
-                    self.assertIs(value.get("additionalProperties"), False)
-                    properties = value.get("properties")
-                    self.assertIsInstance(properties, dict)
-                    self.assertEqual(
-                        set(value.get("required", [])), set(properties)
-                    )
-                for nested in value.values():
-                    assert_closed(nested)
-            elif isinstance(value, list):
-                for nested in value:
-                    assert_closed(nested)
-
-        for path in sorted(SCHEMA_ROOT.glob("*.json")):
-            with self.subTest(schema=path.name):
-                raw = path.read_bytes()
-                schema = json.loads(raw)
-                assert_closed(schema)
-                self.assertNotIn("private_key", raw.decode("ascii").lower())
-
-        execution = json.loads(
-            (SCHEMA_ROOT / "installation_execution_receipt.schema.json")
-            .read_text(encoding="ascii")
-        )
-        self.assertEqual(
-            execution["properties"]["journal_sequence"],
-            {"minimum": 0, "type": "integer"},
-        )
-        self.assertIn("journal_sequence", execution["required"])
-        recovery = json.loads(
-            (SCHEMA_ROOT / "recovery_proof.schema.json").read_text(
-                encoding="ascii"
-            )
-        )
-        for field in ("journal_sequence_before", "journal_sequence_after"):
-            self.assertEqual(
-                recovery["properties"][field],
-                {"minimum": 0, "type": "integer"},
-            )
-            self.assertIn(field, recovery["required"])
-        for field in (
-            "postgresql_projection_queue_row_count",
-            "legacy_import_count",
-        ):
-            self.assertEqual(recovery["properties"][field], {"const": 0})
-            self.assertIn(field, recovery["required"])
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-"""Offline verifier for the Phase 8A proof-pending inactive controller package.
+"""Repository-only verifier for the current inactive governed-Memory package.
 
-The guard reads repository artifacts only. It cannot install, authorize, start,
-route, migrate, delete, or call a provider. Observation evaluation is retained
-only as a content-free refusal surface for future separately authorized work.
-The completed Phase 7C successor proof remains independently verified evidence;
-it is not presented as proof of the new installation controller.
+This module has no installation, rollback, activation, Docker, network, secret,
+PostgreSQL, or Qdrant execution surface.  It verifies immutable application
+evidence, the current closed stores-only package, and refusal-only release
+observations.  The retained Phase 7C receipt is application/runtime evidence;
+it is not proof of the current store installation package or a live system.
 """
 
 from collections.abc import Mapping, Sequence
@@ -16,7 +16,6 @@ import hashlib
 import json
 from pathlib import Path
 import re
-import stat
 import sys
 
 
@@ -24,70 +23,29 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from tools.governed_memory_install.inactive_installation import (
-    InstallationPackageError,
-    verify_package as verify_installation_package,
-)
-from tools.governed_memory_validation.verify_migration_manifest import (
-    verify as verify_migration_manifest,
-)
+from tools.governed_memory_install import package
+from tools.governed_memory_validation import verify_store_migration_manifest
 
 
 OPS = ROOT / "ops" / "governed_memory"
-MIGRATION_ROOT = ROOT / "governed-memory-migrations"
-MIGRATION_MANIFEST = MIGRATION_ROOT / "manifest.json"
-PACKAGE_MANIFEST = OPS / "installation" / "package_manifest.json"
 RUNTIME_MANIFEST = OPS / "runtime_manifest.json"
 RUNTIME_BUILD_RECEIPT = OPS / "runtime_build_receipt.json"
-BOOTSTRAP = OPS / "bootstrap_contract.json"
-PILOT = OPS / "pilot_contract.json"
-RECEIPT_SCHEMA = OPS / "release_receipt.schema.json"
 RUNTIME_LOCK = OPS / "runtime-requirements.lock"
 BUILD_LOCK = OPS / "build-requirements.lock"
 RUNTIME_PACKAGES = (
     ROOT / "tools" / "governed_memory_validation" / "runtime_packages.json"
 )
-INSTALLER = ROOT / "tools" / "governed_memory_install" / "inactive_installation.py"
-DISPOSABLE_RUNNER = (
-    ROOT / "tools" / "governed_memory_validation" / "run_disposable_successor.sh"
-)
-RELEASE_GUARD = Path(__file__).resolve()
-FINALIZER = (
-    OPS
-    / "installation"
-    / "postgres"
-    / "canonical_bootstrap_finalize.pgsql"
-)
-RETIRED_CURRENT_PHASE6E_PROOF = OPS / "phase6e_disposable_proof_receipt.json"
-PHASE7C_DISPOSABLE_PROOF = OPS / "phase7c_disposable_proof_receipt.json"
-PHASE8A_DISPOSABLE_PROOF = OPS / "phase8a_disposable_proof_receipt.json"
-PHASE8A_CONTROLLER_PROOF = (
-    OPS / "history" / "phase8a" / "controller_disposable_proof_receipt.json"
-)
-PHASE8A_POSTGRESQL16_PROOF = (
+BOOTSTRAP = OPS / "bootstrap_contract.json"
+PILOT = OPS / "pilot_contract.json"
+RECEIPT_SCHEMA = OPS / "release_receipt.schema.json"
+PHASE7C_APPLICATION_PROOF = OPS / "phase7c_disposable_proof_receipt.json"
+PHASE8D_RETIREMENT_LEDGER = (
     OPS
     / "history"
-    / "phase8a"
-    / "postgresql16_disposable_proof_receipt.json"
+    / "phase8d"
+    / "phase8a_successor_installation_stack_retirement.json"
 )
-PHASE8A_POSTGRESQL16_HARNESS = (
-    OPS / "history" / "phase8a" / "postgresql16_disposable_proof_harness.sh"
-)
-HISTORICAL_PHASE6B_RUNTIME = (
-    OPS / "history" / "phase6b" / "runtime_build_receipt.json"
-)
-HISTORICAL_PHASE6B_PROOF = (
-    OPS / "history" / "phase6b" / "disposable_proof_receipt.json"
-)
-HISTORICAL_PHASE6E_RUNTIME = (
-    OPS / "history" / "phase6e" / "runtime_build_receipt.json"
-)
-HISTORICAL_PHASE6E_PROOF = (
-    OPS / "history" / "phase6e" / "disposable_proof_receipt.json"
-)
-README = ROOT / "docs" / "memory" / "clean_successor" / "README.md"
-VALIDATION = ROOT / "docs" / "memory" / "clean_successor" / "VALIDATION.md"
-ACTIVATION = ROOT / "docs" / "memory" / "clean_successor" / "ACTIVATION.md"
+ROOT_MIGRATION_MANIFEST = ROOT / "governed-memory-migrations" / "manifest.json"
 
 HASH_RE = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 COMMIT_RE = re.compile(r"[0-9a-f]{40}\Z", re.ASCII)
@@ -116,515 +74,8 @@ EXPECTED_PHASE7C_ATTESTED_RUNTIME_MANIFEST_SHA256 = (
 EXPECTED_PHASE7C_ATTESTED_MIGRATION_MANIFEST_SHA256 = (
     "3dc839db27f1b0d4ac68260fd7bff9f77321e6a10159a299c8335eb36086bcc4"
 )
-
-EXPECTED_PHASE7C_PROOF_WRAPPER_KEYS = {
-    'attested_pre_promotion_runtime_manifest_sha256',
-    'deletion_receipt',
-    'deletion_resilience_receipt',
-    'http_vertical_slice_receipt',
-    'phase',
-    'proof_log_sha256',
-    'proof_receipt',
-    'proof_receipt_canonical_sha256',
-    'proof_receipt_canonicalization',
-    'schema_version',
-}
-EXPECTED_PHASE7C_PROOF_KEYS = {
-    'branch',
-    'bridge_logical_dump_sha256',
-    'candidate_head',
-    'candidate_tree',
-    'candidate_unchanged',
-    'connect_trace_sha256',
-    'deletion_receipt_sha256',
-    'deletion_resilience_receipt_sha256',
-    'docker_persistent_mounts',
-    'external_network_calls',
-    'foundation_logical_dump_sha256',
-    'integration_receipt_sha256',
-    'invocation_id',
-    'loopback_application_endpoints',
-    'manifest_sha256',
-    'network_id',
-    'ports_released',
-    'postgres_container_id',
-    'postgres_image_id',
-    'postgres_server_version',
-    'production_data_read',
-    'production_endpoint_calls',
-    'production_service_invoked',
-    'provider_external_calls',
-    'published_container_ports',
-    'qdrant_container_id',
-    'qdrant_image_digest',
-    'qdrant_image_id',
-    'qdrant_server_version',
-    'resources_removed',
-    'result',
-    'rollback_reapply',
-    'run_id',
-    'runtime_build_receipt_sha256',
-    'runtime_lock_sha256',
-    'runtime_packages_sha256',
-    'schema_version',
-    'semantic_threshold_calibrated',
-    'source_tree_sha256',
-    'traced_internal_bridge_connects',
-}
-EXPECTED_PHASE7C_HTTP_RECEIPT_KEYS = {
-    'answer_binding_sha256',
-    'auth_negative_matrix_sha256',
-    'chat_a_thread_id',
-    'chat_b_thread_id',
-    'claim_id',
-    'cold_extraction_lease',
-    'cold_projection_rebuild',
-    'corrected_revision_id',
-    'deletion_receipt_sha256',
-    'embedding_dispatch_adversarial',
-    'embedding_dispatch_marker_count',
-    'embedding_dispatch_marker_sha256',
-    'http_lifecycle_sha256',
-    'http_owner_lifecycle',
-    'inactive_worker_runtime_sha256',
-    'initial_revision_id',
-    'jwks_fetch_count',
-    'jwks_manifest_sha256',
-    'owner_isolation_sha256',
-    'production_data_read',
-    'production_endpoint_calls',
-    'production_service_invoked',
-    'projection_lease_version_fenced',
-    'provider_external_calls',
-    'rebuild_manifest_sha256',
-    'review_surface_sha256',
-    'route_manifest_sha256',
-    'schema',
-    'semantic_threshold_calibrated',
-    'synthetic_jwt_only',
-}
-EXPECTED_PHASE7C_DELETION_RECEIPT_KEYS = {
-    'attachment_thread_bridge_absence',
-    'claim_deletion_receipt_sha256',
-    'clean_composite_auxiliary_fk_count',
-    'coordinator_final_receipt_sha256',
-    'coordinator_no_work_after_completion',
-    'crash_injection_tested',
-    'deleted_attachment_count',
-    'deleted_bridge_row_count',
-    'deleted_claim_count',
-    'deleted_message_count',
-    'deleted_thread_count',
-    'exact_completed_request_replay',
-    'governed_final_receipt_sha256',
-    'governed_message_tombstone_count',
-    'lifeswitch_snapshot_bytes',
-    'lifeswitch_snapshot_sha256',
-    'live_runtime_catalog_refusal_count',
-    'other_owner_qdrant_snapshot_bytes',
-    'other_owner_qdrant_snapshot_sha256',
-    'other_owner_snapshot_bytes',
-    'other_owner_snapshot_sha256',
-    'page_boundary_tested',
-    'production_data_read',
-    'production_endpoint_calls',
-    'production_service_invoked',
-    'provider_external_calls',
-    'qdrant_delete_outcome_unknown_resolved_by_readback',
-    'qdrant_deletion_receipt_sha256',
-    'qdrant_target_absent_alias_and_physical',
-    'schema',
-    'source_conversation_final_receipt_sha256',
-    'source_message_tombstone_count',
-    'source_thread_tombstone_count',
-    'stale_lease_injection_tested',
-    'synthetic_provider_only',
-    'target_message_count',
-    'target_thread_count',
-    'transient_targets_purged',
-    'typed_project_conflict_code',
-    'typed_project_conflict_retryable',
-    'typed_project_conflict_status',
-}
-EXPECTED_PHASE7C_RESILIENCE_RECEIPT_KEYS = {
-    'attachment_identity_reuse_refused',
-    'attachment_movement_refused',
-    'conversation_final_receipt_sha256',
-    'crash_after_conversation_completion_ack',
-    'crash_after_conversation_finalize',
-    'crash_after_governed_receipt_handoff',
-    'crash_after_source_claim_step',
-    'crash_after_source_memory_finalize',
-    'crash_after_source_register',
-    'crash_after_successor_completion_ack',
-    'crash_after_target_append',
-    'crash_after_target_seal',
-    'crash_boundary_count',
-    'crash_boundary_manifest_sha256',
-    'deleted_attachment_count',
-    'deleted_message_count',
-    'deleted_thread_count',
-    'exhausted_attempts_manual_review',
-    'final_absence_manifest_sha256',
-    'final_absence_verified',
-    'future_dated_chat_refused',
-    'pending_ack_attempt_cap_recovered',
-    'post_completion_no_work',
-    'production_data_read',
-    'production_endpoint_calls',
-    'provider_external_calls',
-    'schema',
-    'source_page_count',
-    'source_page_sizes_sha256',
-    'source_target_manifest_sha256',
-    'stale_lease_read_refused',
-    'stale_lease_release_refused',
-    'stale_lease_replaced',
-    'successor_final_receipt_sha256',
-    'successor_page_count',
-    'successor_page_replay_conflict_refused',
-    'successor_page_replay_exact',
-    'successor_page_sizes_sha256',
-    'target_count',
-}
-
-EXPECTED_PHASE8A_CONTROLLER_CONTRACT_SHA256 = (
-    "5a9412ce71066c13f62dcf1fc7c72032de747c5d314405c3bebe6400aaa05564"
-)
-EXPECTED_PHASE8A_CONTROLLER_PLAN_SHA256 = (
-    "7fa38bc1d7ee416e6349a59fe5eec22d1b62682fec883350b4fe5cfe1735943d"
-)
-EXPECTED_PHASE8A_CONTROLLER_RUNNER_SHA256 = (
-    "9f40830c7b3b0bb0ee263eb9a78b095e690fe1452853785f8f15059335b01125"
-)
-EXPECTED_PHASE8A_PROOF_RECEIPT_SHA256 = (
-    "7aaa5f1d0ec21c8a714d4d72280b838026cb0e2d1bfc011f9933a7e0757c7a71"
-)
-EXPECTED_PHASE8A_CONTROLLER_PROOF_RAW_SHA256 = (
-    "56a9d17616a459f969a0a1ab1f7794b353955708e68e4e5f31b5994e53faaecf"
-)
-EXPECTED_PHASE8A_CONTROLLER_PROOF_CANONICAL_SHA256 = (
-    "65b1ffd6250bc7c3a7545c8ca5d731ac3b0d5e44b27b428d7feab3d3e7193b37"
-)
-EXPECTED_PHASE8A_POSTGRESQL16_PROOF_RAW_SHA256 = (
-    "99d9a1571c17da198c2995d97f816cc30a695ab4a21695de5272e56beab0e242"
-)
-EXPECTED_PHASE8A_POSTGRESQL16_PROOF_CANONICAL_SHA256 = (
-    "68cb15de75cd885e8b6b09b5106f1ff238e7d7517e1746d49c90547f5c0c0726"
-)
-EXPECTED_PHASE8A_POSTGRESQL16_HARNESS_SHA256 = (
-    "3e1245ad420b053c2762abcb2fd8fb01c2f68db880f5a9610ddf7e5101d615bd"
-)
-EXPECTED_PHASE8A_PRE_PROMOTION_HEAD = (
-    "fe1bd715ed9fcb86d5085ab80efc9782935c09a3"
-)
-EXPECTED_PHASE8A_PRE_PROMOTION_TREE = (
-    "5010e2664ac56b0558ce4c79fee9d62dead0d276"
-)
-EXPECTED_PHASE8A_PRE_PROMOTION_PARENT = (
-    "5c5253099e0350d79e68c0d1c09c46c25f8b54b6"
-)
-EXPECTED_PHASE8A_RUNTIME_MANIFEST_SHA256 = (
-    "e4c851e6cba93bf79835d0f7abd4708ca53e3471fe315caf16a7c0fadfe0d9a1"
-)
-EXPECTED_PHASE8A_CANONICAL_FORWARD_SHA256 = (
-    "5e3238856349ca9928d9a20d7658959effdaf6472a795d959ad0707fa9bbbae0"
-)
-EXPECTED_PHASE8A_CANONICAL_ROLLBACK_SHA256 = (
-    "5adec472f5b3277b5a2137fc5e7e8f1d50e587a54302246f6b87cef28442d277"
-)
-EXPECTED_PHASE8A_EXACT_TARGETS_SHA256 = (
-    "77e7899af8132fbbd2aca6dc7e38776eb2ea2f7cd520904a5a44e8b530b941c9"
-)
-
-EXPECTED_PHASE8A_WRAPPER_KEYS = {
-    "schema_version",
-    "phase",
-    "state",
-    "subject",
-    "immutable_package_snapshot",
-    "evidence",
-    "proof_summary",
-    "deferred_revalidation",
-    "authority",
-}
-EXPECTED_PHASE8A_CONTROLLER_PROOF_KEYS = {
-    "artifact_sha256",
-    "audit_blocked_self_test_attempts",
-    "controller_binding_sha256",
-    "exact_targets_sha256",
-    "external_effect_counts",
-    "happy_install_receipt_sha256",
-    "happy_rollback_receipt_sha256",
-    "local_import_guard",
-    "package_artifact_count",
-    "package_artifact_sha256",
-    "package_manifest_sha256",
-    "proof_scope",
-    "result",
-    "retained_effects_after_empty_rollback",
-    "retained_resources_after_empty_rollback",
-    "scenario_counts",
-    "scenario_matrix_sha256",
-    "schema_version",
-    "sentinel_sha256",
-    "sentinels_unchanged",
-    "temp_root_removed",
-}
-EXPECTED_PHASE8A_CONTROLLER_SCENARIO_COUNTS = {
-    "compensation_crash_resume": 60,
-    "crash_resume": 138,
-    "empty_only_refusal": 6,
-    "happy_path": 2,
-    "partial_failure": 92,
-    "partial_install_authorized_rollback": 26,
-    "partial_refusal": 6,
-    "tamper_refusal": 6,
-    "total": 336,
-}
-EXPECTED_PHASE8A_CONTROLLER_EXTERNAL_EFFECT_KEYS = {
-    "audited_path_writes_outside_temp_root",
-    "completed_dns_calls",
-    "completed_mmap_calls",
-    "completed_socket_calls",
-    "completed_subprocess_calls",
-    "live_backend_calls",
-    "live_mutations",
-    "production_postgresql_calls",
-    "provider_calls",
-    "qdrant_calls",
-    "runtime_application_starts",
-    "service_manager_calls",
-    "source_postgresql_connections",
-    "source_postgresql_reads",
-    "source_postgresql_writes",
-}
-EXPECTED_PHASE8A_POSTGRESQL16_PROOF_KEYS = {
-    "schema_version",
-    "phase",
-    "result",
-    "scope",
-    "started_at",
-    "ended_at",
-    "candidate",
-    "bindings",
-    "runtime",
-    "execution",
-    "isolation",
-    "cleanup",
-    "authority",
-}
-EXPECTED_PHASE8A_POSTGRESQL16_POSITIVE_SCENARIOS = [
-    "prefix_absence_authorized_rollback",
-    "prefix_owner_authorized_rollback",
-    "prefix_owner_api_authorized_rollback",
-    "prefix_owner_api_worker_authorized_rollback",
-    "prefix_owner_api_worker_ingest_authorized_rollback",
-    "prefix_all_roles_authorized_rollback",
-    "prefix_database_default_authorized_rollback",
-    "prefix_database_public_revoked_authorized_rollback",
-    "prefix_runtime_connect_authorized_rollback",
-    "prefix_owner_membership_authorized_rollback",
-    "prefix_public_create_revoked_authorized_rollback",
-    "prefix_pgcrypto_installed_authorized_rollback",
-    "repaired_role_drift_authorized_rollback",
-    "full_forward_unchanged_template",
-    "full_state_authorized_rollback",
-    "final_absence_retry",
-    "full_forward_reapply_after_rollback",
-    "simulated_crash_after_exact_database_drop",
-    "roles_only_recovery_rollback",
-    "final_full_forward_reapply",
-    "final_authorized_rollback",
-]
-EXPECTED_PHASE8A_POSTGRESQL16_REFUSAL_SCENARIOS = [
-    "rollback_missing_authorization",
-    "rollback_wrong_authorization",
-    "rollback_role_attribute_drift",
-    "rollback_pgcrypto_member_owner_drift",
-    "rollback_nonempty_database",
-]
-
-EXPECTED_DISPOSABLE_VALIDATION = {'scope': 'successor_disposable_only',
- 'evidence_status': 'phase7c_disposable_installation_revalidation_passed_not_production_activation',
- 'current_full_proof_complete': True,
- 'disposable_revalidation_required': False,
- 'validation_document': 'docs/memory/clean_successor/VALIDATION.md',
- 'runner_path': 'tools/governed_memory_validation/run_disposable_successor.sh',
- 'runner_sha256': '2acd2fb134d834b04f9b41448a2cfead7712ce846dab38b001c1a8647eb9796b',
- 'runner_sealed': True,
- 'proof_execution_runner_sha256': 'bd591188d0afaf4d7a65753e54648241fc1aa5ff3289f194d76d6aa07dfe449f',
- 'current_runner_execution_attested_by_phase7c_proof': False,
- 'current_runner_post_proof_change_scope': 'metadata_only_expected_manifest_sha256_and_validation_state_rebind',
- 'current_runner_proof_execution_semantics_changed': False,
- 'runner_receipt': 'stdout:SUCCESSOR_DISPOSABLE_RECEIPT',
- 'current_candidate_python': '/tmp/governed-memory-successor-runtime-94ca231656579ce3b8f09c308e34dc8a03b8d1cf445f7a3681193767cd7db365-610d07f6e65a4b9648b7887a47d040658b6e08f9b14f627fdb6957cab4d9a8cd/bin/python',
- 'postgresql_fresh_empty': True,
- 'qdrant_fresh_empty': True,
- 'migration_forward_rollback_reapply': True,
- 'normalized_catalog_equivalent_after_reapply': True,
- 'forced_rls_owner_isolation_and_direct_dml_denial': True,
- 'asymmetric_jwt_and_jwks_boundary_invoked': True,
- 'owner_http_lifecycle_invoked': True,
- 'all_owner_routes_invoked': True,
- 'alternating_owner_pool_isolation': True,
- 'owner_pool_max_size': 1,
- 'distinct_chat_a_chat_b': True,
- 'cold_extraction_reconstruction': True,
- 'cold_postgresql_projection_rebuild': True,
- 'correction_retraction_hard_delete_and_retention': True,
- 'live_supabase_user_adapter_unit_validated': True,
- 'live_supabase_session_freshness_verified': False,
- 'qdrant_v1_19_0_real_disposable_compatibility_verified': True,
- 'pilot_marker_disposable_proof_complete': True,
- 'worker_runtime_composition_validated': True,
- 'worker_runtime_composition_status': 'implemented_inactive_persistently_fair_three_lane_real_two_database_disposable_validated',
- 'worker_cross_process_singleton_validated': True,
- 'worker_cross_process_singleton_status': 'implemented_inactive_real_concurrent_lock_disposable_validated',
- 'deletion_coordination_disposable_proof_complete': True,
- 'deletion_coordination_status': 'phase7c_exact_chat_targets_real_disposable_validated_inactive_not_routed_not_production_applied',
- 'production_routes_installed': False,
- 'authenticated_frontend_verified': False,
- 'semantic_threshold_calibrated': False,
- 'production_data_read': False,
- 'production_endpoint_calls': 0,
- 'provider_external_calls': 0,
- 'persistent_resources_created': False,
- 'final_resources_absent': True,
- 'resource_cleanup_complete': True,
- 'current_proof_receipt': 'ops/governed_memory/phase7c_disposable_proof_receipt.json',
- 'current_proof_receipt_sha256': 'd4ef8b5b855a57e308f468f1db80feef9bab826840c014006ea68bcad8db80d0'}
-EXPECTED_INSTALLATION_CONTROLLER_VALIDATION = {
-    "scope": "phase8a_synthetic_controller_only",
-    "state": "packaged_proof_pending_not_installed_not_authorized",
-    "package_manifest_schema_version": (
-        "governed-memory-inactive-installation-package-manifest-v2"
-    ),
-    "package_artifact_count": 59,
-    "controller_contract": "ops/governed_memory/installation/contract.json",
-    "controller_contract_sha256": EXPECTED_PHASE8A_CONTROLLER_CONTRACT_SHA256,
-    "controller_plan": "ops/governed_memory/installation/controller_plan.json",
-    "controller_plan_sha256": EXPECTED_PHASE8A_CONTROLLER_PLAN_SHA256,
-    "disposable_runner": (
-        "tools/governed_memory_validation/"
-        "run_disposable_installation_controller.py"
-    ),
-    "disposable_runner_sha256": EXPECTED_PHASE8A_CONTROLLER_RUNNER_SHA256,
-    "required_disposable_scenario_count": 336,
-    "installation_decision_receipt_schema_version": (
-        "governed-memory-installation-decision-receipt-v2"
-    ),
-    "phase8b_migration_execution_contract": {
-        "psql_variable_name": "governed_memory_inactive_installation",
-        "psql_variable_value": "on",
-        "canonical_roles_preflight_requires_variable": True,
-        "canonical_migrations": [
-            "governed_memory_foundation_0001",
-            "governed_memory_owner_claim_detail_0003",
-            "governed_memory_pilot_marker_0004",
-        ],
-        "source_postgresql_steps": [],
-        "source_conversation_bridge_included": False,
-        "omission_defaults_to_active_mode_and_invalidates_inactive_installation": (
-            True
-        ),
-        "evaluator_verifies_execution": False,
-    },
-    "phase8b_source_connection_count_required": 0,
-    "phase8b_source_catalog_read_count_required": 0,
-    "phase8b_source_application_row_read_count_required": 0,
-    "phase8b_source_write_count_required": 0,
-    "phase8b_all_exact_targets_required_in_every_observation_stage": True,
-    "phase8b_required_empty_rollback_retained_targets": [
-        "install_root",
-        "environment_root",
-        "runtime_environment_root",
-        "state_root",
-        "backup_root",
-        "legacy_secret_quarantine_path_template",
-    ],
-    "phase8b_required_application_unit_postflight_state": (
-        "installed_disabled_inactive"
-    ),
-    "phase8b_required_store_supervisor_postflight_state": (
-        "installed_enabled_active_store_only"
-    ),
-    "phase8b_store_supervisor_is_application_runtime": False,
-    "phase8b_installation_blockers": [
-        "separate_phase8b_dormant_installation_approval_required",
-        (
-            "final_candidate_commit_tree_package_controller_and_plan_not_"
-            "externally_signed"
-        ),
-        "external_owner_public_key_trust_anchor_not_installed",
-        "legacy_secret_exact_transition_receipt_absent",
-        "fresh_store_secret_generation_receipt_absent",
-        "persistent_qdrant_digest_not_authorized",
-        "runtime_wheel_and_offline_dependency_wheelhouse_not_packaged",
-        "store_supervisor_artifact_not_packaged",
-        "encrypted_backup_restore_adapter_artifact_not_packaged",
-        "trusted_clock_and_atomic_single_use_nonce_claim_not_packaged",
-        "canonical_global_execution_lock_not_packaged",
-        "external_journal_seal_anchor_not_packaged",
-        "exact_live_probe_adapter_not_packaged",
-        "same_filesystem_quarantine_preflight_adapter_not_packaged",
-        "canonical_cluster_rollback_not_disposable_postgresql_executed",
-        "linux_execution_backend_hard_disabled",
-        "exact_live_preflight_receipt_absent",
-    ],
-    "current_disposable_proof_executed": False,
-    "current_disposable_proof_complete": False,
-    "current_disposable_proof_result": None,
-    "current_proof_receipt": None,
-    "current_proof_receipt_sha256": None,
-    "live_backend_packaged": False,
-    "live_execution_surface_exposed": False,
-    "installation_authorized": False,
-    "activation_authorized": False,
-}
-EXPECTED_BOOTSTRAP_IMPLEMENTATION_STATUS = {'runtime': 'phase7c_source_bound_offline_build_sealed_disposable_validated_inactive',
- 'session_id_required': True,
- 'supabase_auth_sessions_rpc': 'staged_candidate_not_installed_or_live_verified',
- 'owner_claim_fact_detail': 'implemented_candidate_disposable_validated_not_production_applied',
- 'provider_adapter': 'strict_fake_tested_zero_real_calls',
- 'embedding_adapter': 'strict_3072_fake_unit_validated_durable_request_dispatch_marker_disposable_validated_zero_real_calls',
- 'qdrant_adapter': 'exact_fake_unit_and_real_disposable_v1_19_0_validated_not_persistent_approved',
- 'pilot_marker': 'implemented_disposable_validated_not_production_applied',
- 'worker_algorithm': 'implemented_fake_tested',
- 'worker_runtime_composition': 'implemented_inactive_persistently_fair_three_lane_real_two_database_disposable_validated',
- 'deletion_coordinator': 'phase7c_exact_chat_targets_real_disposable_validated_inactive_not_routed_not_production_applied',
- 'worker_context_required_policy': 'fresh_count_zero_double_mark_re_leased_count_one_single_mark_terminal_unresolved_one_receipt_only_successor_read_zero_successor_writes_provider_embedding_vector_calls',
- 'worker_scheduler': 'private_content_free_postgresql_sequence_cyclic_three_lane_disposable_validated_inactive',
- 'worker_cross_process_singleton': 'postgresql_session_advisory_lock_real_concurrent_disposable_validated_inactive',
- 'calibration': 'independently_bound_unapproved_retrieval_off',
- 'frontend_candidate': '71377a_built_undeployed_visual_qa_pending_operation_id_confirmation_semantics_unverified'}
-EXPECTED_PILOT_PROVIDER_POLICY = {'provider_calls_before_pilot_authorization': 0,
- 'provider_adapter_status': 'strict_fake_tested_zero_real_calls',
- 'embedding_adapter_status': 'strict_3072_fake_unit_validated_durable_request_dispatch_marker_disposable_validated_zero_real_calls',
- 'qdrant_adapter_status': 'exact_fake_unit_and_real_disposable_v1_19_0_validated_not_persistent_approved',
- 'worker_algorithm_status': 'implemented_fake_tested',
- 'worker_runtime_composition_status': 'implemented_inactive_persistently_fair_three_lane_real_two_database_disposable_validated',
- 'deletion_coordinator_status': 'phase7c_exact_chat_targets_real_disposable_validated_inactive_not_routed_not_production_applied',
- 'context_required_runtime_policy': 'fresh_count_zero_double_mark_re_leased_count_one_single_mark_terminal_unresolved_one_receipt_only_successor_read_zero_successor_writes_provider_embedding_vector_calls',
- 'qdrant_unavailable_policy': 'predispatch_qdrant_unavailability_retryable_post_embedding_dispatch_failure_terminal_without_embedding_resend_canonical_postgresql_claim_retained_later_same_claim_projection_blocked_explicit_projection_reconciliation_required',
- 'calibration_status': 'independently_bound_unapproved_retrieval_off',
- 'automatic_retry_after_unknown_dispatch': False}
-EXPECTED_PILOT_CANDIDATE_SURFACES = {'runtime': 'phase7c_source_bound_offline_build_sealed_disposable_validated_inactive',
- 'owner_claim_fact_detail': 'implemented_candidate_disposable_validated_not_production_applied',
- 'pilot_marker': 'implemented_disposable_validated_not_production_applied',
- 'deletion_coordinator': 'phase7c_exact_chat_targets_real_disposable_validated_inactive_not_routed_not_production_applied',
- 'frontend': '71377a_built_undeployed_visual_qa_pending_operation_id_confirmation_semantics_unverified'}
-EXPECTED_MIGRATION_MANIFEST_SHA256 = (
+EXPECTED_ROOT_MIGRATION_MANIFEST_SHA256 = (
     "57ea2a0b151b0ac4a84f0df86041e418d1b1a7843cbfd9281175e34500e15150"
-)
-EXPECTED_MIGRATION_PACKAGE_ID_SHA256 = (
-    "949cfa26bdcdaae11fbc582664e38295c585229be88c06d42e356745b1e97d8d"
-)
-EXPECTED_PACKAGE_MANIFEST_SHA256 = (
-    "5db42bb942b2a96d453cf3b7db28687f7c227c24f07098add73666302be8a22e"
-)
-EXPECTED_RUNTIME_MANIFEST_SHA256 = (
-    "e4c851e6cba93bf79835d0f7abd4708ca53e3471fe315caf16a7c0fadfe0d9a1"
 )
 EXPECTED_RUNTIME_RECEIPT_SHA256 = (
     "210cd0fe1bdaf60089668b3d2c8d37be760ed9b867e0909d4e83ebcc204e84b2"
@@ -647,6 +98,12 @@ EXPECTED_BUILD_LOCK_SHA256 = (
 EXPECTED_RUNTIME_PACKAGES_SHA256 = (
     "ed9273d6bd6dad6cf5680c478dff1beab453f66ab607914994fe8dc2b9d4e882"
 )
+EXPECTED_PHASE8D_RETIREMENT_LEDGER_SHA256 = (
+    "593e1c76e66905c8855625c88c42b1cb080c5e0f0380230cbb03246eaafccae6"
+)
+EXPECTED_PHASE8D_SYNTHETIC_RECEIPT_SHA256 = (
+    "ce9a57f6f01c670dfbc030bff812b99bfb13e9782f406d7e576f0d89af1f33c6"
+)
 EXPECTED_RUNTIME_PYTHON = (
     "/tmp/governed-memory-successor-runtime-"
     f"{EXPECTED_RUNTIME_LOCK_SHA256}-{EXPECTED_RUNTIME_SOURCE_SHA256}/bin/python"
@@ -657,24 +114,14 @@ EXPECTED_RUNTIME_WHEEL = (
     "governed_memory_successor-0.0.0-py3-none-any.whl"
 )
 
-EXPECTED_FIXED_ARTIFACT_HASHES = {
-    "docs/memory/clean_successor/ACTIVATION.md": (
-        "48b06a1387c625b89aee09d01f7d9f5c2d0254e1d5be82dcac88dc64571a4d41"
-    ),
-    "docs/memory/clean_successor/README.md": (
-        "011e75094a03e3564e32abb772c6444e80221e981f86bea6365c9fad758dbb53"
-    ),
-    "docs/memory/clean_successor/VALIDATION.md": (
-        "f4db3791ec4ae51d839dc57307c071362540d9a16e568d636826146bbf75b29b"
-    ),
+# This is deliberately the sole direct raw-byte pin for the mutable summary.
+EXPECTED_RUNTIME_MANIFEST_SHA256 = (
+    "99072a21c7ebd4c16b6a329b1d02e024c7d0e308d690060519740bbd86339b78"
+)
+
+EXPECTED_FIXED_APPLICATION_ARTIFACT_HASHES = {
     "governed-memory-migrations/manifest.json": (
-        EXPECTED_MIGRATION_MANIFEST_SHA256
-    ),
-    "ops/governed_memory/phase7c_disposable_proof_receipt.json": (
-        EXPECTED_PHASE7C_PROOF_RECEIPT_SHA256
-    ),
-    "ops/governed_memory/phase8a_disposable_proof_receipt.json": (
-        EXPECTED_PHASE8A_PROOF_RECEIPT_SHA256
+        EXPECTED_ROOT_MIGRATION_MANIFEST_SHA256
     ),
     "ops/governed_memory/bootstrap_contract.json": (
         "3cdeaf1b90b253d2f07244de432104181c7368c0728bf4504f18a353c106682c"
@@ -691,17 +138,11 @@ EXPECTED_FIXED_ARTIFACT_HASHES = {
     "ops/governed_memory/history/phase6e/runtime_build_receipt.json": (
         "cfe7a60c2e69de5a1603f86717f72d093f6fc2e623c2cb627008dbabb97c1c86"
     ),
-    "ops/governed_memory/history/phase8a/controller_disposable_proof_receipt.json": (
-        EXPECTED_PHASE8A_CONTROLLER_PROOF_RAW_SHA256
+    "ops/governed_memory/history/phase8d/phase8a_successor_installation_stack_retirement.json": (
+        EXPECTED_PHASE8D_RETIREMENT_LEDGER_SHA256
     ),
-    "ops/governed_memory/history/phase8a/postgresql16_disposable_proof_harness.sh": (
-        EXPECTED_PHASE8A_POSTGRESQL16_HARNESS_SHA256
-    ),
-    "ops/governed_memory/history/phase8a/postgresql16_disposable_proof_receipt.json": (
-        EXPECTED_PHASE8A_POSTGRESQL16_PROOF_RAW_SHA256
-    ),
-    "ops/governed_memory/installation/package_manifest.json": (
-        EXPECTED_PACKAGE_MANIFEST_SHA256
+    "ops/governed_memory/phase7c_disposable_proof_receipt.json": (
+        EXPECTED_PHASE7C_PROOF_RECEIPT_SHA256
     ),
     "ops/governed_memory/pilot_contract.json": (
         "3c5105024637f7c9c9f46e1131918d8e253040eee14bc2a35f2618fd198d889f"
@@ -712,14 +153,11 @@ EXPECTED_FIXED_ARTIFACT_HASHES = {
     "ops/governed_memory/runtime_build_receipt.json": (
         EXPECTED_RUNTIME_RECEIPT_SHA256
     ),
-    "ops/governed_memory/runtime_manifest.json": (
-        EXPECTED_RUNTIME_MANIFEST_SHA256
+    "tools/governed_memory_validation/postgres_bootstrap.pgsql": (
+        "0c28d2e444cddea0b61e8ea7ac9f6084b06e2038beb06bb65e754c4712eeb857"
     ),
     "tools/governed_memory_validation/run_disposable_successor.sh": (
         "2acd2fb134d834b04f9b41448a2cfead7712ce846dab38b001c1a8647eb9796b"
-    ),
-    "tools/governed_memory_validation/postgres_bootstrap.pgsql": (
-        "0c28d2e444cddea0b61e8ea7ac9f6084b06e2038beb06bb65e754c4712eeb857"
     ),
 }
 
@@ -830,7 +268,7 @@ def _closed_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     result: dict[str, object] = {}
     for key, value in pairs:
         if key in result:
-            raise _DuplicateJsonKey
+            raise _DuplicateJsonKey(key)
         result[key] = value
     return result
 
@@ -840,22 +278,25 @@ def _reject_nonfinite_json(value: str) -> None:
 
 
 def _load_json(path: Path, *, maximum_bytes: int = 256 * 1024) -> object:
-    if not path.is_file() or path.is_symlink() or path.stat().st_size > maximum_bytes:
-        raise ReleaseGuardError("release_json_invalid")
+    try:
+        raw = path.read_bytes()
+    except OSError as error:
+        raise ReleaseGuardError("release_artifact_read_failed") from error
+    if len(raw) > maximum_bytes:
+        raise ReleaseGuardError("release_artifact_too_large")
     try:
         return json.loads(
-            path.read_text(encoding="utf-8"),
+            raw.decode("utf-8"),
             object_pairs_hook=_closed_object,
             parse_constant=_reject_nonfinite_json,
         )
     except (
-        OSError,
-        UnicodeError,
+        UnicodeDecodeError,
         json.JSONDecodeError,
         _DuplicateJsonKey,
         _NonFiniteJsonValue,
     ) as error:
-        raise ReleaseGuardError("release_json_invalid") from error
+        raise ReleaseGuardError("release_artifact_json_invalid") from error
 
 
 def _sha256(path: Path) -> str:
@@ -863,36 +304,22 @@ def _sha256(path: Path) -> str:
 
 
 def _canonical_json_sha256(value: object) -> str:
-    encoded = json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+    try:
+        payload = json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("ascii")
+    except (TypeError, ValueError, UnicodeError) as error:
+        raise ReleaseGuardError("release_artifact_json_invalid") from error
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _require(condition: bool, code: str) -> None:
     if not condition:
         raise ReleaseGuardError(code)
-
-
-def _json_exact_equal(observed: object, expected: object) -> bool:
-    if type(observed) is not type(expected):
-        return False
-    if isinstance(expected, dict):
-        assert isinstance(observed, dict)
-        return set(observed) == set(expected) and all(
-            _json_exact_equal(observed[key], value)
-            for key, value in expected.items()
-        )
-    if isinstance(expected, list):
-        assert isinstance(observed, list)
-        return len(observed) == len(expected) and all(
-            _json_exact_equal(left, right)
-            for left, right in zip(observed, expected, strict=True)
-        )
-    return observed == expected
 
 
 def _verify_runtime_receipt(receipt: object) -> None:
@@ -944,15 +371,104 @@ def _verify_runtime_receipt(receipt: object) -> None:
     )
 
 
+def _verify_phase7c_application_proof(value: object) -> None:
+    error = "release_phase7c_application_proof_invalid"
+    wrapper_keys = {
+        "schema_version",
+        "phase",
+        "attested_pre_promotion_runtime_manifest_sha256",
+        "proof_log_sha256",
+        "proof_receipt_canonicalization",
+        "proof_receipt_canonical_sha256",
+        "proof_receipt",
+        "http_vertical_slice_receipt",
+        "deletion_receipt",
+        "deletion_resilience_receipt",
+    }
+    if not isinstance(value, dict) or set(value) != wrapper_keys:
+        raise ReleaseGuardError(error)
+    proof = value.get("proof_receipt")
+    http = value.get("http_vertical_slice_receipt")
+    deletion = value.get("deletion_receipt")
+    resilience = value.get("deletion_resilience_receipt")
+    if not all(isinstance(item, dict) for item in (proof, http, deletion, resilience)):
+        raise ReleaseGuardError(error)
+    assert isinstance(proof, dict)
+    assert isinstance(http, dict)
+    assert isinstance(deletion, dict)
+    assert isinstance(resilience, dict)
+    http_sha256 = _canonical_json_sha256(http)
+    deletion_sha256 = _canonical_json_sha256(deletion)
+    resilience_sha256 = _canonical_json_sha256(resilience)
+    _require(
+        value.get("schema_version") == "governed-memory-current-disposable-proof-v2"
+        and value.get("phase") == "phase7c"
+        and value.get("attested_pre_promotion_runtime_manifest_sha256")
+        == EXPECTED_PHASE7C_ATTESTED_RUNTIME_MANIFEST_SHA256
+        and value.get("proof_log_sha256") == EXPECTED_PHASE7C_PROOF_LOG_SHA256
+        and value.get("proof_receipt_canonicalization")
+        == "utf8_json_sorted_keys_compact_no_newline_v1"
+        and value.get("proof_receipt_canonical_sha256")
+        == EXPECTED_PHASE7C_PROOF_CANONICAL_SHA256
+        and _canonical_json_sha256(proof)
+        == EXPECTED_PHASE7C_PROOF_CANONICAL_SHA256
+        and http_sha256 == EXPECTED_PHASE7C_HTTP_RECEIPT_SHA256
+        and deletion_sha256 == EXPECTED_PHASE7C_DELETION_RECEIPT_SHA256
+        and resilience_sha256 == EXPECTED_PHASE7C_RESILIENCE_RECEIPT_SHA256
+        and proof.get("integration_receipt_sha256") == http_sha256
+        and proof.get("deletion_receipt_sha256") == deletion_sha256
+        and proof.get("deletion_resilience_receipt_sha256") == resilience_sha256
+        and proof.get("schema_version")
+        == "governed-memory-successor-disposable-run-v6"
+        and proof.get("result") == "passed"
+        and proof.get("source_tree_sha256") == EXPECTED_RUNTIME_SOURCE_SHA256
+        and proof.get("runtime_build_receipt_sha256")
+        == EXPECTED_RUNTIME_RECEIPT_SHA256
+        and proof.get("manifest_sha256")
+        == EXPECTED_PHASE7C_ATTESTED_MIGRATION_MANIFEST_SHA256
+        and proof.get("runtime_packages_sha256")
+        == EXPECTED_RUNTIME_PACKAGES_SHA256
+        and proof.get("runtime_lock_sha256") == EXPECTED_RUNTIME_LOCK_SHA256
+        and proof.get("candidate_unchanged") is True
+        and proof.get("production_data_read") is False
+        and proof.get("production_endpoint_calls") == 0
+        and proof.get("production_service_invoked") is False
+        and proof.get("provider_external_calls") == 0
+        and proof.get("external_network_calls") == 0
+        and proof.get("resources_removed") is True
+        and proof.get("ports_released") is True
+        and proof.get("rollback_reapply") == "passed"
+        and http.get("production_data_read") is False
+        and http.get("production_endpoint_calls") == 0
+        and http.get("production_service_invoked") is False
+        and http.get("provider_external_calls") == 0
+        and deletion.get("production_data_read") is False
+        and deletion.get("production_endpoint_calls") == 0
+        and deletion.get("production_service_invoked") is False
+        and deletion.get("provider_external_calls") == 0
+        and deletion.get("lifeswitch_snapshot_bytes") == 2765
+        and deletion.get("lifeswitch_snapshot_sha256")
+        == "6fc270d38b681af35d1db008d04ff65fd790a2e44bef5791a23119ab99fcddae"
+        and resilience.get("production_data_read") is False
+        and resilience.get("production_endpoint_calls") == 0
+        and resilience.get("provider_external_calls") == 0,
+        error,
+    )
+
+
 def _verify_chat_only_scope(value: Mapping[str, object]) -> None:
     _require(
         value.get("source_erasure_selectors")
         == ["thread", "message_tail", "recent", "all_conversations"]
         and value.get("source_erasure_direct_delete_roots")
         == ["public.chat_log", "public.chat_attachments", "public.threads"]
-        and value.get("source_erasure_memory_only_or_account_wide_memory_selector_allowed")
+        and value.get(
+            "source_erasure_memory_only_or_account_wide_memory_selector_allowed"
+        )
         is False
-        and value.get("source_erasure_structured_lifeswitch_data_or_accounts_deleted")
+        and value.get(
+            "source_erasure_structured_lifeswitch_data_or_accounts_deleted"
+        )
         is False
         and value.get("source_erasure_legacy_project_rows_deleted") is False
         and value.get("source_erasure_unclassified_side_effects_allowed") is False
@@ -965,971 +481,84 @@ def _verify_chat_only_scope(value: Mapping[str, object]) -> None:
     )
 
 
-def _verify_phase7c_proof(value: object) -> None:
-    error = "release_phase7c_disposable_proof_invalid"
-    if not isinstance(value, dict) or set(value) != EXPECTED_PHASE7C_PROOF_WRAPPER_KEYS:
-        raise ReleaseGuardError(error)
-    proof = value.get("proof_receipt")
-    http = value.get("http_vertical_slice_receipt")
-    deletion = value.get("deletion_receipt")
-    resilience = value.get("deletion_resilience_receipt")
-    if (
-        not isinstance(proof, dict)
-        or set(proof) != EXPECTED_PHASE7C_PROOF_KEYS
-        or not isinstance(http, dict)
-        or set(http) != EXPECTED_PHASE7C_HTTP_RECEIPT_KEYS
-        or not isinstance(deletion, dict)
-        or set(deletion) != EXPECTED_PHASE7C_DELETION_RECEIPT_KEYS
-        or not isinstance(resilience, dict)
-        or set(resilience) != EXPECTED_PHASE7C_RESILIENCE_RECEIPT_KEYS
-    ):
-        raise ReleaseGuardError(error)
-    http_sha256 = _canonical_json_sha256(http)
-    deletion_sha256 = _canonical_json_sha256(deletion)
-    resilience_sha256 = _canonical_json_sha256(resilience)
-    if (
-        value.get("schema_version")
-        != "governed-memory-current-disposable-proof-v2"
-        or value.get("phase") != "phase7c"
-        or value.get("attested_pre_promotion_runtime_manifest_sha256")
-        != EXPECTED_PHASE7C_ATTESTED_RUNTIME_MANIFEST_SHA256
-        or value.get("proof_log_sha256") != EXPECTED_PHASE7C_PROOF_LOG_SHA256
-        or value.get("proof_receipt_canonicalization")
-        != "utf8_json_sorted_keys_compact_no_newline_v1"
-        or value.get("proof_receipt_canonical_sha256")
-        != EXPECTED_PHASE7C_PROOF_CANONICAL_SHA256
-        or _canonical_json_sha256(proof)
-        != EXPECTED_PHASE7C_PROOF_CANONICAL_SHA256
-        or http_sha256 != EXPECTED_PHASE7C_HTTP_RECEIPT_SHA256
-        or deletion_sha256 != EXPECTED_PHASE7C_DELETION_RECEIPT_SHA256
-        or resilience_sha256 != EXPECTED_PHASE7C_RESILIENCE_RECEIPT_SHA256
-        or proof.get("integration_receipt_sha256") != http_sha256
-        or proof.get("deletion_receipt_sha256") != deletion_sha256
-        or proof.get("deletion_resilience_receipt_sha256") != resilience_sha256
-    ):
-        raise ReleaseGuardError(error)
-    if (
-        proof.get("schema_version")
-        != "governed-memory-successor-disposable-run-v6"
-        or proof.get("result") != "passed"
-        or proof.get("branch")
-        != "codex/clean-memory-successor-phase6b-20260810"
-        or proof.get("candidate_head")
-        != "5c9524b463c4760297dcebe489271af8d0b246a7"
-        or proof.get("candidate_tree")
-        != "be2dffb8aa929548462c5e1eafc684d05febb02e"
-        or proof.get("source_tree_sha256")
-        != EXPECTED_RUNTIME_SOURCE_SHA256
-        or proof.get("runtime_build_receipt_sha256")
-        != EXPECTED_RUNTIME_RECEIPT_SHA256
-        or proof.get("manifest_sha256")
-        != EXPECTED_PHASE7C_ATTESTED_MIGRATION_MANIFEST_SHA256
-        or proof.get("runtime_packages_sha256")
-        != EXPECTED_RUNTIME_PACKAGES_SHA256
-        or proof.get("runtime_lock_sha256") != EXPECTED_RUNTIME_LOCK_SHA256
-        or proof.get("candidate_unchanged") is not True
-        or proof.get("external_network_calls") != 0
-        or proof.get("loopback_application_endpoints") is not True
-        or proof.get("traced_internal_bridge_connects") is not True
-        or proof.get("published_container_ports") is not False
-        or proof.get("provider_external_calls") != 0
-        or proof.get("production_data_read") is not False
-        or proof.get("production_endpoint_calls") != 0
-        or proof.get("production_service_invoked") is not False
-        or proof.get("docker_persistent_mounts") is not False
-        or proof.get("ports_released") is not True
-        or proof.get("resources_removed") is not True
-        or proof.get("rollback_reapply") != "passed"
-        or proof.get("semantic_threshold_calibrated") is not False
-        or proof.get("postgres_server_version") != "16.14"
-        or proof.get("qdrant_server_version") != "1.19.0"
-        or proof.get("qdrant_image_digest")
-        != "qdrant/qdrant@sha256:057ee3a8da769fe7310dd3537b4dc7583bf87a95ce8ac43c0af5a46bc580d1fc"
-    ):
-        raise ReleaseGuardError(error)
-    expected_terminal_identity = {
-        "run_id": "019fe927",
-        "invocation_id": "1673c63e-c4d0-4107-8597-aad2644fb8e0",
-        "connect_trace_sha256": (
-            "ca29fcc42714d04ddab5e226fbf9abbe13d7ab7cfa3ebfc79003e29e75b06291"
-        ),
-        "network_id": (
-            "1183060198a217036e9045979bd8c101638acf8927ee2e39e5b1e4f6b7e124b8"
-        ),
-        "postgres_container_id": (
-            "2e2575f210008b7dd36c16b2eb7947aa9ffccbecde0c7356a860ed0202d02faf"
-        ),
-        "qdrant_container_id": (
-            "0d067d4873c92f4f2a937682360f5387ebceaf9057014b0e5b9d02e8703c953c"
-        ),
-        "postgres_image_id": (
-            "sha256:de3a4eab8fdfa507ea92aac488b916b08089e515db49b055fe71dfa271ba3a28"
-        ),
-        "qdrant_image_id": (
-            "sha256:92c4050629efe895f87dafd2830f1cd4d0532bc9967b777cab979ebda71612b3"
-        ),
-        "foundation_logical_dump_sha256": (
-            "d4468ca2ff444cf2aee13c6911d5ba76b5b7daf35afebab18e8be967726af551"
-        ),
-        "bridge_logical_dump_sha256": (
-            "ee016eb399995897cfb14dfd1c83572f11e53481e090c36162b9fa7e5ee9ebe2"
-        ),
-    }
-    if any(
-        proof.get(key) != expected
-        for key, expected in expected_terminal_identity.items()
-    ):
-        raise ReleaseGuardError(error)
-    for key in (
-        "connect_trace_sha256",
-        "network_id",
-        "postgres_container_id",
-        "qdrant_container_id",
-        "foundation_logical_dump_sha256",
-        "bridge_logical_dump_sha256",
-        "integration_receipt_sha256",
-        "deletion_receipt_sha256",
-        "deletion_resilience_receipt_sha256",
-    ):
-        if HASH_RE.fullmatch(str(proof.get(key, ""))) is None:
-            raise ReleaseGuardError(error)
-    for key in ("postgres_image_id", "qdrant_image_id"):
-        observed = proof.get(key)
-        if not isinstance(observed, str) or not observed.startswith("sha256:"):
-            raise ReleaseGuardError(error)
-        if HASH_RE.fullmatch(observed.removeprefix("sha256:")) is None:
-            raise ReleaseGuardError(error)
-    if (
-        http.get("schema")
-        != "governed-memory-successor-http-integration-receipt-v2"
-        or http.get("cold_extraction_lease") is not True
-        or http.get("cold_projection_rebuild") is not True
-        or http.get("embedding_dispatch_adversarial") is not True
-        or http.get("embedding_dispatch_marker_count") != 2
-        or http.get("http_owner_lifecycle") is not True
-        or http.get("jwks_fetch_count") != 1
-        or http.get("projection_lease_version_fenced") is not True
-        or http.get("synthetic_jwt_only") is not True
-        or http.get("production_data_read") is not False
-        or http.get("production_endpoint_calls") != 0
-        or http.get("production_service_invoked") is not False
-        or http.get("provider_external_calls") != 0
-        or http.get("semantic_threshold_calibrated") is not False
-    ):
-        raise ReleaseGuardError(error)
-    expected_http_identity = {
-        "answer_binding_sha256": (
-            "32335bf8882ad58ad22bba31c746ff16a7c6252a5de13fd6520922484a697822"
-        ),
-        "auth_negative_matrix_sha256": (
-            "c7c34090822a0d7ce32c5ed672cefdd8a89d9f462ed30510a0e923198a57e2b1"
-        ),
-        "chat_a_thread_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-        "chat_b_thread_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2",
-        "claim_id": "ff471498-cb50-43c1-9ac7-738b64f8710f",
-        "corrected_revision_id": "b8893939-723b-4c91-bc90-2658e7e55101",
-        "deletion_receipt_sha256": (
-            "55dfdf9988937e4b913f4aabe3d69110e24d4f1fc88aa496166b68a97ac4e3c4"
-        ),
-        "embedding_dispatch_marker_sha256": (
-            "50a5801c0b38caedec174d6f142bdb7d791fd77fd8ce62cbcb5dd3b137a7a9cb"
-        ),
-        "http_lifecycle_sha256": (
-            "e7b0264450891baf8557993abab7fe898e1b2b5c7edadafb17b36c53bd9c6b01"
-        ),
-        "inactive_worker_runtime_sha256": (
-            "6bd10fb1a63d2d75906b59bc70a9313b9f6f1a421a00b769e2b8bc7130de90b1"
-        ),
-        "initial_revision_id": "4ba71787-d052-495f-a889-863deb6a7f55",
-        "jwks_manifest_sha256": (
-            "34f3fd2f85e4a11ef17e415f8d21d578164ec2aaeb33941cdc48dec1ba6bcc77"
-        ),
-        "owner_isolation_sha256": (
-            "35a26d7866ad7a18808914a140daa2b6f35a9077db6418ad81e5a4b784d9c655"
-        ),
-        "rebuild_manifest_sha256": (
-            "51bfce19a2b64335e3539a3031deebaabee100af2dfecc978670dec83ddd91fb"
-        ),
-        "review_surface_sha256": (
-            "de529fa76d535a751f0afaf3f0ed4400ba9614a06855aa9a6e4d1ea0341b912d"
-        ),
-        "route_manifest_sha256": (
-            "580abf16d9a08936d15c2c4b31fd1d7023da3a6b8c16314fb2326fda5763cf3b"
-        ),
-    }
-    if any(
-        http.get(key) != expected
-        for key, expected in expected_http_identity.items()
-    ):
-        raise ReleaseGuardError(error)
-    if (
-        deletion.get("schema")
-        != "governed-memory-successor-conversation-deletion-disposable-receipt-v1"
-        or deletion.get("attachment_thread_bridge_absence") is not True
-        or deletion.get("clean_composite_auxiliary_fk_count") != 5
-        or deletion.get("target_message_count") != 2
-        or deletion.get("target_thread_count") != 1
-        or deletion.get("deleted_message_count") != 2
-        or deletion.get("deleted_thread_count") != 1
-        or deletion.get("deleted_attachment_count") != 2
-        or deletion.get("deleted_bridge_row_count") != 1
-        or deletion.get("deleted_claim_count") != 1
-        or deletion.get("governed_message_tombstone_count") != 2
-        or deletion.get("lifeswitch_snapshot_bytes") != 2765
-        or deletion.get("lifeswitch_snapshot_sha256")
-        != "6fc270d38b681af35d1db008d04ff65fd790a2e44bef5791a23119ab99fcddae"
-        or deletion.get("live_runtime_catalog_refusal_count") != 4
-        or deletion.get("other_owner_snapshot_bytes") != 19456
-        or deletion.get("other_owner_snapshot_sha256")
-        != "5ab66318a199fab78182fc7d9fcee43d9323e2c8ada1011367a84a32c89e337d"
-        or deletion.get("other_owner_qdrant_snapshot_bytes") != 27628
-        or deletion.get("other_owner_qdrant_snapshot_sha256")
-        != "430f74a8ed8961f13964bf65b1905685ce5c7643d826441f4c75dfdd7405b1f6"
-        or deletion.get("page_boundary_tested") is not False
-        or deletion.get("crash_injection_tested") is not False
-        or deletion.get("stale_lease_injection_tested") is not False
-        or deletion.get("qdrant_target_absent_alias_and_physical") is not True
-        or deletion.get("qdrant_delete_outcome_unknown_resolved_by_readback")
-        is not True
-        or deletion.get("coordinator_no_work_after_completion") is not True
-        or deletion.get("exact_completed_request_replay") is not True
-        or deletion.get("transient_targets_purged") is not True
-        or deletion.get("source_message_tombstone_count") != 2
-        or deletion.get("source_thread_tombstone_count") != 1
-        or deletion.get("typed_project_conflict_code")
-        != "governed_project_thread_erasure_required"
-        or deletion.get("typed_project_conflict_status") != 409
-        or deletion.get("typed_project_conflict_retryable") is not False
-        or deletion.get("production_data_read") is not False
-        or deletion.get("production_endpoint_calls") != 0
-        or deletion.get("production_service_invoked") is not False
-        or deletion.get("provider_external_calls") != 0
-        or deletion.get("synthetic_provider_only") is not True
-    ):
-        raise ReleaseGuardError(error)
-    expected_deletion_receipts = {
-        "claim_deletion_receipt_sha256": (
-            "54269002658c6f56e5d0b9cc6ef4c8c55e2ba725df316bef98ae64420a477f5a"
-        ),
-        "coordinator_final_receipt_sha256": (
-            "c10b5c9803b9ded83b425c76f91a726607eb30751572dab80fa5de0a7dee8556"
-        ),
-        "governed_final_receipt_sha256": (
-            "814be0d9b4f2091132cb9f8c27e001305adb85fc4560369dfbd715cdd281df78"
-        ),
-        "qdrant_deletion_receipt_sha256": (
-            "7d4df2aca2fa36592a8bee118491fa02d1c343e10d871d36d67a8a04f912ea84"
-        ),
-        "source_conversation_final_receipt_sha256": (
-            "27188f3cfb21103a895b0899e6f85b75daeea33781a719f14f92b0f07c8997e8"
-        ),
-    }
-    if any(
-        deletion.get(key) != expected
-        for key, expected in expected_deletion_receipts.items()
-    ):
-        raise ReleaseGuardError(error)
-    crash_keys = (
-        "crash_after_conversation_completion_ack",
-        "crash_after_conversation_finalize",
-        "crash_after_governed_receipt_handoff",
-        "crash_after_source_claim_step",
-        "crash_after_source_memory_finalize",
-        "crash_after_source_register",
-        "crash_after_successor_completion_ack",
-        "crash_after_target_append",
-        "crash_after_target_seal",
+def _verify_current_package_receipts(
+    package_receipt: object,
+    store_receipt: object,
+) -> tuple[dict[str, object], dict[str, object]]:
+    _require(
+        isinstance(package_receipt, dict) and isinstance(store_receipt, dict),
+        "release_current_store_package_invalid",
     )
-    if (
-        resilience.get("schema")
-        != "governed-memory-successor-deletion-resilience-receipt-v1"
-        or resilience.get("target_count") != 501
-        or resilience.get("deleted_message_count") != 501
-        or resilience.get("deleted_thread_count") != 1
-        or resilience.get("deleted_attachment_count") != 1
-        or resilience.get("source_page_count") != 2
-        or resilience.get("successor_page_count") != 2
-        or resilience.get("crash_boundary_count") != 9
-        or any(resilience.get(key) is not True for key in crash_keys)
-        or resilience.get("final_absence_verified") is not True
-        or resilience.get("future_dated_chat_refused") is not True
-        or resilience.get("exhausted_attempts_manual_review") is not True
-        or resilience.get("pending_ack_attempt_cap_recovered") is not True
-        or resilience.get("post_completion_no_work") is not True
-        or resilience.get("stale_lease_read_refused") is not True
-        or resilience.get("stale_lease_release_refused") is not True
-        or resilience.get("stale_lease_replaced") is not True
-        or resilience.get("successor_page_replay_conflict_refused") is not True
-        or resilience.get("successor_page_replay_exact") is not True
-        or resilience.get("attachment_identity_reuse_refused") is not True
-        or resilience.get("attachment_movement_refused") is not True
-        or resilience.get("production_data_read") is not False
-        or resilience.get("production_endpoint_calls") != 0
-        or resilience.get("provider_external_calls") != 0
-    ):
-        raise ReleaseGuardError(error)
-    expected_resilience_receipts = {
-        "conversation_final_receipt_sha256": (
-            "d694eebdd531c317b00f3980621b785a02c0da011588f397c997d66ff5f878f9"
-        ),
-        "crash_boundary_manifest_sha256": (
-            "f218ee17713c53f32ea3cb47d89f84f330688c99282391ce43723fc81e1b1247"
-        ),
-        "final_absence_manifest_sha256": (
-            "79f69bc6b0e8f2d8bf31e734113d27dc1d68dac42bc993413bc1aed2c394b4da"
-        ),
-        "source_page_sizes_sha256": (
-            "4ad9c2cf3c3cb9eed697e4da63405f5b6b1f01798d8c33005cb817d6b5b960f3"
-        ),
-        "source_target_manifest_sha256": (
-            "ee870faad72c107443dc917697ce6162cb1c2e593bd5066bd1189ac9e1dc6de3"
-        ),
-        "successor_final_receipt_sha256": (
-            "d185d12475b6f4446c48d86abab317a0a16d53e32a77da7f81980f19d9fcf220"
-        ),
-        "successor_page_sizes_sha256": (
-            "e6bf8fb047155955c1a235ce53569b48cd6a3d39c097ea2c9c5ac65f7fbdba82"
-        ),
-    }
-    if any(
-        resilience.get(key) != expected
-        for key, expected in expected_resilience_receipts.items()
-    ):
-        raise ReleaseGuardError(error)
+    assert isinstance(package_receipt, dict) and isinstance(store_receipt, dict)
+    package_artifacts = package_receipt.get("artifact_sha256")
+    store_artifacts = store_receipt.get("artifact_sha256")
+    _require(
+        package_receipt.get("schema_version")
+        == "governed-memory-phase8b-package-verification-v3"
+        and package_receipt.get("artifact_count") == 44
+        and isinstance(package_artifacts, dict)
+        and len(package_artifacts) == 44
+        and package_receipt.get("guarded_synthetic_proof_harness_packaged") is True
+        and package_receipt.get("synthetic_proof_executed_by_verifier") is False
+        and package_receipt.get("synthetic_proof_receipt_promoted") is False
+        and package_receipt.get("installation_executor_packaged") is False
+        and package_receipt.get("rollback_executor_packaged") is False
+        and package_receipt.get("activation_executor_packaged") is False
+        and package_receipt.get("installation_performed_by_verifier") is False
+        and package_receipt.get("images_staged_by_verifier") is False
+        and package_receipt.get("secrets_touched_by_verifier") is False
+        and package_receipt.get("activation_performed_by_verifier") is False
+        and store_receipt.get("schema_version")
+        == "governed-memory-phase8b-store-migration-verification-v2"
+        and store_receipt.get("file_count") == 10
+        and isinstance(store_artifacts, dict)
+        and len(store_artifacts) == 10
+        and store_receipt.get("source_bridge_artifact_count") == 0
+        and store_receipt.get("historical_package_descriptor_count") == 0
+        and store_receipt.get("production_state_changed") is False
+        and package_receipt.get("migration_manifest_sha256")
+        == store_receipt.get("manifest_sha256"),
+        "release_current_store_package_invalid",
+    )
+    return package_receipt, store_receipt
 
 
-def _verify_phase8a_proof(
-    wrapper: object,
-    controller: object,
-    postgresql: object,
-    package: Mapping[str, object],
+def _verify_runtime_manifest(
+    runtime: object,
+    package_receipt: Mapping[str, object],
+    store_receipt: Mapping[str, object],
 ) -> None:
-    error = "release_phase8a_disposable_proof_invalid"
-    if (
-        not isinstance(wrapper, dict)
-        or set(wrapper) != EXPECTED_PHASE8A_WRAPPER_KEYS
-        or not isinstance(controller, dict)
-        or set(controller) != EXPECTED_PHASE8A_CONTROLLER_PROOF_KEYS
-        or not isinstance(postgresql, dict)
-        or set(postgresql) != EXPECTED_PHASE8A_POSTGRESQL16_PROOF_KEYS
-    ):
-        raise ReleaseGuardError(error)
-
-    subject = wrapper.get("subject")
-    snapshot = wrapper.get("immutable_package_snapshot")
-    evidence = wrapper.get("evidence")
-    summary = wrapper.get("proof_summary")
-    deferred = wrapper.get("deferred_revalidation")
-    authority = wrapper.get("authority")
-    if (
-        not isinstance(subject, dict)
-        or set(subject)
-        != {"branch", "head", "tree", "parent", "worktree_clean_before_and_after"}
-        or not isinstance(snapshot, dict)
-        or set(snapshot)
-        != {
-            "package_manifest_sha256",
-            "runtime_manifest_sha256",
-            "migration_manifest_sha256",
-            "controller_contract_sha256",
-            "controller_plan_sha256",
-            "synthetic_controller_runner_sha256",
-            "canonical_cluster_forward_sha256",
-            "canonical_cluster_rollback_sha256",
-            "exact_targets_sha256",
-            "package_artifact_count",
-            "all_package_artifacts_unchanged_since_proof",
-            "embedded_proof_pending_labels_are_frozen_execution_snapshot",
-        }
-        or not isinstance(evidence, dict)
-        or set(evidence)
-        != {
-            "canonicalization",
-            "controller_receipt_path",
-            "controller_receipt_raw_sha256",
-            "controller_receipt_canonical_sha256",
-            "postgresql16_receipt_path",
-            "postgresql16_receipt_raw_sha256",
-            "postgresql16_receipt_canonical_sha256",
-            "postgresql16_harness_path",
-            "postgresql16_harness_sha256",
-            "postgresql16_harness_mode",
-            "postgresql16_receipt_self_binds_harness",
-        }
-        or not isinstance(summary, dict)
-        or set(summary)
-        != {
-            "controller_scenario_count",
-            "postgresql16_positive_scenario_count",
-            "postgresql16_refusal_scenario_count",
-            "package_artifact_map_exact",
-            "external_and_live_effects_zero",
-            "source_postgresql_reads",
-            "source_postgresql_writes",
-            "qdrant_operations",
-            "provider_calls",
-            "production_data_read",
-            "persistent_resources_created",
-            "cleanup_complete",
-            "accounts_chat_and_lifeswitch_sentinels_unchanged",
-            "linux_execution_backend_available",
-        }
-        or not isinstance(deferred, dict)
-        or set(deferred)
-        != {
-            "migration_execution_authorized",
-            "phase7c_failure_path_revalidation_required",
-            "postgresql16_psql_quit_argument_issue_confirmed",
-            "package_migration_bytes_changed",
-            "affected_paths",
-        }
-        or not isinstance(authority, dict)
-        or set(authority)
-        != {
-            "installation_authorized",
-            "activation_authorized",
-            "production_state_changed",
-            "persistent_resources_created",
-            "provider_calls",
-            "production_data_read",
-            "next_gate",
-        }
-    ):
-        raise ReleaseGuardError(error)
-
-    package_hashes = package.get("artifact_sha256")
-    if not isinstance(package_hashes, dict):
-        raise ReleaseGuardError(error)
-    expected_subject = {
-        "branch": "codex/governed-memory-phase8a-installer-controller-20260811",
-        "head": EXPECTED_PHASE8A_PRE_PROMOTION_HEAD,
-        "tree": EXPECTED_PHASE8A_PRE_PROMOTION_TREE,
-        "parent": EXPECTED_PHASE8A_PRE_PROMOTION_PARENT,
-        "worktree_clean_before_and_after": True,
+    expected_top_level = {
+        "schema_version",
+        "phase",
+        "python_runtime",
+        "validation_runtime",
+        "authority",
+        "infrastructure",
+        "http_runtime",
+        "activation",
+        "release_guard",
+        "ingestion",
+        "worker_adapters",
+        "provider_policy",
+        "phase7c_application_validation",
+        "inactive_store_package",
+        "calibration",
+        "frontend_candidate",
+        "historical_evidence",
+        "owner_routes",
+        "prohibited_routes",
+        "legacy_imports_allowed",
+        "production_state_changed",
     }
-    expected_snapshot = {
-        "package_manifest_sha256": EXPECTED_PACKAGE_MANIFEST_SHA256,
-        "runtime_manifest_sha256": EXPECTED_PHASE8A_RUNTIME_MANIFEST_SHA256,
-        "migration_manifest_sha256": EXPECTED_MIGRATION_MANIFEST_SHA256,
-        "controller_contract_sha256": EXPECTED_PHASE8A_CONTROLLER_CONTRACT_SHA256,
-        "controller_plan_sha256": EXPECTED_PHASE8A_CONTROLLER_PLAN_SHA256,
-        "synthetic_controller_runner_sha256": (
-            EXPECTED_PHASE8A_CONTROLLER_RUNNER_SHA256
-        ),
-        "canonical_cluster_forward_sha256": (
-            EXPECTED_PHASE8A_CANONICAL_FORWARD_SHA256
-        ),
-        "canonical_cluster_rollback_sha256": (
-            EXPECTED_PHASE8A_CANONICAL_ROLLBACK_SHA256
-        ),
-        "exact_targets_sha256": EXPECTED_PHASE8A_EXACT_TARGETS_SHA256,
-        "package_artifact_count": 59,
-        "all_package_artifacts_unchanged_since_proof": True,
-        "embedded_proof_pending_labels_are_frozen_execution_snapshot": True,
-    }
-    if (
-        wrapper.get("schema_version")
-        != "governed-memory-phase8a-installation-controller-proof-wrapper-v1"
-        or wrapper.get("phase") != "phase8a"
-        or wrapper.get("state")
-        != (
-            "disposable_proof_passed_metadata_promoted_inactive_not_"
-            "installed_not_authorized"
-        )
-        or not _json_exact_equal(subject, expected_subject)
-        or not _json_exact_equal(snapshot, expected_snapshot)
-        or package.get("package_manifest_sha256")
-        != EXPECTED_PACKAGE_MANIFEST_SHA256
-        or package.get("exact_targets_sha256")
-        != EXPECTED_PHASE8A_EXACT_TARGETS_SHA256
-        or len(package_hashes) != 59
-    ):
-        raise ReleaseGuardError(error)
-
-    expected_evidence = {
-        "canonicalization": "utf8_json_sorted_keys_compact_no_newline_v1",
-        "controller_receipt_path": (
-            "ops/governed_memory/history/phase8a/"
-            "controller_disposable_proof_receipt.json"
-        ),
-        "controller_receipt_raw_sha256": (
-            EXPECTED_PHASE8A_CONTROLLER_PROOF_RAW_SHA256
-        ),
-        "controller_receipt_canonical_sha256": (
-            EXPECTED_PHASE8A_CONTROLLER_PROOF_CANONICAL_SHA256
-        ),
-        "postgresql16_receipt_path": (
-            "ops/governed_memory/history/phase8a/"
-            "postgresql16_disposable_proof_receipt.json"
-        ),
-        "postgresql16_receipt_raw_sha256": (
-            EXPECTED_PHASE8A_POSTGRESQL16_PROOF_RAW_SHA256
-        ),
-        "postgresql16_receipt_canonical_sha256": (
-            EXPECTED_PHASE8A_POSTGRESQL16_PROOF_CANONICAL_SHA256
-        ),
-        "postgresql16_harness_path": (
-            "ops/governed_memory/history/phase8a/"
-            "postgresql16_disposable_proof_harness.sh"
-        ),
-        "postgresql16_harness_sha256": (
-            EXPECTED_PHASE8A_POSTGRESQL16_HARNESS_SHA256
-        ),
-        "postgresql16_harness_mode": "0644",
-        "postgresql16_receipt_self_binds_harness": True,
-    }
-    if (
-        not _json_exact_equal(evidence, expected_evidence)
-        or _canonical_json_sha256(controller)
-        != EXPECTED_PHASE8A_CONTROLLER_PROOF_CANONICAL_SHA256
-        or _canonical_json_sha256(postgresql)
-        != EXPECTED_PHASE8A_POSTGRESQL16_PROOF_CANONICAL_SHA256
-    ):
-        raise ReleaseGuardError(error)
-
-    expected_controller_artifacts = {
-        relative: package_hashes[relative]
-        for relative in (
-            "ops/governed_memory/installation/controller_plan.json",
-            (
-                "ops/governed_memory/installation/postgres/"
-                "canonical_cluster_rollback.pgsql.in"
-            ),
-            "tools/governed_memory_install/controller.py",
-            "tools/governed_memory_install/journal.py",
-            "tools/governed_memory_install/synthetic_backend.py",
-            (
-                "tools/governed_memory_validation/"
-                "run_disposable_installation_controller.py"
-            ),
-        )
-    }
-    external_effects = controller.get("external_effect_counts")
-    audit_attempts = controller.get("audit_blocked_self_test_attempts")
-    local_import = controller.get("local_import_guard")
-    sentinels = controller.get("sentinel_sha256")
-    scenario_counts = controller.get("scenario_counts")
-    if (
-        controller.get("schema_version")
-        != "governed-memory-installation-controller-disposable-proof-v1"
-        or controller.get("proof_scope")
-        != (
-            "phase8a_synthetic_controller_only_not_live_installation_not_"
-            "installation_authority"
-        )
-        or controller.get("result") != "pass"
-        or controller.get("package_manifest_sha256")
-        != EXPECTED_PACKAGE_MANIFEST_SHA256
-        or controller.get("package_artifact_count") != 59
-        or type(controller.get("package_artifact_count")) is not int
-        or controller.get("package_artifact_sha256") != package_hashes
-        or controller.get("artifact_sha256") != expected_controller_artifacts
-        or controller.get("exact_targets_sha256")
-        != EXPECTED_PHASE8A_EXACT_TARGETS_SHA256
-        or controller.get("controller_binding_sha256")
-        != "527df1325a8fa28d6452191e564d5bb0ea6cbacc182e27aa54b0e31bf9d2a60b"
-        or controller.get("scenario_matrix_sha256")
-        != "29c383c56c41937e24f4e9b0da2076fa8f3247b3f953e27c1cd2f00591d58fa3"
-        or controller.get("happy_install_receipt_sha256")
-        != "024bdb3b762c5e638ea0e15555390fed34867c77433d7ce5ba98f51fa2f2f4d1"
-        or controller.get("happy_rollback_receipt_sha256")
-        != "3d362da7c2c64b5ea9f5685e064c71a021c6114ffe9f8bfdd215f53f19ab0e79"
-        or scenario_counts != EXPECTED_PHASE8A_CONTROLLER_SCENARIO_COUNTS
-        or not isinstance(external_effects, dict)
-        or set(external_effects) != EXPECTED_PHASE8A_CONTROLLER_EXTERNAL_EFFECT_KEYS
-        or any(type(value) is not int or value != 0 for value in external_effects.values())
-        or not _json_exact_equal(
-            audit_attempts,
-            {
-            "dns": 1,
-            "mmap": 1,
-            "sentinel_mutation": 1,
-            "socket": 1,
-            "subprocess": 2,
-            "write_outside_temp_root": 2,
-            },
-        )
-        or not _json_exact_equal(
-            local_import,
-            {
-            "blocked_effects_during_import": {},
-            "installed_before_local_artifact_imports": True,
-            "local_artifact_imports_completed": True,
-            },
-        )
-        or not _json_exact_equal(
-            sentinels,
-            {
-            "accounts": (
-                "25663a57142c68b9a86ff5419f75865d36c9c4af64673d692ac7c6d60e29eca2"
-            ),
-            "chat": (
-                "4842a597611a07074b80099c9c7ca76e8d24839ba5833df92da510716aac72fc"
-            ),
-            "lifeswitch_structured_data": (
-                "604929697b40cbab46b5b1ea768f110f7b9883aa99e07b68a6facdf0165d2816"
-            ),
-            },
-        )
-        or controller.get("sentinels_unchanged") is not True
-        or controller.get("temp_root_removed") is not True
-        or controller.get("retained_effects_after_empty_rollback")
-        != [
-            "I04_QUARANTINE_LEGACY_SECRET",
-            "I05_CREATE_SERVICE_IDENTITY",
-            "I29_SEAL_INACTIVE_POSTFLIGHT",
-        ]
-        or controller.get("retained_resources_after_empty_rollback")
-        != [
-            "inactive_postflight_receipt",
-            "legacy_secret_quarantine",
-            "root:backup_root",
-            "root:environment_root",
-            "root:install_root",
-            "root:runtime_environment_root",
-            "root:state_root",
-            "service_identity",
-        ]
-    ):
-        raise ReleaseGuardError(error)
-    assert isinstance(scenario_counts, dict)
-    if (
-        any(type(value) is not int for value in scenario_counts.values())
-        or sum(
-            value
-            for key, value in scenario_counts.items()
-            if key != "total"
-        )
-        != scenario_counts["total"]
-    ):
-        raise ReleaseGuardError(error)
-
-    candidate = postgresql.get("candidate")
-    bindings = postgresql.get("bindings")
-    runtime = postgresql.get("runtime")
-    execution = postgresql.get("execution")
-    isolation = postgresql.get("isolation")
-    cleanup = postgresql.get("cleanup")
-    proof_authority = postgresql.get("authority")
-    if (
-        not isinstance(candidate, dict)
-        or set(candidate)
-        != {"head", "tree", "parent", "worktree_clean_before_and_after"}
-        or not isinstance(bindings, dict)
-        or set(bindings)
-        != {
-            "package_manifest_sha256",
-            "runtime_manifest_sha256",
-            "canonical_cluster_forward_sha256",
-            "canonical_cluster_rollback_sha256",
-            "proof_harness_executed_path",
-            "proof_harness_sha256",
-            "proof_harness_self_bound",
-        }
-        or not isinstance(runtime, dict)
-        or set(runtime)
-        != {
-            "docker_context",
-            "docker_server_version",
-            "image_reference",
-            "image_id",
-            "platform",
-            "postgresql_server_version",
-        }
-        or not isinstance(execution, dict)
-        or set(execution)
-        != {
-            "positive_scenarios",
-            "positive_scenario_count",
-            "refusal_scenarios",
-            "refusal_scenario_count",
-            "refusal_state_unchanged",
-            "final_database_absent",
-            "final_target_roles_absent",
-        }
-        or not isinstance(isolation, dict)
-        or set(isolation)
-        != {
-            "invocation",
-            "container_name",
-            "container_id",
-            "network_name",
-            "network_id",
-            "network_internal",
-            "published_ports",
-            "bind_mounts",
-            "persistent_volumes",
-            "tmpfs_only",
-            "read_only_rootfs",
-            "no_new_privileges",
-            "container_log_driver_none",
-            "source_database_endpoints_supplied",
-            "source_database_reads",
-            "source_database_writes",
-            "qdrant_operations",
-            "provider_calls",
-            "live_mutations",
-        }
-        or not isinstance(cleanup, dict)
-        or set(cleanup) != {"exact_owned_resources_removed", "proof_image_retained"}
-        or not isinstance(proof_authority, dict)
-        or set(proof_authority)
-        != {
-            "installation_authorized",
-            "activation_authorized",
-            "production_state_changed",
-            "proof_metadata_promotion_required",
-            "clearable_blocker_after_promotion",
-        }
-    ):
-        raise ReleaseGuardError(error)
-
-    if (
-        postgresql.get("schema_version")
-        != "governed-memory-phase8a-pg16-disposable-proof-v2"
-        or postgresql.get("phase") != "phase8a_inactive_installation_controller"
-        or postgresql.get("scope")
-        != "isolated_disposable_postgresql16_only_not_installation_authority"
-        or postgresql.get("result") != "pass"
-        or postgresql.get("started_at") != "2026-08-12T00:48:43Z"
-        or postgresql.get("ended_at") != "2026-08-12T00:48:52Z"
-        or not _json_exact_equal(
-            candidate,
-            {
-            "head": EXPECTED_PHASE8A_PRE_PROMOTION_HEAD,
-            "tree": EXPECTED_PHASE8A_PRE_PROMOTION_TREE,
-            "parent": EXPECTED_PHASE8A_PRE_PROMOTION_PARENT,
-            "worktree_clean_before_and_after": True,
-            },
-        )
-        or not _json_exact_equal(
-            bindings,
-            {
-            "package_manifest_sha256": EXPECTED_PACKAGE_MANIFEST_SHA256,
-            "runtime_manifest_sha256": EXPECTED_PHASE8A_RUNTIME_MANIFEST_SHA256,
-            "canonical_cluster_forward_sha256": (
-                EXPECTED_PHASE8A_CANONICAL_FORWARD_SHA256
-            ),
-            "canonical_cluster_rollback_sha256": (
-                EXPECTED_PHASE8A_CANONICAL_ROLLBACK_SHA256
-            ),
-            "proof_harness_executed_path": (
-                "/tmp/phase8a_pg16_disposable_proof_fe1bd71_selfbound.sh"
-            ),
-            "proof_harness_sha256": EXPECTED_PHASE8A_POSTGRESQL16_HARNESS_SHA256,
-            "proof_harness_self_bound": True,
-            },
-        )
-        or not _json_exact_equal(
-            runtime,
-            {
-            "docker_context": "default",
-            "docker_server_version": "28.5.1",
-            "image_reference": (
-                "postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df"
-                "5301e940bca0a56f58fddf30ffc07777"
-            ),
-            "image_id": (
-                "sha256:de3a4eab8fdfa507ea92aac488b916b08089e515db49b055fe71dfa271ba3a28"
-            ),
-            "platform": "linux/amd64",
-            "postgresql_server_version": "16.14",
-            },
-        )
-        or execution.get("positive_scenarios")
-        != EXPECTED_PHASE8A_POSTGRESQL16_POSITIVE_SCENARIOS
-        or execution.get("positive_scenario_count") != 21
-        or type(execution.get("positive_scenario_count")) is not int
-        or execution.get("refusal_scenarios")
-        != EXPECTED_PHASE8A_POSTGRESQL16_REFUSAL_SCENARIOS
-        or execution.get("refusal_scenario_count") != 5
-        or type(execution.get("refusal_scenario_count")) is not int
-        or execution.get("refusal_state_unchanged") is not True
-        or execution.get("final_database_absent") is not True
-        or execution.get("final_target_roles_absent") is not True
-        or not _json_exact_equal(
-            cleanup,
-            {"exact_owned_resources_removed": True, "proof_image_retained": True},
-        )
-        or not _json_exact_equal(
-            proof_authority,
-            {
-            "installation_authorized": False,
-            "activation_authorized": False,
-            "production_state_changed": False,
-            "proof_metadata_promotion_required": True,
-            "clearable_blocker_after_promotion": (
-                "canonical_cluster_rollback_not_disposable_postgresql_executed"
-            ),
-            },
-        )
-    ):
-        raise ReleaseGuardError(error)
-
-    expected_isolation = {
-        "invocation": "fe1bd71-5db42bb9-selfbound",
-        "container_name": "gm8a-pg16-fe1bd71-5db42bb9-selfbound",
-        "container_id": (
-            "e826d3dc59453fef104d68c08c2c892a0c0f3514c544d679b0f65ba18bf5ee1f"
-        ),
-        "network_name": "gm8a-net-fe1bd71-5db42bb9-selfbound",
-        "network_id": (
-            "663b351d7330ac20aff5529bcbbad6999eec3c703ea83128d61ca9475773fe41"
-        ),
-        "network_internal": True,
-        "published_ports": False,
-        "bind_mounts": False,
-        "persistent_volumes": False,
-        "tmpfs_only": True,
-        "read_only_rootfs": True,
-        "no_new_privileges": True,
-        "container_log_driver_none": True,
-        "source_database_endpoints_supplied": False,
-        "source_database_reads": 0,
-        "source_database_writes": 0,
-        "qdrant_operations": 0,
-        "provider_calls": 0,
-        "live_mutations": 0,
-    }
-    for counter in (
-        "source_database_reads",
-        "source_database_writes",
-        "qdrant_operations",
-        "provider_calls",
-        "live_mutations",
-    ):
-        if type(isolation.get(counter)) is not int:
-            raise ReleaseGuardError(error)
-    if not _json_exact_equal(isolation, expected_isolation):
-        raise ReleaseGuardError(error)
-
-    expected_summary = {
-        "controller_scenario_count": 336,
-        "postgresql16_positive_scenario_count": 21,
-        "postgresql16_refusal_scenario_count": 5,
-        "package_artifact_map_exact": True,
-        "external_and_live_effects_zero": True,
-        "source_postgresql_reads": 0,
-        "source_postgresql_writes": 0,
-        "qdrant_operations": 0,
-        "provider_calls": 0,
-        "production_data_read": False,
-        "persistent_resources_created": False,
-        "cleanup_complete": True,
-        "accounts_chat_and_lifeswitch_sentinels_unchanged": True,
-        "linux_execution_backend_available": False,
-    }
-    for counter in (
-        "controller_scenario_count",
-        "postgresql16_positive_scenario_count",
-        "postgresql16_refusal_scenario_count",
-        "source_postgresql_reads",
-        "source_postgresql_writes",
-        "qdrant_operations",
-        "provider_calls",
-    ):
-        if type(summary.get(counter)) is not int:
-            raise ReleaseGuardError(error)
-    if not _json_exact_equal(summary, expected_summary):
-        raise ReleaseGuardError(error)
-
-    affected = deferred.get("affected_paths")
-    expected_affected = [
-        {
-            "path": "governed-memory-migrations/roles_preflight.pgsql",
-            "line": 39,
-            "sha256": (
-                "f823b0f6815a669084dd88e5c4650317a36cf786e64a15317421a76c0091f02b"
-            ),
-            "scheduled_phase": "phase8b",
-        },
-        {
-            "path": (
-                "governed-memory-migrations/0002_conversation_bridge/forward.pgsql"
-            ),
-            "line": 20,
-            "sha256": (
-                "e805a245ecb1566f025f07359376527278ed62771998f628c51883dfecb22355"
-            ),
-            "scheduled_phase": "phase8c",
-        },
-    ]
-    if (
-        not _json_exact_equal(
-            deferred,
-            {
-            "migration_execution_authorized": False,
-            "phase7c_failure_path_revalidation_required": True,
-            "postgresql16_psql_quit_argument_issue_confirmed": True,
-            "package_migration_bytes_changed": False,
-            "affected_paths": expected_affected,
-            },
-        )
-        or not isinstance(affected, list)
-        or any(
-            not isinstance(item, dict)
-            or set(item) != {"path", "line", "sha256", "scheduled_phase"}
-            for item in affected
-        )
-        or not _json_exact_equal(
-            authority,
-            {
-            "installation_authorized": False,
-            "activation_authorized": False,
-            "production_state_changed": False,
-            "persistent_resources_created": False,
-            "provider_calls": 0,
-            "production_data_read": False,
-            "next_gate": "separate_phase8b_audit_and_remediation_approval",
-            },
-        )
-        or type(authority.get("provider_calls")) is not int
-    ):
-        raise ReleaseGuardError(error)
-
-    roles_preflight = MIGRATION_ROOT / "roles_preflight.pgsql"
-    bridge_forward = MIGRATION_ROOT / "0002_conversation_bridge" / "forward.pgsql"
-    try:
-        role_lines = roles_preflight.read_text(encoding="utf-8").splitlines()
-        bridge_lines = bridge_forward.read_text(encoding="utf-8").splitlines()
-    except (OSError, UnicodeError) as failure:
-        raise ReleaseGuardError(error) from failure
-    if (
-        _sha256(roles_preflight) != expected_affected[0]["sha256"]
-        or _sha256(bridge_forward) != expected_affected[1]["sha256"]
-        or len(role_lines) < 39
-        or role_lines[38].strip() != "\\quit 3"
-        or len(bridge_lines) < 20
-        or bridge_lines[19].strip() != "\\quit 3"
-        or package_hashes.get(expected_affected[0]["path"])
-        != expected_affected[0]["sha256"]
-        or package_hashes.get(expected_affected[1]["path"])
-        != expected_affected[1]["sha256"]
-        or package_hashes.get(
-            "ops/governed_memory/installation/postgres/"
-            "canonical_cluster.pgsql.in"
-        )
-        != EXPECTED_PHASE8A_CANONICAL_FORWARD_SHA256
-        or package_hashes.get(
-            "ops/governed_memory/installation/postgres/"
-            "canonical_cluster_rollback.pgsql.in"
-        )
-        != EXPECTED_PHASE8A_CANONICAL_ROLLBACK_SHA256
-        or bindings.get("canonical_cluster_rollback_sha256")
-        != controller["artifact_sha256"][
-            "ops/governed_memory/installation/postgres/"
-            "canonical_cluster_rollback.pgsql.in"
-        ]
-    ):
-        raise ReleaseGuardError(error)
-
-
-def _verify_runtime_manifest(runtime: object) -> None:
-    _require(isinstance(runtime, dict), "release_runtime_manifest_invalid")
+    _require(
+        isinstance(runtime, dict) and set(runtime) == expected_top_level,
+        "release_runtime_manifest_invalid",
+    )
     assert isinstance(runtime, dict)
     validation = runtime.get("validation_runtime")
-    disposable = runtime.get("disposable_validation")
-    installation_controller = runtime.get("installation_controller_validation")
+    phase7c = runtime.get("phase7c_application_validation")
+    current = runtime.get("inactive_store_package")
     activation = runtime.get("activation")
     http = runtime.get("http_runtime")
     infrastructure = runtime.get("infrastructure")
@@ -1938,11 +567,13 @@ def _verify_runtime_manifest(runtime: object) -> None:
     frontend = runtime.get("frontend_candidate")
     history = runtime.get("historical_evidence")
     _require(
-        runtime.get("schema_version") == "governed-memory-successor-runtime-manifest-v1"
+        runtime.get("schema_version")
+        == "governed-memory-successor-runtime-manifest-v2"
         and runtime.get("phase")
         == (
-            "phase8a_inactive_installation_controller_packaged_proof_pending_"
-            "activation_blocked"
+            "phase8d_repository_only_phase8a_successor_installation_stack_"
+            "retired_"
+            "current_inactive_store_package_activation_blocked"
         )
         and runtime.get("production_state_changed") is False
         and runtime.get("legacy_imports_allowed") is False
@@ -1958,38 +589,134 @@ def _verify_runtime_manifest(runtime: object) -> None:
         == EXPECTED_RUNTIME_RECEIPT_SHA256
         and validation.get("current_source_bound") is True
         and validation.get("current_runtime_rebuild_pending") is False
-        and disposable == EXPECTED_DISPOSABLE_VALIDATION
-        and installation_controller
-        == EXPECTED_INSTALLATION_CONTROLLER_VALIDATION
+        and isinstance(phase7c, dict)
+        and phase7c.get("scope")
+        == "retained_phase7c_application_runtime_and_deletion_proof"
+        and phase7c.get("evidence_role")
+        == "application_evidence_not_current_store_installation_or_live_proof"
+        and phase7c.get("phase7c_proof_complete") is True
+        and phase7c.get("reusable_as_current_store_installation_proof") is False
+        and phase7c.get("reusable_as_live_proof") is False
+        and phase7c.get("current_proof_receipt")
+        == "ops/governed_memory/phase7c_disposable_proof_receipt.json"
+        and phase7c.get("current_proof_receipt_sha256")
+        == EXPECTED_PHASE7C_PROOF_RECEIPT_SHA256
+        and phase7c.get("production_routes_installed") is False
+        and phase7c.get("authenticated_frontend_verified") is False
+        and phase7c.get("semantic_threshold_calibrated") is False
+        and phase7c.get("production_data_read") is False
+        and phase7c.get("production_endpoint_calls") == 0
+        and phase7c.get("provider_external_calls") == 0
+        and phase7c.get("persistent_resources_created") is False
+        and isinstance(current, dict)
+        and current.get("scope") == "current_inactive_stores_only_package"
+        and current.get("state")
+        == (
+            "static_verified_synthetic_harness_executed_separately_passed_not_"
+            "promoted_no_phase8d_installation_not_authorized"
+        )
+        and current.get("package_manifest")
+        == "ops/governed_memory/installation/phase8b/package_manifest.json"
+        and current.get("package_manifest_sha256")
+        == package_receipt.get("package_manifest_sha256")
+        and current.get("package_manifest_schema_version")
+        == "governed-memory-phase8b-inactive-execution-package-manifest-v2"
+        and current.get("package_artifact_count")
+        == package_receipt.get("artifact_count")
+        and current.get("contract")
+        == "ops/governed_memory/installation/phase8b/contract.json"
+        and current.get("contract_canonical_sha256")
+        == package_receipt.get("contract_canonical_sha256")
+        and current.get("controller_plan")
+        == "ops/governed_memory/installation/phase8b/controller_plan.json"
+        and current.get("controller_plan_canonical_sha256")
+        == package_receipt.get("plan_canonical_sha256")
+        and current.get("store_migration_manifest")
+        == "ops/governed_memory/installation/phase8b/migration_manifest.json"
+        and current.get("store_migration_manifest_sha256")
+        == store_receipt.get("manifest_sha256")
+        and current.get("store_migration_file_count")
+        == store_receipt.get("file_count")
+        and current.get("static_package_verification_complete") is True
+        and current.get("synthetic_proof_harness_packaged") is True
+        and current.get("synthetic_proof_executed_for_current_package") is True
+        and current.get("synthetic_proof_executed_by_release_guard") is False
+        and current.get("synthetic_proof_scenario_count") == 131
+        and current.get("synthetic_proof_outcome")
+        == "synthetic_matrix_passed_repository_only_not_live_proof"
+        and current.get("synthetic_proof_receipt_sha256")
+        == EXPECTED_PHASE8D_SYNTHETIC_RECEIPT_SHA256
+        and current.get("synthetic_proof_execution_record")
+        == (
+            "ops/governed_memory/history/phase8d/"
+            "phase8a_successor_installation_stack_retirement.json"
+        )
+        and current.get("synthetic_proof_full_receipt_persisted") is False
+        and current.get("synthetic_proof_receipt_promoted") is False
+        and current.get("live_installation_proof_complete") is False
+        and current.get("installation_executor_packaged") is False
+        and current.get("rollback_executor_packaged") is False
+        and current.get("activation_executor_packaged") is False
+        and current.get("phase8d_installation_performed") is False
+        and current.get("live_installation_state_reverified_by_phase8d") is False
+        and current.get("installation_authorized") is False
+        and current.get("activation_authorized") is False
+        and current.get("production_state_changed") is False
         and isinstance(activation, dict)
         and activation.get("blockers") == EXPECTED_ACTIVATION_BLOCKERS
         and activation.get("production_authorized") is False
-        and activation.get("installed_services") == []
-        and activation.get("running_services") == []
-        and activation.get("enabled_services") == []
-        and activation.get("installed_timers") == []
-        and activation.get("enabled_timers") == []
+        and activation.get("retained_phase7a_snapshot_installed_services") == []
+        and activation.get("retained_phase7a_snapshot_running_services") == []
+        and activation.get("retained_phase7a_snapshot_enabled_services") == []
+        and activation.get("retained_phase7a_snapshot_installed_timers") == []
+        and activation.get("retained_phase7a_snapshot_enabled_timers") == []
+        and activation.get("phase8d_live_successor_service_state_reverified")
+        is False
+        and "installed_services" not in activation
+        and "running_services" not in activation
+        and "enabled_services" not in activation
+        and "installed_timers" not in activation
+        and "enabled_timers" not in activation
         and isinstance(http, dict)
         and http.get("default_mode") == "off"
-        and http.get("conversation_erasure_route_candidate_implemented") is True
         and http.get("conversation_erasure_route_installed") is False
         and http.get("conversation_erasure_route_routed") is False
         and http.get("conversation_erasure_route_live_verified") is False
-        and http.get("conversation_erasure_route_live_supabase_verified") is False
         and http.get("supabase_auth_sessions_rpc_live_verified") is False
-        and http.get("conversation_bridge_catalog_hash_provisioned") is False
         and http.get("source_logging_policy_live_verified") is False
-        and http.get("source_log_duration_observed") == "off"
-        and http.get("source_log_parameter_max_length_observed")
-        == "-1_full_bind_values_unsafe"
         and http.get("source_logging_parameter_remediation_authorized") is False
         and http.get("source_logging_parameter_remediation_applied") is False
         and isinstance(infrastructure, dict)
-        and infrastructure.get("postgresql_persistent_resource_created") is False
-        and infrastructure.get("qdrant_persistent_resource_created") is False
+        and infrastructure.get("current_inactive_store_contract")
+        == "ops/governed_memory/installation/phase8b/contract.json"
+        and infrastructure.get("current_inactive_store_package_manifest")
+        == "ops/governed_memory/installation/phase8b/package_manifest.json"
+        and infrastructure.get("phase7c_disposable_application_compose")
+        == "ops/governed_memory/compose.candidate.yaml"
+        and infrastructure.get("phase7c_disposable_application_compose_role")
+        == (
+            "retained_application_validation_input_not_current_inactive_store_"
+            "composition"
+        )
+        and infrastructure.get("persistent_composition_packaged") is False
+        and "compose_candidate" not in infrastructure
+        and "persistent_compose_candidate" not in infrastructure
+        and "compose_scope" not in infrastructure
+        and "inactive_installation_contract" not in infrastructure
+        and "inactive_installation_package_manifest" not in infrastructure
+        and infrastructure.get(
+            "retained_phase7a_snapshot_postgresql_persistent_resource_created"
+        )
+        is False
+        and infrastructure.get(
+            "retained_phase7a_snapshot_qdrant_persistent_resource_created"
+        )
+        is False
+        and infrastructure.get("phase8d_live_store_state_reverified") is False
+        and "postgresql_persistent_resource_created" not in infrastructure
+        and "qdrant_persistent_resource_created" not in infrastructure
         and infrastructure.get("existing_production_store_reuse_allowed") is False
         and infrastructure.get("legacy_snapshot_or_mount_reuse_allowed") is False
-        and infrastructure.get("qdrant_persistent_pilot_image") is None
         and isinstance(release, dict)
         and release
         == {
@@ -2001,31 +728,9 @@ def _verify_runtime_manifest(runtime: object) -> None:
         }
         and isinstance(ingestion, dict)
         and isinstance(frontend, dict)
-        and frontend
-        == {
-            "git_commit": "71377a838058d75320b55817fc8c9656d404f955",
-            "git_commit_short": "71377a",
-            "git_tree": "7d29afff30676eccc77465e5f144ec9129aaae4d",
-            "parent_live_commit": "9015eb0efc0cddbda3f9fd812c4f550b0c1f5b3b",
-            "build_id": "-zedD-GFt2yko7J17swb6",
-            "built": True,
-            "deployed": False,
-            "authenticated_visual_qa_complete": False,
-            "successor_operation_id_and_confirmation_semantics_verified": False,
-        }
+        and frontend.get("deployed") is False
+        and frontend.get("authenticated_visual_qa_complete") is False
         and isinstance(history, dict)
-        and history.get("phase6e_runtime_build_receipt")
-        == "ops/governed_memory/history/phase6e/runtime_build_receipt.json"
-        and history.get("phase6e_runtime_build_receipt_sha256")
-        == EXPECTED_FIXED_ARTIFACT_HASHES[
-            "ops/governed_memory/history/phase6e/runtime_build_receipt.json"
-        ]
-        and history.get("phase6e_disposable_proof_receipt")
-        == "ops/governed_memory/history/phase6e/disposable_proof_receipt.json"
-        and history.get("phase6e_disposable_proof_receipt_sha256")
-        == EXPECTED_FIXED_ARTIFACT_HASHES[
-            "ops/governed_memory/history/phase6e/disposable_proof_receipt.json"
-        ]
         and history.get("reusable_for_current_candidate") is False,
         "release_runtime_manifest_invalid",
     )
@@ -2033,7 +738,7 @@ def _verify_runtime_manifest(runtime: object) -> None:
     _verify_chat_only_scope(ingestion)
 
 
-def _verify_bootstrap_and_pilot(bootstrap: object, pilot: object) -> None:
+def _verify_governance_refusals(bootstrap: object, pilot: object) -> None:
     _require(
         isinstance(bootstrap, dict) and isinstance(pilot, dict),
         "release_governance_contract_invalid",
@@ -2058,21 +763,14 @@ def _verify_bootstrap_and_pilot(bootstrap: object, pilot: object) -> None:
         and cleanup.get("wildcard_target_allowed") is False
         and cleanup.get("prefix_target_allowed") is False
         and isinstance(bridge, dict)
-        and bridge.get("source_erasure_status")
-        == "phase7c_real_disposable_validated_inactive_not_routed_not_production_applied"
-        and bootstrap.get("candidate_implementation_status")
-        == EXPECTED_BOOTSTRAP_IMPLEMENTATION_STATUS
-        and bridge.get("source_erasure_structured_lifeswitch_tables_or_accounts_deleted")
+        and bridge.get(
+            "source_erasure_structured_lifeswitch_tables_or_accounts_deleted"
+        )
         is False
         and bridge.get("source_erasure_legacy_project_rows_deleted") is False
         and pilot.get("schema_version") == "governed-memory-pilot-contract-v1"
         and pilot.get("state") == "inactive_candidate_blocked_not_authorized"
         and pilot.get("production_state_changed") is False
-        and pilot.get("provider_policy") == EXPECTED_PILOT_PROVIDER_POLICY
-        and pilot.get("candidate_surfaces") == EXPECTED_PILOT_CANDIDATE_SURFACES
-        and isinstance(source_erasure, dict)
-        and source_erasure.get("status")
-        == "phase7c_real_disposable_validated_inactive_not_routed_not_production_applied"
         and pilot.get("start_blockers") == EXPECTED_ACTIVATION_BLOCKERS
         and pilot.get("eligible_input", {}).get("old_conversations") is False
         and pilot.get("eligible_input", {}).get("historical_backfill") is False
@@ -2080,6 +778,7 @@ def _verify_bootstrap_and_pilot(bootstrap: object, pilot: object) -> None:
         and pilot.get("required_start_state", {}).get("legacy_import_count") == 0
         and pilot.get("required_start_state", {}).get("unprocessed_prefill_count")
         == 0
+        and isinstance(source_erasure, dict)
         and source_erasure.get("structured_lifeswitch_data_deleted") is False
         and source_erasure.get("accounts_deleted") is False
         and source_erasure.get("legacy_project_rows_deleted") is False,
@@ -2087,62 +786,16 @@ def _verify_bootstrap_and_pilot(bootstrap: object, pilot: object) -> None:
     )
 
 
-def _verify_installation_text_contracts() -> None:
-    _require(not FINALIZER.exists(), "release_retired_finalizer_present")
-    _require(
-        not RETIRED_CURRENT_PHASE6E_PROOF.exists(),
-        "release_retired_current_proof_present",
-    )
-    package_text = PACKAGE_MANIFEST.read_text(encoding="utf-8")
-    installer_text = INSTALLER.read_text(encoding="utf-8")
-    _require(
-        "canonical_bootstrap_finalize.pgsql" not in package_text
-        and "canonical_bootstrap_finalize.pgsql" not in installer_text,
-        "release_retired_finalizer_referenced",
-    )
-    canonical = (
-        OPS / "installation" / "postgres" / "canonical_cluster.pgsql.in"
-    ).read_text(encoding="utf-8")
-    source = (
-        OPS / "installation" / "postgres" / "source_cluster_roles.pgsql.in"
-    ).read_text(encoding="utf-8")
-    roles_preflight = (
-        MIGRATION_ROOT / "roles_preflight.pgsql"
-    ).read_text(encoding="utf-8")
-    _require(
-        "current_setting('shared_preload_libraries')" not in roles_preflight
-        and "privileged canonical cluster bootstrap verifies" in roles_preflight,
-        "release_logging_preflight_boundary_invalid",
-    )
-
-    for value in (canonical, source):
-        _require(
-            "log_parameter_max_length" in value
-            and "log_parameter_max_length_on_error" in value
-            and "log_duration" in value
-            and "pgaudit" in value.lower(),
-            "release_logging_preflight_invalid",
-        )
-
-
 def verify_candidate_artifacts() -> dict[str, object]:
     observed_hashes: dict[str, str] = {}
-    for path in (
-        PHASE8A_DISPOSABLE_PROOF,
-        PHASE8A_CONTROLLER_PROOF,
-        PHASE8A_POSTGRESQL16_PROOF,
-        PHASE8A_POSTGRESQL16_HARNESS,
+    for relative, expected in sorted(
+        EXPECTED_FIXED_APPLICATION_ARTIFACT_HASHES.items()
     ):
+        path = ROOT / relative
         _require(
             path.is_file() and not path.is_symlink(),
-            "release_phase8a_proof_artifact_invalid",
+            "release_artifact_missing_or_symlink",
         )
-    _require(
-        stat.S_IMODE(PHASE8A_POSTGRESQL16_HARNESS.lstat().st_mode) == 0o644,
-        "release_phase8a_proof_artifact_invalid",
-    )
-    for relative, expected in sorted(EXPECTED_FIXED_ARTIFACT_HASHES.items()):
-        path = ROOT / relative
         actual = _sha256(path)
         _require(actual == expected, "release_artifact_hash_mismatch")
         observed_hashes[relative] = actual
@@ -2153,93 +806,129 @@ def verify_candidate_artifacts() -> dict[str, object]:
         "release_runtime_lock_invalid",
     )
     try:
-        package = verify_installation_package()
-    except InstallationPackageError as error:
-        raise ReleaseGuardError("release_installation_package_invalid") from error
-    _require(
-        package.get("package_manifest_sha256")
-        == EXPECTED_PACKAGE_MANIFEST_SHA256
-        and len(package.get("artifact_sha256", {})) == 59
-        and package.get("evaluator_mutating_commands_executed") == 0
-        and package.get("evaluator_provider_calls") == 0
-        and package.get("evaluator_state_changed") is False,
-        "release_installation_package_invalid",
-    )
-    migration = verify_migration_manifest(MIGRATION_ROOT)
-    _require(
-        migration
-        == {
-            "schema_version": "governed-memory-migration-verification-v4",
-            "result": "verified",
-            "validation_state": (
-                "disposable_validated"
-            ),
-            "manifest_sha256": EXPECTED_MIGRATION_MANIFEST_SHA256,
-            "migration_package_id_sha256": EXPECTED_MIGRATION_PACKAGE_ID_SHA256,
-            "file_count": 15,
-        },
-        "release_migration_manifest_invalid",
+        package_receipt = package.verify()
+        store_receipt = verify_store_migration_manifest.verify()
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        raise ReleaseGuardError("release_current_store_package_invalid") from error
+    package_receipt, store_receipt = _verify_current_package_receipts(
+        package_receipt,
+        store_receipt,
     )
     receipt = _load_json(RUNTIME_BUILD_RECEIPT)
-    phase7c_proof = _load_json(PHASE7C_DISPOSABLE_PROOF)
-    phase8a_proof = _load_json(PHASE8A_DISPOSABLE_PROOF)
-    phase8a_controller_proof = _load_json(PHASE8A_CONTROLLER_PROOF)
-    phase8a_postgresql16_proof = _load_json(PHASE8A_POSTGRESQL16_PROOF)
+    phase7c = _load_json(PHASE7C_APPLICATION_PROOF)
+    phase8d = _load_json(PHASE8D_RETIREMENT_LEDGER)
     runtime = _load_json(RUNTIME_MANIFEST)
     bootstrap = _load_json(BOOTSTRAP)
     pilot = _load_json(PILOT)
     _verify_runtime_receipt(receipt)
-    _verify_phase7c_proof(phase7c_proof)
-    _verify_phase8a_proof(
-        phase8a_proof,
-        phase8a_controller_proof,
-        phase8a_postgresql16_proof,
-        package,
+    _verify_phase7c_application_proof(phase7c)
+    phase8d_verification = (
+        phase8d.get("verification") if isinstance(phase8d, dict) else None
     )
-    _verify_runtime_manifest(runtime)
-    _verify_bootstrap_and_pilot(bootstrap, pilot)
-    _verify_installation_text_contracts()
+    phase8d_safety = phase8d.get("safety") if isinstance(phase8d, dict) else None
+    phase8d_replacement = (
+        phase8d.get("replacement") if isinstance(phase8d, dict) else None
+    )
+    _require(
+        isinstance(phase8d, dict)
+        and phase8d.get("schema_version")
+        == (
+            "governed-memory-phase8d-phase8a-successor-installation-stack-"
+            "retirement-v1"
+        )
+        and phase8d.get("state")
+        == (
+            "repository_retirement_verified_no_phase8d_live_mutation_live_"
+            "absence_not_reverified"
+        )
+        and isinstance(phase8d_replacement, dict)
+        and phase8d_replacement.get("package_manifest_sha256")
+        == package_receipt.get("package_manifest_sha256")
+        and phase8d_replacement.get("artifact_count")
+        == package_receipt.get("artifact_count")
+        and isinstance(phase8d_verification, dict)
+        and phase8d_verification.get("synthetic_scenario_count") == 131
+        and phase8d_verification.get("synthetic_outcome")
+        == "synthetic_matrix_passed_not_live_proof"
+        and phase8d_verification.get("synthetic_receipt_sha256")
+        == EXPECTED_PHASE8D_SYNTHETIC_RECEIPT_SHA256
+        and isinstance(phase8d_safety, dict)
+        and phase8d_safety.get("docker_run_or_image_operation_performed") is False
+        and phase8d_safety.get("secret_read_write_or_generation_performed")
+        is False
+        and phase8d_safety.get("service_change_performed") is False
+        and phase8d_safety.get("postgresql_operation_performed") is False
+        and phase8d_safety.get("qdrant_operation_performed") is False
+        and phase8d_safety.get("installation_performed") is False
+        and phase8d_safety.get("activation_performed") is False,
+        "release_phase8d_retirement_ledger_invalid",
+    )
+    _verify_runtime_manifest(runtime, package_receipt, store_receipt)
+    _verify_governance_refusals(bootstrap, pilot)
     receipt_schema = _load_json(RECEIPT_SCHEMA)
     _require(
         isinstance(receipt_schema, dict)
         and receipt_schema.get("additionalProperties") is False,
         "release_receipt_schema_invalid",
     )
+    _require(
+        _sha256(RUNTIME_MANIFEST) == EXPECTED_RUNTIME_MANIFEST_SHA256,
+        "release_runtime_manifest_hash_mismatch",
+    )
+    package_artifacts = package_receipt["artifact_sha256"]
+    assert isinstance(package_artifacts, dict)
     observed_hashes.update(
         {
-            RUNTIME_LOCK.relative_to(ROOT).as_posix(): _sha256(RUNTIME_LOCK),
-            BUILD_LOCK.relative_to(ROOT).as_posix(): _sha256(BUILD_LOCK),
-            RUNTIME_PACKAGES.relative_to(ROOT).as_posix(): _sha256(
+            "ops/governed_memory/runtime_manifest.json": _sha256(
+                RUNTIME_MANIFEST
+            ),
+            "ops/governed_memory/runtime-requirements.lock": _sha256(
+                RUNTIME_LOCK
+            ),
+            "ops/governed_memory/build-requirements.lock": _sha256(BUILD_LOCK),
+            "tools/governed_memory_validation/runtime_packages.json": _sha256(
                 RUNTIME_PACKAGES
             ),
-            RELEASE_GUARD.relative_to(ROOT).as_posix(): _sha256(RELEASE_GUARD),
+            "ops/governed_memory/installation/phase8b/package_manifest.json": str(
+                package_receipt["package_manifest_sha256"]
+            ),
+            "ops/governed_memory/installation/phase8b/migration_manifest.json": str(
+                store_receipt["manifest_sha256"]
+            ),
         }
     )
     return {
-        "schema_version": "governed-memory-release-artifact-verification-v2",
+        "schema_version": "governed-memory-release-artifact-verification-v3",
         "phase": (
-            "phase8a_inactive_installation_controller_proof_promoted_"
-            "activation_blocked"
+            "phase8d_repository_only_phase8a_successor_installation_stack_"
+            "retired_"
+            "current_inactive_store_package_activation_blocked"
         ),
         "artifact_sha256": dict(sorted(observed_hashes.items())),
-        "installation_package_artifact_count": len(
-            package.get("artifact_sha256", {})
+        "runtime_build_evidence_verified": True,
+        "phase7c_application_proof_verified": True,
+        "phase7c_proof_is_current_store_installation_proof": False,
+        "phase7c_proof_is_live_proof": False,
+        "current_store_package_static_verification_complete": True,
+        "current_store_package_artifact_count": len(package_artifacts),
+        "current_store_package_manifest_sha256": package_receipt[
+            "package_manifest_sha256"
+        ],
+        "current_store_migration_manifest_sha256": store_receipt[
+            "manifest_sha256"
+        ],
+        "synthetic_proof_harness_packaged": True,
+        "synthetic_proof_executed_separately_for_current_package": True,
+        "synthetic_proof_executed_by_release_guard": False,
+        "synthetic_proof_scenario_count": 131,
+        "synthetic_proof_receipt_sha256": (
+            EXPECTED_PHASE8D_SYNTHETIC_RECEIPT_SHA256
         ),
-        "installation_package_manifest_sha256": EXPECTED_PACKAGE_MANIFEST_SHA256,
-        "migration_manifest_sha256": EXPECTED_MIGRATION_MANIFEST_SHA256,
-        "runtime_source_sha256": EXPECTED_RUNTIME_SOURCE_SHA256,
-        "disposable_revalidation_required": True,
-        "installation_controller_disposable_proof_complete": True,
-        "installation_controller_proof_receipt": (
-            "ops/governed_memory/phase8a_disposable_proof_receipt.json"
-        ),
-        "installation_controller_proof_receipt_sha256": (
-            EXPECTED_PHASE8A_PROOF_RECEIPT_SHA256
-        ),
-        "package_embedded_controller_state": (
-            "packaged_proof_pending_not_installed_not_authorized"
-        ),
-        "linux_execution_backend_available": False,
+        "synthetic_proof_receipt_promoted": False,
+        "live_installation_proof_complete": False,
+        "installation_executor_packaged": False,
+        "rollback_executor_packaged": False,
+        "activation_executor_packaged": False,
         "installation_authorized": False,
         "activation_authorized": False,
         "external_calls": 0,
@@ -2344,8 +1033,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 __all__ = [
     "EXACT_TARGETS",
     "EXPECTED_ACTIVATION_BLOCKERS",
-    "EXPECTED_MIGRATION_MANIFEST_SHA256",
-    "EXPECTED_PACKAGE_MANIFEST_SHA256",
+    "EXPECTED_PHASE8D_RETIREMENT_LEDGER_SHA256",
+    "EXPECTED_PHASE8D_SYNTHETIC_RECEIPT_SHA256",
+    "EXPECTED_ROOT_MIGRATION_MANIFEST_SHA256",
     "EXPECTED_RUNTIME_MANIFEST_SHA256",
     "ReleaseGuardError",
     "evaluate_release_observation",

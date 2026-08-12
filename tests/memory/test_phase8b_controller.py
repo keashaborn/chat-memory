@@ -7,7 +7,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from tools.governed_memory_install.controller_v2 import (
+from tools.governed_memory_install.controller import (
     CompletedStateError,
     CompensationFailedError,
     ControllerLockError,
@@ -100,7 +100,7 @@ class _HermeticBackend:
             self.inject_after_compensate = None
 
 
-class Phase8BControllerV2Tests(unittest.TestCase):
+class Phase8BControllerTests(unittest.TestCase):
     def setUp(self) -> None:
         self._temporary = tempfile.TemporaryDirectory()
         lock_directory = Path(self._temporary.name) / "controller-lock"
@@ -199,7 +199,7 @@ class Phase8BControllerV2Tests(unittest.TestCase):
         )
 
         source = (
-            ROOT / "tools/governed_memory_install/controller_v2.py"
+            ROOT / "tools/governed_memory_install/controller.py"
         ).read_text(encoding="utf-8")
         for forbidden in (
             "import subprocess",

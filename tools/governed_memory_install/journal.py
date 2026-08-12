@@ -1,383 +1,584 @@
 from __future__ import annotations
 
-"""Durable, content-free journal for the inactive installation controller."""
+"""One-entry file/anchor recovery journal for the Phase 8B controller.
 
-from dataclasses import dataclass
+The file is append-and-fsync first; the content-free ``AuthorityState`` anchor
+is advanced second.  Reopening accepts only equality or exactly one complete
+file entry ahead of the anchor.  The latter is the sole repair path for a
+crash between the two durable commits.
+"""
+
 import fcntl
 import hashlib
 import json
 import os
 from pathlib import Path
-import re
 import stat
 from typing import Final
 
+from .authority_state import (
+    AuthorityState,
+    AuthorityStateError,
+    HASH_RE,
+    ZERO_HEAD,
+)
+from .controller import (
+    ATTEMPT_STEP_ID,
+    JournalEvent,
+    JournalRecord,
+)
+from .execution_capability import (
+    ClaimedExecutionBindingError,
+    _claimed_execution_binding_evidence,
+)
+from .execution_lock import (
+    ExecutionLockError,
+    HeldExecutionLockCapability,
+    validate_held_execution_lock,
+)
 
-JOURNAL_SCHEMA_VERSION: Final = "governed-memory-installation-journal-entry-v1"
-JOURNAL_KEYS: Final = frozenset(
+
+JOURNAL_SCHEMA_VERSION: Final = "governed-memory-phase8b-journal-v1"
+_JOURNAL_KEYS: Final = frozenset(
     {
         "schema_version",
-        "binding_sha256",
-        "sequence",
-        "operation",
+        "plan_sha256",
         "attempt_id",
+        "sequence",
         "step_id",
         "event",
-        "disposable_authorization_sha256",
-        "prior_entry_sha256",
-        "entry_sha256",
+        "prior_record_sha256",
+        "record_sha256",
     }
 )
-OPERATIONS: Final = frozenset({"install", "rollback", "compensation"})
-EVENTS: Final = frozenset(
-    {"intent", "effect_complete", "recovered_after_effect"}
-)
-ZERO_HEAD: Final = "0" * 64
-HASH_RE: Final = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
-ATTEMPT_RE: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z", re.ASCII)
-STEP_RE: Final = re.compile(r"[IR][0-9]{2}_[A-Z0-9_]+\Z", re.ASCII)
 MAX_JOURNAL_BYTES: Final = 16 * 1024 * 1024
-MAX_ENTRY_BYTES: Final = 4096
+MAX_RECORD_BYTES: Final = 4096
 
 
-class JournalError(RuntimeError):
-    """Base class for fail-closed journal errors."""
+class DurableJournalError(RuntimeError):
+    """Base class for fail-closed durable journal failures."""
 
 
-class JournalSecurityError(JournalError):
-    """The journal path or metadata is unsafe."""
+class DurableJournalSecurityError(DurableJournalError):
+    pass
 
 
-class JournalIntegrityError(JournalError):
-    """The journal bytes or hash chain are invalid."""
+class DurableJournalIntegrityError(DurableJournalError):
+    pass
 
 
-class JournalBusyError(JournalError):
-    """Another controller owns the journal lock."""
+class DurableJournalBusyError(DurableJournalError):
+    pass
+
+
+class DurableJournalAnchorError(DurableJournalError):
+    pass
 
 
 def _canonical_bytes(value: object) -> bytes:
-    return json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-    ).encode("ascii")
-
-
-def _sha256(value: bytes) -> str:
-    return hashlib.sha256(value).hexdigest()
+    try:
+        return json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("ascii")
+    except (TypeError, ValueError, UnicodeError) as error:
+        raise DurableJournalIntegrityError(
+            "phase8b_durable_journal_json_invalid"
+        ) from error
 
 
 def _strict_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     result: dict[str, object] = {}
     for key, value in pairs:
         if key in result:
-            raise JournalIntegrityError("journal_duplicate_key")
+            raise DurableJournalIntegrityError(
+                "phase8b_durable_journal_duplicate_key"
+            )
         result[key] = value
     return result
 
 
-@dataclass(frozen=True, slots=True)
-class JournalEntry:
-    binding_sha256: str
-    sequence: int
-    operation: str
-    attempt_id: str
-    step_id: str
-    event: str
-    disposable_authorization_sha256: str
-    prior_entry_sha256: str
-    entry_sha256: str
-
-    def as_dict(self) -> dict[str, object]:
-        return {
-            "schema_version": JOURNAL_SCHEMA_VERSION,
-            "binding_sha256": self.binding_sha256,
-            "sequence": self.sequence,
-            "operation": self.operation,
-            "attempt_id": self.attempt_id,
-            "step_id": self.step_id,
-            "event": self.event,
-            "disposable_authorization_sha256": self.disposable_authorization_sha256,
-            "prior_entry_sha256": self.prior_entry_sha256,
-            "entry_sha256": self.entry_sha256,
-        }
-
-
-def _validate_scalar_fields(document: dict[str, object]) -> None:
-    if set(document) != JOURNAL_KEYS:
-        raise JournalIntegrityError("journal_entry_shape_invalid")
-    if document.get("schema_version") != JOURNAL_SCHEMA_VERSION:
-        raise JournalIntegrityError("journal_schema_version_invalid")
-    if not isinstance(document.get("sequence"), int) or isinstance(
-        document.get("sequence"), bool
-    ) or document["sequence"] < 1:
-        raise JournalIntegrityError("journal_sequence_invalid")
-    for key in (
-        "binding_sha256",
-        "disposable_authorization_sha256",
-        "prior_entry_sha256",
-        "entry_sha256",
-    ):
-        value = document.get(key)
-        if not isinstance(value, str) or HASH_RE.fullmatch(value) is None:
-            raise JournalIntegrityError("journal_hash_invalid")
-    if document.get("operation") not in OPERATIONS:
-        raise JournalIntegrityError("journal_operation_invalid")
-    attempt_id = document.get("attempt_id")
-    if not isinstance(attempt_id, str) or ATTEMPT_RE.fullmatch(attempt_id) is None:
-        raise JournalIntegrityError("journal_attempt_id_invalid")
-    step_id = document.get("step_id")
-    if not isinstance(step_id, str) or STEP_RE.fullmatch(step_id) is None:
-        raise JournalIntegrityError("journal_step_id_invalid")
-    if document.get("event") not in EVENTS:
-        raise JournalIntegrityError("journal_event_invalid")
-
-
-def _entry_from_document(document: dict[str, object]) -> JournalEntry:
-    _validate_scalar_fields(document)
-    asserted_hash = document["entry_sha256"]
-    hash_input = dict(document)
-    del hash_input["entry_sha256"]
-    if _sha256(_canonical_bytes(hash_input)) != asserted_hash:
-        raise JournalIntegrityError("journal_entry_hash_mismatch")
-    return JournalEntry(
-        binding_sha256=str(document["binding_sha256"]),
-        sequence=int(document["sequence"]),
-        operation=str(document["operation"]),
-        attempt_id=str(document["attempt_id"]),
-        step_id=str(document["step_id"]),
-        event=str(document["event"]),
-        disposable_authorization_sha256=str(
-            document["disposable_authorization_sha256"]
-        ),
-        prior_entry_sha256=str(document["prior_entry_sha256"]),
-        entry_sha256=str(asserted_hash),
+def _reject_constant(value: str) -> None:
+    raise DurableJournalIntegrityError(
+        "phase8b_durable_journal_json_invalid"
     )
 
 
-def parse_journal_bytes(
+def _record_document(record: JournalRecord) -> dict[str, object]:
+    return {
+        "schema_version": JOURNAL_SCHEMA_VERSION,
+        "plan_sha256": record.plan_sha256,
+        "attempt_id": record.attempt_id,
+        "sequence": record.sequence,
+        "step_id": record.step_id,
+        "event": record.event,
+        "prior_record_sha256": record.prior_record_sha256,
+        "record_sha256": record.record_sha256,
+    }
+
+
+def _record_from_document(
+    document: dict[str, object],
+    *,
+    expected_plan_sha256: str,
+    expected_attempt_id: str,
+) -> JournalRecord:
+    if set(document) != _JOURNAL_KEYS:
+        raise DurableJournalIntegrityError(
+            "phase8b_durable_journal_record_shape_invalid"
+        )
+    if document.get("schema_version") != JOURNAL_SCHEMA_VERSION:
+        raise DurableJournalIntegrityError(
+            "phase8b_durable_journal_schema_invalid"
+        )
+    if document.get("plan_sha256") != expected_plan_sha256:
+        raise DurableJournalIntegrityError(
+            "phase8b_durable_journal_plan_mismatch"
+        )
+    if document.get("attempt_id") != expected_attempt_id:
+        raise DurableJournalIntegrityError(
+            "phase8b_durable_journal_attempt_mismatch"
+        )
+    sequence = document.get("sequence")
+    if type(sequence) is not int or sequence < 1:
+        raise DurableJournalIntegrityError(
+            "phase8b_durable_journal_sequence_invalid"
+        )
+    for key in ("prior_record_sha256", "record_sha256"):
+        value = document.get(key)
+        if not isinstance(value, str) or HASH_RE.fullmatch(value) is None:
+            raise DurableJournalIntegrityError(
+                "phase8b_durable_journal_hash_invalid"
+            )
+    step_id = document.get("step_id")
+    if not isinstance(step_id, str) or not (
+        step_id == ATTEMPT_STEP_ID
+        or (
+            len(step_id) >= 5
+            and step_id[0] == "I"
+            and step_id[1:3].isdigit()
+            and step_id[3] == "_"
+            and all(character.isupper() or character.isdigit() or character == "_"
+                    for character in step_id[4:])
+        )
+    ):
+        raise DurableJournalIntegrityError(
+            "phase8b_durable_journal_step_invalid"
+        )
+    try:
+        event = JournalEvent(document.get("event"))
+    except (TypeError, ValueError) as error:
+        raise DurableJournalIntegrityError(
+            "phase8b_durable_journal_event_invalid"
+        ) from error
+    asserted = JournalRecord(
+        plan_sha256=expected_plan_sha256,
+        attempt_id=expected_attempt_id,
+        sequence=sequence,
+        step_id=step_id,
+        event=event.value,
+        prior_record_sha256=document["prior_record_sha256"],  # type: ignore[arg-type]
+        record_sha256=document["record_sha256"],  # type: ignore[arg-type]
+    )
+    calculated = JournalRecord.create(
+        plan_sha256=asserted.plan_sha256,
+        attempt_id=asserted.attempt_id,
+        sequence=asserted.sequence,
+        step_id=asserted.step_id,
+        event=event,
+        prior_record_sha256=asserted.prior_record_sha256,
+    )
+    if asserted != calculated:
+        raise DurableJournalIntegrityError(
+            "phase8b_durable_journal_record_hash_invalid"
+        )
+    return asserted
+
+
+def parse_durable_journal_bytes(
     content: bytes,
     *,
-    binding_sha256: str,
-) -> tuple[JournalEntry, ...]:
-    """Parse and validate the complete chain, rejecting partial final writes."""
-
-    if HASH_RE.fullmatch(binding_sha256) is None:
-        raise JournalIntegrityError("journal_binding_invalid")
+    expected_plan_sha256: str,
+    expected_attempt_id: str,
+) -> tuple[JournalRecord, ...]:
+    if not isinstance(expected_plan_sha256, str) or HASH_RE.fullmatch(
+        expected_plan_sha256
+    ) is None:
+        raise DurableJournalIntegrityError(
+            "phase8b_durable_journal_plan_invalid"
+        )
     if len(content) > MAX_JOURNAL_BYTES:
-        raise JournalIntegrityError("journal_too_large")
+        raise DurableJournalIntegrityError(
+            "phase8b_durable_journal_too_large"
+        )
     if content and not content.endswith(b"\n"):
-        raise JournalIntegrityError("journal_truncated")
-    entries: list[JournalEntry] = []
+        raise DurableJournalIntegrityError(
+            "phase8b_durable_journal_truncated"
+        )
+    records: list[JournalRecord] = []
     prior = ZERO_HEAD
     for sequence, raw_line in enumerate(content.splitlines(), start=1):
-        if not raw_line or len(raw_line) > MAX_ENTRY_BYTES:
-            raise JournalIntegrityError("journal_entry_size_invalid")
+        if not raw_line or len(raw_line) > MAX_RECORD_BYTES:
+            raise DurableJournalIntegrityError(
+                "phase8b_durable_journal_record_size_invalid"
+            )
         try:
             document = json.loads(
                 raw_line.decode("ascii"),
                 object_pairs_hook=_strict_object,
+                parse_constant=_reject_constant,
             )
-        except JournalIntegrityError:
+        except DurableJournalIntegrityError:
             raise
         except (UnicodeError, json.JSONDecodeError) as error:
-            raise JournalIntegrityError("journal_json_invalid") from error
-        if not isinstance(document, dict):
-            raise JournalIntegrityError("journal_entry_shape_invalid")
-        if _canonical_bytes(document) != raw_line:
-            raise JournalIntegrityError("journal_json_not_canonical")
-        entry = _entry_from_document(document)
-        if entry.binding_sha256 != binding_sha256:
-            raise JournalIntegrityError("journal_binding_mismatch")
-        if entry.sequence != sequence:
-            raise JournalIntegrityError("journal_sequence_mismatch")
-        if entry.prior_entry_sha256 != prior:
-            raise JournalIntegrityError("journal_prior_hash_mismatch")
-        prior = entry.entry_sha256
-        entries.append(entry)
-    return tuple(entries)
+            raise DurableJournalIntegrityError(
+                "phase8b_durable_journal_json_invalid"
+            ) from error
+        if type(document) is not dict or _canonical_bytes(document) != raw_line:
+            raise DurableJournalIntegrityError(
+                "phase8b_durable_journal_json_not_canonical"
+            )
+        record = _record_from_document(
+            document,
+            expected_plan_sha256=expected_plan_sha256,
+            expected_attempt_id=expected_attempt_id,
+        )
+        if record.sequence != sequence:
+            raise DurableJournalIntegrityError(
+                "phase8b_durable_journal_sequence_mismatch"
+            )
+        if record.prior_record_sha256 != prior:
+            raise DurableJournalIntegrityError(
+                "phase8b_durable_journal_chain_mismatch"
+            )
+        records.append(record)
+        prior = record.record_sha256
+    return tuple(records)
 
 
-class FileJournal:
-    """Locked append-only journal with strict filesystem invariants.
-
-    A caller reopening an existing journal should pass the head and sequence
-    from its last sealed receipt. That detects removal of a clean line suffix;
-    the internal chain detects mutation, reordering, insertion, and partial
-    truncation.
-    """
+class DurableJournal:
+    """Locked one-file controller journal anchored in ``AuthorityState``."""
 
     def __init__(
         self,
         path: Path,
         *,
-        binding_sha256: str,
-        expected_head_sha256: str | None = None,
-        expected_sequence: int | None = None,
+        claimed_execution_binding: object,
+        authority_state: AuthorityState,
+        held_lock: HeldExecutionLockCapability,
+        expected_uid: int | None = None,
+        create: bool = False,
     ) -> None:
-        if HASH_RE.fullmatch(binding_sha256) is None:
-            raise JournalSecurityError("journal_binding_invalid")
-        if (expected_head_sha256 is None) != (expected_sequence is None):
-            raise JournalSecurityError("journal_expected_head_incomplete")
-        if expected_head_sha256 is not None and (
-            HASH_RE.fullmatch(expected_head_sha256) is None
-            or not isinstance(expected_sequence, int)
-            or isinstance(expected_sequence, bool)
-            or expected_sequence < 0
-        ):
-            raise JournalSecurityError("journal_expected_head_invalid")
+        # Token validation intentionally precedes every journal-path access.
+        try:
+            binding = _claimed_execution_binding_evidence(
+                claimed_execution_binding
+            )
+        except ClaimedExecutionBindingError as error:
+            raise DurableJournalSecurityError(
+                "phase8b_durable_journal_binding_invalid"
+            ) from error
+        if type(authority_state) is not AuthorityState:
+            raise DurableJournalSecurityError(
+                "phase8b_durable_journal_authority_state_invalid"
+            )
+        try:
+            validate_held_execution_lock(held_lock)
+        except ExecutionLockError as error:
+            raise DurableJournalSecurityError(
+                "phase8b_durable_journal_lock_not_held"
+            ) from error
+        lock_path_sha256 = hashlib.sha256(
+            str(held_lock._owner.path).encode("utf-8")
+        ).hexdigest()
+        if lock_path_sha256 != binding.global_lock_path_sha256:
+            raise DurableJournalSecurityError(
+                "phase8b_durable_journal_lock_binding_mismatch"
+            )
+        state_path_sha256 = hashlib.sha256(
+            str(authority_state.path).encode("utf-8")
+        ).hexdigest()
+        if state_path_sha256 != binding.authority_state_path_sha256:
+            raise DurableJournalSecurityError(
+                "phase8b_durable_journal_authority_state_binding_mismatch"
+            )
+        uid = os.geteuid() if expected_uid is None else expected_uid
+        if type(uid) is not int or uid < 0:
+            raise DurableJournalSecurityError(
+                "phase8b_durable_journal_uid_invalid"
+            )
+        if type(create) is not bool:
+            raise DurableJournalSecurityError(
+                "phase8b_durable_journal_create_invalid"
+            )
         self.path = Path(path)
-        self.binding_sha256 = binding_sha256
-        self._fd = -1
-        self._inode: tuple[int, int] | None = None
-        self._entries: tuple[JournalEntry, ...] = ()
-        self._open(expected_head_sha256, expected_sequence)
-
-    def _open(
-        self,
-        expected_head_sha256: str | None,
-        expected_sequence: int | None,
-    ) -> None:
-        try:
-            parent = self.path.parent.stat(follow_symlinks=False)
-        except OSError as error:
-            raise JournalSecurityError("journal_directory_invalid") from error
         if (
-            not stat.S_ISDIR(parent.st_mode)
-            or stat.S_IMODE(parent.st_mode) != 0o700
-            or parent.st_uid != os.geteuid()
+            not self.path.name
+            or self.path.name in {".", ".."}
+            or str(self.path) != binding.execution_journal_path
         ):
-            raise JournalSecurityError("journal_directory_invalid")
-        nofollow = getattr(os, "O_NOFOLLOW", 0)
-        if nofollow == 0:
-            raise JournalSecurityError("journal_nofollow_unavailable")
-        flags = os.O_RDWR | os.O_APPEND | os.O_CLOEXEC | nofollow
-        created = False
+            raise DurableJournalSecurityError(
+                "phase8b_durable_journal_path_invalid"
+            )
+        self.expected_uid = uid
+        self.authority_state = authority_state
+        self.held_lock = held_lock
+        self.binding_sha256 = binding.journal_binding_sha256
+        self.plan_sha256 = binding.controller_model_sha256
+        self.attempt_id = binding.attempt_id
+        self.execution_id = binding.execution_id
+        self._fd = -1
+        self._directory_inode: tuple[int, int] | None = None
+        self._file_inode: tuple[int, int] | None = None
+        self._records: tuple[JournalRecord, ...] = ()
+        self._last_anchor_result = "unreconciled"
+        self._open(create=create)
+
+    def _require_lock(self) -> None:
         try:
-            self._fd = os.open(self.path, flags | os.O_CREAT | os.O_EXCL, 0o600)
-            created = True
-        except FileExistsError:
-            try:
-                self._fd = os.open(self.path, flags)
-            except OSError as error:
-                raise JournalSecurityError("journal_file_invalid") from error
+            validate_held_execution_lock(self.held_lock)
+        except ExecutionLockError as error:
+            raise DurableJournalSecurityError(
+                "phase8b_durable_journal_lock_not_held"
+            ) from error
+
+    @staticmethod
+    def _nofollow() -> int:
+        value = getattr(os, "O_NOFOLLOW", 0)
+        if value == 0:
+            raise DurableJournalSecurityError(
+                "phase8b_durable_journal_nofollow_unavailable"
+            )
+        return value
+
+    def _open_directory(self) -> int:
+        self._require_lock()
+        flags = os.O_RDONLY | os.O_CLOEXEC | self._nofollow()
+        flags |= getattr(os, "O_DIRECTORY", 0)
+        try:
+            directory_fd = os.open(self.path.parent, flags)
         except OSError as error:
-            raise JournalSecurityError("journal_file_invalid") from error
+            raise DurableJournalSecurityError(
+                "phase8b_durable_journal_directory_invalid"
+            ) from error
         try:
-            fcntl.flock(self._fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except (BlockingIOError, OSError) as error:
-            os.close(self._fd)
-            self._fd = -1
-            raise JournalBusyError("journal_locked") from error
-        try:
-            if created:
-                os.fchmod(self._fd, 0o600)
-                os.fsync(self._fd)
-                directory_fd = os.open(
-                    self.path.parent,
-                    os.O_RDONLY | os.O_CLOEXEC | nofollow,
-                )
-                try:
-                    os.fsync(directory_fd)
-                finally:
-                    os.close(directory_fd)
-            self._validate_open_file()
-            self._entries = self._read_validated()
-            head = self.head_sha256
-            if expected_sequence is not None and (
-                len(self._entries) != expected_sequence
-                or head != expected_head_sha256
+            opened = os.fstat(directory_fd)
+            named = self.path.parent.stat(follow_symlinks=False)
+            if (
+                not stat.S_ISDIR(opened.st_mode)
+                or not stat.S_ISDIR(named.st_mode)
+                or stat.S_IMODE(opened.st_mode) != 0o700
+                or opened.st_uid != self.expected_uid
+                or (opened.st_dev, opened.st_ino)
+                != (named.st_dev, named.st_ino)
             ):
-                raise JournalIntegrityError("journal_sealed_head_mismatch")
+                raise DurableJournalSecurityError(
+                    "phase8b_durable_journal_directory_invalid"
+                )
+            inode = (opened.st_dev, opened.st_ino)
+            if self._directory_inode is not None and inode != self._directory_inode:
+                raise DurableJournalSecurityError(
+                    "phase8b_durable_journal_directory_replaced"
+                )
+            self._directory_inode = inode
+            self._require_lock()
+            return directory_fd
         except BaseException:
-            self.close()
+            os.close(directory_fd)
             raise
 
-    def _validate_open_file(self) -> None:
+    def _validate_file(self, directory_fd: int) -> None:
+        self._require_lock()
         try:
             opened = os.fstat(self._fd)
-            named = self.path.stat(follow_symlinks=False)
+            named = os.stat(
+                self.path.name,
+                dir_fd=directory_fd,
+                follow_symlinks=False,
+            )
         except OSError as error:
-            raise JournalSecurityError("journal_file_invalid") from error
+            raise DurableJournalSecurityError(
+                "phase8b_durable_journal_file_invalid"
+            ) from error
         if (
             not stat.S_ISREG(opened.st_mode)
             or not stat.S_ISREG(named.st_mode)
             or stat.S_IMODE(opened.st_mode) != 0o600
+            or opened.st_uid != self.expected_uid
             or opened.st_nlink != 1
-            or opened.st_uid != os.geteuid()
             or (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)
         ):
-            raise JournalSecurityError("journal_file_invalid")
-        current = (opened.st_dev, opened.st_ino)
-        if self._inode is not None and current != self._inode:
-            raise JournalSecurityError("journal_path_replaced")
-        self._inode = current
+            raise DurableJournalSecurityError(
+                "phase8b_durable_journal_file_invalid"
+            )
+        inode = (opened.st_dev, opened.st_ino)
+        if self._file_inode is not None and inode != self._file_inode:
+            raise DurableJournalSecurityError(
+                "phase8b_durable_journal_file_replaced"
+            )
+        self._file_inode = inode
+        self._require_lock()
 
-    def _read_validated(self) -> tuple[JournalEntry, ...]:
-        self._validate_open_file()
+    def _open(self, *, create: bool) -> None:
+        self._require_lock()
+        directory_fd = self._open_directory()
+        flags = os.O_RDWR | os.O_APPEND | os.O_CLOEXEC | self._nofollow()
         try:
+            try:
+                if create:
+                    self._fd = os.open(
+                        self.path.name,
+                        flags | os.O_CREAT | os.O_EXCL,
+                        0o600,
+                        dir_fd=directory_fd,
+                    )
+                else:
+                    self._fd = os.open(
+                        self.path.name,
+                        flags,
+                        dir_fd=directory_fd,
+                    )
+            except OSError as error:
+                raise DurableJournalSecurityError(
+                    "phase8b_durable_journal_file_invalid"
+                ) from error
+            try:
+                fcntl.flock(self._fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except (BlockingIOError, OSError) as error:
+                raise DurableJournalBusyError(
+                    "phase8b_durable_journal_locked"
+                ) from error
+            if create:
+                os.fchmod(self._fd, 0o600)
+                os.fsync(self._fd)
+                os.fsync(directory_fd)
+            self._validate_file(directory_fd)
+            self._require_lock()
+        except BaseException:
+            self.close()
+            raise
+        finally:
+            os.close(directory_fd)
+        try:
+            self._records = self._read_validated()
+            self._reconcile_anchor()
+        except BaseException:
+            self.close()
+            raise
+
+    def _read_validated(self) -> tuple[JournalRecord, ...]:
+        self._require_lock()
+        directory_fd = self._open_directory()
+        try:
+            self._validate_file(directory_fd)
             size = os.fstat(self._fd).st_size
             if size > MAX_JOURNAL_BYTES:
-                raise JournalIntegrityError("journal_too_large")
+                raise DurableJournalIntegrityError(
+                    "phase8b_durable_journal_too_large"
+                )
             os.lseek(self._fd, 0, os.SEEK_SET)
             remaining = size
             chunks: list[bytes] = []
             while remaining:
                 chunk = os.read(self._fd, min(remaining, 65536))
                 if not chunk:
-                    raise JournalIntegrityError("journal_short_read")
+                    raise DurableJournalIntegrityError(
+                        "phase8b_durable_journal_short_read"
+                    )
                 chunks.append(chunk)
                 remaining -= len(chunk)
         except OSError as error:
-            raise JournalIntegrityError("journal_read_failed") from error
-        return parse_journal_bytes(
-            b"".join(chunks), binding_sha256=self.binding_sha256
+            raise DurableJournalIntegrityError(
+                "phase8b_durable_journal_read_failed"
+            ) from error
+        finally:
+            os.close(directory_fd)
+        records = parse_durable_journal_bytes(
+            b"".join(chunks),
+            expected_plan_sha256=self.plan_sha256,
+            expected_attempt_id=self.attempt_id,
         )
+        self._require_lock()
+        return records
+
+    def _reconcile_anchor(self) -> None:
+        self._require_lock()
+        sequence = len(self._records)
+        head = self._records[-1].record_sha256 if self._records else ZERO_HEAD
+        prior = (
+            self._records[-1].prior_record_sha256
+            if self._records
+            else ZERO_HEAD
+        )
+        try:
+            result = self.authority_state.advance_anchor(
+                self.binding_sha256,
+                journal_sequence=sequence,
+                journal_head_sha256=head,
+                journal_prior_head_sha256=prior,
+            )
+            self._require_lock()
+        except AuthorityStateError as error:
+            raise DurableJournalAnchorError(
+                "phase8b_durable_journal_anchor_mismatch"
+            ) from error
+        self._last_anchor_result = result.result
 
     @property
-    def entries(self) -> tuple[JournalEntry, ...]:
+    def anchor_result(self) -> str:
+        return self._last_anchor_result
+
+    def journal_records(self) -> tuple[JournalRecord, ...]:
+        self._require_lock()
         observed = self._read_validated()
-        if observed != self._entries:
-            raise JournalIntegrityError("journal_changed_while_locked")
+        if observed != self._records:
+            raise DurableJournalIntegrityError(
+                "phase8b_durable_journal_changed_while_locked"
+            )
+        self._reconcile_anchor()
         return observed
 
-    @property
-    def sequence(self) -> int:
-        return len(self._entries)
-
-    @property
-    def head_sha256(self) -> str:
-        return self._entries[-1].entry_sha256 if self._entries else ZERO_HEAD
-
-    def append(
-        self,
-        *,
-        operation: str,
-        attempt_id: str,
-        step_id: str,
-        event: str,
-        disposable_authorization_sha256: str,
-    ) -> JournalEntry:
-        if self._read_validated() != self._entries:
-            raise JournalIntegrityError("journal_changed_while_locked")
-        sequence = len(self._entries) + 1
-        document: dict[str, object] = {
-            "schema_version": JOURNAL_SCHEMA_VERSION,
-            "binding_sha256": self.binding_sha256,
-            "sequence": sequence,
-            "operation": operation,
-            "attempt_id": attempt_id,
-            "step_id": step_id,
-            "event": event,
-            "disposable_authorization_sha256": disposable_authorization_sha256,
-            "prior_entry_sha256": self.head_sha256,
-        }
-        document["entry_sha256"] = _sha256(_canonical_bytes(document))
-        entry = _entry_from_document(document)
-        encoded = _canonical_bytes(document) + b"\n"
+    def append_journal(self, record: JournalRecord) -> None:
+        self._require_lock()
+        before = self.journal_records()
+        if type(record) is not JournalRecord:
+            raise DurableJournalIntegrityError(
+                "phase8b_durable_journal_record_type_invalid"
+            )
+        expected_prior = before[-1].record_sha256 if before else ZERO_HEAD
         try:
+            event = JournalEvent(record.event)
+        except (TypeError, ValueError) as error:
+            raise DurableJournalIntegrityError(
+                "phase8b_durable_journal_event_invalid"
+            ) from error
+        expected = JournalRecord.create(
+            plan_sha256=self.plan_sha256,
+            attempt_id=self.attempt_id,
+            sequence=len(before) + 1,
+            step_id=record.step_id,
+            event=event,
+            prior_record_sha256=expected_prior,
+        )
+        if record != expected:
+            raise DurableJournalIntegrityError(
+                "phase8b_durable_journal_append_binding_invalid"
+            )
+        encoded = _canonical_bytes(_record_document(record)) + b"\n"
+        if len(encoded) > MAX_RECORD_BYTES:
+            raise DurableJournalIntegrityError(
+                "phase8b_durable_journal_record_size_invalid"
+            )
+        current_size = os.fstat(self._fd).st_size
+        if current_size + len(encoded) > MAX_JOURNAL_BYTES:
+            raise DurableJournalIntegrityError(
+                "phase8b_durable_journal_too_large"
+            )
+        try:
+            self._require_lock()
             offset = 0
             while offset < len(encoded):
                 written = os.write(self._fd, encoded[offset:])
@@ -385,12 +586,17 @@ class FileJournal:
                     raise OSError("short journal write")
                 offset += written
             os.fsync(self._fd)
+            self._require_lock()
         except OSError as error:
-            raise JournalIntegrityError("journal_append_failed") from error
-        self._entries = (*self._entries, entry)
-        if self._read_validated() != self._entries:
-            raise JournalIntegrityError("journal_post_append_mismatch")
-        return entry
+            raise DurableJournalIntegrityError(
+                "phase8b_durable_journal_append_failed"
+            ) from error
+        self._records = (*before, record)
+        if self._read_validated() != self._records:
+            raise DurableJournalIntegrityError(
+                "phase8b_durable_journal_post_append_mismatch"
+            )
+        self._reconcile_anchor()
 
     def close(self) -> None:
         if self._fd >= 0:
@@ -400,8 +606,19 @@ class FileJournal:
                 os.close(self._fd)
                 self._fd = -1
 
-    def __enter__(self) -> FileJournal:
+    def __enter__(self) -> DurableJournal:
         return self
 
     def __exit__(self, *unused: object) -> None:
         self.close()
+
+
+__all__ = [
+    "DurableJournal",
+    "DurableJournalAnchorError",
+    "DurableJournalBusyError",
+    "DurableJournalError",
+    "DurableJournalIntegrityError",
+    "DurableJournalSecurityError",
+    "parse_durable_journal_bytes",
+]

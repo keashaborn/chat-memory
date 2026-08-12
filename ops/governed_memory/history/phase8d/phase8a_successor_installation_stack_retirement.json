@@ -1,0 +1,457 @@
+{
+  "schema_version": "governed-memory-phase8d-phase8a-successor-installation-stack-retirement-v1",
+  "state": "repository_retirement_verified_no_phase8d_live_mutation_live_absence_not_reverified",
+  "server": "seebx",
+  "scope": "repository_only_phase8a_successor_installation_stack_retirement_no_installation_no_activation",
+  "retirement_boundary": {
+    "retired_generation": "obsolete_phase8a_successor_installation_execution_and_proof_stack_only",
+    "current_phase8b_successor_package_canonicalized": true,
+    "memory_v1_v5_repository_runtime_retired": false,
+    "memory_v1_v5_live_runtime_quiesced": false,
+    "all_legacy_memory_code_retired_claimed": false
+  },
+  "predecessor": {
+    "commit": "c4ebb513b4ba77cf0416c43d4594a556b150e18a",
+    "tree": "a04d1d0f497268dcdcc68a839381d17bbba6dc3c",
+    "old_root_package_manifest_sha256": "5db42bb942b2a96d453cf3b7db28687f7c227c24f07098add73666302be8a22e",
+    "current_package_manifest_before_retirement_sha256": "271436d171f130b28203ffc7e78c0a529dd0bc6315e4b595c6920029a5505a71"
+  },
+  "replacement": {
+    "package_manifest": "ops/governed_memory/installation/phase8b/package_manifest.json",
+    "package_manifest_sha256": "10bda00fb6554af1f1a24398b8c40d6536ad70593dd7892a60f77a6c94541b06",
+    "artifact_count": 44,
+    "offline_verifier": "tools/governed_memory_install/package.py",
+    "synthetic_proof_promoted_as_live_proof": false,
+    "installation_performed_by_phase8d": false,
+    "activation_performed_by_phase8d": false,
+    "live_installation_state_reverified_by_phase8d": false
+  },
+  "canonicalized_source_path_count": 6,
+  "canonicalized_source_paths": [
+    {
+      "predecessor_path": "tools/governed_memory_install/authority_v2.py",
+      "predecessor_sha256": "451ed8b246cfd7142fb08fbaddfeed17801869490debc447869d184af5f7d1e7",
+      "predecessor_size_bytes": 24103,
+      "current_path": "tools/governed_memory_install/authority.py",
+      "current_sha256": "04e92056d6fb7b1548c67c340e1a4f8dceda90e55fac4e45e1c451bd6ae4470e",
+      "current_size_bytes": 24119,
+      "transformation": "rewritten_and_canonicalized_not_byte_identity_rename"
+    },
+    {
+      "predecessor_path": "tools/governed_memory_install/controller_v2.py",
+      "predecessor_sha256": "9fa3b1a1098fe886363ad9ce23d0fecb04cf1298a6cd78456b3af5801ce8f414",
+      "predecessor_size_bytes": 30708,
+      "current_path": "tools/governed_memory_install/controller.py",
+      "current_sha256": "41215dd2676c8b8cee8e62ff7c83af83ddadaec4dbe72aae5001635cf231353e",
+      "current_size_bytes": 30672,
+      "transformation": "rewritten_and_canonicalized_not_byte_identity_rename"
+    },
+    {
+      "predecessor_path": "tools/governed_memory_install/durable_journal_v2.py",
+      "predecessor_sha256": "42d8b3c6aee8648fb69fe015dad6cf6721e3dffbabf7b6597aee22dbefd77f52",
+      "predecessor_size_bytes": 21659,
+      "current_path": "tools/governed_memory_install/journal.py",
+      "current_sha256": "e9d7e24f0d60b61623a659e57e2548ea010e5bf9ee089c33ee092ec8a795b723",
+      "current_size_bytes": 21517,
+      "transformation": "rewritten_and_canonicalized_not_byte_identity_rename"
+    },
+    {
+      "predecessor_path": "tools/governed_memory_install/execution_capability_v2.py",
+      "predecessor_sha256": "16638be6325b5db8bf44b33d5aa5545299d4051ffc3d45c2fe83c35fe7c77338",
+      "predecessor_size_bytes": 18073,
+      "current_path": "tools/governed_memory_install/execution_capability.py",
+      "current_sha256": "16375a7006d74bbb2c9ef36b3ee40657e4238cf4be2ce7bd1b955b20a10a888c",
+      "current_size_bytes": 18070,
+      "transformation": "rewritten_and_canonicalized_not_byte_identity_rename"
+    },
+    {
+      "predecessor_path": "tools/governed_memory_install/package_v3.py",
+      "predecessor_sha256": "8d9d05de81f04b42213af71d98ea0a85540dff784df9f70d3cf8ea1d08881def",
+      "predecessor_size_bytes": 35812,
+      "current_path": "tools/governed_memory_install/package.py",
+      "current_sha256": "c9c4698cf0fda41d6e87fdc7bc865df6fde21c44068c1ab239df48595585ba46",
+      "current_size_bytes": 35677,
+      "transformation": "rewritten_and_canonicalized_not_byte_identity_rename"
+    },
+    {
+      "predecessor_path": "tools/governed_memory_install/synthetic_backend_v2.py",
+      "predecessor_sha256": "9da76d6c388c3e377a463bb28160e6f828aab4db37ae6347d99d0229cbb39317",
+      "predecessor_size_bytes": 10617,
+      "current_path": "tools/governed_memory_install/synthetic_backend.py",
+      "current_sha256": "1ca7407f272119c19c554c3551bafd56c8e552c2f56bf6668fa28e1e0a457f67",
+      "current_size_bytes": 10573,
+      "transformation": "rewritten_and_canonicalized_not_byte_identity_rename"
+    }
+  ],
+  "canonicalized_test_path_count": 2,
+  "canonicalized_test_paths": [
+    {
+      "predecessor_path": "tests/memory/test_phase8b_controller_v2.py",
+      "predecessor_sha256": "80ea0e725807070399b9172d47078493769652e711ef9da6cdaa92cdab58ac7e",
+      "predecessor_size_bytes": 17326,
+      "current_path": "tests/memory/test_phase8b_controller.py",
+      "current_sha256": "844799b2ed7f25ece4491b8ac7f4a1a047d46f85b35d588837b4846aeae9a237",
+      "current_size_bytes": 17318,
+      "transformation": "renamed_and_updated_for_canonical_source_generation"
+    },
+    {
+      "predecessor_path": "tests/memory/test_phase8b_package_v3.py",
+      "predecessor_sha256": "83251914c330769eba0e18c6e88dccadd02728b42976735243a5b7d058d6321a",
+      "predecessor_size_bytes": 17469,
+      "current_path": "tests/memory/test_phase8b_package.py",
+      "current_sha256": "4d3c388e9d4ea83b65f917f6baa4a720b51a7802e111e11ffb67ba679df6abd0",
+      "current_size_bytes": 18166,
+      "transformation": "renamed_and_updated_for_canonical_source_generation"
+    }
+  ],
+  "retired_obsolete_artifact_count": 30,
+  "retired_obsolete_identity_disposition": {
+    "deleted_paths": 26,
+    "paths_retained_with_replacement_bytes": 4,
+    "replacement_byte_paths": [
+      "tools/governed_memory_install/authority.py",
+      "tools/governed_memory_install/controller.py",
+      "tools/governed_memory_install/journal.py",
+      "tools/governed_memory_install/synthetic_backend.py"
+    ]
+  },
+  "retired_artifacts": [
+    {
+      "path": "tools/governed_memory_install/authority.py",
+      "sha256": "b34894c14cbf008da2b61a3cb9e35111c08829df500ad961b1b8f7c05d0b8f5f",
+      "size_bytes": 18353
+    },
+    {
+      "path": "tools/governed_memory_install/controller.py",
+      "sha256": "28d773fa6e5b47d3d61b7b0f1019e3af503da03ea2c0102dec20134f4219631a",
+      "size_bytes": 28305
+    },
+    {
+      "path": "tools/governed_memory_install/controller_linux.py",
+      "sha256": "299872482ce8ab64201efe43308d856125d6e8e2cd8db213485547ef48e3da98",
+      "size_bytes": 776
+    },
+    {
+      "path": "tools/governed_memory_install/inactive_installation.py",
+      "sha256": "b1bff72e0fbcdcf2a16387df0b1fd86cc78a09eadcbb394bae1e80e640cf7d13",
+      "size_bytes": 49435
+    },
+    {
+      "path": "tools/governed_memory_install/journal.py",
+      "sha256": "413e334a973895f313b332186b333bb2e25244bbdc1dab41b252d018b1c743d5",
+      "size_bytes": 14847
+    },
+    {
+      "path": "tools/governed_memory_install/synthetic_backend.py",
+      "sha256": "6998dd9c4c646427f115b8b5e57af0c858dd7b4796d920d440cb5f5ebbd7188f",
+      "size_bytes": 10242
+    },
+    {
+      "path": "tools/governed_memory_validation/run_disposable_installation_controller.py",
+      "sha256": "9f40830c7b3b0bb0ee263eb9a78b095e690fe1452853785f8f15059335b01125",
+      "size_bytes": 68620
+    },
+    {
+      "path": "ops/governed_memory/installation/contract.json",
+      "sha256": "5a9412ce71066c13f62dcf1fc7c72032de747c5d314405c3bebe6400aaa05564",
+      "size_bytes": 14863
+    },
+    {
+      "path": "ops/governed_memory/installation/controller_plan.json",
+      "sha256": "7fa38bc1d7ee416e6349a59fe5eec22d1b62682fec883350b4fe5cfe1735943d",
+      "size_bytes": 21528
+    },
+    {
+      "path": "ops/governed_memory/installation/journal.schema.json",
+      "sha256": "c912e37151ff3037e2cd22c2a42af2a29bc53ae9ec8e8844f5cf0098df07a864",
+      "size_bytes": 1657
+    },
+    {
+      "path": "ops/governed_memory/installation/receipt.schema.json",
+      "sha256": "35e53957ba93382644cb6f3511efec54b60d6bfe98a73a1a4d2ed8c94746792d",
+      "size_bytes": 6720
+    },
+    {
+      "path": "ops/governed_memory/installation/package_manifest.json",
+      "sha256": "5db42bb942b2a96d453cf3b7db28687f7c227c24f07098add73666302be8a22e",
+      "size_bytes": 8013
+    },
+    {
+      "path": "ops/governed_memory/installation/authority/dormant_install_scope.schema.json",
+      "sha256": "ba350f152bdafeae04c9d79cc5baa2e965867b7dc98cbd599762a5a47c78b080",
+      "size_bytes": 5033
+    },
+    {
+      "path": "ops/governed_memory/installation/authority/external_authorization.schema.json",
+      "sha256": "c2ea2a376df336001dc2c2efa5d0832d7697d8e8646e61a965ce17f969aca4d7",
+      "size_bytes": 3421
+    },
+    {
+      "path": "ops/governed_memory/installation/authority/installation_execution_receipt.schema.json",
+      "sha256": "cefc420f363a1b3027131821b9a62034ec36347ae1e3c5d8e4a6e350906bc70f",
+      "size_bytes": 3453
+    },
+    {
+      "path": "ops/governed_memory/installation/authority/recovery_proof.schema.json",
+      "sha256": "47bc4f42d9e8f1c3c230a0a6809eee7047e2ad0afb66b32c078a26ccca23b4d9",
+      "size_bytes": 3076
+    },
+    {
+      "path": "ops/governed_memory/installation/compose.persistent.in.yaml",
+      "sha256": "9c020ee232fc365e3559cc6e2eba5fa8468a80dcdba322dfee7d121480b0c7e3",
+      "size_bytes": 3819
+    },
+    {
+      "path": "ops/governed_memory/installation/legacy_quiescence_manifest.json",
+      "sha256": "8f9e9721d2ea3731a251dfef6b52809aae51c129afe9521edd0f46f4b560e69b",
+      "size_bytes": 3866
+    },
+    {
+      "path": "ops/governed_memory/installation/postgres/source_cluster_roles.pgsql.in",
+      "sha256": "cc3e7a87b7bbab66737760decd05b7c216b21cd1c0d930a41d68ed132633e245",
+      "size_bytes": 7466
+    },
+    {
+      "path": "ops/governed_memory/installation/secrets/bootstrap.env.example",
+      "sha256": "d51b005a9d1d2ffce6924fa49791e01b79a6346c81f441c8b6ed0f9609122d99",
+      "size_bytes": 144
+    },
+    {
+      "path": "ops/governed_memory/installation/secrets/http.env.example",
+      "sha256": "de7cdc0d6d9c91e483fef3ac110b5117350dfa24be721e165cd8d49ff8a90bb6",
+      "size_bytes": 351
+    },
+    {
+      "path": "ops/governed_memory/installation/secrets/pilot.env.example",
+      "sha256": "56b9b9f10c9ea00d3700c7190ac191cb87a4ebe5f4f2c54e0405a18401c8877c",
+      "size_bytes": 214
+    },
+    {
+      "path": "ops/governed_memory/installation/secrets/worker.env.example",
+      "sha256": "13de0082bc3aa1b3036acbe93fc94d64f39e3d0b6edfac68377acc120945b083",
+      "size_bytes": 333
+    },
+    {
+      "path": "ops/governed_memory/installation/service-account.json",
+      "sha256": "1ce2d7520170a606134120ffaf23ea0d6fad82ecd2b67ad262a1033f1d88d743",
+      "size_bytes": 1609
+    },
+    {
+      "path": "ops/governed_memory/phase8a_disposable_proof_receipt.json",
+      "sha256": "7aaa5f1d0ec21c8a714d4d72280b838026cb0e2d1bfc011f9933a7e0757c7a71",
+      "size_bytes": 4335
+    },
+    {
+      "path": "ops/governed_memory/history/phase8a/controller_disposable_proof_receipt.json",
+      "sha256": "56a9d17616a459f969a0a1ab1f7794b353955708e68e4e5f31b5994e53faaecf",
+      "size_bytes": 10679
+    },
+    {
+      "path": "ops/governed_memory/history/phase8a/postgresql16_disposable_proof_harness.sh",
+      "sha256": "3e1245ad420b053c2762abcb2fd8fb01c2f68db880f5a9610ddf7e5101d615bd",
+      "size_bytes": 26089
+    },
+    {
+      "path": "ops/governed_memory/history/phase8a/postgresql16_disposable_proof_receipt.json",
+      "sha256": "99d9a1571c17da198c2995d97f816cc30a695ab4a21695de5272e56beab0e242",
+      "size_bytes": 4212
+    },
+    {
+      "path": "tests/memory/test_inactive_installation_controller.py",
+      "sha256": "1f4de281f7e3b2f74ac3bac09afa21fd534a9e2eca354b5b77bcfddbae7f549f",
+      "size_bytes": 36711
+    },
+    {
+      "path": "tests/memory/test_inactive_installation_package.py",
+      "sha256": "fe1d31e4731d08aa5836b9677e3b2ed09e3afb8bc228f33eeb9684595e9630b4",
+      "size_bytes": 54331
+    }
+  ],
+  "live_legacy_inventory": {
+    "observation_kind": "bounded_read_only_named_targets_only",
+    "observed_at_utc": "2026-08-12T10:27:55Z",
+    "legacy_memory_timers_observed_loaded_enabled_active": [
+      "memory-v1-deferred-reconciliation-scan.timer",
+      "memory-v1-evidence-intake-dispatcher.timer",
+      "memory-v1-projection.timer",
+      "memory-v1-v5-2-local-packet-router.timer",
+      "memory-v1-v5-chat-capture.timer",
+      "memory-v1-v5-local-auto-resolution.timer",
+      "memory-v1-v5-local-auto-stage.timer",
+      "memory-v1-v5-local-claim-projection.timer",
+      "memory-v1-v5-local-legacy-reintake-audit.timer",
+      "memory-v1-v5-local-packet-router.timer"
+    ],
+    "triggered_services_observed_loaded_inactive_zero_main_pid": [
+      "memory-v1-deferred-reconciliation-scan.service",
+      "memory-v1-evidence-intake-dispatcher.service",
+      "memory-v1-projection.service",
+      "memory-v1-v5-2-local-packet-router.service",
+      "memory-v1-v5-chat-capture.service",
+      "memory-v1-v5-local-auto-resolution.service",
+      "memory-v1-v5-local-auto-stage.service",
+      "memory-v1-v5-local-claim-projection.service",
+      "memory-v1-v5-local-legacy-reintake-audit.service",
+      "memory-v1-v5-local-packet-router.service"
+    ],
+    "repository_sync_timer_observed_loaded_enabled_active": true,
+    "brains_service_observed_loaded_active": true,
+    "eval_all_users_cron_match_count": 0,
+    "quiescence_performed": false,
+    "production_state_changed": false
+  },
+  "active_tree_legacy_runtime_surface_not_retired": {
+    "scope": "memory_v1_v5_repository_runtime_units_sql_and_tests",
+    "audited_for_retirement_by_phase8d": false,
+    "retired_by_phase8d": false,
+    "counts_are_path_pattern_inventory_not_semantic_classification": true,
+    "path_pattern_counts": {
+      "tools_memory_v1": 463,
+      "scripts_memory_v1": 301,
+      "ops_systemd_memory_v1": 49,
+      "ops_sql_memory_v1": 371,
+      "tests_memory_v1": 339
+    },
+    "includes_production_install_or_activation_scripts": true,
+    "includes_active_runtime_manifest": "ops/systemd/memory-v1-active-runtime-manifest-v1.json",
+    "future_retirement_requires_separate_inventory_and_authorization": true
+  },
+  "retained_quiescence_controls_from_retired_phase8a_manifest": {
+    "source_artifact": "ops/governed_memory/installation/legacy_quiescence_manifest.json",
+    "source_artifact_sha256": "8f9e9721d2ea3731a251dfef6b52809aae51c129afe9521edd0f46f4b560e69b",
+    "memory_timer_stop_set": [
+      {
+        "timer": "memory-v1-deferred-reconciliation-scan.timer",
+        "triggered_service": "memory-v1-deferred-reconciliation-scan.service"
+      },
+      {
+        "timer": "memory-v1-evidence-intake-dispatcher.timer",
+        "triggered_service": "memory-v1-evidence-intake-dispatcher.service"
+      },
+      {
+        "timer": "memory-v1-projection.timer",
+        "triggered_service": "memory-v1-projection.service"
+      },
+      {
+        "timer": "memory-v1-v5-2-local-packet-router.timer",
+        "triggered_service": "memory-v1-v5-2-local-packet-router.service"
+      },
+      {
+        "timer": "memory-v1-v5-chat-capture.timer",
+        "triggered_service": "memory-v1-v5-chat-capture.service"
+      },
+      {
+        "timer": "memory-v1-v5-local-auto-resolution.timer",
+        "triggered_service": "memory-v1-v5-local-auto-resolution.service"
+      },
+      {
+        "timer": "memory-v1-v5-local-auto-stage.timer",
+        "triggered_service": "memory-v1-v5-local-auto-stage.service"
+      },
+      {
+        "timer": "memory-v1-v5-local-claim-projection.timer",
+        "triggered_service": "memory-v1-v5-local-claim-projection.service"
+      },
+      {
+        "timer": "memory-v1-v5-local-legacy-reintake-audit.timer",
+        "triggered_service": "memory-v1-v5-local-legacy-reintake-audit.service"
+      },
+      {
+        "timer": "memory-v1-v5-local-packet-router.timer",
+        "triggered_service": "memory-v1-v5-local-packet-router.service"
+      }
+    ],
+    "historical_cron_stop_candidate": {
+      "owner": "ubuntu",
+      "schedule": "0 3 * * *",
+      "working_directory": "/opt/chat-memory",
+      "executable": "/opt/chat-memory/eval_all_users.sh",
+      "exact_line_sha256": "71ba61ab03ee2635281d9d55b637a7adbeae04ac8330e8d733c1e9fc746e0cc4",
+      "current_phase8d_match_count": 0,
+      "remove_only_after_current_crontab_hash_binding": true
+    },
+    "preserve_unless_separately_authorized": {
+      "timer": "chat-memory-git-sync.timer",
+      "triggered_service": "chat-memory-git-sync.service",
+      "classification": "repository_sync_not_memory_reader_or_writer"
+    },
+    "preserved_runtime": {
+      "unit": "brains.service",
+      "reason": "chat_and_structured_lifeswitch_runtime",
+      "whole_unit_stop_is_not_the_exclusivity_mechanism": true
+    },
+    "future_quiescence_requirements": {
+      "separate_authorization_required": true,
+      "capture_pre_state_for_every_named_unit_and_crontab": true,
+      "stop_and_disable_only_exact_memory_timer_stop_set": true,
+      "stop_exact_triggered_services_and_wait_for_zero_main_pid": true,
+      "minimum_observation_window_hours": 24,
+      "zero_legacy_memory_process_starts_required": true,
+      "legacy_memory_provider_surfaces_unreachable_required": true,
+      "legacy_memory_router_surfaces_unreachable_required": true,
+      "legacy_memory_admin_surfaces_unreachable_required": true,
+      "zero_legacy_memory_readers_required": true,
+      "zero_legacy_postgresql_memory_writes_required": true,
+      "zero_legacy_qdrant_memory_writes_required": true,
+      "timer_and_cron_quiescence_alone_establishes_exclusivity": false,
+      "rollback": "restore_only_exact_recorded_pre_state"
+    }
+  },
+  "current_phase8b_shared_inputs_retained": [
+    "ops/governed_memory/installation/postgres/canonical_cluster.pgsql.in",
+    "ops/governed_memory/installation/postgres/canonical_cluster_rollback.pgsql.in",
+    "ops/governed_memory/installation/store_spec.json",
+    "ops/governed_memory/installation/systemd/governed-memory-stores.service.in"
+  ],
+  "open_packaging_gaps_created_or_exposed_by_retirement": [
+    "source_role_bootstrap_not_currently_packaged",
+    "application_service_identity_contract_not_currently_packaged"
+  ],
+  "retained_deferred": [
+    "governed-memory-migrations including 0002 conversation bridge",
+    "tools/governed_memory_validation/verify_migration_manifest.py",
+    "tools/governed_memory_validation/run_disposable_successor.sh",
+    "Phase 7C application and chat-deletion evidence",
+    "runtime and build locks and receipts",
+    "bootstrap and pilot contracts",
+    "calibration and Supabase session-authority contracts",
+    "application HTTP and worker unit templates",
+    "Memory v1/v5 repository executable, unit, SQL, and test surface",
+    "source PostgreSQL role-bootstrap concept; obsolete Phase 8A template retired and replacement not currently packaged",
+    "application service-identity concept; obsolete Phase 8A contract retired and replacement not currently packaged"
+  ],
+  "verification": {
+    "base_artifact_identity_count_verified": 30,
+    "base_artifact_identity_error_count": 0,
+    "canonical_source_path_count_verified": 6,
+    "canonical_test_path_count_verified": 2,
+    "retired_predecessor_paths_absent": true,
+    "obsolete_same_path_bytes_absent": true,
+    "phase8b_package_manifest_generator_byte_identical": true,
+    "phase8b_package_manifest_sha256": "10bda00fb6554af1f1a24398b8c40d6536ad70593dd7892a60f77a6c94541b06",
+    "phase8b_package_artifact_count": 44,
+    "offline_package_verifier_passed": true,
+    "offline_store_migration_verifier_passed": true,
+    "offline_release_guard_passed": true,
+    "synthetic_scenario_count": 131,
+    "synthetic_outcome": "synthetic_matrix_passed_not_live_proof",
+    "synthetic_receipt_sha256": "ce9a57f6f01c670dfbc030bff812b99bfb13e9782f406d7e576f0d89af1f33c6",
+    "focused_test_count": 123,
+    "full_test_count": 699,
+    "full_test_skipped_count": 8,
+    "full_test_result": "passed_with_two_resource_warnings_for_unclosed_unix_sockets",
+    "git_diff_check_passed": true,
+    "docker_or_live_store_test_used": false
+  },
+  "safety": {
+    "docker_run_or_image_operation_performed": false,
+    "secret_read_write_or_generation_performed": false,
+    "service_change_performed": false,
+    "postgresql_operation_performed": false,
+    "qdrant_operation_performed": false,
+    "installation_performed": false,
+    "activation_performed": false,
+    "old_bytes_preserved_by_git_history_only": true,
+    "active_tree_code_archive_created": false
+  }
+}

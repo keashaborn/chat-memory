@@ -11,11 +11,11 @@ import unittest
 from unittest import mock
 
 from tools.governed_memory_install import disposable_proof_harness as harness
-from tools.governed_memory_install.synthetic_backend_v2 import (
+from tools.governed_memory_install.synthetic_backend import (
     FAULT_NONE,
-    SyntheticBackendV2,
-    SyntheticBackendV2Error,
-    SyntheticScenarioV2,
+    SyntheticBackend,
+    SyntheticBackendError,
+    SyntheticScenario,
 )
 from tools.governed_memory_validation import run_phase8b_disposable_proof as runner
 
@@ -124,17 +124,17 @@ class Phase8BDisposableHarnessTests(unittest.TestCase):
         )
 
     def test_exact_sealed_backend_is_internal_and_not_injectable(self) -> None:
-        scenario = SyntheticScenarioV2(
+        scenario = SyntheticScenario(
             scenario_id="TEST_HAPPY",
             family=harness.FAMILY_HAPPY_PATH,
             fault_point=FAULT_NONE,
             target_step_id=None,
         )
         with self.assertRaisesRegex(
-            SyntheticBackendV2Error,
+            SyntheticBackendError,
             "construction_not_authorized",
         ):
-            SyntheticBackendV2(scenario)
+            SyntheticBackend(scenario)
         parameters = inspect.signature(harness.run_disposable_proof).parameters
         self.assertEqual(tuple(parameters), ("disposable_root",))
         self.assertNotIn("backend", parameters)
@@ -294,21 +294,23 @@ class Phase8BDisposableHarnessTests(unittest.TestCase):
         self.assertIs(os.environ, original_environ)
         self.assertIs(getattr(os, "environb", None), original_environb)
 
-    def test_sources_do_not_import_historical_phase8a_execution_stack(self) -> None:
+    def test_sources_do_not_import_retired_versioned_or_live_execution_stack(
+        self,
+    ) -> None:
         source_paths = (
-            ROOT / "tools/governed_memory_install/synthetic_backend_v2.py",
+            ROOT / "tools/governed_memory_install/synthetic_backend.py",
             ROOT / "tools/governed_memory_install/disposable_proof_harness.py",
             ROOT
             / "tools/governed_memory_validation/run_phase8b_disposable_proof.py",
         )
         joined = "\n".join(path.read_text(encoding="utf-8") for path in source_paths)
         for forbidden in (
-            "from .controller import",
-            "governed_memory_install.controller import",
-            "from .journal import",
-            "governed_memory_install.journal import",
-            "from .synthetic_backend import",
-            "governed_memory_install.synthetic_backend import",
+            "authority_v2",
+            "controller_v2",
+            "durable_journal_v2",
+            "execution_capability_v2",
+            "package_v3",
+            "synthetic_backend_v2",
             "run_disposable_installation_controller",
             "import subprocess",
             "import socket",

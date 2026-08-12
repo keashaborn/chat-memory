@@ -14,7 +14,7 @@ import hashlib
 import re
 from typing import Final, Protocol
 
-from .authority_v2 import (
+from .authority import (
     AuthorityVerificationError,
     CryptographicallyValidScopeNotExecution,
     _execution_capability_evidence,
