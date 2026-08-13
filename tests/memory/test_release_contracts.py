@@ -44,7 +44,7 @@ def observation(operation: str, *, state: str) -> dict[str, object]:
     }
 
 
-class Phase9HReleaseArtifactTests(unittest.TestCase):
+class Phase9JReleaseArtifactTests(unittest.TestCase):
     def test_current_package_and_retained_application_evidence_verify(self) -> None:
         result = verify_candidate_artifacts()
         self.assertEqual(
@@ -53,9 +53,8 @@ class Phase9HReleaseArtifactTests(unittest.TestCase):
         )
         self.assertEqual(
             result["phase"],
-            "phase9h_repository_only_non_postgresql_live_transports_"
-            "postgresql_stage_machine_runtime_publication_policy_and_"
-            "rollback_marker_packaged_inactive_activation_blocked",
+            "phase9j_install_ready_closed_runtime_and_store_transports_"
+            "packaged_inactive_activation_blocked",
         )
         self.assertTrue(result["artifact_integrity_verified"])
         self.assertTrue(
@@ -84,7 +83,7 @@ class Phase9HReleaseArtifactTests(unittest.TestCase):
         self.assertTrue(
             result["current_store_package_static_verification_complete"]
         )
-        self.assertEqual(result["current_store_package_artifact_count"], 70)
+        self.assertEqual(result["current_store_package_artifact_count"], 74)
         self.assertTrue(result["synthetic_proof_harness_packaged"])
         self.assertFalse(result["current_store_synthetic_proof_complete"])
         self.assertFalse(
@@ -113,56 +112,52 @@ class Phase9HReleaseArtifactTests(unittest.TestCase):
             "resolved_store_spec_and_exact_docker_labels_bound",
             "resource_identity_ledger_v2_packaged",
             "retained_audit_artifact_hashes_bound",
-        ):
-            self.assertTrue(result[field], field)
-        self.assertFalse(result["controller_runtime_built_or_installed"])
-        self.assertFalse(result["controller_release_staged"])
-        self.assertFalse(result["stores_install_owns_or_removes_controller_substrate"])
-        for field in (
             "empty_rollback_controller_authority_marker_packaged",
-            "fresh_live_semantic_empty_recheck_required_at_r05_under_controller_marker",
+            "fresh_live_semantic_empty_recheck_required_at_r06_under_administrative_writer_fence",
             "empty_rollback_receipt_persisted_create_once_while_controller_marker_held",
             "closed_live_transport_contracts_packaged",
-            "postgresql_source_closure_contract_packaged",
+            "complete_closed_live_transport_substrate_set_packaged",
+            "complete_closed_live_transport_substrate_set_integrated_into_bound_factory",
             "driver_native_postgresql_stage_contract_packaged",
             "driver_native_postgresql_executable_stage_machine_packaged",
+            "concrete_psycopg_postgresql_transport_packaged",
             "runtime_input_selection_contract_repaired",
-            "runtime_build_receipt_provenance_v3_packaged",
+            "runtime_build_receipt_provenance_v4_packaged",
             "exact_postgresql_16_14_and_qdrant_1_19_0_readiness_required",
+            "approved_terminal_postgresql_catalog_manifest_selected",
             "durable_controller_rollback_marker_transport_packaged",
-            "controller_marker_empty_recheck_then_stop_then_physical_removal_order_implemented",
+            "controller_authority_marker_then_supervisor_removal_then_writer_fence_empty_recheck_then_store_stop_and_physical_removal_order_implemented",
+            "selected_live_platform_transports_packaged",
             "selected_non_postgresql_live_platform_transport_factory_packaged",
+            "pinned_postgresql_driver_selected",
+            "controller_runtime_build_transport_packaged",
             "controller_runtime_publication_policy_transport_packaged",
             "runtime_publication_durable_intent_before_first_rename_packaged",
             "runtime_publication_post_intent_generic_cleanup_forbidden",
             "runtime_publication_crash_prefix_manual_review_fence_packaged",
             "runtime_publication_same_device_rename_precondition_packaged",
             "runtime_publication_exact_terminal_replay_with_renewed_fsyncs_packaged",
+            "production_runtime_publication_primitives_packaged",
+            "independent_standalone_cpython_payload_tree_proof_packaged",
         ):
             self.assertTrue(result[field], field)
+        self.assertFalse(result["controller_runtime_built_or_installed"])
+        self.assertFalse(result["controller_release_staged"])
+        self.assertFalse(result["stores_install_owns_or_removes_controller_substrate"])
         for field in (
-            "complete_closed_live_transport_substrate_set_packaged",
-            "complete_closed_live_transport_substrate_set_integrated_into_bound_factory",
-            "concrete_psycopg_postgresql_transport_packaged",
-            "approved_terminal_postgresql_catalog_manifest_selected",
             "physical_postgresql_qdrant_writer_exclusion_packaged",
             "physical_postgresql_qdrant_writer_exclusion_transport_packaged",
             "external_direct_writer_exclusion_implemented",
             "stopped_store_semantic_empty_recheck_is_valid",
             "destructive_rollback_steps_atomically_recheck_empty_under_fence",
-            "production_runtime_publication_primitives_packaged",
-            "independent_standalone_cpython_payload_tree_proof_packaged",
         ):
             self.assertFalse(result[field], field)
         self.assertTrue(result["closed_install_store_effect_adapter_packaged"])
         self.assertTrue(result["closed_empty_rollback_store_effect_adapter_packaged"])
-        self.assertFalse(result["selected_live_platform_transports_packaged"])
-        self.assertFalse(result["pinned_postgresql_driver_selected"])
         self.assertTrue(result["durable_create_once_receipt_store_packaged"])
         self.assertTrue(
             result["controller_runtime_release_builder_orchestration_packaged"]
         )
-        self.assertFalse(result["controller_runtime_build_transport_packaged"])
         self.assertFalse(result["activation_executor_packaged"])
         self.assertFalse(result["installation_authorized"])
         self.assertFalse(result["activation_authorized"])
@@ -200,215 +195,234 @@ class Phase9HReleaseArtifactTests(unittest.TestCase):
         original = json.loads(
             (OPS / "runtime_manifest.json").read_text(encoding="utf-8")
         )
-        variants: list[dict[str, object]] = []
-        for mutate in (
-            lambda value: value["activation"].update(
-                {"production_authorized": True}
+        mutations = [
+            (
+                "phase",
+                lambda value: value.update({"phase": "invalid_retired_phase"}),
             ),
-            lambda value: value["activation"][
-                "retained_phase7a_snapshot_running_services"
-            ].append(
-                "governed-memory-http.service"
+            (
+                "activation_authority",
+                lambda value: value["activation"].update(
+                    {"production_authorized": True}
+                ),
             ),
-            lambda value: value["disposable_validation"].update(
-                {"reusable_as_current_store_installation_proof": True}
+            (
+                "retained_running_service",
+                lambda value: value["activation"][
+                    "retained_phase7a_snapshot_running_services"
+                ].append("governed-memory-http.service"),
             ),
-            lambda value: value["disposable_validation"].update(
-                {"reusable_as_live_proof": True}
+            (
+                "phase8g_installation_reuse",
+                lambda value: value["disposable_validation"].update(
+                    {"reusable_as_current_store_installation_proof": True}
+                ),
             ),
-            lambda value: value["disposable_validation"].update(
-                {"current_proof_complete": False}
+            (
+                "phase8g_live_reuse",
+                lambda value: value["disposable_validation"].update(
+                    {"reusable_as_live_proof": True}
+                ),
             ),
-            lambda value: value["validation_runtime"].update(
-                {"current_source_bound": False}
+            (
+                "phase8g_proof_regression",
+                lambda value: value["disposable_validation"].update(
+                    {"current_proof_complete": False}
+                ),
             ),
-            lambda value: value["validation_runtime"].update(
-                {"current_runtime_rebuild_pending": True}
+            (
+                "source_binding",
+                lambda value: value["validation_runtime"].update(
+                    {"current_source_bound": False}
+                ),
             ),
-            lambda value: value["validation_runtime"].update(
-                {"current_build_receipt_sha256": "0" * 64}
+            (
+                "runtime_rebuild",
+                lambda value: value["validation_runtime"].update(
+                    {"current_runtime_rebuild_pending": True}
+                ),
             ),
-            lambda value: value["inactive_store_package"].update(
-                {"synthetic_proof_executed_for_current_package": True}
+            (
+                "runtime_receipt_hash",
+                lambda value: value["validation_runtime"].update(
+                    {"current_build_receipt_sha256": "0" * 64}
+                ),
             ),
-            lambda value: value["inactive_store_package"].update(
-                {"static_package_verification_complete": False}
+            (
+                "package_state",
+                lambda value: value["inactive_store_package"].update(
+                    {"state": "invalid_retired_phase"}
+                ),
             ),
-            lambda value: value["inactive_store_package"].update(
-                {"synthetic_proof_receipt_promoted": True}
+            (
+                "package_schema",
+                lambda value: value["inactive_store_package"].update(
+                    {
+                        "package_manifest_schema_version": (
+                            "governed-memory-dormant-store-install-"
+                            "inactive-execution-package-manifest-v3"
+                        )
+                    }
+                ),
             ),
-            lambda value: value["inactive_store_package"].update(
-                {"live_installation_proof_complete": True}
+            (
+                "package_artifact_count",
+                lambda value: value["inactive_store_package"].update(
+                    {"package_artifact_count": 70}
+                ),
             ),
-            lambda value: value["inactive_store_package"].update(
-                {"installation_executor_packaged": False}
+            (
+                "package_manifest_hash",
+                lambda value: value["inactive_store_package"].update(
+                    {"package_manifest_sha256": "0" * 64}
+                ),
             ),
-            lambda value: value["inactive_store_package"].update(
-                {"package_manifest_sha256": "0" * 64}
+            (
+                "retained_postgres_resource",
+                lambda value: value["infrastructure"].update(
+                    {
+                        "retained_phase7a_snapshot_postgresql_persistent_resource_created": True
+                    }
+                ),
             ),
-            lambda value: value["inactive_store_package"].update(
-                {"controller_runtime_verification_capability_packaged": False}
+            (
+                "persistent_composition",
+                lambda value: value["infrastructure"].update(
+                    {"persistent_composition_packaged": True}
+                ),
             ),
-            lambda value: value["inactive_store_package"].update(
-                {"full_controller_release_tree_verification_packaged": False}
+            (
+                "phase7c_compose_role",
+                lambda value: value["infrastructure"].update(
+                    {
+                        "phase7c_disposable_application_compose_role": (
+                            "current_inactive_store_composition"
+                        )
+                    }
+                ),
             ),
-            lambda value: value["inactive_store_package"].update(
-                {"exact_locked_controller_distribution_set_verification_packaged": False}
+            (
+                "installed_erasure_route",
+                lambda value: value["http_runtime"].update(
+                    {"conversation_erasure_route_installed": True}
+                ),
             ),
-            lambda value: value["inactive_store_package"].update(
-                {"full_release_tree_sha256_bound_through_claim_journal_host_ownership_and_install_receipt": False}
+            (
+                "lifeswitch_erasure_scope",
+                lambda value: value["ingestion"].update(
+                    {
+                        "source_erasure_structured_lifeswitch_data_or_accounts_deleted": True
+                    }
+                ),
             ),
-            lambda value: value["inactive_store_package"].update(
-                {"empty_rollback_full_runtime_and_release_identity_bound_through_authority_claim_journal_requests_observations_controller_marker_and_receipt": False}
-            ),
-            lambda value: value["inactive_store_package"].update(
-                {"supervisor_launcher_source_packaged": False}
-            ),
-            lambda value: value["inactive_store_package"].update(
-                {"controller_runtime_built_or_installed": True}
-            ),
-            lambda value: value["inactive_store_package"].update(
-                {"resolved_store_spec_and_exact_docker_labels_bound": False}
-            ),
-            lambda value: value["inactive_store_package"].update(
-                {"resource_identity_ledger_v2_packaged": False}
-            ),
-            lambda value: value["inactive_store_package"].update(
-                {"physical_postgresql_qdrant_writer_exclusion_packaged": True}
-            ),
-            lambda value: value["inactive_store_package"].update(
-                {"empty_rollback_controller_authority_marker_packaged": False}
-            ),
-            lambda value: value["inactive_store_package"].update(
-                {
-                    "fresh_live_semantic_empty_recheck_required_at_r05_under_controller_marker": False
-                }
-            ),
-            lambda value: value["inactive_store_package"].update(
-                {
-                    "destructive_rollback_steps_atomically_recheck_empty_under_fence": True
-                }
-            ),
-            lambda value: value["inactive_store_package"].update(
-                {"closed_live_transport_contracts_packaged": False}
-            ),
-            lambda value: value["inactive_store_package"].update(
-                {"complete_closed_live_transport_substrate_set_integrated_into_bound_factory": True}
-            ),
-            lambda value: value["inactive_store_package"].update(
-                {
-                    "postgresql_source_closure_contract_packaged": False
-                }
-            ),
-            lambda value: value["inactive_store_package"].update(
-                {"driver_native_postgresql_stage_contract_packaged": False}
-            ),
-            lambda value: value["inactive_store_package"].update(
-                {
-                    "driver_native_postgresql_executable_stage_machine_packaged": False
-                }
-            ),
-            lambda value: value["inactive_store_package"].update(
-                {"concrete_psycopg_postgresql_transport_packaged": True}
-            ),
-            lambda value: value["inactive_store_package"].update(
-                {"runtime_input_selection_contract_repaired": False}
-            ),
-            lambda value: value["inactive_store_package"].update(
-                {"runtime_build_receipt_provenance_v3_packaged": False}
-            ),
-            lambda value: value["inactive_store_package"].update(
-                {"approved_terminal_postgresql_catalog_manifest_selected": True}
-            ),
-            lambda value: value["inactive_store_package"].update(
-                {"durable_controller_rollback_marker_transport_packaged": False}
-            ),
-            lambda value: value["inactive_store_package"].update(
-                {
-                    "physical_postgresql_qdrant_writer_exclusion_transport_packaged": True
-                }
-            ),
-            lambda value: value["inactive_store_package"].update(
-                {"external_direct_writer_exclusion_implemented": True}
-            ),
-            lambda value: value["inactive_store_package"].update(
-                {
-                    "controller_marker_empty_recheck_then_stop_then_physical_removal_order_implemented": False
-                }
-            ),
-            lambda value: value["inactive_store_package"].update(
-                {
-                    "selected_non_postgresql_live_linux_platform_transport_factory_packaged": False
-                }
-            ),
-            lambda value: value["inactive_store_package"].update(
-                {
-                    "controller_runtime_publication_policy_transport_packaged": False
-                }
-            ),
-            lambda value: value["inactive_store_package"].update(
-                {
-                    "runtime_publication_durable_intent_before_first_rename_packaged": False
-                }
-            ),
-            lambda value: value["inactive_store_package"].update(
-                {"runtime_publication_post_intent_generic_cleanup_forbidden": False}
-            ),
-            lambda value: value["inactive_store_package"].update(
-                {
-                    "runtime_publication_crash_prefix_manual_review_fence_packaged": False
-                }
-            ),
-            lambda value: value["inactive_store_package"].update(
-                {"runtime_publication_same_device_rename_precondition_packaged": False}
-            ),
-            lambda value: value["inactive_store_package"].update(
-                {
-                    "runtime_publication_exact_terminal_replay_with_renewed_fsyncs_packaged": False
-                }
-            ),
-            lambda value: value["inactive_store_package"].update(
-                {"production_runtime_publication_primitives_packaged": True}
-            ),
-            lambda value: value["inactive_store_package"].update(
-                {
-                    "independent_standalone_cpython_payload_tree_proof_packaged": True
-                }
-            ),
-            lambda value: value["inactive_store_package"].update(
-                {"retained_audit_artifact_hashes_bound": False}
-            ),
-            lambda value: value["infrastructure"].update(
-                {
-                    "retained_phase7a_snapshot_postgresql_persistent_resource_created": True
-                }
-            ),
-            lambda value: value["infrastructure"].update(
-                {"persistent_composition_packaged": True}
-            ),
-            lambda value: value["infrastructure"].update(
-                {
-                    "phase7c_disposable_application_compose_role": (
-                        "current_inactive_store_composition"
-                    )
-                }
-            ),
-            lambda value: value["http_runtime"].update(
-                {"conversation_erasure_route_installed": True}
-            ),
-            lambda value: value["ingestion"].update(
-                {
-                    "source_erasure_structured_lifeswitch_data_or_accounts_deleted": True
-                }
-            ),
-        ):
+        ]
+        required_true = (
+            "static_package_verification_complete",
+            "historical_dormant_store_install_static_package_verification_complete",
+            "synthetic_proof_harness_packaged",
+            "historical_dormant_store_install_synthetic_proof_executed",
+            "installation_executor_packaged",
+            "rollback_executor_packaged",
+            "controller_runtime_verification_capability_packaged",
+            "full_controller_release_tree_verification_packaged",
+            "exact_locked_controller_distribution_set_verification_packaged",
+            "full_release_tree_sha256_bound_through_claim_journal_host_ownership_and_install_receipt",
+            "empty_rollback_full_runtime_and_release_identity_bound_through_authority_claim_journal_requests_observations_controller_marker_and_receipt",
+            "supervisor_launcher_source_packaged",
+            "controller_runtime_and_release_require_separate_future_build_and_install_authority",
+            "resolved_store_spec_and_exact_docker_labels_bound",
+            "resource_identity_ledger_v2_packaged",
+            "empty_rollback_controller_authority_marker_packaged",
+            "fresh_live_semantic_empty_recheck_required_at_r06_under_administrative_writer_fence",
+            "closed_live_transport_contracts_packaged",
+            "complete_closed_live_transport_substrate_set_packaged",
+            "complete_closed_live_transport_substrate_set_integrated_into_bound_factory",
+            "driver_native_postgresql_stage_contract_packaged",
+            "driver_native_postgresql_executable_stage_machine_packaged",
+            "concrete_psycopg_postgresql_transport_packaged",
+            "runtime_input_selection_contract_repaired",
+            "runtime_build_receipt_provenance_v4_packaged",
+            "exact_postgresql_16_14_and_qdrant_1_19_0_readiness_required",
+            "approved_terminal_postgresql_catalog_manifest_selected",
+            "durable_controller_rollback_marker_transport_packaged",
+            "controller_authority_marker_then_supervisor_removal_then_writer_fence_empty_recheck_then_store_stop_and_physical_removal_order_implemented",
+            "retained_audit_artifact_hashes_bound",
+            "durable_create_once_receipt_store_packaged",
+            "public_entrypoints_require_canonical_root_owned_production_receipt_store",
+            "synthetic_receipt_stores_are_private_test_only",
+            "closed_post_claim_linux_install_adapter_and_factory_packaged",
+            "fixed_loopback_store_readiness_dto_adapter_packaged",
+            "physical_ledger_bound_empty_rollback_adapter_packaged",
+            "concrete_install_store_effect_adapters_packaged",
+            "concrete_empty_rollback_store_effect_adapters_packaged",
+            "selected_live_linux_platform_transports_packaged",
+            "selected_non_postgresql_live_linux_platform_transport_factory_packaged",
+            "pinned_postgresql_driver_selected_or_packaged",
+            "controller_runtime_release_builder_orchestration_packaged",
+            "controller_runtime_builder_publication_transport_packaged",
+            "controller_runtime_publication_policy_transport_packaged",
+            "runtime_publication_durable_intent_before_first_rename_packaged",
+            "runtime_publication_post_intent_generic_cleanup_forbidden",
+            "runtime_publication_crash_prefix_manual_review_fence_packaged",
+            "runtime_publication_same_device_rename_precondition_packaged",
+            "runtime_publication_exact_terminal_replay_with_renewed_fsyncs_packaged",
+            "production_runtime_publication_primitives_packaged",
+            "approved_standalone_cpython_substrate_digest_bound",
+            "independent_standalone_cpython_payload_tree_proof_packaged",
+            "install_controller_emits_canonical_receipt",
+            "empty_rollback_controller_emits_canonical_receipt",
+            "install_receipt_binds_fresh_terminal_canonical_store_readiness",
+            "empty_rollback_requires_opaque_verified_install_receipt_and_ledger",
+            "completed_install_and_empty_rollback_replay_reverification_packaged",
+        )
+        required_false = (
+            "synthetic_proof_executed_for_current_package",
+            "synthetic_proof_executed_by_release_guard",
+            "synthetic_proof_receipt_promoted",
+            "live_installation_proof_complete",
+            "controller_runtime_built_or_installed",
+            "controller_release_staged",
+            "stores_install_owns_or_removes_controller_substrate",
+            "physical_postgresql_qdrant_writer_exclusion_packaged",
+            "destructive_rollback_steps_atomically_recheck_empty_under_fence",
+            "physical_postgresql_qdrant_writer_exclusion_transport_packaged",
+            "external_direct_writer_exclusion_implemented",
+            "stopped_store_semantic_empty_recheck_is_valid",
+            "activation_executor_packaged",
+            "installation_performed",
+            "live_installation_state_reverified_for_current_candidate",
+            "installation_authorized",
+            "activation_authorized",
+            "production_state_changed",
+        )
+        for field in required_true:
+            mutations.append(
+                (
+                    field,
+                    lambda value, field=field: value[
+                        "inactive_store_package"
+                    ].update({field: False}),
+                )
+            )
+        for field in required_false:
+            mutations.append(
+                (
+                    field,
+                    lambda value, field=field: value[
+                        "inactive_store_package"
+                    ].update({field: True}),
+                )
+            )
+
+        variants: list[tuple[str, dict[str, object]]] = []
+        for name, mutate in mutations:
             variant = json.loads(json.dumps(original))
             mutate(variant)
-            variants.append(variant)
+            variants.append((name, variant))
         package_receipt = release_guard.package.verify()
         store_receipt = release_guard.verify_store_migration_manifest.verify()
-        for index, variant in enumerate(variants):
-            with self.subTest(index=index), self.assertRaisesRegex(
+        for name, variant in variants:
+            with self.subTest(name=name), self.assertRaisesRegex(
                 ReleaseGuardError,
                 "release_(runtime_manifest|source_erasure_scope)_invalid",
             ):
@@ -421,118 +435,93 @@ class Phase9HReleaseArtifactTests(unittest.TestCase):
     def test_current_package_and_store_receipt_drift_are_rejected(self) -> None:
         current_package = release_guard.package.verify()
         current_store = release_guard.verify_store_migration_manifest.verify()
-        package_variants = []
-        for key, value in (
+        required_true = (
+            "guarded_synthetic_proof_harness_packaged",
+            "proof_receipt_is_external_to_package",
+            "authority_gated_disposable_linux_proof_runner_packaged",
+            "claim_bound_install_controller_composition_packaged",
+            "claim_bound_empty_rollback_controller_composition_packaged",
+            "controller_runtime_verification_capability_packaged",
+            "full_controller_release_tree_verification_packaged",
+            "exact_locked_controller_distribution_set_verification_packaged",
+            "full_release_tree_sha256_bound_through_claim_journal_host_ownership_and_install_receipt",
+            "empty_rollback_full_runtime_and_release_identity_bound_through_authority_claim_journal_requests_observations_controller_authority_marker_and_receipt",
+            "supervisor_launcher_source_packaged",
+            "controller_runtime_and_release_require_separate_future_build_and_install_authority",
+            "resolved_store_spec_and_exact_docker_labels_bound",
+            "resource_identity_ledger_v2_packaged",
+            "empty_rollback_controller_authority_marker_packaged",
+            "fresh_live_semantic_empty_recheck_required_at_r06_under_administrative_writer_fence",
+            "empty_rollback_receipt_persisted_create_once_while_controller_authority_marker_held",
+            "closed_live_transport_contracts_packaged",
+            "complete_closed_live_transport_substrate_set_packaged",
+            "complete_closed_live_transport_substrate_set_integrated_into_bound_factory",
+            "driver_native_postgresql_stage_contract_packaged",
+            "driver_native_postgresql_executable_stage_machine_packaged",
+            "concrete_psycopg_postgresql_transport_packaged",
+            "runtime_input_selection_contract_repaired",
+            "runtime_build_receipt_provenance_v4_packaged",
+            "exact_postgresql_16_14_and_qdrant_1_19_0_readiness_required",
+            "approved_terminal_postgresql_catalog_manifest_selected",
+            "durable_live_empty_rollback_controller_authority_marker_transport_packaged",
+            "administrative_cooperative_writer_fence_implemented",
+            "controller_authority_marker_then_supervisor_removal_then_writer_fence_empty_recheck_then_store_stop_and_physical_removal_order_implemented",
+            "retained_audit_artifact_hashes_bound",
+            "install_controller_emits_canonical_receipt",
+            "empty_rollback_controller_emits_canonical_receipt",
+            "install_receipt_binds_fresh_terminal_canonical_store_readiness",
+            "empty_rollback_requires_opaque_verified_install_receipt_and_ledger",
+            "completed_install_and_empty_rollback_replay_reverification_packaged",
+            "closed_install_store_effect_adapter_packaged",
+            "closed_empty_rollback_store_effect_adapter_packaged",
+            "selected_live_platform_transports_packaged",
+            "selected_non_postgresql_live_platform_transport_factory_packaged",
+            "pinned_postgresql_driver_selected",
+            "durable_create_once_receipt_store_packaged",
+            "controller_runtime_release_builder_orchestration_packaged",
+            "controller_runtime_build_transport_packaged",
+            "controller_runtime_publication_policy_transport_packaged",
+            "runtime_publication_durable_intent_before_first_rename_packaged",
+            "runtime_publication_post_intent_generic_cleanup_forbidden",
+            "runtime_publication_crash_prefix_manual_review_fence_packaged",
+            "runtime_publication_same_device_rename_precondition_packaged",
+            "runtime_publication_exact_terminal_replay_with_renewed_fsyncs_packaged",
+            "production_runtime_publication_primitives_packaged",
+            "independent_standalone_cpython_payload_tree_proof_packaged",
+        )
+        required_false = (
+            "synthetic_proof_executed_by_verifier",
+            "synthetic_proof_receipt_present_at_package_sealing",
+            "disposable_linux_proof_runner_executed_by_verifier",
+            "disposable_linux_proof_receipt_present_at_package_sealing",
+            "controller_runtime_built_or_installed",
+            "controller_release_staged",
+            "stores_install_owns_or_removes_controller_substrate",
+            "equivalent_privileged_root_bypass_excluded",
+            "stopped_store_semantic_empty_recheck_is_valid",
+            "activation_entrypoint_packaged",
+            "installation_performed_by_verifier",
+            "images_staged_by_verifier",
+            "secrets_touched_by_verifier",
+            "activation_performed_by_verifier",
+        )
+        mutations = [
+            (
+                "schema_version",
+                "governed-memory-dormant-store-install-package-verification-v4",
+            ),
             ("artifact_count", current_package["artifact_count"] + 1),
-            ("synthetic_proof_executed_by_verifier", True),
-            ("synthetic_proof_receipt_promoted", True),
-            ("claim_bound_install_controller_composition_packaged", False),
-            ("claim_bound_empty_rollback_controller_composition_packaged", False),
-            ("controller_runtime_verification_capability_packaged", False),
-            ("full_controller_release_tree_verification_packaged", False),
-            ("exact_locked_controller_distribution_set_verification_packaged", False),
-            (
-                "full_release_tree_sha256_bound_through_claim_journal_host_ownership_and_install_receipt",
-                False,
-            ),
-            (
-                "empty_rollback_full_runtime_and_release_identity_bound_through_authority_claim_journal_requests_observations_controller_authority_marker_and_receipt",
-                False,
-            ),
-            ("supervisor_launcher_source_packaged", False),
-            ("controller_runtime_built_or_installed", True),
-            ("controller_release_staged", True),
-            (
-                "controller_runtime_and_release_require_separate_future_build_and_install_authority",
-                False,
-            ),
-            ("stores_install_owns_or_removes_controller_substrate", True),
-            ("resolved_store_spec_and_exact_docker_labels_bound", False),
-            ("resource_identity_ledger_v2_packaged", False),
-            ("empty_rollback_controller_authority_marker_packaged", False),
-            (
-                "fresh_live_semantic_empty_recheck_required_at_r05_under_controller_authority_marker",
-                False,
-            ),
-            (
-                "empty_rollback_receipt_persisted_create_once_while_controller_authority_marker_held",
-                False,
-            ),
-            ("closed_live_transport_contracts_packaged", False),
-            ("complete_closed_live_transport_substrate_set_integrated_into_bound_factory", True),
-            ("postgresql_source_closure_contract_packaged", False),
-            ("driver_native_postgresql_stage_contract_packaged", False),
-            (
-                "driver_native_postgresql_executable_stage_machine_packaged",
-                False,
-            ),
-            ("concrete_psycopg_postgresql_transport_packaged", True),
-            ("runtime_input_selection_contract_repaired", False),
-            ("runtime_build_receipt_provenance_v3_packaged", False),
-            ("exact_postgresql_16_14_and_qdrant_1_19_0_readiness_required", False),
-            ("approved_terminal_postgresql_catalog_manifest_selected", True),
-            (
-                "durable_live_empty_rollback_controller_authority_marker_transport_packaged",
-                False,
-            ),
-            ("external_direct_writer_exclusion_implemented", True),
-            ("stopped_store_semantic_empty_recheck_is_valid", True),
-            (
-                "controller_authority_marker_empty_recheck_then_stop_then_physical_removal_order_implemented",
-                False,
-            ),
-            ("retained_audit_artifact_hashes_bound", False),
-            (
-                "install_receipt_binds_fresh_terminal_canonical_store_readiness",
-                False,
-            ),
-            (
-                "empty_rollback_requires_opaque_verified_install_receipt_and_ledger",
-                False,
-            ),
-            (
-                "completed_install_and_empty_rollback_replay_reverification_packaged",
-                False,
-            ),
-            ("closed_install_store_effect_adapter_packaged", False),
-            ("closed_empty_rollback_store_effect_adapter_packaged", False),
-            ("selected_live_platform_transports_packaged", True),
-            (
-                "selected_non_postgresql_live_platform_transport_factory_packaged",
-                False,
-            ),
-            ("pinned_postgresql_driver_selected", True),
-            ("durable_create_once_receipt_store_packaged", False),
-            ("controller_runtime_release_builder_orchestration_packaged", False),
-            ("controller_runtime_build_transport_packaged", True),
-            ("controller_runtime_publication_policy_transport_packaged", False),
-            (
-                "runtime_publication_durable_intent_before_first_rename_packaged",
-                False,
-            ),
-            ("runtime_publication_post_intent_generic_cleanup_forbidden", False),
-            (
-                "runtime_publication_crash_prefix_manual_review_fence_packaged",
-                False,
-            ),
-            ("runtime_publication_same_device_rename_precondition_packaged", False),
-            (
-                "runtime_publication_exact_terminal_replay_with_renewed_fsyncs_packaged",
-                False,
-            ),
-            ("production_runtime_publication_primitives_packaged", True),
-            (
-                "independent_standalone_cpython_payload_tree_proof_packaged",
-                True,
-            ),
-            ("images_staged_by_verifier", True),
-            ("secrets_touched_by_verifier", True),
-        ):
+            ("migration_manifest_sha256", "0" * 64),
+        ]
+        mutations.extend((field, False) for field in required_true)
+        mutations.extend((field, True) for field in required_false)
+        package_variants: list[tuple[str, dict[str, object]]] = []
+        for key, value in mutations:
             variant = json.loads(json.dumps(current_package))
             variant[key] = value
-            package_variants.append(variant)
-        for index, variant in enumerate(package_variants):
-            with self.subTest(kind="package", index=index), self.assertRaisesRegex(
+            package_variants.append((key, variant))
+        for key, variant in package_variants:
+            with self.subTest(kind="package", key=key), self.assertRaisesRegex(
                 ReleaseGuardError, "release_current_store_package_invalid"
             ):
                 release_guard._verify_current_package_receipts(

@@ -23,8 +23,12 @@ from .authority import (
 from .authority_state import (
     AuthorityClaimNotAllowedError,
     AuthorityState,
+    AuthorityStateIntegrityError,
     HASH_RE,
     NonceClaim,
+    NonceClaimIdentity,
+    derive_nonce_claim_identity,
+    operation_sha256,
 )
 from .execution_lock import (
     ExecutionLockError,
@@ -87,6 +91,25 @@ class ExecutionAuthorityPermit:
     trusted_clock_utc: str
 
 
+@dataclass(frozen=True, slots=True)
+class VerifiedExecutionAuthorityIdentity:
+    """Immutable identity derivable from verified signed authority alone."""
+
+    operation: str
+    authorization_namespace: str
+    thread_id: str
+    scope_id: str
+    authorization_id: str
+    nonce: str
+    nonce_sha256: str
+    operation_sha256: str
+    execution_sha256: str
+    authorization_sha256: str
+    scope_sha256: str
+    trust_bundle_sha256: str
+    claim_sha256: str
+
+
 def read_trusted_utc(clock: TrustedUtcClock) -> TrustedClockReading:
     """Read exactly once and strictly validate an injected UTC clock."""
 
@@ -112,6 +135,42 @@ def _parse_authorization_timestamp(value: object) -> datetime:
     except ValueError as error:
         raise ExecutionAuthorityError("execution_authority_time_invalid") from error
     return parsed
+
+
+def execution_binding_sha256(
+    *,
+    operation: str,
+    scope_sha256: str,
+    authorization_sha256: str,
+    trust_bundle_sha256: str,
+) -> str:
+    """Derive the canonical authority execution binding without side effects."""
+
+    try:
+        operation_sha256(operation)
+    except AuthorityStateIntegrityError as error:
+        raise ExecutionAuthorityError(
+            "execution_authority_operation_invalid"
+        ) from error
+    for value in (
+        scope_sha256,
+        authorization_sha256,
+        trust_bundle_sha256,
+    ):
+        if not isinstance(value, str) or HASH_RE.fullmatch(value) is None:
+            raise ExecutionAuthorityError("execution_authority_hash_invalid")
+    execution_material = b"\x00".join(
+        value.encode("ascii")
+        for value in (
+            operation,
+            scope_sha256,
+            authorization_sha256,
+            trust_bundle_sha256,
+        )
+    )
+    return hashlib.sha256(
+        _EXECUTION_BINDING_DOMAIN + execution_material
+    ).hexdigest()
 
 
 def _validate_evidence(
@@ -144,19 +203,53 @@ def _validate_evidence(
         > MAX_AUTHORIZATION_WINDOW_SECONDS
     ):
         raise ExecutionAuthorityError("execution_authority_window_invalid")
-    execution_material = b"\x00".join(
-        value.encode("ascii")
-        for value in (
-            evidence.operation,
-            evidence.scope_sha256,
-            evidence.authorization_sha256,
-            evidence.trust_bundle_sha256,
-        )
+    execution_sha256 = execution_binding_sha256(
+        operation=evidence.operation,
+        scope_sha256=evidence.scope_sha256,
+        authorization_sha256=evidence.authorization_sha256,
+        trust_bundle_sha256=evidence.trust_bundle_sha256,
     )
-    execution_sha256 = hashlib.sha256(
-        _EXECUTION_BINDING_DOMAIN + execution_material
-    ).hexdigest()
     return evidence, not_before, expires_at, execution_sha256
+
+
+def verified_execution_authority_identity(
+    capability: object,
+    *,
+    expected_operation: str,
+) -> VerifiedExecutionAuthorityIdentity:
+    """Derive the exact future durable claim identity from verified authority."""
+
+    evidence, unused_not_before, unused_expires_at, execution_sha256 = (
+        _validate_evidence(capability, expected_operation=expected_operation)
+    )
+    try:
+        claim: NonceClaimIdentity = derive_nonce_claim_identity(
+            evidence.nonce,
+            operation=evidence.operation,
+            execution_sha256=execution_sha256,
+            authorization_sha256=evidence.authorization_sha256,
+            scope_sha256=evidence.scope_sha256,
+            trust_bundle_sha256=evidence.trust_bundle_sha256,
+        )
+    except AuthorityStateIntegrityError as error:
+        raise ExecutionAuthorityError(
+            "execution_authority_identity_invalid"
+        ) from error
+    return VerifiedExecutionAuthorityIdentity(
+        operation=evidence.operation,
+        authorization_namespace=evidence.authorization_namespace,
+        thread_id=evidence.thread_id,
+        scope_id=evidence.scope_id,
+        authorization_id=evidence.authorization_id,
+        nonce=evidence.nonce,
+        nonce_sha256=claim.nonce_sha256,
+        operation_sha256=claim.operation_sha256,
+        execution_sha256=claim.execution_sha256,
+        authorization_sha256=claim.authorization_sha256,
+        scope_sha256=claim.scope_sha256,
+        trust_bundle_sha256=claim.trust_bundle_sha256,
+        claim_sha256=claim.claim_sha256,
+    )
 
 
 def _permit_from_claim(
@@ -227,4 +320,46 @@ def claim_execution_authority(
         raise ExecutionAuthorityError("execution_authority_lock_not_held") from error
     except AuthorityClaimNotAllowedError as error:
         raise ExecutionAuthorityError("execution_authority_expired") from error
+    return _permit_from_claim(claim, reading)
+
+
+def resume_execution_authority(
+    capability: object,
+    *,
+    state: AuthorityState,
+    clock: TrustedUtcClock,
+    held_lock: HeldExecutionLockCapability,
+    expected_operation: str,
+) -> ExecutionAuthorityPermit:
+    """Resume only an exact preexisting claim; never create authority."""
+
+    try:
+        validate_held_execution_lock(held_lock)
+    except ExecutionLockError as error:
+        raise ExecutionAuthorityError("execution_authority_lock_not_held") from error
+    evidence, not_before, unused_expires_at, execution_sha256 = (
+        _validate_evidence(capability, expected_operation=expected_operation)
+    )
+    reading = read_trusted_utc(clock)
+    if reading.observed_at < not_before:
+        raise ExecutionAuthorityError("execution_authority_not_yet_valid")
+    try:
+        validate_held_execution_lock(held_lock)
+        claim = state.claim_nonce(
+            evidence.nonce,
+            operation=expected_operation,
+            execution_sha256=execution_sha256,
+            authorization_sha256=evidence.authorization_sha256,
+            scope_sha256=evidence.scope_sha256,
+            trust_bundle_sha256=evidence.trust_bundle_sha256,
+            held_lock=held_lock,
+            allow_new_claim=False,
+        )
+        validate_held_execution_lock(held_lock)
+    except ExecutionLockError as error:
+        raise ExecutionAuthorityError("execution_authority_lock_not_held") from error
+    except AuthorityClaimNotAllowedError as error:
+        raise ExecutionAuthorityError("execution_authority_claim_absent") from error
+    if claim.result != "exact_execution_resumed":
+        raise ExecutionAuthorityError("execution_authority_resume_invalid")
     return _permit_from_claim(claim, reading)

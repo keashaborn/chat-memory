@@ -9,7 +9,7 @@ global-lock validation, durable nonce claim, exact empty-state verification,
 and exact resource binding.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from enum import Enum
 import hashlib
@@ -25,6 +25,7 @@ from .authority_state import (
     AuthorityClaimNotAllowedError,
     AuthorityState,
     AuthorityStateError,
+    nonce_sha256,
 )
 from .execution_authority import TrustedUtcClock, read_trusted_utc
 from .controller_runtime import (
@@ -64,6 +65,7 @@ from .durable_receipts import (
     _open_directory_nofollow,
 )
 from .rollback_authority import (
+    RECOVERY_RESERVATION_OPERATION,
     ROLLBACK_OPERATION,
     RollbackAuthorityError,
     rollback_capability_evidence,
@@ -104,6 +106,9 @@ _JOURNAL_DOMAIN: Final = b"governed-memory-empty-rollback-journal-v3\x00"
 _RETAINED_AUDIT_SET_DOMAIN: Final = (
     b"governed-memory-empty-rollback-retained-audit-set-v1\x00"
 )
+_RETAINED_ROLLBACK_EVIDENCE_DOMAIN: Final = (
+    b"governed-memory-empty-rollback-retained-evidence-v1\x00"
+)
 MAX_RETAINED_INSTALL_RECEIPT_BYTES: Final = 64 * 1024
 
 
@@ -115,6 +120,12 @@ class RollbackEvent(str, Enum):
     INTENT = "intent"
     APPLIED = "applied"
     COMPLETE = "complete"
+
+
+class RollbackAuthorityMode(str, Enum):
+    START_ROLLBACK = "start-rollback"
+    START_RESERVED_ROLLBACK = "start-reserved-rollback"
+    RESUME_ROLLBACK = "resume-rollback"
 
 
 @dataclass(frozen=True, slots=True)
@@ -266,6 +277,8 @@ class ClaimedEmptyRollbackEvidence:
     supervisor_launcher_path: str
     supervisor_launcher_sha256: str
     installation_execution_id: str
+    recovery_reservation_claim_sha256: str
+    retained_evidence_sha256: str
     journal_binding_sha256: str
     journal_path: str
     authority_state_path_sha256: str
@@ -326,6 +339,8 @@ class RollbackOperationRequest:
     supervisor_launcher_sha256: str
     installation_execution_id: str
     installation_receipt_sha256: str
+    recovery_reservation_claim_sha256: str
+    retained_evidence_sha256: str
     eligibility_receipt_sha256: str
     resource_ledger_binding_sha256: str
     resource_ledger_head_sha256: str
@@ -389,6 +404,11 @@ class RollbackOperationRequest:
             != self.controller_release_root
             + "/tools/governed_memory_install/store_supervisor_launcher.py"
             or _HASH_RE.fullmatch(self.installation_receipt_sha256) is None
+            or _HASH_RE.fullmatch(
+                self.recovery_reservation_claim_sha256
+            )
+            is None
+            or _HASH_RE.fullmatch(self.retained_evidence_sha256) is None
             or _HASH_RE.fullmatch(self.installation_execution_id) is None
             or _HASH_RE.fullmatch(self.eligibility_receipt_sha256) is None
             or _HASH_RE.fullmatch(self.resource_ledger_binding_sha256) is None
@@ -453,6 +473,12 @@ def canonical_live_rollback_controller_authority_marker_sha256(
                 "plan_sha256": request.plan_sha256,
                 "eligibility_receipt_sha256": (
                     request.eligibility_receipt_sha256
+                ),
+                "recovery_reservation_claim_sha256": (
+                    request.recovery_reservation_claim_sha256
+                ),
+                "retained_evidence_sha256": (
+                    request.retained_evidence_sha256
                 ),
                 "exact_targets_sha256": request.exact_targets_sha256,
                 "controller_runtime_tree_sha256": (
@@ -564,6 +590,9 @@ class VerifiedInstallReceiptLedgerEvidence:
     resource_ledger_head_sha256: str
     resource_ledger_sequence: int
     exact_targets_sha256: str
+    exact_rollback_resources_count: int
+    recovery_reservation_claim_sha256: str
+    retained_evidence_sha256: str
 
 
 _INSTALL_LEDGER_TOKEN = object()
@@ -593,6 +622,73 @@ class _VerifiedInstallReceiptLedgerCapability:
 
     def __repr__(self) -> str:
         return "VerifiedInstallReceiptLedgerCapability(<content-redacted>)"
+
+
+_RETAINED_ROLLBACK_EVIDENCE_TOKEN = object()
+
+
+class _VerifiedRetainedRollbackEvidenceCapability:
+    """Opaque preclaim proof of the durable receipt and anchored exact ledger."""
+
+    __slots__ = ("_evidence", "_token")
+
+    def __init__(
+        self,
+        evidence: VerifiedInstallReceiptLedgerEvidence,
+        token: object,
+    ) -> None:
+        if token is not _RETAINED_ROLLBACK_EVIDENCE_TOKEN:
+            raise EmptyRollbackExecutionError(
+                "empty_rollback_retained_evidence_capability_invalid"
+            )
+        self._evidence = evidence
+        self._token = token
+
+    def __repr__(self) -> str:
+        return "VerifiedRetainedRollbackEvidenceCapability(<content-redacted>)"
+
+
+def _retained_evidence_material(
+    evidence: VerifiedInstallReceiptLedgerEvidence,
+) -> dict[str, object]:
+    return {
+        "canonical_receipt_sha256": evidence.canonical_receipt_sha256,
+        "installation_execution_id": evidence.installation_execution_id,
+        "installation_receipt_sha256": evidence.installation_receipt_sha256,
+        "candidate_git_commit": evidence.candidate_git_commit,
+        "candidate_git_tree": evidence.candidate_git_tree,
+        "package_manifest_sha256": evidence.package_manifest_sha256,
+        "controller_runtime_receipt_sha256": (
+            evidence.controller_runtime_receipt_sha256
+        ),
+        "controller_runtime_tree_sha256": (
+            evidence.controller_runtime_tree_sha256
+        ),
+        "controller_release_tree_sha256": (
+            evidence.controller_release_tree_sha256
+        ),
+        "resource_ledger_binding_sha256": (
+            evidence.resource_ledger_binding_sha256
+        ),
+        "resource_ledger_head_sha256": evidence.resource_ledger_head_sha256,
+        "resource_ledger_sequence": evidence.resource_ledger_sequence,
+        "exact_targets_sha256": evidence.exact_targets_sha256,
+        "exact_rollback_resources_count": (
+            evidence.exact_rollback_resources_count
+        ),
+        "recovery_reservation_claim_sha256": (
+            evidence.recovery_reservation_claim_sha256
+        ),
+    }
+
+
+def _retained_evidence_sha256(
+    evidence: VerifiedInstallReceiptLedgerEvidence,
+) -> str:
+    return _hash_domain(
+        _RETAINED_ROLLBACK_EVIDENCE_DOMAIN,
+        _retained_evidence_material(evidence),
+    )
 
 
 def _strict_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -668,7 +764,7 @@ def verify_retained_install_receipt_and_ledger(
         raise EmptyRollbackExecutionError(
             "empty_rollback_install_ledger_evidence_mismatch"
         )
-    evidence = VerifiedInstallReceiptLedgerEvidence(
+    preliminary = VerifiedInstallReceiptLedgerEvidence(
         canonical_receipt_sha256=hashlib.sha256(
             canonical_install_receipt
         ).hexdigest(),
@@ -716,10 +812,96 @@ def verify_retained_install_receipt_and_ledger(
         ),
         resource_ledger_sequence=resource_evidence.resource_ledger_sequence,
         exact_targets_sha256=resource_evidence.exact_targets_sha256,
+        exact_rollback_resources_count=len(resources),
+        recovery_reservation_claim_sha256=ZERO_HEAD,
+        retained_evidence_sha256="0" * 64,
+    )
+    evidence = replace(
+        preliminary,
+        retained_evidence_sha256=_retained_evidence_sha256(preliminary),
     )
     return _VerifiedInstallReceiptLedgerCapability(
         evidence,
         _INSTALL_LEDGER_TOKEN,
+    )
+
+
+def verify_retained_install_receipt_and_anchored_ledger(
+    canonical_install_receipt: bytes,
+    verified_resources: object,
+    *,
+    authority_state: AuthorityState,
+    held_lock: HeldExecutionLockCapability,
+    recovery_reservation_claim_sha256: str = ZERO_HEAD,
+) -> object:
+    """Mint preclaim evidence only after the exact durable ledger anchor agrees."""
+
+    if type(authority_state) is not AuthorityState:
+        raise EmptyRollbackExecutionError(
+            "empty_rollback_retained_evidence_state_invalid"
+        )
+    try:
+        validate_held_execution_lock(held_lock)
+        if _HASH_RE.fullmatch(recovery_reservation_claim_sha256) is None:
+            raise EmptyRollbackExecutionError(
+                "empty_rollback_recovery_reservation_claim_invalid"
+            )
+        capability = verify_retained_install_receipt_and_ledger(
+            canonical_install_receipt,
+            verified_resources,
+        )
+        if (
+            type(capability) is not _VerifiedInstallReceiptLedgerCapability
+            or capability._token is not _INSTALL_LEDGER_TOKEN
+            or type(capability._evidence)
+            is not VerifiedInstallReceiptLedgerEvidence
+        ):
+            raise EmptyRollbackExecutionError(
+                "empty_rollback_retained_evidence_capability_invalid"
+            )
+        evidence = replace(
+            capability._evidence,
+            recovery_reservation_claim_sha256=(
+                recovery_reservation_claim_sha256
+            ),
+            retained_evidence_sha256=ZERO_HEAD,
+        )
+        evidence = replace(
+            evidence,
+            retained_evidence_sha256=_retained_evidence_sha256(evidence),
+        )
+        if (
+            type(evidence) is not VerifiedInstallReceiptLedgerEvidence
+            or evidence.exact_rollback_resources_count
+            != len(ROLLBACK_RESOURCE_KEYS)
+        ):
+            raise EmptyRollbackExecutionError(
+                "empty_rollback_retained_evidence_capability_invalid"
+            )
+        anchor = authority_state.read_resource_ledger_anchor(
+            evidence.resource_ledger_binding_sha256,
+            held_lock=held_lock,
+        )
+        validate_held_execution_lock(held_lock)
+    except EmptyRollbackExecutionError:
+        raise
+    except (AuthorityStateError, ExecutionLockError) as error:
+        raise EmptyRollbackExecutionError(
+            "empty_rollback_resource_ledger_anchor_invalid"
+        ) from error
+    if (
+        anchor.result != "resource_anchor_current"
+        or anchor.sequence != evidence.resource_ledger_sequence
+        or anchor.head_sha256 != evidence.resource_ledger_head_sha256
+        or evidence.retained_evidence_sha256
+        != _retained_evidence_sha256(evidence)
+    ):
+        raise EmptyRollbackExecutionError(
+            "empty_rollback_resource_ledger_anchor_mismatch"
+        )
+    return _VerifiedRetainedRollbackEvidenceCapability(
+        evidence,
+        _RETAINED_ROLLBACK_EVIDENCE_TOKEN,
     )
 
 
@@ -738,7 +920,17 @@ def validate_install_receipt_ledger_capability(
         raise EmptyRollbackExecutionError(
             "empty_rollback_install_ledger_capability_invalid"
         )
-    evidence = value._evidence
+    evidence = replace(
+        value._evidence,
+        recovery_reservation_claim_sha256=(
+            request.recovery_reservation_claim_sha256
+        ),
+        retained_evidence_sha256=ZERO_HEAD,
+    )
+    evidence = replace(
+        evidence,
+        retained_evidence_sha256=_retained_evidence_sha256(evidence),
+    )
     if (
         _HASH_RE.fullmatch(evidence.canonical_receipt_sha256) is None
         or evidence.installation_execution_id
@@ -778,6 +970,16 @@ def validate_install_receipt_ledger_capability(
         or evidence.resource_ledger_sequence
         != request.resource_ledger_sequence
         or evidence.exact_targets_sha256 != request.exact_targets_sha256
+        or evidence.exact_rollback_resources_count
+        != len(ROLLBACK_RESOURCE_KEYS)
+        or _HASH_RE.fullmatch(
+            evidence.recovery_reservation_claim_sha256
+        )
+        is None
+        or evidence.retained_evidence_sha256
+        != request.retained_evidence_sha256
+        or evidence.retained_evidence_sha256
+        != _retained_evidence_sha256(evidence)
     ):
         raise EmptyRollbackExecutionError(
             "empty_rollback_install_ledger_capability_mismatch"
@@ -1104,10 +1306,107 @@ def _hash_domain(domain: bytes, value: object) -> str:
     return hashlib.sha256(domain + canonical_json_bytes(value)).hexdigest()
 
 
+def _validate_retained_rollback_evidence_capability(
+    value: object,
+    *,
+    plan: EmptyRollbackPlan,
+    expected_resource_evidence: VerifiedRollbackResourceEvidence,
+    expected_candidate_git_commit: str,
+    expected_candidate_git_tree: str,
+) -> VerifiedInstallReceiptLedgerEvidence:
+    if (
+        type(value) is not _VerifiedRetainedRollbackEvidenceCapability
+        or value._token is not _RETAINED_ROLLBACK_EVIDENCE_TOKEN
+        or type(value._evidence) is not VerifiedInstallReceiptLedgerEvidence
+    ):
+        raise EmptyRollbackExecutionError(
+            "empty_rollback_retained_evidence_capability_invalid"
+        )
+    evidence = value._evidence
+    if (
+        evidence.installation_execution_id != plan.installation_execution_id
+        or evidence.installation_receipt_sha256
+        != plan.installation_receipt_sha256
+        or evidence.candidate_git_commit != expected_candidate_git_commit
+        or evidence.candidate_git_tree != expected_candidate_git_tree
+        or evidence.package_manifest_sha256 != plan.package_manifest_sha256
+        or evidence.resource_ledger_binding_sha256
+        != expected_resource_evidence.resource_ledger_binding_sha256
+        or evidence.resource_ledger_head_sha256
+        != expected_resource_evidence.resource_ledger_head_sha256
+        or evidence.resource_ledger_sequence
+        != expected_resource_evidence.resource_ledger_sequence
+        or evidence.exact_targets_sha256 != plan.exact_targets_sha256
+        or evidence.exact_rollback_resources_count
+        != len(ROLLBACK_RESOURCE_KEYS)
+        or evidence.retained_evidence_sha256
+        != _retained_evidence_sha256(evidence)
+    ):
+        raise EmptyRollbackExecutionError(
+            "empty_rollback_retained_evidence_capability_mismatch"
+        )
+    return evidence
+
+
+def _verify_recovery_reservation_claim(
+    evidence: object,
+    *,
+    authority_state: AuthorityState,
+    held_lock: HeldExecutionLockCapability,
+) -> str:
+    reservation = getattr(evidence, "recovery_reservation", None)
+    if reservation is None:
+        return ZERO_HEAD
+    rollback_nonce_sha256 = nonce_sha256(str(getattr(evidence, "nonce", "")))
+    installation_nonce_sha256 = str(
+        getattr(evidence, "installation_nonce_sha256", "")
+    )
+    if (
+        reservation.operation != RECOVERY_RESERVATION_OPERATION
+        or reservation.installation_execution_id
+        != getattr(evidence, "installation_execution_id", None)
+        or reservation.not_before != getattr(evidence, "not_before", None)
+        or reservation.expires_at != getattr(evidence, "expires_at", None)
+        or nonce_sha256(reservation.nonce)
+        in {rollback_nonce_sha256, installation_nonce_sha256}
+    ):
+        raise EmptyRollbackExecutionError(
+            "empty_rollback_recovery_reservation_invalid"
+        )
+    try:
+        reservation_claim = authority_state.claim_nonce(
+            reservation.nonce,
+            operation=reservation.operation,
+            execution_sha256=reservation.execution_sha256,
+            authorization_sha256=reservation.authorization_sha256,
+            scope_sha256=reservation.scope_sha256,
+            trust_bundle_sha256=reservation.trust_bundle_sha256,
+            held_lock=held_lock,
+            allow_new_claim=False,
+        )
+        validate_held_execution_lock(held_lock)
+    except AuthorityClaimNotAllowedError as error:
+        raise EmptyRollbackExecutionError(
+            "empty_rollback_recovery_reservation_absent"
+        ) from error
+    except (AuthorityStateError, ExecutionLockError) as error:
+        raise EmptyRollbackExecutionError(
+            "empty_rollback_recovery_reservation_invalid"
+        ) from error
+    if reservation_claim.result != "exact_execution_resumed":
+        raise EmptyRollbackExecutionError(
+            "empty_rollback_recovery_reservation_invalid"
+        )
+    return reservation_claim.claim_sha256
+
+
 def _claim_empty_rollback(
     capability: object,
     plan: EmptyRollbackPlan,
     *,
+    retained_evidence_capability: object,
+    expected_resource_evidence: VerifiedRollbackResourceEvidence,
+    authority_mode: RollbackAuthorityMode,
     authority_state: AuthorityState,
     clock: TrustedUtcClock,
     held_lock: HeldExecutionLockCapability,
@@ -1123,6 +1422,7 @@ def _claim_empty_rollback(
         type(authority_state) is not AuthorityState
         or authority_state.path != AUTHORITY_STATE_PATH
         or held_lock._owner.path != GLOBAL_LOCK_PATH
+        or type(authority_mode) is not RollbackAuthorityMode
         or evidence.operation != ROLLBACK_OPERATION
         or evidence.rollback_plan_sha256 != plan.plan_sha256
         or evidence.package_manifest_sha256 != plan.package_manifest_sha256
@@ -1130,11 +1430,50 @@ def _claim_empty_rollback(
         raise EmptyRollbackExecutionError(
             "empty_rollback_execution_authority_invalid"
         )
+    retained_evidence = _validate_retained_rollback_evidence_capability(
+        retained_evidence_capability,
+        plan=plan,
+        expected_resource_evidence=expected_resource_evidence,
+        expected_candidate_git_commit=evidence.candidate_git_commit,
+        expected_candidate_git_tree=evidence.candidate_git_tree,
+    )
+    rollback_nonce_sha256 = nonce_sha256(evidence.nonce)
+    if rollback_nonce_sha256 == evidence.installation_nonce_sha256:
+        raise EmptyRollbackExecutionError(
+            "empty_rollback_authority_nonce_collision"
+        )
     reading = read_trusted_utc(clock)
     not_before = _parse_timestamp(evidence.not_before)
     expires_at = _parse_timestamp(evidence.expires_at)
     if reading.observed_at < not_before:
         raise EmptyRollbackExecutionError("empty_rollback_authority_not_yet_valid")
+    reservation = evidence.recovery_reservation
+    reservation_claim_sha256 = _verify_recovery_reservation_claim(
+        evidence,
+        authority_state=authority_state,
+        held_lock=held_lock,
+    )
+    if retained_evidence.recovery_reservation_claim_sha256 != (
+        reservation_claim_sha256
+    ):
+        raise EmptyRollbackExecutionError(
+            "empty_rollback_recovery_reservation_claim_mismatch"
+        )
+    reserved_recovery = reservation_claim_sha256 != ZERO_HEAD
+    if (
+        authority_mode is RollbackAuthorityMode.START_RESERVED_ROLLBACK
+        and not reserved_recovery
+    ):
+        raise EmptyRollbackExecutionError(
+            "empty_rollback_recovery_reservation_required"
+        )
+    if (
+        authority_mode is RollbackAuthorityMode.START_ROLLBACK
+        and reservation is not None
+    ):
+        raise EmptyRollbackExecutionError(
+            "empty_rollback_reserved_authority_mode_required"
+        )
     runtime_binding = {
         "package_manifest_sha256": evidence.package_manifest_sha256,
         "installation_execution_id": evidence.installation_execution_id,
@@ -1178,6 +1517,9 @@ def _claim_empty_rollback(
             "authorization_sha256": evidence.authorization_sha256,
             "trust_bundle_sha256": evidence.trust_bundle_sha256,
             "plan_sha256": plan.plan_sha256,
+            "retained_evidence_sha256": (
+                retained_evidence.retained_evidence_sha256
+            ),
             **runtime_binding,
         },
     )
@@ -1190,13 +1532,43 @@ def _claim_empty_rollback(
             scope_sha256=evidence.scope_sha256,
             trust_bundle_sha256=evidence.trust_bundle_sha256,
             held_lock=held_lock,
-            allow_new_claim=reading.observed_at < expires_at,
+            allow_new_claim=(
+                authority_mode
+                is not RollbackAuthorityMode.RESUME_ROLLBACK
+                and (
+                    reading.observed_at < expires_at
+                    or (
+                        authority_mode
+                        is RollbackAuthorityMode.START_RESERVED_ROLLBACK
+                        and reserved_recovery
+                    )
+                )
+            ),
         )
         validate_held_execution_lock(held_lock)
     except AuthorityClaimNotAllowedError as error:
-        raise EmptyRollbackExecutionError("empty_rollback_authority_expired") from error
+        code = (
+            "empty_rollback_resume_claim_absent"
+            if authority_mode is RollbackAuthorityMode.RESUME_ROLLBACK
+            else "empty_rollback_authority_expired"
+        )
+        raise EmptyRollbackExecutionError(code) from error
     except (AuthorityStateError, ExecutionLockError) as error:
         raise EmptyRollbackExecutionError("empty_rollback_nonce_claim_failed") from error
+    if (
+        authority_mode is RollbackAuthorityMode.RESUME_ROLLBACK
+        and claim.result != "exact_execution_resumed"
+    ):
+        raise EmptyRollbackExecutionError("empty_rollback_resume_claim_invalid")
+    if (
+        authority_mode
+        in {
+            RollbackAuthorityMode.START_ROLLBACK,
+            RollbackAuthorityMode.START_RESERVED_ROLLBACK,
+        }
+        and claim.result != "nonce_claimed"
+    ):
+        raise EmptyRollbackExecutionError("empty_rollback_start_already_claimed")
     execution_id = execution_sha
     attempt_digest = _hash_domain(
         _ATTEMPT_DOMAIN,
@@ -1214,6 +1586,9 @@ def _claim_empty_rollback(
             "attempt_id": attempt_id,
             "plan_sha256": plan.plan_sha256,
             "journal_path": journal_path,
+            "retained_evidence_sha256": (
+                retained_evidence.retained_evidence_sha256
+            ),
             **runtime_binding,
         },
     )
@@ -1254,6 +1629,12 @@ def _claim_empty_rollback(
         supervisor_launcher_path=evidence.supervisor_launcher_path,
         supervisor_launcher_sha256=evidence.supervisor_launcher_sha256,
         installation_execution_id=evidence.installation_execution_id,
+        recovery_reservation_claim_sha256=(
+            reservation_claim_sha256
+        ),
+        retained_evidence_sha256=(
+            retained_evidence.retained_evidence_sha256
+        ),
         journal_binding_sha256=binding_sha,
         journal_path=journal_path,
         authority_state_path_sha256=hashlib.sha256(
@@ -1292,6 +1673,7 @@ class _EmptyRollbackController:
         claimed: object,
         journal: RollbackJournalAdapter,
         operations: EmptyRollbackOperations,
+        authority_state: AuthorityState,
         held_lock: HeldExecutionLockCapability,
         receipt_store: DurableReceiptStore,
     ) -> None:
@@ -1317,6 +1699,7 @@ class _EmptyRollbackController:
                 for name in ("records", "reserve_effect_capacity", "append")
             )
             or type(receipt_store) is not DurableReceiptStore
+            or type(authority_state) is not AuthorityState
             or not all(
                 callable(getattr(operations, name, None))
                 for name in (
@@ -1341,6 +1724,7 @@ class _EmptyRollbackController:
         self.claim = claim
         self.journal = journal
         self.operations = operations
+        self.authority_state = authority_state
         self.held_lock = held_lock
         self.receipt_store = receipt_store
         self.install_ledger_evidence: (
@@ -1442,6 +1826,10 @@ class _EmptyRollbackController:
             supervisor_launcher_sha256=self.claim.supervisor_launcher_sha256,
             installation_execution_id=self.plan.installation_execution_id,
             installation_receipt_sha256=self.plan.installation_receipt_sha256,
+            recovery_reservation_claim_sha256=(
+                self.claim.recovery_reservation_claim_sha256
+            ),
+            retained_evidence_sha256=self.claim.retained_evidence_sha256,
             eligibility_receipt_sha256=self.plan.eligibility_receipt_sha256,
             resource_ledger_binding_sha256=(
                 self.expected_resource_evidence.resource_ledger_binding_sha256
@@ -1633,6 +2021,7 @@ class _EmptyRollbackController:
                     expected_candidate_git_tree=self.plan.candidate_git_tree,
                 )
             )
+            self._require_current_resource_ledger_anchor()
             return
         if step.step_id == "R04_ACQUIRE_ROLLBACK_CONTROLLER_AUTHORITY_MARKER":
             self._acquire_controller_authority_marker()
@@ -1724,6 +2113,30 @@ class _EmptyRollbackController:
             expected_candidate_git_commit=self.plan.candidate_git_commit,
             expected_candidate_git_tree=self.plan.candidate_git_tree,
         )
+        self._require_current_resource_ledger_anchor()
+
+    def _require_current_resource_ledger_anchor(self) -> None:
+        self._require_lock()
+        try:
+            anchor = self.authority_state.read_resource_ledger_anchor(
+                self.expected_resource_evidence.resource_ledger_binding_sha256,
+                held_lock=self.held_lock,
+            )
+        except AuthorityStateError as error:
+            raise EmptyRollbackExecutionError(
+                "empty_rollback_resource_ledger_anchor_invalid"
+            ) from error
+        self._require_lock()
+        if (
+            anchor.result != "resource_anchor_current"
+            or anchor.sequence
+            != self.expected_resource_evidence.resource_ledger_sequence
+            or anchor.head_sha256
+            != self.expected_resource_evidence.resource_ledger_head_sha256
+        ):
+            raise EmptyRollbackExecutionError(
+                "empty_rollback_resource_ledger_anchor_mismatch"
+            )
 
     def _require_current_install_binding(self) -> None:
         self._require_lock()
@@ -1796,7 +2209,7 @@ class _EmptyRollbackController:
             resource_ledger_sequence=evidence.resource_ledger_sequence,
             eligibility_receipt_sha256=self.plan.eligibility_receipt_sha256,
             retained_audit_set_sha256=self.retained_audit_set_sha256,
-            exact_targets_absent_count=len(self.resources),
+            exact_rollback_resources_absent_count=len(self.resources),
         )
         try:
             durable = self.receipt_store.write_once(
@@ -1966,6 +2379,7 @@ def _run_authorized_empty_store_rollback(
     operations: EmptyRollbackOperations | None,
     resolved_store_spec: Mapping[str, object] | None,
     receipt_store: DurableReceiptStore,
+    authority_mode: RollbackAuthorityMode,
     require_durable_journal: bool,
     require_production_receipt_store: bool,
 ) -> EmptyRollbackExecutionReceipt:
@@ -2046,6 +2460,7 @@ def _run_authorized_empty_store_rollback(
         type(receipt_store) is not DurableReceiptStore
         or type(require_durable_journal) is not bool
         or type(require_production_receipt_store) is not bool
+        or type(authority_mode) is not RollbackAuthorityMode
         or (
             require_production_receipt_store
             and (
@@ -2076,18 +2491,21 @@ def _run_authorized_empty_store_rollback(
         raise EmptyRollbackExecutionError(
             "empty_rollback_receipt_store_invalid"
         ) from error
-    claimed = _claim_empty_rollback(
-        verified_rollback_capability,
-        plan,
-        authority_state=authority_state,
-        clock=clock,
-        held_lock=held_lock,
-    )
-    claim_evidence = claimed_empty_rollback_evidence(claimed)
-    if claim_evidence.installation_execution_id != plan.installation_execution_id:
-        raise EmptyRollbackExecutionError(
-            "empty_rollback_installation_execution_binding_mismatch"
+    try:
+        preclaim_rollback_evidence = rollback_capability_evidence(
+            verified_rollback_capability
         )
+        recovery_reservation_claim_sha256 = (
+            _verify_recovery_reservation_claim(
+                preclaim_rollback_evidence,
+                authority_state=authority_state,
+                held_lock=held_lock,
+            )
+        )
+    except RollbackAuthorityError as error:
+        raise EmptyRollbackExecutionError(
+            "empty_rollback_execution_authority_invalid"
+        ) from error
     try:
         durable_install = receipt_store.read(
             ReceiptArtifact.INSTALL,
@@ -2102,6 +2520,39 @@ def _run_authorized_empty_store_rollback(
             raise EmptyRollbackExecutionError(
                 "empty_rollback_install_receipt_preclaim_mismatch"
             )
+        retained_evidence_capability = (
+            verify_retained_install_receipt_and_anchored_ledger(
+                canonical_json_bytes(dict(durable_install.canonical_receipt)),
+                resources,
+                authority_state=authority_state,
+                held_lock=held_lock,
+                recovery_reservation_claim_sha256=(
+                    recovery_reservation_claim_sha256
+                ),
+            )
+        )
+    except EmptyRollbackExecutionError:
+        raise
+    except DurableReceiptError as error:
+        raise EmptyRollbackExecutionError(
+            "empty_rollback_preclaim_receipt_validation_failed"
+        ) from error
+    claimed = _claim_empty_rollback(
+        verified_rollback_capability,
+        plan,
+        retained_evidence_capability=retained_evidence_capability,
+        expected_resource_evidence=resource_evidence,
+        authority_mode=authority_mode,
+        authority_state=authority_state,
+        clock=clock,
+        held_lock=held_lock,
+    )
+    claim_evidence = claimed_empty_rollback_evidence(claimed)
+    if claim_evidence.installation_execution_id != plan.installation_execution_id:
+        raise EmptyRollbackExecutionError(
+            "empty_rollback_installation_execution_binding_mismatch"
+        )
+    try:
         durable_eligibility = receipt_store.write_once(
             ReceiptArtifact.EMPTY_ROLLBACK_ELIGIBILITY,
             plan.installation_execution_id,
@@ -2187,6 +2638,7 @@ def _run_authorized_empty_store_rollback(
             claimed=claimed,
             journal=journal,
             operations=operations,
+            authority_state=authority_state,
             held_lock=held_lock,
             receipt_store=receipt_store,
         ).run()
@@ -2209,6 +2661,7 @@ def _run_authorized_empty_store_rollback_synthetic(
     journal_factory: RollbackJournalFactory,
     operations: EmptyRollbackOperations,
     receipt_store: DurableReceiptStore,
+    authority_mode: RollbackAuthorityMode = RollbackAuthorityMode.START_ROLLBACK,
 ) -> EmptyRollbackExecutionReceipt:
     """Private test harness path for fault-injected in-process journals."""
 
@@ -2227,6 +2680,7 @@ def _run_authorized_empty_store_rollback_synthetic(
         operations=operations,
         resolved_store_spec=None,
         receipt_store=receipt_store,
+        authority_mode=authority_mode,
         require_durable_journal=False,
         require_production_receipt_store=False,
     )
@@ -2245,6 +2699,7 @@ def _run_authorized_empty_store_rollback_durable_synthetic(
     journal_factory: RollbackJournalFactory,
     operations: EmptyRollbackOperations,
     receipt_store: DurableReceiptStore,
+    authority_mode: RollbackAuthorityMode = RollbackAuthorityMode.START_ROLLBACK,
 ) -> EmptyRollbackExecutionReceipt:
     """Private durable-journal test path requiring a synthetic receipt store."""
 
@@ -2263,6 +2718,7 @@ def _run_authorized_empty_store_rollback_durable_synthetic(
         operations=operations,
         resolved_store_spec=None,
         receipt_store=receipt_store,
+        authority_mode=authority_mode,
         require_durable_journal=True,
         require_production_receipt_store=False,
     )
@@ -2304,6 +2760,79 @@ def run_authorized_empty_store_rollback(
         operations=None,
         resolved_store_spec=resolved_store_spec,
         receipt_store=receipt_store,
+        authority_mode=RollbackAuthorityMode.START_ROLLBACK,
+        require_durable_journal=True,
+        require_production_receipt_store=True,
+    )
+
+
+def start_reserved_authorized_empty_store_rollback(
+    *,
+    verified_rollback_capability: object,
+    verified_package_capability: object,
+    verified_controller_runtime_capability: object,
+    eligibility_receipt: Mapping[str, object],
+    resources: object,
+    authority_state: AuthorityState,
+    clock: TrustedUtcClock,
+    held_lock: HeldExecutionLockCapability,
+    resolved_store_spec: Mapping[str, object],
+    receipt_store: DurableReceiptStore,
+) -> EmptyRollbackExecutionReceipt:
+    """Consume a preclaimed recovery reservation for the first rollback only."""
+
+    return _run_authorized_empty_store_rollback(
+        verified_rollback_capability=verified_rollback_capability,
+        verified_package_capability=verified_package_capability,
+        verified_controller_runtime_capability=(
+            verified_controller_runtime_capability
+        ),
+        eligibility_receipt=eligibility_receipt,
+        resources=resources,
+        authority_state=authority_state,
+        clock=clock,
+        held_lock=held_lock,
+        journal_factory=None,
+        operations=None,
+        resolved_store_spec=resolved_store_spec,
+        receipt_store=receipt_store,
+        authority_mode=RollbackAuthorityMode.START_RESERVED_ROLLBACK,
+        require_durable_journal=True,
+        require_production_receipt_store=True,
+    )
+
+
+def resume_authorized_empty_store_rollback(
+    *,
+    verified_rollback_capability: object,
+    verified_package_capability: object,
+    verified_controller_runtime_capability: object,
+    eligibility_receipt: Mapping[str, object],
+    resources: object,
+    authority_state: AuthorityState,
+    clock: TrustedUtcClock,
+    held_lock: HeldExecutionLockCapability,
+    resolved_store_spec: Mapping[str, object],
+    receipt_store: DurableReceiptStore,
+) -> EmptyRollbackExecutionReceipt:
+    """Resume only the exact previously claimed rollback, including after expiry."""
+
+    return _run_authorized_empty_store_rollback(
+        verified_rollback_capability=verified_rollback_capability,
+        verified_package_capability=verified_package_capability,
+        verified_controller_runtime_capability=(
+            verified_controller_runtime_capability
+        ),
+        eligibility_receipt=eligibility_receipt,
+        resources=resources,
+        authority_state=authority_state,
+        clock=clock,
+        held_lock=held_lock,
+        journal_factory=None,
+        operations=None,
+        resolved_store_spec=resolved_store_spec,
+        receipt_store=receipt_store,
+        authority_mode=RollbackAuthorityMode.RESUME_ROLLBACK,
         require_durable_journal=True,
         require_production_receipt_store=True,
     )
@@ -2320,6 +2849,7 @@ __all__ = [
     "GLOBAL_LOCK_PATH",
     "MAX_RETAINED_INSTALL_RECEIPT_BYTES",
     "ROLLBACK_JOURNAL_SCHEMA",
+    "RollbackAuthorityMode",
     "RollbackEvent",
     "RollbackJournalAdapter",
     "RollbackJournalRecord",
@@ -2329,8 +2859,11 @@ __all__ = [
     "canonical_live_rollback_controller_authority_marker_sha256",
     "claimed_empty_rollback_evidence",
     "run_authorized_empty_store_rollback",
+    "resume_authorized_empty_store_rollback",
+    "start_reserved_authorized_empty_store_rollback",
     "validate_empty_rollback_controller_authority_marker_capability",
     "validate_install_receipt_ledger_capability",
     "validate_rollback_records",
     "verify_retained_install_receipt_and_ledger",
+    "verify_retained_install_receipt_and_anchored_ledger",
 ]

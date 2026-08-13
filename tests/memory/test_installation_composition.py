@@ -28,6 +28,7 @@ from tools.governed_memory_install.execution_capability import (
     ClaimedExecutionBindingEvidence,
     _ClaimedExecutionBinding,
     _CLAIMED_EXECUTION_TOKEN,
+    verified_dormant_install_authority_identity,
 )
 from tools.governed_memory_install.execution_lock import GlobalExecutionLock
 from tools.governed_memory_install.authority_state import AuthorityState
@@ -54,8 +55,10 @@ from tools.governed_memory_install.install_entrypoint import (
     INACTIVE_REFUSAL_CODE,
     InstallEntrypointError,
     _run_authorized_dormant_store_install_synthetic,
+    _resume_authorized_dormant_store_install_synthetic,
     production_install_postgres_stage_receipt_sink,
     run_authorized_dormant_store_install,
+    resume_authorized_dormant_store_install,
 )
 from tools.governed_memory_install.durable_receipts import DurableReceiptStore
 from tools.governed_memory_install.journal import DurableJournal
@@ -1490,6 +1493,41 @@ class InstallationCompositionTests(unittest.TestCase):
             receipt_store=receipt_store,
         )
         verified = verify_install_receipt(receipt)
+        install_identity = verified_dormant_install_authority_identity(
+            scope_capability
+        )
+        self.assertEqual(verified["execution_id"], install_identity.execution_id)
+        canonical_claim = state.claim_nonce(
+            "N" * 48,
+            operation=install_identity.operation,
+            execution_sha256=install_identity.execution_sha256,
+            authorization_sha256=install_identity.authorization_sha256,
+            scope_sha256=install_identity.scope_sha256,
+            trust_bundle_sha256=install_identity.trust_bundle_sha256,
+            held_lock=self.lock.held_capability(),
+            allow_new_claim=False,
+        )
+        self.assertEqual(canonical_claim.result, "exact_execution_resumed")
+        self.assertEqual(
+            (
+                canonical_claim.nonce_sha256,
+                canonical_claim.operation_sha256,
+                canonical_claim.execution_sha256,
+                canonical_claim.authorization_sha256,
+                canonical_claim.scope_sha256,
+                canonical_claim.trust_bundle_sha256,
+                canonical_claim.claim_sha256,
+            ),
+            (
+                install_identity.authorization_nonce_sha256,
+                install_identity.operation_sha256,
+                install_identity.execution_sha256,
+                install_identity.authorization_sha256,
+                install_identity.scope_sha256,
+                install_identity.trust_bundle_sha256,
+                install_identity.claim_sha256,
+            ),
+        )
         self.assertEqual(verified["resource_ledger_sequence"], 15)
         self.assertEqual(verified["journal_sequence"], 38)
         self.assertEqual(
@@ -1499,7 +1537,7 @@ class InstallationCompositionTests(unittest.TestCase):
         self.assertRegex(backend_readiness_sha, r"^[0-9a-f]{64}$")
         self.assertEqual(readiness_probe.fresh_calls, 1)
         self.assertEqual(readiness_probe.terminal_calls, 1)
-        resumed = _run_authorized_dormant_store_install_synthetic(
+        resumed = _resume_authorized_dormant_store_install_synthetic(
             verified_scope_capability=scope_capability,
             verified_package_capability=package_capability,
             verified_controller_runtime_capability=runtime_capability,
@@ -1566,7 +1604,7 @@ class InstallationCompositionTests(unittest.TestCase):
                 side_effect=production_dependencies,
             ),
         ):
-            public_receipt = run_authorized_dormant_store_install(
+            public_receipt = resume_authorized_dormant_store_install(
                 verified_scope_capability=scope_capability,
                 verified_package_capability=package_capability,
                 verified_controller_runtime_capability=runtime_capability,
@@ -1576,7 +1614,7 @@ class InstallationCompositionTests(unittest.TestCase):
                 prerequisites=prerequisites,
                 receipt_store=receipt_store,
             )
-            public_resumed = run_authorized_dormant_store_install(
+            public_resumed = resume_authorized_dormant_store_install(
                 verified_scope_capability=scope_capability,
                 verified_package_capability=package_capability,
                 verified_controller_runtime_capability=runtime_capability,
@@ -1599,7 +1637,7 @@ class InstallationCompositionTests(unittest.TestCase):
         with self.assertRaisesRegex(
             InstallEntrypointError, "dormant_install_backend_refused"
         ):
-            _run_authorized_dormant_store_install_synthetic(
+            _resume_authorized_dormant_store_install_synthetic(
                 verified_scope_capability=scope_capability,
                 verified_package_capability=package_capability,
                 verified_controller_runtime_capability=runtime_capability,

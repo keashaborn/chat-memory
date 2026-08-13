@@ -83,7 +83,7 @@ def _bound_spec() -> dict[str, object]:
         static,
         ExecutionBinding(
             BINDING_SHA256,
-            "phase9h-test",
+            "phase9j-test",
             "a" * 64,
             EXECUTION_ID,
             PACKAGE_SHA256,
@@ -679,14 +679,24 @@ class QdrantAdapterTests(unittest.TestCase):
         return {
             "result": {
                 "points_count": 0,
+                "indexed_vectors_count": 0,
+                "segments_count": 2,
+                "status": "green",
+                "optimizer_status": "ok",
+                "payload_schema": {},
+                "update_queue": {"length": 0},
                 "config": {
                     "params": {
                         "vectors": {"size": 3072, "distance": "Dot"},
                         "on_disk_payload": True,
                         "replication_factor": 1,
+                        "shard_number": 1,
+                        "write_consistency_factor": 1,
                     }
                 },
-            }
+            },
+            "status": "ok",
+            "time": 0.001,
         }
 
     def test_create_uses_fixed_404_probe_then_fixed_request_bytes(self) -> None:
@@ -792,6 +802,36 @@ class QdrantAdapterTests(unittest.TestCase):
                 "terminal_qdrant_collection_config_invalid",
             ):
                 adapter.observe_collection()
+
+    def test_pinned_collection_update_queue_shape_is_bounded(self) -> None:
+        for value in (-1, 1, True, 0.0, {"length": 0, "extra": 1}):
+            collection = self._collection()
+            collection["result"]["update_queue"] = (
+                value if isinstance(value, dict) else {"length": value}
+            )
+            client = FakeQdrantClient()
+            adapter = ClosedQdrantEffects(
+                client=client, artifacts=_artifacts()
+            )
+            client.queue(
+                QdrantRequestId.OBSERVE_COLLECTION, 200, collection
+            )
+            with self.subTest(value=value), self.assertRaisesRegex(
+                LinuxLiveAdapterError,
+                "qdrant_collection_shape_invalid",
+            ):
+                adapter.observe_collection()
+
+        collection = self._collection()
+        del collection["result"]["update_queue"]
+        client = FakeQdrantClient()
+        adapter = ClosedQdrantEffects(client=client, artifacts=_artifacts())
+        client.queue(QdrantRequestId.OBSERVE_COLLECTION, 200, collection)
+        with self.assertRaisesRegex(
+            LinuxLiveAdapterError,
+            "qdrant_collection_shape_invalid",
+        ):
+            adapter.observe_collection()
 
     def test_fresh_store_refuses_any_unrelated_collection(self) -> None:
         client = FakeQdrantClient()

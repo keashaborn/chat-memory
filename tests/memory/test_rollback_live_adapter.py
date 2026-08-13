@@ -648,6 +648,8 @@ class ExactPhysicalRollbackOperationsTests(unittest.TestCase):
             installation_receipt_sha256=str(
                 self.install_receipt["receipt_sha256"]
             ),
+            recovery_reservation_claim_sha256="0" * 64,
+            retained_evidence_sha256="b" * 64,
             eligibility_receipt_sha256=str(self.eligibility["receipt_sha256"]),
             resource_ledger_binding_sha256=(
                 evidence.resource_ledger_binding_sha256
@@ -855,6 +857,132 @@ class ExactPhysicalRollbackOperationsTests(unittest.TestCase):
         self.assertNotIn(
             "remove_exact_qdrant_alias", {operation for operation, key in self.driver.calls}
         )
+
+    def test_completed_replay_with_absent_stores_reuses_durable_empty_state(
+        self,
+    ) -> None:
+        for resource_key in self.driver.states:
+            self.driver.states[resource_key] = "absent"
+
+        marker_request = self._request(3)
+        acquisition = (
+            self.adapter.acquire_empty_rollback_controller_authority_marker(
+                marker_request
+            )
+        )
+        capability = self._capability(marker_request, acquisition)
+        observed = self.adapter.observe_empty_eligibility(
+            self._request(5), capability
+        )
+
+        self.assertEqual(observed, self.eligibility)
+        self.assertEqual(self.probe.calls, 0)
+        self.assertIsNotNone(self.marker_transport.held)
+        self.assertIsNotNone(
+            self.marker_transport.held.semantic_empty_state_sha256
+        )
+
+        final_request = self._request(21)
+        unused, resources = verified_rollback_resource_parts(
+            self.verified_resources
+        )
+        self.assertTrue(
+            self.adapter.exact_resources_absent(
+                final_request, resources, capability
+            )
+        )
+        self.adapter.verify_install_receipt_and_ledger(final_request)
+        retained = self.adapter.observe_retained_audit_set(
+            final_request, RETAINED_AUDIT_KEYS, capability
+        )
+        self.assertEqual(set(retained), set(RETAINED_AUDIT_KEYS))
+        self.assertEqual(
+            retained["installation_receipt"],
+            self.receipts.read(
+                ReceiptArtifact.INSTALL, EXECUTION_ID
+            ).canonical_file_sha256,
+        )
+        self.assertEqual(
+            retained["eligibility_receipt"],
+            self.receipts.read(
+                ReceiptArtifact.EMPTY_ROLLBACK_ELIGIBILITY,
+                EXECUTION_ID,
+            ).canonical_file_sha256,
+        )
+
+        self.adapter.release_empty_rollback_controller_authority_marker(
+            marker_request, capability
+        )
+        self.assertIsNone(self.marker_transport.held)
+        self.assertEqual(self.marker_transport.releases, 1)
+        self.assertEqual(self.driver.calls, [])
+
+    def test_completed_replay_recovers_persisted_semantic_marker_then_releases(
+        self,
+    ) -> None:
+        for resource_key in self.driver.states:
+            self.driver.states[resource_key] = "absent"
+
+        marker_request = self._request(3)
+        first_acquisition = (
+            self.adapter.acquire_empty_rollback_controller_authority_marker(
+                marker_request
+            )
+        )
+        first_capability = self._capability(
+            marker_request, first_acquisition
+        )
+        self.adapter.observe_empty_eligibility(
+            self._request(5), first_capability
+        )
+        persisted = self.marker_transport.held
+        self.assertIsNotNone(persisted)
+        self.assertIsNotNone(persisted.semantic_empty_state_sha256)
+
+        replay_adapter = ExactPhysicalEmptyRollbackOperations(
+            bindings=self.bindings,
+            verified_resources=self.verified_resources,
+            driver=self.driver,
+            eligibility_probe=self.probe,
+            controller_authority_marker_transport=self.marker_transport,
+            retained_audit_source=_Audit(),
+            receipt_store=self.receipts,
+        )
+        replay_acquisition = (
+            replay_adapter.acquire_empty_rollback_controller_authority_marker(
+                marker_request
+            )
+        )
+        replay_capability = self._capability(
+            marker_request, replay_acquisition
+        )
+        replay_adapter.observe_empty_eligibility(
+            self._request(5), replay_capability
+        )
+
+        self.assertEqual(self.probe.calls, 0)
+        self.assertEqual(self.marker_transport.held, persisted)
+        final_request = self._request(21)
+        unused, resources = verified_rollback_resource_parts(
+            self.verified_resources
+        )
+        self.assertTrue(
+            replay_adapter.exact_resources_absent(
+                final_request, resources, replay_capability
+            )
+        )
+        replay_adapter.verify_install_receipt_and_ledger(final_request)
+        retained = replay_adapter.observe_retained_audit_set(
+            final_request, RETAINED_AUDIT_KEYS, replay_capability
+        )
+        self.assertEqual(set(retained), set(RETAINED_AUDIT_KEYS))
+
+        replay_adapter.release_empty_rollback_controller_authority_marker(
+            marker_request, replay_capability
+        )
+        self.assertIsNone(self.marker_transport.held)
+        self.assertEqual(self.marker_transport.releases, 1)
+        self.assertEqual(self.driver.calls, [])
 
     def test_logical_child_effects_fail_closed_until_plan_marks_verification(self) -> None:
         unused, capability, acquisition = self._remove_supervisor_and_acquire()

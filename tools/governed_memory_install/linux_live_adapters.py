@@ -2256,6 +2256,7 @@ class ClosedQdrantEffects:
             if type(result) is not dict or not {
                 "config",
                 "points_count",
+                "update_queue",
             } <= set(result) <= {
                 "config",
                 "indexed_vectors_count",
@@ -2264,6 +2265,7 @@ class ClosedQdrantEffects:
                 "points_count",
                 "segments_count",
                 "status",
+                "update_queue",
             }:
                 raise KeyError
             if type(result["config"]) is not dict or not {
@@ -2308,6 +2310,14 @@ class ClosedQdrantEffects:
             }:
                 raise KeyError
             points_count = result["points_count"]
+            update_queue = result["update_queue"]
+            if (
+                type(update_queue) is not dict
+                or set(update_queue) != {"length"}
+                or type(update_queue["length"]) is not int
+                or update_queue["length"] != 0
+            ):
+                raise KeyError
             normalized = QdrantCollectionConfiguration(
                 vector_size=vectors["size"],
                 distance=vectors["distance"],

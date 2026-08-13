@@ -1,168 +1,69 @@
 # Governed Memory validation boundary
 
-## What validation proves
+## Offline repository checks
 
-The current validators read repository files and exercise a sealed synthetic
-model. They can prove exact package membership, hashes, dependency closure,
-closed contracts, deterministic controller behavior, refusal paths, absence of
-forbidden predecessor imports, and that the current source-bound runtime was
-rebuilt from hash-locked offline wheels.
-
-The build receipt alone cannot prove PostgreSQL, Qdrant, Docker, systemd,
-networking, secrets, routes, or application consumption. The separate Phase 8G
-receipt proves the exact current candidate in invocation-owned disposable
-resources only; it is not installation or live-production evidence.
-
-## Canonical repository checks
-
-Run on **seebx** from the isolated Phase 8D candidate carrying the current
-Phase 9H repository-only patch:
+Run on **seebx** from the isolated candidate:
 
 ```bash
 python3 -I -B tools/governed_memory_install/package.py verify-package
 python3 -I -B tools/governed_memory_validation/verify_store_migration_manifest.py
-python3 -I -B tools/governed_memory_validation/verify_migration_manifest.py \
-  governed-memory-migrations
+python3 -I -B tools/governed_memory_validation/verify_migration_manifest.py governed-memory-migrations
 python3 -I -B tools/governed_memory_release/release_guard.py verify-artifacts
-python3 -B -m unittest discover -s tests/memory -p 'test_*.py'
+PYTHONDONTWRITEBYTECODE=1 python3 -I -B -m unittest discover -s tests/memory -p 'test_*.py'
 git diff --check
 ```
 
-These are offline checks. They verify the current bytes, current runtime build
-receipt, promoted Phase 8G proof, and archived Phase 7C evidence. They do not run
-Docker or connect to a store. The release guard remains fail-closed because
-dormant installation is not authorized and later activation blockers remain.
+The package verifier must report schema v5, Phase 9J inactive state, exactly 74
+artifacts, no proof receipt inside the sealed package, no installation, no
+secret access, no image staging, and no activation. The release guard must
+still refuse production release with
+`inactive_installation_package_not_authorized`.
 
-## Closed current package
+These checks prove current bytes, contracts, source closure, deterministic
+controller behavior, and fail-closed paths. They do not prove Docker,
+PostgreSQL, Qdrant, systemd, process-crash recovery, or installation.
 
-The checked-in manifest must be byte-identical to generator output. Every local
-Python import and package initializer must be a manifest member. Extra files,
-old version-suffixed module names, Phase 8A source, migration 0002, runtime
-credentials, application services, and legacy proof payloads are forbidden from
-the stores-only package.
+## Disposable Linux proof
 
-The current canonical modules are unversioned filenames. Schema-version values
-inside signed or hashed documents remain explicit protocol identities and are
-not rewritten merely to make filenames shorter.
+The external Phase 9J proof is a separate, explicitly authorized operation on
+**seebx**. Only the repository issuer is invoked. It verifies the clean
+candidate and exact controller-runtime receipt, creates the fixed root-owned
+recovery capsule, acquires the whole-proof lock, and launches the sealed
+runtime by its immutable release identity.
 
-## Evidence classifications
+The proof may use only pinned local PostgreSQL 16.14 and Qdrant 1.19.0 images,
+fresh invocation-owned credentials, fixed loopback ports, synthetic data, and
+fixed disposable resource names. It must perform install, real controller
+process termination and resume, cold controller restart, reserved empty
+rollback, rollback termination and resume, and exact final absence.
 
-- Phase 7C: runtime and application/chat-deletion receipts archived under
-  `ops/governed_memory/history/phase7c/`; historical and non-reusable for the
-  current candidate.
-- Current runtime build: successfully rebuilt from hash-locked offline wheels;
-  source-bound receipt current; not Docker, store, installation, or activation
-  proof.
-- Current installation package: exact manifest membership statically verified;
-  claim-bound
-  non-CLI install and empty-rollback compositions, durable journals, an anchored
-  identity ledger, canonical operation receipts, a create-once durable receipt
-  store whose public entrypoints require the canonical root-owned executions
-  path, fresh terminal-readiness replay checks, opaque rollback receipt/ledger
-  binding, a secure runtime verifier, an exact release-path launcher,
-  resolved-spec Docker-label binding, a durable controller rollback marker,
-  and retained audit hashes are packaged. R04/R05 place a live semantic-empty
-  check before stop and physical removal and keep the marker through receipt
-  persistence. The marker is not physical writer exclusion; direct external
-  writers remain a blocker. The verifier closes the
-  complete manifest-defined release tree with no extras and requires exact
-  equality between the locked and installed normalized distribution sets. The
-  rollback authority claim validates trusted time and the exact global lock
-  before any durable receipt read or eligibility-receipt persistence. Its
-  release-tree hash is bound through the claim, journal, host ownership, and
-  install receipt. Empty rollback separately requires the verified runtime
-  capability and binds the exact runtime/release identity through signed
-  authority, claim, journal, operation requests and observations, controller marker,
-  retained install receipt, and rollback receipt.
+The proof must not read production data or credentials, call a provider,
+connect to production endpoints, alter live services, import legacy memory, or
+activate the successor. Its content-free receipt is external to the sealed
+package and is promotable only when all terminal checks pass.
 
-  Phase 9H additionally packages closed post-claim Linux install and dependency
-  factory code, a fixed loopback readiness DTO adapter, a physical ledger-bound
-  empty-rollback adapter, and controller runtime/release builder orchestration.
-  These reviewed layers expose typed operation models. Immutable Docker,
-  systemd, root-file, and Qdrant request/observation contracts are packaged.
-  Narrow selected-field image inspection and exact-ledger-container supervisor
-  inspect/start/stop primitives are retained and repaired. Non-PostgreSQL Linux
-  transports are concrete, but no complete bound factory exists until the
-  concrete Psycopg adapter exists. The PostgreSQL contract closes exact
-  source identities and all required native-translation, session-role,
-  privacy, catalog, and rollback-prefix conditions. A fixed orchestration,
-  resume, and 16-query catalog machine is packaged and locks before every
-  observation, but operation-to-SQL translation, the concrete Psycopg adapter,
-  and an approved terminal catalog are absent, so construction refuses.
-  Psycopg with its binary extra, version 3.3.4, is only the preferred
-  synchronous driver family and version; no exact wheel filenames or hashes
-  are selected, locked, or verified;
-  CPython and wheelhouse bytes are not staged; no approved terminal PostgreSQL
-  catalog exists. Runtime publication rejects noncanonical or duplicate JSON,
-  binds its receipt to the immutable destination, rechecks staged identities,
-  checks same-device rename preconditions, and persists exact intent before the
-  first rename. Exact terminal state replays with renewed fsyncs; ambiguous
-  post-intent restarts are fenced for manual review without generic cleanup.
-  Concrete production publication
-  primitives and independent substrate payload-tree proof remain absent. The
-  runtime builder deterministically refuses these current
-  inputs, and the runtime capability verifier rejects incomplete selected
-  inputs before any filesystem or process probe. The runtime verifier was not executed,
-  no controller runtime was built, staged, or installed, no release was
-  published, no installation occurred, and current live installation state was
-  not reverified.
-- Current full-chain migration: artifact integrity and Phase 8G disposable
-  apply/rollback/absence/reapply verified; not production-applied.
-- Current disposable PostgreSQL/Qdrant validation: passed against commit
-  `c8691f0bef993b8e2edda982fe634c4b83e68590`, tree
-  `9d95027a736a44d394c0f859821daa1554c88e22`, PostgreSQL 16.14, and Qdrant
-  1.19.0. The proof log SHA-256 is
-  `9ff51264aff1c56d2c8570311ba116b64e1adae8d0282bae2cd395a745a400c1`.
-- Synthetic controller and in-process composition tests: repository evidence
-  only; not promoted as live installation or rollback proof.
-- Release: refused with `inactive_installation_package_not_authorized`.
-- Production: no successor installation or activation evidence; no production
-  data read and no provider call made.
+## Recovery and refusal
 
-Any future live claim must separately bind source, installed bytes,
-configuration, enablement, running process, invocation, and consumption.
+The recovery capsule is create-once root-owned state, not cleanup authority.
+The runner first reconciles an exact prior capsule/publication state. A
+supervised run may perform one start-or-recover launch followed by at most one
+recover-only launch. Missing claims, foreign resources, identity drift,
+ambiguous publication prefixes, expired unreserved authority, or incomplete
+terminal absence fail closed.
 
-## Retirement verification
+Never delete or normalize an ambiguous journal, receipt, claim, runtime
+publication, capsule, or disposable resource by assumption. Diagnose it under
+the same global lock and exact identities.
 
-Phase 8D requires all of the following:
+## Evidence classification
 
-1. no executable Phase 8A successor-install source or test remains in the active
-   tree;
-2. no current successor control, CI job, test, or document treats Phase 8A as
-   authority;
-3. current exact inventories name only canonical successor modules;
-4. the release guard verifies the current package and store migration manifest;
-5. deleted artifact hashes are retained only in the compact retirement ledger;
-6. Git history, rather than an active-tree code archive, preserves old bytes;
-7. focused and full tests pass without Docker or live-store access.
+- Phase 8G: current application/runtime and chat-deletion disposable evidence;
+  not installation or activation evidence.
+- Phase 9J package verification: static repository evidence only.
+- Phase 9J disposable Linux receipt: install/recovery/empty-rollback evidence
+  for fixed disposable resources only; never production activation evidence.
+- Production: remains unchanged and activation-blocked until Phase 10 receives
+  separate authority and proves the full installed-to-consumed chain.
 
-Phase 8F additionally requires that the current app/response graph and default
-CI have no Memory V1 or stored-preference dependency. Remaining V1/v5 files are
-quarantined and are not considered current proof. Their physical deletion is a
-later, separately authorized closure.
-
-## Safety boundary
-
-The Phase 8G application-runtime rebuild used hash-locked offline wheels. The
-successful disposable run used
-only invocation-owned PostgreSQL/Qdrant resources with pinned local image
-digests, synthetic inputs, no persistent mounts, zero provider calls, and zero
-production reads or endpoint calls. Independent postflight checks found no
-owned resources or listeners and confirmed unchanged live repository, service,
-and Docker identities. Phase 9H added repository code and exercised only
-synthetic in-process tests; it did not run Docker, access secrets, read
-production data, call a provider, build or install the controller runtime, or
-change a service, PostgreSQL, or Qdrant. Source preparation, installation, and
-production operations remain separately authorized work.
-
-An earlier failed attempt produced no terminal receipt. Its fail-closed worker
-mode exposed stale test setup and receipt labels; cleanup completed before the
-corrected canonical run. Do not combine either log or any partial receipt from
-that attempt with the successful proof.
-
-Disposable chat-erasure validation remained limited to chat-owned data and
-conversational derivatives. Representative synthetic structured LifeSwitch
-fixtures were hash-identical before and after, but production LifeSwitch data
-was not inspected. Accounts and structured LifeSwitch libraries, food logs,
-workouts, weightlifting sessions, measurements, plans, and people data remain
-excluded from deletion.
+Chat-erasure validation remains chat-only. Accounts and structured LifeSwitch
+records are outside the deletion graph.

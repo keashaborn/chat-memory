@@ -36,11 +36,15 @@ from tools.governed_memory_install.rollback_authority import (
     TRUST_BUNDLE_SCHEMA_VERSION,
     verify_empty_rollback_execution_capability,
 )
+from tools.governed_memory_install.execution_capability import (
+    verified_dormant_install_authority_identity,
+)
 from tools.governed_memory_install.package_capability import (
     verified_package_evidence,
 )
 from tools.governed_memory_install.resource_identity import load_ledger
 from tests.memory.test_empty_rollback_authority import (
+    INSTALL_PACKAGE_TEST_NONCE_SHA256,
     build_verified_controller_runtime,
     build_verified_install_package,
 )
@@ -53,7 +57,10 @@ class EmptyRollbackPlanTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         os.chmod(self.root, 0o700)
         self.ledger_counter = 0
-        self.package_capability = build_verified_install_package()
+        (
+            self.install_scope_capability,
+            self.package_capability,
+        ) = build_verified_install_package(return_scope_capability=True)
         self.runtime_capability = build_verified_controller_runtime(
             self.package_capability
         )
@@ -61,7 +68,11 @@ class EmptyRollbackPlanTests(unittest.TestCase):
         self.commit = package.candidate_git_commit
         self.tree = package.candidate_git_tree
         self.package_sha = package.package_manifest_sha256
-        self.installation_execution_id = "6" * 64
+        self.installation_execution_id = (
+            verified_dormant_install_authority_identity(
+                self.install_scope_capability
+            ).execution_id
+        )
         self.install_receipt_sha = "d" * 64
         records = self._ledger_records()
         self.ledger_head = records[-1].entry_sha256
@@ -177,6 +188,7 @@ class EmptyRollbackPlanTests(unittest.TestCase):
             installation_execution_id=str(
                 selected_eligibility["installation_execution_id"]
             ),
+            installation_nonce_sha256=INSTALL_PACKAGE_TEST_NONCE_SHA256,
             installation_receipt_sha256=str(
                 selected_eligibility["installation_receipt_sha256"]
             ),
@@ -284,6 +296,7 @@ class EmptyRollbackPlanTests(unittest.TestCase):
             expected_key_id=key_id,
             expected_trust_bundle_sha256=hashlib.sha256(trust_bytes).hexdigest(),
             expected_bindings=bindings,
+            verified_install_scope_capability=self.install_scope_capability,
             verified_package_capability=self.package_capability,
             verified_controller_runtime_capability=self.runtime_capability,
         )

@@ -5,10 +5,11 @@ from __future__ import annotations
 
 This module has no installation, rollback, activation, Docker, network, secret,
 PostgreSQL, or Qdrant execution surface. Phase 7C receipts are immutable
-historical evidence only. The current Phase 8G application proof and Phase 9H
-repository-only dormant-store controller package are verified separately. The
-Phase 9H package includes only a controller rollback marker, not external writer
-exclusion; installation and activation remain refused.
+historical evidence only. The current Phase 8G application proof and Phase 9J
+inactive dormant-store controller package are verified separately. Phase 9J
+packages an administrative cooperative writer fence but does not claim to
+exclude an equivalent privileged-root bypass; production installation and
+activation remain refused.
 """
 
 from collections.abc import Mapping, Sequence
@@ -160,7 +161,7 @@ EXPECTED_CURRENT_RUNTIME_RECEIPT_SHA256 = (
     "25ca53e683e53f79b726909ef64bc8afad30269cce3f59804cf66335667a8108"
 )
 EXPECTED_CURRENT_RUNTIME_MANIFEST_SHA256 = (
-    "325befc02967653eaed40d7f7249d781850403ff8f18c95042e69103967d37eb"
+    "3cb34462b2b779aee0f063ec86c38342fc6ebcadf065a95b4f6ad3418a19f7aa"
 )
 EXPECTED_CURRENT_RUNTIME_SOURCE_SHA256 = (
     "b52b753dc7974ee120e4abe264bb36f16b53341fa86b2ea8e0ab5bf86c735c20"
@@ -275,11 +276,8 @@ EXPECTED_CURRENT_COMPONENT_DISPOSITION: Mapping[str, object] = {
         "controller_rollback_marker_transport": (
             "tools/governed_memory_install/live_rollback_marker.py"
         ),
-        "postgresql_source_closure_module": (
-            "tools/governed_memory_install/postgres_source_closure.py"
-        ),
-        "postgresql_source_closure_contract": (
-            "ops/governed_memory/installation/current/postgres/source_closure_contract.json"
+        "postgresql_driver_adapter": (
+            "tools/governed_memory_install/psycopg_postgres_adapter.py"
         ),
         "postgresql_native_stage_machine": (
             "tools/governed_memory_install/postgres_native_stages.py"
@@ -290,9 +288,22 @@ EXPECTED_CURRENT_COMPONENT_DISPOSITION: Mapping[str, object] = {
         "controller_runtime_publication_policy_transport": (
             "tools/governed_memory_release/runtime_publication_transport.py"
         ),
+        "controller_runtime_publication_primitives": (
+            "tools/governed_memory_release/linux_runtime_publication_primitives.py"
+        ),
+        "controller_runtime_input_stager": (
+            "tools/governed_memory_release/runtime_input_stager.py"
+        ),
+        "standalone_cpython_inspector": (
+            "tools/governed_memory_release/inspect_standalone_cpython.py"
+        ),
         "synthetic_proof_entrypoint": (
             "tools/governed_memory_validation/"
             "run_installation_synthetic_proof.py"
+        ),
+        "disposable_linux_proof_entrypoint": (
+            "tools/governed_memory_validation/"
+            "run_disposable_installation_live_proof.py"
         ),
         "legacy_memory_fallback_allowed": False,
         "stored_assistant_preferences_allowed": False,
@@ -311,16 +322,16 @@ EXPECTED_CURRENT_COMPONENT_DISPOSITION: Mapping[str, object] = {
         "claim_bound_empty_rollback_controller_composition_packaged": True,
         "controller_runtime_verification_capability_packaged": True,
         "controller_runtime_release_builder_orchestration_packaged": True,
-        "controller_runtime_builder_publication_transport_packaged": False,
+        "controller_runtime_builder_publication_transport_packaged": True,
         "controller_runtime_publication_policy_transport_packaged": True,
         "runtime_publication_durable_intent_before_first_rename_packaged": True,
         "runtime_publication_post_intent_generic_cleanup_forbidden": True,
         "runtime_publication_crash_prefix_manual_review_fence_packaged": True,
         "runtime_publication_same_device_rename_precondition_packaged": True,
         "runtime_publication_exact_terminal_replay_with_renewed_fsyncs_packaged": True,
-        "production_runtime_publication_primitives_packaged": False,
-        "approved_standalone_cpython_substrate_digest_bound": False,
-        "independent_standalone_cpython_payload_tree_proof_packaged": False,
+        "production_runtime_publication_primitives_packaged": True,
+        "approved_standalone_cpython_substrate_digest_bound": True,
+        "independent_standalone_cpython_payload_tree_proof_packaged": True,
         "full_controller_release_tree_verification_packaged": True,
         "exact_locked_controller_distribution_set_verification_packaged": True,
         "full_release_tree_sha256_bound_through_claim_journal_host_ownership_and_install_receipt": True,
@@ -334,24 +345,23 @@ EXPECTED_CURRENT_COMPONENT_DISPOSITION: Mapping[str, object] = {
         "resource_identity_ledger_v2_packaged": True,
         "physical_postgresql_qdrant_writer_exclusion_packaged": False,
         "empty_rollback_controller_authority_marker_packaged": True,
-        "fresh_live_semantic_empty_recheck_required_at_r05_under_controller_marker": True,
+        "fresh_live_semantic_empty_recheck_required_at_r06_under_administrative_writer_fence": True,
         "destructive_rollback_steps_atomically_recheck_empty_under_fence": False,
         "closed_live_transport_contracts_packaged": True,
-        "complete_closed_live_transport_substrate_set_packaged": False,
-        "complete_closed_live_transport_substrate_set_integrated_into_bound_factory": False,
-        "postgresql_source_closure_contract_packaged": True,
+        "complete_closed_live_transport_substrate_set_packaged": True,
+        "complete_closed_live_transport_substrate_set_integrated_into_bound_factory": True,
         "driver_native_postgresql_stage_contract_packaged": True,
         "driver_native_postgresql_executable_stage_machine_packaged": True,
-        "concrete_psycopg_postgresql_transport_packaged": False,
+        "concrete_psycopg_postgresql_transport_packaged": True,
         "runtime_input_selection_contract_repaired": True,
-        "runtime_build_receipt_provenance_v3_packaged": True,
+        "runtime_build_receipt_provenance_v4_packaged": True,
         "exact_postgresql_16_14_and_qdrant_1_19_0_readiness_required": True,
-        "approved_terminal_postgresql_catalog_manifest_selected": False,
+        "approved_terminal_postgresql_catalog_manifest_selected": True,
         "physical_postgresql_qdrant_writer_exclusion_transport_packaged": False,
         "durable_controller_rollback_marker_transport_packaged": True,
         "external_direct_writer_exclusion_implemented": False,
         "stopped_store_semantic_empty_recheck_is_valid": False,
-        "controller_marker_empty_recheck_then_stop_then_physical_removal_order_implemented": True,
+        "controller_authority_marker_then_supervisor_removal_then_writer_fence_empty_recheck_then_store_stop_and_physical_removal_order_implemented": True,
         "retained_audit_artifact_hashes_bound": True,
         "durable_create_once_receipt_store_packaged": True,
         "public_entrypoints_require_canonical_root_owned_production_receipt_store": True,
@@ -364,11 +374,14 @@ EXPECTED_CURRENT_COMPONENT_DISPOSITION: Mapping[str, object] = {
         "physical_ledger_bound_empty_rollback_adapter_packaged": True,
         "concrete_install_store_effect_adapters_packaged": True,
         "concrete_empty_rollback_store_effect_adapters_packaged": True,
-        "selected_live_linux_platform_transports_packaged": False,
+        "selected_live_linux_platform_transports_packaged": True,
         "selected_non_postgresql_live_linux_platform_transport_factory_packaged": True,
-        "pinned_postgresql_driver_selected_or_packaged": False,
+        "pinned_postgresql_driver_selected_or_packaged": True,
         "activation_entrypoint_packaged": False,
-        "validation_scope": "synthetic_in_process_only",
+        "validation_scope": (
+            "synthetic_in_process_and_separately_authorized_disposable_linux_"
+            "proof_pending"
+        ),
         "live_linux_execution_proven": False,
         "live_installation_proof_complete": False,
         "installation_performed": False,
@@ -874,13 +887,25 @@ def _verify_current_package_receipts(
     store_artifacts = store_receipt.get("artifact_sha256")
     _require(
         package_receipt.get("schema_version")
-        == "governed-memory-dormant-store-install-package-verification-v4"
+        == "governed-memory-dormant-store-install-package-verification-v5"
         and isinstance(package_artifacts, dict)
         and bool(package_artifacts)
         and package_receipt.get("artifact_count") == len(package_artifacts)
         and package_receipt.get("guarded_synthetic_proof_harness_packaged") is True
         and package_receipt.get("synthetic_proof_executed_by_verifier") is False
-        and package_receipt.get("synthetic_proof_receipt_promoted") is False
+        and package_receipt.get("synthetic_proof_receipt_present_at_package_sealing")
+        is False
+        and package_receipt.get("proof_receipt_is_external_to_package") is True
+        and package_receipt.get(
+            "authority_gated_disposable_linux_proof_runner_packaged"
+        )
+        is True
+        and package_receipt.get("disposable_linux_proof_runner_executed_by_verifier")
+        is False
+        and package_receipt.get(
+            "disposable_linux_proof_receipt_present_at_package_sealing"
+        )
+        is False
         and package_receipt.get("claim_bound_install_controller_composition_packaged") is True
         and package_receipt.get("claim_bound_empty_rollback_controller_composition_packaged") is True
         and package_receipt.get("controller_runtime_verification_capability_packaged") is True
@@ -912,7 +937,7 @@ def _verify_current_package_receipts(
         )
         is True
         and package_receipt.get(
-            "fresh_live_semantic_empty_recheck_required_at_r05_under_controller_authority_marker"
+            "fresh_live_semantic_empty_recheck_required_at_r06_under_administrative_writer_fence"
         )
         is True
         and package_receipt.get(
@@ -920,13 +945,9 @@ def _verify_current_package_receipts(
         )
         is True
         and package_receipt.get("closed_live_transport_contracts_packaged") is True
-        and package_receipt.get("complete_closed_live_transport_substrate_set_packaged") is False
+        and package_receipt.get("complete_closed_live_transport_substrate_set_packaged") is True
         and package_receipt.get(
             "complete_closed_live_transport_substrate_set_integrated_into_bound_factory"
-        )
-        is False
-        and package_receipt.get(
-            "postgresql_source_closure_contract_packaged"
         )
         is True
         and package_receipt.get(
@@ -940,9 +961,9 @@ def _verify_current_package_receipts(
         and package_receipt.get(
             "concrete_psycopg_postgresql_transport_packaged"
         )
-        is False
+        is True
         and package_receipt.get("runtime_input_selection_contract_repaired") is True
-        and package_receipt.get("runtime_build_receipt_provenance_v3_packaged") is True
+        and package_receipt.get("runtime_build_receipt_provenance_v4_packaged") is True
         and package_receipt.get(
             "exact_postgresql_16_14_and_qdrant_1_19_0_readiness_required"
         )
@@ -950,17 +971,21 @@ def _verify_current_package_receipts(
         and package_receipt.get(
             "approved_terminal_postgresql_catalog_manifest_selected"
         )
-        is False
+        is True
         and package_receipt.get(
             "durable_live_empty_rollback_controller_authority_marker_transport_packaged"
         )
         is True
-        and package_receipt.get("external_direct_writer_exclusion_implemented")
+        and package_receipt.get(
+            "administrative_cooperative_writer_fence_implemented"
+        )
+        is True
+        and package_receipt.get("equivalent_privileged_root_bypass_excluded")
         is False
         and package_receipt.get("stopped_store_semantic_empty_recheck_is_valid")
         is False
         and package_receipt.get(
-            "controller_authority_marker_empty_recheck_then_stop_then_physical_removal_order_implemented"
+            "controller_authority_marker_then_supervisor_removal_then_writer_fence_empty_recheck_then_store_stop_and_physical_removal_order_implemented"
         )
         is True
         and package_receipt.get("retained_audit_artifact_hashes_bound") is True
@@ -980,19 +1005,19 @@ def _verify_current_package_receipts(
         is True
         and package_receipt.get("closed_install_store_effect_adapter_packaged") is True
         and package_receipt.get("closed_empty_rollback_store_effect_adapter_packaged") is True
-        and package_receipt.get("selected_live_platform_transports_packaged") is False
+        and package_receipt.get("selected_live_platform_transports_packaged") is True
         and package_receipt.get(
             "selected_non_postgresql_live_platform_transport_factory_packaged"
         )
         is True
-        and package_receipt.get("pinned_postgresql_driver_selected") is False
+        and package_receipt.get("pinned_postgresql_driver_selected") is True
         and package_receipt.get("durable_create_once_receipt_store_packaged") is True
         and package_receipt.get(
             "controller_runtime_release_builder_orchestration_packaged"
         )
         is True
         and package_receipt.get("controller_runtime_build_transport_packaged")
-        is False
+        is True
         and package_receipt.get(
             "controller_runtime_publication_policy_transport_packaged"
         )
@@ -1020,11 +1045,11 @@ def _verify_current_package_receipts(
         and package_receipt.get(
             "production_runtime_publication_primitives_packaged"
         )
-        is False
+        is True
         and package_receipt.get(
             "independent_standalone_cpython_payload_tree_proof_packaged"
         )
-        is False
+        is True
         and package_receipt.get("activation_entrypoint_packaged") is False
         and package_receipt.get("installation_performed_by_verifier") is False
         and package_receipt.get("images_staged_by_verifier") is False
@@ -1115,9 +1140,8 @@ def _verify_runtime_manifest(
         == "governed-memory-successor-runtime-manifest-v4"
         and runtime.get("phase")
         == (
-            "phase9h_repository_only_non_postgresql_live_transports_"
-            "postgresql_stage_machine_runtime_publication_policy_and_"
-            "rollback_marker_packaged_inactive_activation_blocked"
+            "phase9j_install_ready_closed_runtime_and_store_transports_"
+            "packaged_inactive_activation_blocked"
         )
         and runtime.get("production_state_changed") is False
         and runtime.get("legacy_imports_allowed") is False
@@ -1208,14 +1232,13 @@ def _verify_runtime_manifest(
         and current.get("scope") == "current_inactive_stores_only_package"
         and current_state
         == (
-            "phase9h_repository_only_non_postgresql_live_transports_"
-            "postgresql_stage_machine_runtime_publication_policy_and_"
-            "rollback_marker_packaged_not_authorized"
+            "phase9j_install_ready_closed_runtime_and_store_transports_"
+            "packaged_not_installed_not_activated"
         )
         and current.get("package_manifest")
         == "ops/governed_memory/installation/current/package_manifest.json"
         and current.get("package_manifest_schema_version")
-        == "governed-memory-dormant-store-install-inactive-execution-package-manifest-v3"
+        == "governed-memory-dormant-store-install-inactive-execution-package-manifest-v4"
         and current.get("package_manifest_sha256")
         == package_receipt.get("package_manifest_sha256")
         and current.get("package_artifact_count")
@@ -1236,14 +1259,6 @@ def _verify_runtime_manifest(
         == package_receipt.get("controller_runtime_contract_canonical_sha256")
         and current.get("controller_runtime_contract")
         == "ops/governed_memory/installation/current/controller_runtime_contract.json"
-        and current.get(
-            "postgres_source_closure_contract_canonical_sha256"
-        )
-        == package_receipt.get(
-            "postgres_source_closure_contract_canonical_sha256"
-        )
-        and current.get("postgres_source_closure_contract")
-        == "ops/governed_memory/installation/current/postgres/source_closure_contract.json"
         and current.get("postgres_native_stage_contract_canonical_sha256")
         == package_receipt.get("postgres_native_stage_contract_canonical_sha256")
         and current.get("postgres_native_stage_contract")
@@ -1302,7 +1317,7 @@ def _verify_runtime_manifest(
         )
         is True
         and current.get(
-            "fresh_live_semantic_empty_recheck_required_at_r05_under_controller_marker"
+            "fresh_live_semantic_empty_recheck_required_at_r06_under_administrative_writer_fence"
         )
         is True
         and current.get(
@@ -1310,13 +1325,9 @@ def _verify_runtime_manifest(
         )
         is False
         and current.get("closed_live_transport_contracts_packaged") is True
-        and current.get("complete_closed_live_transport_substrate_set_packaged") is False
+        and current.get("complete_closed_live_transport_substrate_set_packaged") is True
         and current.get(
             "complete_closed_live_transport_substrate_set_integrated_into_bound_factory"
-        )
-        is False
-        and current.get(
-            "postgresql_source_closure_contract_packaged"
         )
         is True
         and current.get("driver_native_postgresql_stage_contract_packaged") is True
@@ -1325,15 +1336,15 @@ def _verify_runtime_manifest(
         )
         is True
         and current.get("concrete_psycopg_postgresql_transport_packaged")
-        is False
+        is True
         and current.get("runtime_input_selection_contract_repaired") is True
-        and current.get("runtime_build_receipt_provenance_v3_packaged") is True
+        and current.get("runtime_build_receipt_provenance_v4_packaged") is True
         and current.get(
             "exact_postgresql_16_14_and_qdrant_1_19_0_readiness_required"
         )
         is True
         and current.get("approved_terminal_postgresql_catalog_manifest_selected")
-        is False
+        is True
         and current.get(
             "physical_postgresql_qdrant_writer_exclusion_transport_packaged"
         )
@@ -1343,7 +1354,7 @@ def _verify_runtime_manifest(
         and current.get("external_direct_writer_exclusion_implemented") is False
         and current.get("stopped_store_semantic_empty_recheck_is_valid") is False
         and current.get(
-            "controller_marker_empty_recheck_then_stop_then_physical_removal_order_implemented"
+            "controller_authority_marker_then_supervisor_removal_then_writer_fence_empty_recheck_then_store_stop_and_physical_removal_order_implemented"
         )
         is True
         and current.get("retained_audit_artifact_hashes_bound") is True
@@ -1361,18 +1372,18 @@ def _verify_runtime_manifest(
         is True
         and current.get("concrete_install_store_effect_adapters_packaged") is True
         and current.get("concrete_empty_rollback_store_effect_adapters_packaged") is True
-        and current.get("selected_live_linux_platform_transports_packaged") is False
+        and current.get("selected_live_linux_platform_transports_packaged") is True
         and current.get(
             "selected_non_postgresql_live_linux_platform_transport_factory_packaged"
         )
         is True
-        and current.get("pinned_postgresql_driver_selected_or_packaged") is False
+        and current.get("pinned_postgresql_driver_selected_or_packaged") is True
         and current.get(
             "controller_runtime_release_builder_orchestration_packaged"
         )
         is True
         and current.get("controller_runtime_builder_publication_transport_packaged")
-        is False
+        is True
         and current.get(
             "controller_runtime_publication_policy_transport_packaged"
         )
@@ -1398,13 +1409,13 @@ def _verify_runtime_manifest(
         )
         is True
         and current.get("production_runtime_publication_primitives_packaged")
-        is False
+        is True
         and current.get("approved_standalone_cpython_substrate_digest_bound")
-        is False
+        is True
         and current.get(
             "independent_standalone_cpython_payload_tree_proof_packaged"
         )
-        is False
+        is True
         and current.get("install_controller_emits_canonical_receipt") is True
         and current.get("empty_rollback_controller_emits_canonical_receipt") is True
         and current.get(
@@ -1453,11 +1464,11 @@ def _verify_runtime_manifest(
         and infrastructure.get(
             "complete_closed_live_transport_substrate_set_packaged"
         )
-        is False
+        is True
         and infrastructure.get(
             "complete_closed_live_transport_substrate_set_integrated_into_bound_factory"
         )
-        is False
+        is True
         and infrastructure.get("driver_native_postgresql_stage_contract_packaged")
         is True
         and infrastructure.get(
@@ -1465,11 +1476,11 @@ def _verify_runtime_manifest(
         )
         is True
         and infrastructure.get("concrete_psycopg_postgresql_transport_packaged")
-        is False
+        is True
         and infrastructure.get(
             "approved_terminal_postgresql_catalog_manifest_selected"
         )
-        is False
+        is True
         and infrastructure.get(
             "physical_postgresql_qdrant_writer_exclusion_transport_packaged"
         )
@@ -1481,7 +1492,7 @@ def _verify_runtime_manifest(
         and infrastructure.get("external_direct_writer_exclusion_implemented")
         is False
         and infrastructure.get("selected_live_linux_platform_transports_packaged")
-        is False
+        is True
         and infrastructure.get(
             "selected_non_postgresql_live_linux_platform_transport_factory_packaged"
         )
@@ -1749,9 +1760,8 @@ def verify_candidate_artifacts() -> dict[str, object]:
     return {
         "schema_version": "governed-memory-release-artifact-verification-v8",
         "phase": (
-            "phase9h_repository_only_non_postgresql_live_transports_"
-            "postgresql_stage_machine_runtime_publication_policy_and_"
-            "rollback_marker_packaged_inactive_activation_blocked"
+            "phase9j_install_ready_closed_runtime_and_store_transports_"
+            "packaged_inactive_activation_blocked"
         ),
         "artifact_sha256": dict(sorted(observed_hashes.items())),
         "artifact_integrity_verified": True,
@@ -1798,42 +1808,41 @@ def verify_candidate_artifacts() -> dict[str, object]:
         "resource_identity_ledger_v2_packaged": True,
         "physical_postgresql_qdrant_writer_exclusion_packaged": False,
         "empty_rollback_controller_authority_marker_packaged": True,
-        "fresh_live_semantic_empty_recheck_required_at_r05_under_controller_marker": True,
+        "fresh_live_semantic_empty_recheck_required_at_r06_under_administrative_writer_fence": True,
         "destructive_rollback_steps_atomically_recheck_empty_under_fence": False,
         "empty_rollback_receipt_persisted_create_once_while_controller_marker_held": True,
         "closed_live_transport_contracts_packaged": True,
-        "complete_closed_live_transport_substrate_set_packaged": False,
-        "complete_closed_live_transport_substrate_set_integrated_into_bound_factory": False,
-        "postgresql_source_closure_contract_packaged": True,
+        "complete_closed_live_transport_substrate_set_packaged": True,
+        "complete_closed_live_transport_substrate_set_integrated_into_bound_factory": True,
         "driver_native_postgresql_stage_contract_packaged": True,
         "driver_native_postgresql_executable_stage_machine_packaged": True,
-        "concrete_psycopg_postgresql_transport_packaged": False,
+        "concrete_psycopg_postgresql_transport_packaged": True,
         "runtime_input_selection_contract_repaired": True,
-        "runtime_build_receipt_provenance_v3_packaged": True,
+        "runtime_build_receipt_provenance_v4_packaged": True,
         "exact_postgresql_16_14_and_qdrant_1_19_0_readiness_required": True,
-        "approved_terminal_postgresql_catalog_manifest_selected": False,
+        "approved_terminal_postgresql_catalog_manifest_selected": True,
         "physical_postgresql_qdrant_writer_exclusion_transport_packaged": False,
         "durable_controller_rollback_marker_transport_packaged": True,
         "external_direct_writer_exclusion_implemented": False,
         "stopped_store_semantic_empty_recheck_is_valid": False,
-        "controller_marker_empty_recheck_then_stop_then_physical_removal_order_implemented": True,
+        "controller_authority_marker_then_supervisor_removal_then_writer_fence_empty_recheck_then_store_stop_and_physical_removal_order_implemented": True,
         "retained_audit_artifact_hashes_bound": True,
         "closed_install_store_effect_adapter_packaged": True,
         "closed_empty_rollback_store_effect_adapter_packaged": True,
-        "selected_live_platform_transports_packaged": False,
+        "selected_live_platform_transports_packaged": True,
         "selected_non_postgresql_live_platform_transport_factory_packaged": True,
-        "pinned_postgresql_driver_selected": False,
+        "pinned_postgresql_driver_selected": True,
         "durable_create_once_receipt_store_packaged": True,
         "controller_runtime_release_builder_orchestration_packaged": True,
-        "controller_runtime_build_transport_packaged": False,
+        "controller_runtime_build_transport_packaged": True,
         "controller_runtime_publication_policy_transport_packaged": True,
         "runtime_publication_durable_intent_before_first_rename_packaged": True,
         "runtime_publication_post_intent_generic_cleanup_forbidden": True,
         "runtime_publication_crash_prefix_manual_review_fence_packaged": True,
         "runtime_publication_same_device_rename_precondition_packaged": True,
         "runtime_publication_exact_terminal_replay_with_renewed_fsyncs_packaged": True,
-        "production_runtime_publication_primitives_packaged": False,
-        "independent_standalone_cpython_payload_tree_proof_packaged": False,
+        "production_runtime_publication_primitives_packaged": True,
+        "independent_standalone_cpython_payload_tree_proof_packaged": True,
         "activation_executor_packaged": False,
         "installation_authorized": False,
         "activation_authorized": False,

@@ -845,7 +845,9 @@ def _observe_release_tree(
                 "root_mode": root_mode,
                 "entries": [
                     {"path": path, "mode": mode, "sha256": digest}
-                    for path, mode, digest in entries
+                    for path, mode, digest in sorted(
+                        entries, key=lambda entry: entry[0].rstrip("/")
+                    )
                 ],
             }
         )
@@ -904,7 +906,9 @@ def _hash_tree(directory_fd: int) -> str:
                 "schema_version": "governed-memory-controller-runtime-tree-v1",
                 "entries": [
                     {"path": path, "mode": mode, "sha256": digest}
-                    for path, mode, digest in entries
+                    for path, mode, digest in sorted(
+                        entries, key=lambda entry: entry[0].rstrip("/")
+                    )
                 ],
             }
         )

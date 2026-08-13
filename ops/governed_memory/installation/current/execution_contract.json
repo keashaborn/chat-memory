@@ -1,5 +1,5 @@
 {
-  "schema_version": "governed-memory-dormant-store-install-inactive-execution-package-v3",
+  "schema_version": "governed-memory-dormant-store-install-inactive-execution-package-v4",
   "state": "phase9j-install-ready-closed-runtime-and-store-transports-packaged-not-installed-not-activated",
   "server": "seebx",
   "package_manifest_relationship": {
@@ -10,15 +10,17 @@
   "authority_sequences": {
     "install": [
       "A01_ACQUIRE_AND_VERIFY_GLOBAL_LOCK",
-      "A02_VERIFY_SIGNED_INSTALL_SCOPE_CLOCK_AND_PACKAGE",
-      "A03_CLAIM_INSTALL_NONCE_AND_DERIVE_EXECUTION_BINDING",
-      "A04_OPEN_EXACT_ANCHORED_INSTALL_JOURNAL"
+      "A02_VERIFY_SIGNED_RECOVERY_CAPSULE_INSTALL_SCOPE_CLOCK_AND_PACKAGE",
+      "A03_CLAIM_RECOVERY_RESERVATION_BEFORE_FIRST_INSTALL_EFFECT",
+      "A04_CLAIM_INSTALL_NONCE_AND_DERIVE_EXECUTION_BINDING",
+      "A05_OPEN_EXACT_ANCHORED_INSTALL_JOURNAL"
     ],
     "empty_rollback": [
       "B01_ACQUIRE_AND_VERIFY_GLOBAL_LOCK",
-      "B02_VERIFY_SEPARATE_SIGNED_EMPTY_ROLLBACK_SCOPE_CLOCK_AND_PACKAGE",
-      "B03_CLAIM_ROLLBACK_NONCE_AND_DERIVE_EXECUTION_BINDING",
-      "B04_OPEN_EXACT_ANCHORED_ROLLBACK_JOURNAL"
+      "B02_VERIFY_SIGNED_RECOVERY_DELEGATION_AND_PRECLAIMED_RESERVATION",
+      "B03_VERIFY_DURABLE_INSTALL_RECEIPT_AND_ANCHORED_EXACT_FIFTEEN_RESOURCE_LEDGER",
+      "B04_MINT_OPAQUE_RETAINED_EVIDENCE_AND_CLAIM_ROLLBACK_NONCE",
+      "B05_PERSIST_ELIGIBILITY_AND_OPEN_EXACT_ANCHORED_ROLLBACK_JOURNAL"
     ]
   },
   "execution_boundary": {
@@ -76,6 +78,8 @@
     "opaque_verified_controller_runtime_capability_required": true,
     "opaque_claimed_install_execution_capability_required": true,
     "opaque_claimed_empty_rollback_capability_required": true,
+    "canonical_dormant_install_authority_identity_derivation_shared_by_install_and_rollback": true,
+    "opaque_retained_rollback_evidence_sha256_bound_into_final_rollback_execution_and_claim": true,
     "caller_selected_attempt_id_allowed": false,
     "execution_id_derived_from_authority_claim": true,
     "journal_binds_package_contract_plan_spec_resource_identity_implementation_and_exact_paths": true,
@@ -84,6 +88,9 @@
     "per_execution_resource_identity_ledger_path_bound": true,
     "resource_identity_ledger_head_anchored_and_required_for_empty_rollback": true,
     "empty_rollback_requires_opaque_verified_install_receipt_and_ledger_capability": true,
+    "signed_public_pre_effect_recovery_delegation_required": true,
+    "durable_recovery_reservation_claim_required_before_first_install_effect": true,
+    "derived_rollback_authority_binds_post_effect_exact_ledger_and_empty_eligibility": true,
     "resolved_store_spec_hash_and_exact_docker_label_hashes_bound": true,
     "exact_controller_process_is_trusted": true,
     "hostile_same_process_capability_forgery_resisted": false
@@ -106,6 +113,17 @@
     "composite_step_recoverable_state_protocol_implemented": true,
     "install_receipt_replay_requires_fresh_terminal_store_readiness_probe": true,
     "empty_rollback_resume_revalidates_install_receipt_and_resource_ledger": true,
+    "durable_install_receipt_and_anchored_exact_fifteen_resource_ledger_verified_before_final_rollback_nonce_claim": true,
+    "opaque_retained_rollback_evidence_sha256_bound_into_final_rollback_execution_and_claim": true,
+    "final_rollback_nonce_claim_precedes_eligibility_persistence_journal_creation_and_any_rollback_effect": true,
+    "r03_reverifies_exact_retained_install_receipt_and_anchored_ledger_before_first_effect": true,
+    "resume_install_and_resume_rollback_never_create_missing_claims": true,
+    "start_reserved_rollback_requires_exact_preclaimed_recovery_reservation_and_is_the_only_post_expiry_first_claim_path": true,
+    "install_recovery_reservation_and_rollback_nonces_are_pairwise_distinct_and_recovery_delegation_is_bound_to_the_exact_derived_install_execution_id": true,
+    "fresh_process_recovery_without_ephemeral_signer_packaged": true,
+    "expired_recovery_delegation_usable_only_with_matching_preclaimed_reservation": true,
+    "proof_supervision_lock_serializes_full_run_and_recover_lifecycle": true,
+    "recovery_capsule_retained_and_never_removed_by_store_rollback": true,
     "completed_empty_rollback_replay_reproves_exact_resource_absence": true,
     "empty_rollback_controller_authority_marker_held_from_r04_through_receipt": true,
     "fresh_live_semantic_empty_recheck_required_at_r06_under_administrative_writer_fence": true,
@@ -127,6 +145,14 @@
     "arbitrary_store_mutation_argv_surface": false,
     "shell_allowed": false,
     "image_pull_build_load_import_or_run_allowed_by_repository_phase": false,
+    "fixed_host_clock_synchronization_preflight_binary": "/usr/bin/timedatectl",
+    "fixed_host_clock_synchronization_preflight_arguments": [
+      "show",
+      "--property=NTPSynchronized",
+      "--value"
+    ],
+    "fixed_host_clock_synchronization_preflight_exact_stdout": "yes\n",
+    "caller_selected_clock_command_or_path_allowed": false,
     "source_postgresql_allowed": false,
     "provider_endpoint_allowed": false,
     "legacy_store_or_secret_path_allowed": false,
@@ -164,13 +190,18 @@
     "empty_rollback_receipt_binds_verified_runtime_and_full_release_tree_identity": true,
     "durable_create_once_install_eligibility_and_rollback_receipt_store_packaged": true,
     "install_receipt_persisted_before_return": true,
-    "rollback_authority_claim_precedes_durable_receipt_reads_and_eligibility_persistence": true,
+    "durable_install_receipt_and_anchored_exact_fifteen_resource_ledger_verified_before_final_rollback_nonce_claim": true,
+    "opaque_retained_rollback_evidence_sha256_bound_into_final_rollback_execution_and_claim": true,
+    "final_rollback_nonce_claim_precedes_eligibility_persistence_journal_creation_and_any_rollback_effect": true,
+    "r03_reverifies_exact_retained_install_receipt_and_anchored_ledger_before_first_effect": true,
     "final_rollback_receipt_persisted_while_controller_authority_marker_held": true,
     "final_rollback_receipt_persistence_while_controller_authority_marker_held_required": true,
     "canonical_production_executions_root": "/var/lib/governed-memory-controller/executions",
     "public_install_and_rollback_entrypoints_require_root_owned_production_receipt_store": true,
     "synthetic_receipt_stores_accepted_only_by_private_in_process_test_wrappers": true,
     "receipt_schema_files_hash_bound_by_package": true,
+    "live_proof_receipt_binds_host_clock_synchronization_preflight_passed": true,
+    "live_proof_receipt_binds_recovery_capsule_and_pre_effect_reservation": true,
     "activation_receipt_packaged": false
   },
   "proof_boundary": {
@@ -195,8 +226,8 @@
   "remaining_blockers": [
     "controller_runtime_and_release_substrate_not_separately_built_installed_or_receipted",
     "live_disposable_linux_proof_not_run",
-    "exact_local_image_identity_receipt_not_published",
-    "authority_substrate_and_trusted_clock_not_installed",
+    "exact_local_image_digest_and_id_reinspection_pending_for_disposable_live_proof",
+    "durable_recovery_capsule_and_pre_effect_reservation_not_live_executed",
     "current_live_preflight_absent",
     "final_commit_tree_package_contract_plan_runtime_and_images_not_signed",
     "dormant_install_execution_approval_absent",

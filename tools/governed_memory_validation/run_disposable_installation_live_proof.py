@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-"""Run the externally permitted Phase 9 disposable store proof.
+"""Run the signed-capsule Phase 9 disposable store proof.
 
 The outer process accepts only four immutable identities. Authority comes
-from one fixed root-owned permit containing pre-signed install documents and
-a narrow rollback-signing delegation. The supervising issuer retains the
-private key and signs only an exact ledger-derived rollback request over two
-fixed inherited pipes; this runner never receives a private key.
+from one fixed root-owned recovery capsule containing pre-signed install
+documents and a narrow public rollback-recovery delegation.  The issuer
+discards its private key before this process starts; this runner receives only
+the locked guard descriptor and public capsule.
 
 This program never imports provider clients, reads production data or provider
 credentials, accepts a path/command/SQL/URL/resource name, or performs a name-based
-cleanup.  If rollback authority has been minted, failure recovery can only
-resume the exact public ledger-bound rollback.
+cleanup.  A root-owned public recovery capsule and content-free authority-state
+reservation are committed before the first install worker.  The capsule holds
+only signed public documents; no private signing key is persisted.  Recovery
+can therefore derive and resume only the exact ledger-bound empty rollback.
 """
 
 import sys
@@ -31,8 +33,10 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import re
+import select
 import signal
 import stat
+import subprocess
 import time
 from types import MappingProxyType
 from typing import Final, Mapping, Sequence
@@ -60,8 +64,8 @@ if sys.flags.isolated and __name__ == "__main__":
 
 from tools.governed_memory_install import authority
 from tools.governed_memory_install.authority_state import (
+    AuthorityClaimNotAllowedError,
     AuthorityState,
-    nonce_sha256 as authority_nonce_sha256,
     operation_sha256 as authority_operation_sha256,
 )
 from tools.governed_memory_install.controller_runtime import (
@@ -72,15 +76,27 @@ from tools.governed_memory_install.durable_receipts import (
     DurableReceiptStore,
     ReceiptArtifact,
 )
-from tools.governed_memory_install.execution_authority import KernelUtcClock
+from tools.governed_memory_install.execution_capability import (
+    reconstruct_resolved_store_spec_from_claimed_binding,
+    resume_dormant_store_install_execution_binding,
+    verified_dormant_install_authority_identity,
+)
+from tools.governed_memory_install.execution_authority import (
+    KernelUtcClock,
+    read_trusted_utc,
+)
 from tools.governed_memory_install.execution_lock import GlobalExecutionLock
-from tools.governed_memory_install.host_boundary import CommandRunner
+from tools.governed_memory_install.host_boundary import (
+    CommandRunner,
+    FIXED_ENVIRONMENT,
+)
 from tools.governed_memory_install.image_preflight import (
     expectations_from_store_spec,
     inspect_exact_store_image_set,
 )
 from tools.governed_memory_install.install_backend import InstallPrerequisites
 from tools.governed_memory_install.install_entrypoint import (
+    resume_authorized_dormant_store_install,
     run_authorized_dormant_store_install,
 )
 from tools.governed_memory_install.linux_plan import validate_store_spec
@@ -103,18 +119,22 @@ from tools.governed_memory_install.rollback import (
     verified_rollback_resource_parts,
 )
 from tools.governed_memory_install.rollback_authority import (
-    AUTHORIZATION_PAYLOAD_SCHEMA_VERSION as ROLLBACK_AUTHORIZATION_PAYLOAD_SCHEMA,
-    AUTHORIZATION_SCHEMA_VERSION as ROLLBACK_AUTHORIZATION_SCHEMA,
     EmptyRollbackExpectedBindings,
+    RECOVERY_DERIVATION_POLICY,
+    RECOVERY_RESERVATION_OPERATION,
     ROLLBACK_OPERATION,
     SCOPE_SCHEMA_VERSION as ROLLBACK_SCOPE_SCHEMA,
     TRUST_BUNDLE_SCHEMA_VERSION as ROLLBACK_TRUST_SCHEMA,
-    verify_empty_rollback_execution_capability,
+    derive_empty_rollback_execution_capability_from_recovery_delegation,
+    recovery_reservation_binding,
+    rollback_capability_evidence,
+    verify_empty_rollback_recovery_delegation,
 )
 from tools.governed_memory_install.rollback_entrypoint import (
     AUTHORITY_STATE_PATH,
     GLOBAL_LOCK_PATH,
-    run_authorized_empty_store_rollback,
+    resume_authorized_empty_store_rollback,
+    start_reserved_authorized_empty_store_rollback,
 )
 
 
@@ -123,25 +143,33 @@ AUTHORIZED_TEXT: Final = "Authorized to move on and finish nine whatever it take
 AUTHORIZED_TEXT_SHA256: Final = hashlib.sha256(
     AUTHORIZED_TEXT.encode("utf-8")
 ).hexdigest()
-PERMIT_PATH: Final = Path(
-    "/run/governed-memory-controller/phase9-disposable-proof-permit.json"
+RECOVERY_CAPSULE_PATH: Final = Path(
+    "/var/lib/governed-memory-controller/phase9-disposable-proof-recovery-capsule.json"
 )
-ROLLBACK_REQUEST_FD: Final = 3
-ROLLBACK_RESPONSE_FD: Final = 4
-PERMIT_SCHEMA: Final = "governed-memory-phase9-disposable-proof-permit-v1"
+RECOVERY_CAPSULE_SCHEMA: Final = "governed-memory-phase9-disposable-proof-recovery-capsule-v2"
 AUTHORIZATION_NAMESPACE: Final = "governed-memory-phase9-live-proof-v1"
 INSTALL_SCOPE_ID: Final = "phase9-disposable-live-install-000001"
 ROLLBACK_SCOPE_ID: Final = "phase9-disposable-live-rollback-000001"
-LIVE_PROOF_RECEIPT_SCHEMA: Final = "governed-memory-phase9-live-proof-receipt-v1"
+LIVE_PROOF_RECEIPT_SCHEMA: Final = "governed-memory-phase9-live-proof-receipt-v3"
+RECOVERY_RECEIPT_SCHEMA: Final = (
+    "governed-memory-phase9-disposable-proof-recovery-receipt-v1"
+)
 LIVE_PROOF_RECEIPT_SCHEMA_RELATIVE: Final = (
     "ops/governed_memory/installation/current/live_proof_receipt.schema.json"
 )
 INSTALL_NONCE_DOMAIN: Final = b"governed-memory-phase9-install-nonce-v1\x00"
 ROLLBACK_NONCE_DOMAIN: Final = b"governed-memory-phase9-rollback-nonce-v1\x00"
+RECOVERY_RESERVATION_NONCE_DOMAIN: Final = (
+    b"governed-memory-phase9-rollback-recovery-reservation-nonce-v1\x00"
+)
 
 EXECUTIONS_ROOT: Final = Path("/var/lib/governed-memory-controller/executions")
 CONTROLLER_STATE_ROOT: Final = Path("/var/lib/governed-memory-controller")
 LOCK_ROOT: Final = Path("/run/lock/governed-memory-controller")
+LIVE_PROOF_GUARD_PATH: Final = (
+    LOCK_ROOT / "phase9-disposable-live-proof.lock"
+)
+LIVE_PROOF_GUARD_FD: Final = 9
 CONTROLLER_CONFIG_ROOT: Final = Path("/etc/governed-memory-controller")
 STORE_SECRET_PARENT: Final = Path("/etc/governed-memory-stores")
 STORE_SECRET_ROOT: Final = Path(
@@ -159,9 +187,23 @@ INSTALL_KILL_STEP: Final = "I04_WRITE_RESOLVED_STORE_SPEC_AND_GENERATE_FRESH_STO
 ROLLBACK_KILL_STEP: Final = "R05_DISABLE_AND_REMOVE_STORES_SUPERVISOR"
 JOURNAL_APPLIED_EVENT: Final = "applied"
 BOUNDARY_TIMEOUT_SECONDS: Final = 180.0
+WORKER_COMPLETION_TIMEOUT_SECONDS: Final = 240.0
+WORKER_CLEANUP_TIMEOUT_SECONDS: Final = 5.0
+
+# The signed public capsule plus an exact AuthorityState reservation make
+# rollback derivation independently resumable without retaining a signer.
+DURABLE_PRE_EFFECT_ROLLBACK_AUTHORITY_PACKAGED: Final = True
 POLL_INTERVAL_SECONDS: Final = 0.002
 MAX_WORKER_RESULT_BYTES: Final = 1024 * 1024
 MAX_ARTIFACT_BYTES: Final = 8 * 1024 * 1024
+TIMEDATECTL_BINARY: Final = Path("/usr/bin/timedatectl")
+TIMEDATECTL_SYNCHRONIZATION_ARGV: Final = (
+    "/usr/bin/timedatectl",
+    "show",
+    "--property=NTPSynchronized",
+    "--value",
+)
+TIMEDATECTL_TIMEOUT_SECONDS: Final = 5
 
 _HASH_RE: Final = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _COMMIT_RE: Final = re.compile(r"[0-9a-f]{40}\Z", re.ASCII)
@@ -177,7 +219,12 @@ _LIVE_PROOF_RECEIPT_KEYS: Final = frozenset(
         "package_manifest_sha256",
         "controller_runtime_receipt_sha256",
         "live_proof_receipt_schema_sha256",
-        "external_proof_permit_sha256",
+        "recovery_capsule_sha256",
+        "recovery_reservation_claim_sha256",
+        "recovery_capsule_published_before_first_install_effect",
+        "recovery_reservation_claimed_before_first_install_effect",
+        "ephemeral_private_signer_retained_at_execution_start",
+        "recovery_capsule_retained_at_terminal_observation",
         "authorization_text_sha256",
         "installation_execution_id",
         "installation_receipt_sha256",
@@ -199,12 +246,13 @@ _LIVE_PROOF_RECEIPT_KEYS: Final = frozenset(
         "public_empty_rollback_entrypoint_used",
         "fresh_r06_semantic_empty_recheck_required",
         "completed_public_rollback_replayed",
-        "exact_targets_absent_count",
+        "exact_rollback_resources_absent_count",
         "exact_resources_absent_at_terminal_observation",
         "terminal_absence_is_continuous_guarantee",
         "stores_installed_at_terminal_observation",
         "stores_supervisor_installed_at_terminal_observation",
         "controller_runtime_capability_reverified",
+        "host_clock_synchronization_preflight_passed",
         "source_postgres_read_count",
         "source_postgres_write_count",
         "provider_calls",
@@ -215,6 +263,29 @@ _LIVE_PROOF_RECEIPT_KEYS: Final = frozenset(
         "receipt_sha256",
     }
 )
+_RECOVERY_RECEIPT_KEYS: Final = frozenset(
+    {
+        "schema_version",
+        "result",
+        "candidate_git_commit",
+        "candidate_git_tree",
+        "package_manifest_sha256",
+        "controller_runtime_receipt_sha256",
+        "recovery_capsule_sha256",
+        "installation_execution_id",
+        "installation_receipt_sha256",
+        "empty_rollback_execution_id",
+        "empty_rollback_receipt_sha256",
+        "exact_resources_absent",
+        "stores_installed",
+        "stores_supervisor_installed",
+        "install_initiated_by_recovery_mode",
+        "provider_calls",
+        "production_data_read",
+        "activation_performed",
+        "receipt_sha256",
+    }
+)
 
 
 class LiveProofError(RuntimeError):
@@ -222,11 +293,18 @@ class LiveProofError(RuntimeError):
 
 
 class WorkerMode(str, Enum):
+    START_OR_RECOVER = "worker-start-or-recover"
+    RECOVER_ONLY = "worker-recover-only"
     INSTALL = "install"
     RESUME_INSTALL = "resume-install"
     ROLLBACK = "rollback"
     RESUME_ROLLBACK = "resume-rollback"
     VERIFY_ABSENCE = "verify-absence"
+
+
+class RunnerMode(str, Enum):
+    START_OR_RECOVER = "start-or-recover"
+    RECOVER_ONLY = "recover-only"
 
 
 def _canonical(value: object) -> bytes:
@@ -257,6 +335,33 @@ def _require_hash(value: str, *, commit: bool = False) -> str:
     return value
 
 
+def _install_authority_material(
+    verified_scope_capability: object,
+) -> Mapping[str, str]:
+    """Project the one canonical verified install-authority identity."""
+
+    try:
+        identity = verified_dormant_install_authority_identity(
+            verified_scope_capability
+        )
+    except Exception as error:
+        raise LiveProofError(
+            "phase9_live_proof_install_authorization_invalid"
+        ) from error
+    return MappingProxyType(
+        {
+            "nonce": identity.authorization_nonce,
+            "operation": identity.operation,
+            "execution_sha256": identity.execution_sha256,
+            "authorization_sha256": identity.authorization_sha256,
+            "scope_sha256": identity.scope_sha256,
+            "trust_bundle_sha256": identity.trust_bundle_sha256,
+            "claim_sha256": identity.claim_sha256,
+            "execution_id": identity.execution_id,
+        }
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ProofInputs:
     candidate_git_commit: str
@@ -278,7 +383,7 @@ class ProofInputs:
 
 
 @dataclass(frozen=True, slots=True)
-class VerifiedPermit:
+class VerifiedRecoveryCapsule:
     raw: bytes
     document: Mapping[str, object]
     install_documents: InstallDocuments
@@ -316,7 +421,8 @@ class ProofContext:
     verified_scope_capability: object
     verified_package_capability: object
     verified_runtime_capability: object
-    permit: VerifiedPermit
+    verified_recovery_delegation_capability: object
+    recovery_capsule: VerifiedRecoveryCapsule
     rollback_documents: RollbackDocuments | None = None
 
 
@@ -365,6 +471,115 @@ def _read_regular_no_follow(path: Path, *, maximum: int) -> bytes:
             os.close(descriptor)
 
 
+def _read_optional_root_regular_no_follow(
+    path: Path,
+    *,
+    maximum: int,
+) -> bytes | None:
+    """Read a fixed root file; None means stable leaf absence only."""
+
+    parent_fd = descriptor = -1
+    flags = os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        parent_fd = os.open(
+            path.parent,
+            flags | getattr(os, "O_DIRECTORY", 0),
+        )
+        parent = os.fstat(parent_fd)
+        named_parent = path.parent.stat(follow_symlinks=False)
+        if (
+            not stat.S_ISDIR(parent.st_mode)
+            or stat.S_IMODE(parent.st_mode) != 0o700
+            or parent.st_uid != 0
+            or parent.st_gid != 0
+            or (parent.st_dev, parent.st_ino)
+            != (named_parent.st_dev, named_parent.st_ino)
+        ):
+            raise LiveProofError(
+                "phase9_live_proof_optional_file_parent_invalid"
+            )
+        parent_identity = (parent.st_dev, parent.st_ino)
+        try:
+            descriptor = os.open(path.name, flags, dir_fd=parent_fd)
+        except FileNotFoundError:
+            try:
+                os.stat(path.name, dir_fd=parent_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                pass
+            except OSError as error:
+                raise LiveProofError(
+                    "phase9_live_proof_optional_file_invalid"
+                ) from error
+            else:
+                raise LiveProofError(
+                    "phase9_live_proof_optional_file_appeared"
+                )
+            after_parent = os.fstat(parent_fd)
+            after_named_parent = path.parent.stat(follow_symlinks=False)
+            if (
+                (after_parent.st_dev, after_parent.st_ino) != parent_identity
+                or (after_named_parent.st_dev, after_named_parent.st_ino)
+                != parent_identity
+            ):
+                raise LiveProofError(
+                    "phase9_live_proof_optional_file_parent_changed"
+                )
+            return None
+        opened = os.fstat(descriptor)
+        named = os.stat(path.name, dir_fd=parent_fd, follow_symlinks=False)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or not stat.S_ISREG(named.st_mode)
+            or opened.st_uid != 0
+            or opened.st_gid != 0
+            or opened.st_nlink != 1
+            or not 1 <= opened.st_size <= maximum
+            or (opened.st_dev, opened.st_ino)
+            != (named.st_dev, named.st_ino)
+        ):
+            raise LiveProofError("phase9_live_proof_optional_file_invalid")
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            block = os.read(descriptor, min(65536, maximum + 1 - total))
+            if not block:
+                break
+            chunks.append(block)
+            total += len(block)
+            if total > maximum:
+                raise LiveProofError(
+                    "phase9_live_proof_optional_file_invalid"
+                )
+        after = os.fstat(descriptor)
+        named_after = os.stat(
+            path.name,
+            dir_fd=parent_fd,
+            follow_symlinks=False,
+        )
+        after_parent = os.fstat(parent_fd)
+        after_named_parent = path.parent.stat(follow_symlinks=False)
+        if (
+            (after.st_dev, after.st_ino, after.st_size)
+            != (opened.st_dev, opened.st_ino, opened.st_size)
+            or (named_after.st_dev, named_after.st_ino, named_after.st_size)
+            != (opened.st_dev, opened.st_ino, opened.st_size)
+            or (after_parent.st_dev, after_parent.st_ino) != parent_identity
+            or (after_named_parent.st_dev, after_named_parent.st_ino)
+            != parent_identity
+        ):
+            raise LiveProofError("phase9_live_proof_optional_file_changed")
+        return b"".join(chunks)
+    except LiveProofError:
+        raise
+    except OSError as error:
+        raise LiveProofError("phase9_live_proof_optional_file_invalid") from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if parent_fd >= 0:
+            os.close(parent_fd)
+
+
 def _parse_canonical_object(raw: bytes, code: str) -> dict[str, object]:
     try:
         value = json.loads(raw.decode("ascii"))
@@ -406,7 +621,7 @@ def _parse_exact_hashed_json_object(raw: bytes, code: str) -> dict[str, object]:
     return value
 
 
-_PERMIT_KEYS: Final = frozenset(
+_RECOVERY_CAPSULE_KEYS: Final = frozenset(
     {
         "schema_version",
         "thread_id",
@@ -423,7 +638,7 @@ _PERMIT_KEYS: Final = frozenset(
         "exact_targets_sha256",
         "public_key_base64",
         "key_id",
-        "permit_nonce",
+        "recovery_capsule_nonce",
         "issued_at",
         "not_before",
         "expires_at",
@@ -443,13 +658,13 @@ def _parse_utc(value: object) -> datetime:
         value,
         re.ASCII,
     ) is None:
-        raise LiveProofError("phase9_live_proof_permit_time_invalid")
+        raise LiveProofError("phase9_live_proof_recovery_capsule_time_invalid")
     try:
         return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(
             tzinfo=timezone.utc
         )
     except ValueError as error:
-        raise LiveProofError("phase9_live_proof_permit_time_invalid") from error
+        raise LiveProofError("phase9_live_proof_recovery_capsule_time_invalid") from error
 
 
 def _decode_public_key(document: Mapping[str, object]) -> tuple[Ed25519PublicKey, str]:
@@ -465,7 +680,7 @@ def _decode_public_key(document: Mapping[str, object]) -> tuple[Ed25519PublicKey
             raise ValueError
         return Ed25519PublicKey.from_public_bytes(public), key_id
     except (ValueError, TypeError) as error:
-        raise LiveProofError("phase9_live_proof_permit_public_key_invalid") from error
+        raise LiveProofError("phase9_live_proof_recovery_capsule_public_key_invalid") from error
 
 
 def _verify_rollback_delegation(
@@ -480,7 +695,7 @@ def _verify_rollback_delegation(
     signature = envelope.get("signature")
     if (
         envelope.get("schema_version")
-        != "governed-memory-phase9-rollback-delegation-envelope-v1"
+        != "governed-memory-empty-store-recovery-delegation-envelope-v1"
         or type(payload) is not dict
         or type(signature) is not dict
         or set(signature) != {"algorithm", "key_id", "value_base64"}
@@ -488,8 +703,17 @@ def _verify_rollback_delegation(
         or signature.get("key_id") != key_id
     ):
         raise LiveProofError("phase9_live_proof_rollback_delegation_invalid")
+    installation_execution_id = payload.get("installation_execution_id")
+    if (
+        type(installation_execution_id) is not str
+        or _HASH_RE.fullmatch(installation_execution_id) is None
+    ):
+        raise LiveProofError("phase9_live_proof_rollback_delegation_invalid")
+    recovery_capsule_nonce = str(document["recovery_capsule_nonce"])
     expected_payload = {
-        "schema_version": "governed-memory-phase9-rollback-delegation-v1",
+        "schema_version": (
+            "governed-memory-empty-store-recovery-delegation-v1"
+        ),
         "authorization_namespace": AUTHORIZATION_NAMESPACE,
         "thread_id": THREAD_ID,
         "install_scope_id": INSTALL_SCOPE_ID,
@@ -503,14 +727,21 @@ def _verify_rollback_delegation(
         ],
         "controller_contract_sha256": document["controller_contract_sha256"],
         "execution_plan_sha256": document["execution_plan_sha256"],
-        "exact_targets_sha256": document["exact_targets_sha256"],
-        "permit_nonce": document["permit_nonce"],
+        "exact_target_contract_sha256": document["exact_targets_sha256"],
+        "installation_execution_id": installation_execution_id,
+        "rollback_nonce": _sha(
+            ROLLBACK_NONCE_DOMAIN + recovery_capsule_nonce.encode("ascii")
+        ),
+        "recovery_reservation_nonce": _sha(
+            RECOVERY_RESERVATION_NONCE_DOMAIN + recovery_capsule_nonce.encode("ascii")
+        ),
         "key_id": key_id,
         "issued_at": document["issued_at"],
         "not_before": document["not_before"],
         "expires_at": document["expires_at"],
         "single_use": True,
         "empty_only": True,
+        "derivation_policy": dict(RECOVERY_DERIVATION_POLICY),
         "source_postgres_read_count": 0,
         "production_data_read": False,
         "provider_calls": 0,
@@ -545,18 +776,47 @@ def _stable_file_identity(value: os.stat_result) -> tuple[int, ...]:
     )
 
 
-def _load_verified_permit(
+def _load_verified_recovery_capsule(
     inputs: ProofInputs,
     artifacts: Mapping[str, bytes],
-) -> VerifiedPermit:
-    descriptor = -1
+    *,
+    require_current: bool = True,
+) -> VerifiedRecoveryCapsule:
+    if type(require_current) is not bool:
+        raise LiveProofError("phase9_live_proof_recovery_capsule_policy_invalid")
+    parent_fd = descriptor = -1
     try:
+        flags = os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
+        parent_fd = os.open(
+            RECOVERY_CAPSULE_PATH.parent,
+            flags | getattr(os, "O_DIRECTORY", 0),
+        )
+        parent = os.fstat(parent_fd)
+        named_parent = RECOVERY_CAPSULE_PATH.parent.stat(
+            follow_symlinks=False
+        )
+        if (
+            not stat.S_ISDIR(parent.st_mode)
+            or stat.S_IMODE(parent.st_mode) != 0o700
+            or parent.st_uid != 0
+            or parent.st_gid != 0
+            or (parent.st_dev, parent.st_ino)
+            != (named_parent.st_dev, named_parent.st_ino)
+        ):
+            raise LiveProofError(
+                "phase9_live_proof_recovery_capsule_parent_invalid"
+            )
         descriptor = os.open(
-            PERMIT_PATH,
-            os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
+            RECOVERY_CAPSULE_PATH.name,
+            flags,
+            dir_fd=parent_fd,
         )
         opened = os.fstat(descriptor)
-        named = PERMIT_PATH.stat(follow_symlinks=False)
+        named = os.stat(
+            RECOVERY_CAPSULE_PATH.name,
+            dir_fd=parent_fd,
+            follow_symlinks=False,
+        )
         if (
             not stat.S_ISREG(opened.st_mode)
             or stat.S_IMODE(opened.st_mode) != 0o400
@@ -567,22 +827,58 @@ def _load_verified_permit(
             or opened.st_size > 64 * 1024
             or (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)
         ):
-            raise LiveProofError("phase9_live_proof_permit_identity_invalid")
+            raise LiveProofError("phase9_live_proof_recovery_capsule_identity_invalid")
         raw = os.read(descriptor, opened.st_size + 1)
         after = os.fstat(descriptor)
+        named_after = os.stat(
+            RECOVERY_CAPSULE_PATH.name,
+            dir_fd=parent_fd,
+            follow_symlinks=False
+        )
+        parent_after = os.fstat(parent_fd)
+        named_parent_after = RECOVERY_CAPSULE_PATH.parent.stat(
+            follow_symlinks=False
+        )
         if (
             len(raw) != opened.st_size
             or _stable_file_identity(after) != _stable_file_identity(opened)
+            or _stable_file_identity(named_after)
+            != _stable_file_identity(opened)
+            or _stable_file_identity(parent_after)
+            != _stable_file_identity(parent)
+            or _stable_file_identity(named_parent_after)
+            != _stable_file_identity(parent)
         ):
-            raise LiveProofError("phase9_live_proof_permit_changed")
+            raise LiveProofError("phase9_live_proof_recovery_capsule_changed")
     except LiveProofError:
         raise
     except OSError as error:
-        raise LiveProofError("phase9_live_proof_permit_unavailable") from error
+        raise LiveProofError("phase9_live_proof_recovery_capsule_unavailable") from error
     finally:
         if descriptor >= 0:
             os.close(descriptor)
-    document = _parse_canonical_object(raw, "phase9_live_proof_permit_invalid")
+        if parent_fd >= 0:
+            os.close(parent_fd)
+    return _verify_recovery_capsule_raw(
+        inputs,
+        artifacts,
+        raw,
+        require_current=require_current,
+    )
+
+
+def _verify_recovery_capsule_raw(
+    inputs: ProofInputs,
+    artifacts: Mapping[str, bytes],
+    raw: bytes,
+    *,
+    require_current: bool = True,
+) -> VerifiedRecoveryCapsule:
+    """Verify capsule bytes after a caller has proved their file identity."""
+
+    if type(require_current) is not bool:
+        raise LiveProofError("phase9_live_proof_recovery_capsule_policy_invalid")
+    document = _parse_canonical_object(raw, "phase9_live_proof_recovery_capsule_invalid")
     contract_raw = artifacts.get(
         "ops/governed_memory/installation/current/contract.json"
     )
@@ -596,7 +892,7 @@ def _load_verified_permit(
     )
     exact_targets = contract.get("exact_targets")
     expected = {
-        "schema_version": PERMIT_SCHEMA,
+        "schema_version": RECOVERY_CAPSULE_SCHEMA,
         "thread_id": THREAD_ID,
         "authorization_text_sha256": AUTHORIZED_TEXT_SHA256,
         "authorization_namespace": AUTHORIZATION_NAMESPACE,
@@ -613,14 +909,14 @@ def _load_verified_permit(
         "exact_targets_sha256": _document_sha(exact_targets),
     }
     if (
-        set(document) != _PERMIT_KEYS
+        set(document) != _RECOVERY_CAPSULE_KEYS
         or type(exact_targets) is not dict
         or any(document.get(key) != value for key, value in expected.items())
         or document.get("single_use") is not True
-        or type(document.get("permit_nonce")) is not str
-        or _HASH_RE.fullmatch(str(document["permit_nonce"])) is None
+        or type(document.get("recovery_capsule_nonce")) is not str
+        or _HASH_RE.fullmatch(str(document["recovery_capsule_nonce"])) is None
     ):
-        raise LiveProofError("phase9_live_proof_permit_binding_invalid")
+        raise LiveProofError("phase9_live_proof_recovery_capsule_binding_invalid")
     issued = _parse_utc(document["issued_at"])
     not_before = _parse_utc(document["not_before"])
     expires = _parse_utc(document["expires_at"])
@@ -629,14 +925,13 @@ def _load_verified_permit(
         not_before < issued - timedelta(seconds=10)
         or expires <= not_before
         or (expires - not_before).total_seconds() > 15 * 60
-        or now < not_before
-        or now >= expires
+        or (require_current and (now < not_before or now >= expires))
     ):
-        raise LiveProofError("phase9_live_proof_permit_expired")
+        raise LiveProofError("phase9_live_proof_recovery_capsule_expired")
     public_key, key_id = _decode_public_key(document)
-    permit_nonce = str(document["permit_nonce"])
-    install_nonce = _sha(INSTALL_NONCE_DOMAIN + permit_nonce.encode("ascii"))
-    rollback_nonce = _sha(ROLLBACK_NONCE_DOMAIN + permit_nonce.encode("ascii"))
+    recovery_capsule_nonce = str(document["recovery_capsule_nonce"])
+    install_nonce = _sha(INSTALL_NONCE_DOMAIN + recovery_capsule_nonce.encode("ascii"))
+    rollback_nonce = _sha(ROLLBACK_NONCE_DOMAIN + recovery_capsule_nonce.encode("ascii"))
     install_scope = document.get("install_scope")
     install_authorization = document.get("install_authorization")
     trust_bundle = document.get("trust_bundle")
@@ -687,7 +982,13 @@ def _load_verified_permit(
     ):
         raise LiveProofError("phase9_live_proof_install_delegation_invalid")
     delegation = _verify_rollback_delegation(document, public_key, key_id)
-    return VerifiedPermit(
+    delegation_payload = delegation.get("payload")
+    if (
+        type(delegation_payload) is not dict
+        or delegation_payload.get("rollback_nonce") != rollback_nonce
+    ):
+        raise LiveProofError("phase9_live_proof_rollback_delegation_invalid")
+    return VerifiedRecoveryCapsule(
         raw=raw,
         document=MappingProxyType(document),
         install_documents=InstallDocuments(
@@ -830,11 +1131,19 @@ def _install_scope(
     }
 
 
-def _verified_install_context(inputs: ProofInputs) -> tuple[ProofContext, VerifiedPermit]:
+def _verified_install_context(
+    inputs: ProofInputs,
+    *,
+    require_current: bool = True,
+) -> tuple[ProofContext, VerifiedRecoveryCapsule]:
     package_manifest, artifacts = _load_release(inputs)
     runtime_receipt = _load_runtime_receipt(inputs)
-    permit = _load_verified_permit(inputs, artifacts)
-    documents = permit.install_documents
+    capsule = _load_verified_recovery_capsule(
+        inputs,
+        artifacts,
+        require_current=require_current,
+    )
+    documents = capsule.install_documents
     scope_document = _parse_canonical_object(
         documents.scope, "phase9_live_proof_scope_invalid"
     )
@@ -872,6 +1181,29 @@ def _verified_install_context(inputs: ProofInputs) -> tuple[ProofContext, Verifi
         package_capability,
         runtime_build_receipt_json=runtime_receipt,
     )
+    install_material = _install_authority_material(scope_capability)
+    delegation_payload = capsule.rollback_delegation.get("payload")
+    if (
+        type(delegation_payload) is not dict
+        or delegation_payload.get("installation_execution_id")
+        != install_material["execution_id"]
+    ):
+        raise LiveProofError("phase9_live_proof_rollback_delegation_invalid")
+    recovery_delegation_capability = verify_empty_rollback_recovery_delegation(
+        _canonical(dict(capsule.rollback_delegation)),
+        documents.trust_bundle,
+        expected_namespace=AUTHORIZATION_NAMESPACE,
+        expected_thread_id=THREAD_ID,
+        expected_install_scope_id=INSTALL_SCOPE_ID,
+        expected_rollback_scope_id=ROLLBACK_SCOPE_ID,
+        expected_authorization_text_sha256=AUTHORIZED_TEXT_SHA256,
+        expected_key_id=documents.key_id,
+        expected_trust_bundle_sha256=_sha(documents.trust_bundle),
+        expected_installation_execution_id=install_material["execution_id"],
+        verified_install_scope_capability=scope_capability,
+        verified_package_capability=package_capability,
+        verified_controller_runtime_capability=runtime_capability,
+    )
     return (
         ProofContext(
             inputs=inputs,
@@ -882,21 +1214,16 @@ def _verified_install_context(inputs: ProofInputs) -> tuple[ProofContext, Verifi
             verified_scope_capability=scope_capability,
             verified_package_capability=package_capability,
             verified_runtime_capability=runtime_capability,
-            permit=permit,
+            verified_recovery_delegation_capability=(
+                recovery_delegation_capability
+            ),
+            recovery_capsule=capsule,
         ),
-        permit,
+        capsule,
     )
 
 
-def _ensure_root_directory(path: Path, mode: int) -> None:
-    try:
-        os.mkdir(path, mode)
-        os.chmod(path, mode, follow_symlinks=False)
-        os.chown(path, 0, 0, follow_symlinks=False)
-    except FileExistsError:
-        pass
-    except OSError as error:
-        raise LiveProofError("phase9_live_proof_substrate_create_failed") from error
+def _verify_preexisting_root_directory(path: Path, mode: int) -> None:
     try:
         observed = path.stat(follow_symlinks=False)
     except OSError as error:
@@ -911,29 +1238,183 @@ def _ensure_root_directory(path: Path, mode: int) -> None:
 
 
 def _prepare_fixed_substrate() -> None:
+    """Validate the separately installed substrate without mutating it."""
+
     if os.geteuid() != 0:
         raise LiveProofError("phase9_live_proof_root_required")
-    _ensure_root_directory(LOCK_ROOT, 0o700)
-    _ensure_root_directory(CONTROLLER_STATE_ROOT, 0o700)
-    _ensure_root_directory(EXECUTIONS_ROOT, 0o700)
-    _ensure_root_directory(CONTROLLER_CONFIG_ROOT, 0o700)
-    _ensure_root_directory(STORE_SECRET_PARENT, 0o755)
-    _ensure_root_directory(STORE_SECRET_ROOT, 0o700)
+    for path, mode in (
+        (LOCK_ROOT, 0o700),
+        (CONTROLLER_STATE_ROOT, 0o700),
+        (EXECUTIONS_ROOT, 0o700),
+        (CONTROLLER_CONFIG_ROOT, 0o700),
+        (STORE_SECRET_PARENT, 0o755),
+        (STORE_SECRET_ROOT, 0o700),
+    ):
+        _verify_preexisting_root_directory(path, mode)
 
 
-def _authority_state() -> AuthorityState:
+def _verify_host_clock_synchronized() -> bool:
+    """Fail closed unless the fixed host synchronization probe says yes."""
+
+    try:
+        metadata = TIMEDATECTL_BINARY.stat(follow_symlinks=False)
+    except OSError as error:
+        raise LiveProofError(
+            "phase9_live_proof_clock_preflight_binary_invalid"
+        ) from error
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or stat.S_IMODE(metadata.st_mode) != 0o755
+        or metadata.st_uid != 0
+        or metadata.st_gid != 0
+        or metadata.st_nlink != 1
+    ):
+        raise LiveProofError("phase9_live_proof_clock_preflight_binary_invalid")
+    try:
+        completed = subprocess.run(
+            TIMEDATECTL_SYNCHRONIZATION_ARGV,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd="/",
+            env=dict(FIXED_ENVIRONMENT),
+            check=False,
+            timeout=TIMEDATECTL_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise LiveProofError("phase9_live_proof_clock_preflight_failed") from error
+    if (
+        completed.returncode != 0
+        or completed.stdout != b"yes\n"
+        or completed.stderr != b""
+    ):
+        raise LiveProofError("phase9_live_proof_clock_not_synchronized")
+    try:
+        after = TIMEDATECTL_BINARY.stat(follow_symlinks=False)
+    except OSError as error:
+        raise LiveProofError(
+            "phase9_live_proof_clock_preflight_binary_changed"
+        ) from error
+    if _stable_file_identity(after) != _stable_file_identity(metadata):
+        raise LiveProofError("phase9_live_proof_clock_preflight_binary_changed")
+    return True
+
+
+def _authority_state(*, allow_create: bool = True) -> AuthorityState:
+    if type(allow_create) is not bool:
+        raise LiveProofError("phase9_live_proof_authority_state_invalid")
     try:
         metadata = AUTHORITY_STATE_PATH.stat(follow_symlinks=False)
         if not stat.S_ISREG(metadata.st_mode):
             raise LiveProofError("phase9_live_proof_authority_state_invalid")
         create = False
     except FileNotFoundError:
+        if not allow_create:
+            raise LiveProofError(
+                "phase9_live_proof_authority_state_absent"
+            ) from None
         create = True
     return AuthorityState(
         AUTHORITY_STATE_PATH,
         expected_uid=0,
         create=create,
     )
+
+
+def _claim_or_verify_recovery_reservation(
+    context: ProofContext,
+    *,
+    state: AuthorityState,
+    held_lock: object,
+    allow_new_claim: bool,
+    require_current: bool,
+) -> Mapping[str, object]:
+    """Claim or reverify the exact signed public recovery reservation."""
+
+    if type(allow_new_claim) is not bool or type(require_current) is not bool:
+        raise LiveProofError("phase9_live_proof_recovery_reservation_invalid")
+    try:
+        binding = recovery_reservation_binding(
+            context.verified_recovery_delegation_capability
+        )
+        if binding.installation_execution_id != _expected_install_execution_id(
+            context
+        ):
+            raise LiveProofError(
+                "phase9_live_proof_recovery_reservation_install_mismatch"
+            )
+        reading = read_trusted_utc(KernelUtcClock())
+        not_before = _parse_utc(binding.not_before)
+        expires_at = _parse_utc(binding.expires_at)
+        if reading.observed_at < not_before:
+            raise LiveProofError(
+                "phase9_live_proof_recovery_reservation_not_yet_valid"
+            )
+        if require_current and reading.observed_at >= expires_at:
+            raise LiveProofError(
+                "phase9_live_proof_recovery_reservation_expired"
+            )
+        claim = state.claim_nonce(
+            binding.nonce,
+            operation=binding.operation,
+            execution_sha256=binding.execution_sha256,
+            authorization_sha256=binding.authorization_sha256,
+            scope_sha256=binding.scope_sha256,
+            trust_bundle_sha256=binding.trust_bundle_sha256,
+            held_lock=held_lock,
+            allow_new_claim=(
+                allow_new_claim and reading.observed_at < expires_at
+            ),
+        )
+    except AuthorityClaimNotAllowedError as error:
+        raise LiveProofError(
+            "phase9_live_proof_recovery_reservation_absent"
+        ) from error
+    except LiveProofError:
+        raise
+    except Exception as error:
+        raise LiveProofError(
+            "phase9_live_proof_recovery_reservation_invalid"
+        ) from error
+    if (
+        claim.operation_sha256
+        != authority_operation_sha256(RECOVERY_RESERVATION_OPERATION)
+        or claim.execution_sha256 != binding.execution_sha256
+        or (
+            allow_new_claim
+            and claim.result not in {"nonce_claimed", "exact_execution_resumed"}
+        )
+        or (
+            not allow_new_claim
+            and claim.result != "exact_execution_resumed"
+        )
+    ):
+        raise LiveProofError(
+            "phase9_live_proof_recovery_reservation_invalid"
+        )
+    return MappingProxyType(
+        {
+            "result": claim.result,
+            "claim_sha256": claim.claim_sha256,
+            "execution_sha256": claim.execution_sha256,
+        }
+    )
+
+
+def _claim_recovery_reservation_before_install(
+    context: ProofContext,
+) -> Mapping[str, object]:
+    with GlobalExecutionLock(GLOBAL_LOCK_PATH, expected_uid=0) as lock:
+        held = lock.held_capability()
+        _verify_host_clock_synchronized()
+        state = _authority_state(allow_create=True)
+        return _claim_or_verify_recovery_reservation(
+            context,
+            state=state,
+            held_lock=held,
+            allow_new_claim=True,
+            require_current=True,
+        )
 
 
 def _install_prerequisites(context: ProofContext) -> InstallPrerequisites:
@@ -982,13 +1463,52 @@ def _install_prerequisites(context: ProofContext) -> InstallPrerequisites:
     )
 
 
-def _run_install_worker(context: ProofContext) -> Mapping[str, object]:
-    state = _authority_state()
-    receipt_store = DurableReceiptStore.production()
-    prerequisites = _install_prerequisites(context)
+def _run_install_worker(
+    context: ProofContext,
+    *,
+    resume_only: bool,
+) -> Mapping[str, object]:
+    if type(resume_only) is not bool:
+        raise LiveProofError("phase9_live_proof_install_mode_invalid")
     with GlobalExecutionLock(GLOBAL_LOCK_PATH, expected_uid=0) as lock:
         held = lock.held_capability()
-        return run_authorized_dormant_store_install(
+        _verify_host_clock_synchronized()
+        state = _authority_state(allow_create=False)
+        return _execute_install_locked(
+            context,
+            state=state,
+            held_lock=held,
+            resume_only=resume_only,
+        )
+
+
+def _execute_install_locked(
+    context: ProofContext,
+    *,
+    state: AuthorityState,
+    held_lock: object,
+    resume_only: bool,
+) -> Mapping[str, object]:
+    """Execute one install mode under the caller's continuously held lock."""
+
+    if type(resume_only) is not bool:
+        raise LiveProofError("phase9_live_proof_install_mode_invalid")
+    try:
+        _claim_or_verify_recovery_reservation(
+            context,
+            state=state,
+            held_lock=held_lock,
+            allow_new_claim=False,
+            require_current=False,
+        )
+        receipt_store = DurableReceiptStore.production()
+        prerequisites = _install_prerequisites(context)
+        install_function = (
+            resume_authorized_dormant_store_install
+            if resume_only
+            else run_authorized_dormant_store_install
+        )
+        return install_function(
             verified_scope_capability=context.verified_scope_capability,
             verified_package_capability=context.verified_package_capability,
             verified_controller_runtime_capability=(
@@ -996,78 +1516,59 @@ def _run_install_worker(context: ProofContext) -> Mapping[str, object]:
             ),
             authority_state=state,
             clock=KernelUtcClock(),
-            held_lock=held,
+            held_lock=held_lock,
             prerequisites=prerequisites,
             receipt_store=receipt_store,
         )
+    except LiveProofError:
+        raise
+    except Exception as error:
+        raise LiveProofError("phase9_live_proof_install_execution_failed") from error
 
 
 def _expected_install_execution_id(context: ProofContext) -> str:
     """Derive the exact install execution ID before the first worker fork."""
+    return _install_authority_material(context.verified_scope_capability)[
+        "execution_id"
+    ]
 
-    scope = context.install_documents.scope
-    authorization = context.install_documents.authorization
-    trust_bundle = context.install_documents.trust_bundle
-    envelope = _parse_canonical_object(
-        authorization, "phase9_live_proof_install_authorization_invalid"
-    )
-    payload = envelope.get("payload")
-    if type(payload) is not dict or type(payload.get("nonce")) is not str:
-        raise LiveProofError("phase9_live_proof_install_authorization_invalid")
-    operation = authority.AUTHORIZATION_OPERATION
-    scope_hash = _sha(scope)
-    authorization_hash = _sha(authorization)
-    trust_hash = _sha(trust_bundle)
-    operation_hash = authority_operation_sha256(operation)
-    execution_material = b"\x00".join(
-        value.encode("ascii")
-        for value in (
-            operation,
-            scope_hash,
-            authorization_hash,
-            trust_hash,
+
+def _resolved_store_spec(
+    context: ProofContext,
+    *,
+    state: AuthorityState,
+    held_lock: object,
+) -> Mapping[str, object]:
+    """Reconstruct exact spec from sealed bytes and compare live copy if present."""
+
+    try:
+        claimed = resume_dormant_store_install_execution_binding(
+            context.verified_scope_capability,
+            verified_package_capability=context.verified_package_capability,
+            verified_controller_runtime_capability=(
+                context.verified_runtime_capability
+            ),
+            state=state,
+            clock=KernelUtcClock(),
+            held_lock=held_lock,
         )
-    )
-    execution_sha256 = _sha(
-        b"governed-memory-execution-binding-v1\x00" + execution_material
-    )
-    nonce_hash = authority_nonce_sha256(str(payload["nonce"]))
-    claim_material = b"\x00".join(
-        value.encode("ascii")
-        for value in (
-            nonce_hash,
-            operation_hash,
-            execution_sha256,
-            authorization_hash,
-            scope_hash,
-            trust_hash,
+        reconstructed = reconstruct_resolved_store_spec_from_claimed_binding(
+            claimed,
+            verified_package_capability=context.verified_package_capability,
         )
+    except Exception as error:
+        raise LiveProofError(
+            "phase9_live_proof_resolved_store_spec_reconstruction_failed"
+        ) from error
+    expected = _canonical(reconstructed) + b"\n"
+    raw = _read_optional_root_regular_no_follow(
+        RESOLVED_STORE_SPEC_PATH,
+        maximum=16 * 1024 * 1024,
     )
-    claim_sha256 = _sha(
-        b"governed-memory-authority-claim-v1\x00" + claim_material
-    )
-    execution_id_material = {
-        "claim_sha256": claim_sha256,
-        "execution_sha256": execution_sha256,
-        "operation_sha256": operation_hash,
-    }
-    return _sha(
-        b"governed-memory-dormant_store_install-execution-id-v1\x00"
-        + _canonical(execution_id_material)
-    )
-
-
-def _resolved_store_spec() -> Mapping[str, object]:
-    raw = _read_regular_no_follow(
-        RESOLVED_STORE_SPEC_PATH, maximum=16 * 1024 * 1024
-    )
-    if not raw.endswith(b"\n"):
+    if raw is not None and raw != expected:
         raise LiveProofError("phase9_live_proof_resolved_store_spec_invalid")
-    document = _parse_canonical_object(
-        raw[:-1], "phase9_live_proof_resolved_store_spec_invalid"
-    )
     return MappingProxyType(
-        validate_store_spec(document, allow_placeholders=False)
+        validate_store_spec(reconstructed, allow_placeholders=False)
     )
 
 
@@ -1156,91 +1657,27 @@ def _rollback_eligibility_seed(
     )
 
 
-def _write_pipe_document(descriptor: int, document: Mapping[str, object]) -> None:
-    raw = _canonical(dict(document)) + b"\n"
-    if len(raw) > MAX_WORKER_RESULT_BYTES:
-        raise LiveProofError("phase9_live_proof_signing_request_too_large")
-    view = memoryview(raw)
-    try:
-        while view:
-            written = os.write(descriptor, view)
-            if written <= 0:
-                raise OSError
-            view = view[written:]
-    except OSError as error:
-        raise LiveProofError("phase9_live_proof_signing_channel_failed") from error
-
-
-def _read_pipe_document(descriptor: int) -> dict[str, object]:
-    data = bytearray()
-    try:
-        while len(data) <= MAX_WORKER_RESULT_BYTES:
-            block = os.read(descriptor, min(65536, MAX_WORKER_RESULT_BYTES + 1 - len(data)))
-            if not block:
-                break
-            data.extend(block)
-            if b"\n" in block:
-                break
-    except OSError as error:
-        raise LiveProofError("phase9_live_proof_signing_channel_failed") from error
-    if not data.endswith(b"\n") or b"\n" in data[:-1]:
-        raise LiveProofError("phase9_live_proof_signing_response_invalid")
-    return _parse_canonical_object(
-        bytes(data[:-1]), "phase9_live_proof_signing_response_invalid"
-    )
-
-
-def _request_rollback_authorization(
-    *, request: Mapping[str, object], key_id: str
-) -> bytes:
-    request_raw = _canonical(dict(request))
-    request_sha256 = _sha(request_raw)
-    _write_pipe_document(ROLLBACK_REQUEST_FD, request)
-    response = _read_pipe_document(ROLLBACK_RESPONSE_FD)
-    signature = response.get("signature")
-    if (
-        set(response) != {"schema_version", "result", "request_sha256", "signature"}
-        or response.get("schema_version")
-        != "governed-memory-phase9-rollback-signing-response-v1"
-        or response.get("result") != "exact_delegated_rollback_signed"
-        or response.get("request_sha256") != request_sha256
-        or type(signature) is not dict
-        or set(signature) != {"algorithm", "key_id", "value_base64"}
-        or signature.get("algorithm") != "Ed25519"
-        or signature.get("key_id") != key_id
-    ):
-        raise LiveProofError("phase9_live_proof_signing_response_invalid")
-    try:
-        decoded = base64.b64decode(str(signature["value_base64"]), validate=True)
-    except (ValueError, TypeError) as error:
-        raise LiveProofError("phase9_live_proof_signing_response_invalid") from error
-    if len(decoded) != 64:
-        raise LiveProofError("phase9_live_proof_signing_response_invalid")
-    try:
-        payload_raw = base64.b64decode(
-            str(request["rollback_authorization_payload_base64"]), validate=True
-        )
-        payload = _parse_canonical_object(
-            payload_raw, "phase9_live_proof_signing_response_invalid"
-        )
-    except (ValueError, TypeError) as error:
-        raise LiveProofError("phase9_live_proof_signing_response_invalid") from error
-    return _canonical(
-        {
-            "schema_version": ROLLBACK_AUTHORIZATION_SCHEMA,
-            "payload": payload,
-            "signature": signature,
-        }
-    )
-
-
 def _build_rollback_documents(
     *,
     context: ProofContext,
     install_receipt: Mapping[str, object],
+    state: AuthorityState | None = None,
+    held_lock: object | None = None,
 ) -> RollbackDocuments:
     install = verify_install_receipt(install_receipt)
-    resolved = _resolved_store_spec()
+    if state is None or held_lock is None:
+        with GlobalExecutionLock(GLOBAL_LOCK_PATH, expected_uid=0) as lock:
+            return _build_rollback_documents(
+                context=context,
+                install_receipt=install,
+                state=_authority_state(allow_create=False),
+                held_lock=lock.held_capability(),
+            )
+    resolved = _resolved_store_spec(
+        context,
+        state=state,
+        held_lock=held_lock,
+    )
     resources = _load_install_resources(
         install_receipt=install, resolved_store_spec=resolved
     )
@@ -1284,55 +1721,12 @@ def _build_rollback_documents(
         },
     }
     scope_raw = _canonical(scope)
-    scope_sha256 = _sha(scope_raw)
-    permit = context.permit
-    key_id = permit.key_id
-    delegated = permit.document
-    payload = {
-        "schema_version": ROLLBACK_AUTHORIZATION_PAYLOAD_SCHEMA,
-        "authorization_id": "phase9-disposable-live-rollback-auth-000001",
-        "authorization_namespace": AUTHORIZATION_NAMESPACE,
-        "thread_id": THREAD_ID,
-        "scope_id": ROLLBACK_SCOPE_ID,
-        "scope_sha256": scope_sha256,
-        "key_id": key_id,
-        "approval_phrase": (
-            "APPROVE GOVERNED MEMORY EMPTY STORE ROLLBACK " + scope_sha256
-        ),
-        "nonce": permit.rollback_nonce,
-        "issued_at": delegated["issued_at"],
-        "not_before": delegated["not_before"],
-        "expires_at": delegated["expires_at"],
-        "single_use": True,
-    }
-    request = {
-        "schema_version": "governed-memory-phase9-rollback-signing-request-v1",
-        "permit_nonce": delegated["permit_nonce"],
-        "candidate_git_commit": context.inputs.candidate_git_commit,
-        "candidate_git_tree": context.inputs.candidate_git_tree,
-        "package_manifest_sha256": context.inputs.package_manifest_sha256,
-        "controller_runtime_receipt_sha256": (
-            context.inputs.controller_runtime_receipt_sha256
-        ),
-        "exact_targets_sha256": evidence.exact_targets_sha256,
-        "installation_execution_id": install["execution_id"],
-        "installation_receipt_sha256": install["receipt_sha256"],
-        "resource_ledger_head_sha256": evidence.resource_ledger_head_sha256,
-        "eligibility_receipt_sha256": eligibility["receipt_sha256"],
-        "rollback_scope_base64": base64.b64encode(scope_raw).decode("ascii"),
-        "rollback_authorization_payload_base64": base64.b64encode(
-            _canonical(payload)
-        ).decode("ascii"),
-        "eligibility_receipt": dict(eligibility),
-    }
-    authorization_raw = _request_rollback_authorization(
-        request=request,
-        key_id=key_id,
-    )
+    capsule = context.recovery_capsule
+    key_id = capsule.key_id
     return RollbackDocuments(
         scope=scope_raw,
-        authorization=authorization_raw,
-        trust_bundle=permit.install_documents.trust_bundle,
+        authorization=_canonical(dict(capsule.rollback_delegation)),
+        trust_bundle=capsule.install_documents.trust_bundle,
         key_id=key_id,
         eligibility=eligibility,
         resources=resources,
@@ -1358,6 +1752,11 @@ def _verified_rollback_capability(context: ProofContext) -> object:
         installation_execution_id=str(
             eligibility["installation_execution_id"]
         ),
+        installation_nonce_sha256=(
+            verified_dormant_install_authority_identity(
+                context.verified_scope_capability
+            ).authorization_nonce_sha256
+        ),
         installation_receipt_sha256=str(
             eligibility["installation_receipt_sha256"]
         ),
@@ -1370,34 +1769,66 @@ def _verified_rollback_capability(context: ProofContext) -> object:
             resource_evidence.resource_ledger_head_sha256
         ),
     )
-    return verify_empty_rollback_execution_capability(
+    return derive_empty_rollback_execution_capability_from_recovery_delegation(
+        context.verified_recovery_delegation_capability,
         documents.scope,
-        documents.authorization,
-        documents.trust_bundle,
-        expected_namespace=AUTHORIZATION_NAMESPACE,
-        expected_thread_id=THREAD_ID,
-        expected_scope_id=ROLLBACK_SCOPE_ID,
-        expected_key_id=documents.key_id,
-        expected_trust_bundle_sha256=_sha(documents.trust_bundle),
         expected_bindings=bindings,
-        verified_package_capability=context.verified_package_capability,
-        verified_controller_runtime_capability=(
-            context.verified_runtime_capability
-        ),
     )
 
 
-def _run_rollback_worker(context: ProofContext) -> Mapping[str, object]:
+def _run_rollback_worker(
+    context: ProofContext,
+    *,
+    start_from_reservation: bool,
+) -> Mapping[str, object]:
+    if type(start_from_reservation) is not bool:
+        raise LiveProofError("phase9_live_proof_rollback_mode_invalid")
     documents = context.rollback_documents
     if documents is None:
         raise LiveProofError("phase9_live_proof_rollback_context_absent")
-    capability = _verified_rollback_capability(context)
-    state = _authority_state()
-    receipt_store = DurableReceiptStore.production()
     with GlobalExecutionLock(GLOBAL_LOCK_PATH, expected_uid=0) as lock:
         held = lock.held_capability()
+        _verify_host_clock_synchronized()
+        state = _authority_state(allow_create=False)
+        return _execute_rollback_locked(
+            context,
+            state=state,
+            held_lock=held,
+            start_from_reservation=start_from_reservation,
+        )
 
-        receipt = run_authorized_empty_store_rollback(
+
+def _execute_rollback_locked(
+    context: ProofContext,
+    *,
+    state: AuthorityState,
+    held_lock: object,
+    start_from_reservation: bool,
+) -> Mapping[str, object]:
+    """Execute one rollback mode under the caller's continuously held lock."""
+
+    if type(start_from_reservation) is not bool:
+        raise LiveProofError("phase9_live_proof_rollback_mode_invalid")
+    documents = context.rollback_documents
+    if documents is None:
+        raise LiveProofError("phase9_live_proof_rollback_context_absent")
+    try:
+        _claim_or_verify_recovery_reservation(
+            context,
+            state=state,
+            held_lock=held_lock,
+            allow_new_claim=False,
+            require_current=False,
+        )
+        capability = _verified_rollback_capability(context)
+        receipt_store = DurableReceiptStore.production()
+
+        rollback_function = (
+            start_reserved_authorized_empty_store_rollback
+            if start_from_reservation
+            else resume_authorized_empty_store_rollback
+        )
+        receipt = rollback_function(
             verified_rollback_capability=capability,
             verified_package_capability=context.verified_package_capability,
             verified_controller_runtime_capability=(
@@ -1407,18 +1838,88 @@ def _run_rollback_worker(context: ProofContext) -> Mapping[str, object]:
             resources=documents.resources,
             authority_state=state,
             clock=KernelUtcClock(),
-            held_lock=held,
+            held_lock=held_lock,
             resolved_store_spec=documents.resolved_store_spec,
             receipt_store=receipt_store,
         )
         return dict(receipt.canonical_receipt)
+    except LiveProofError:
+        raise
+    except Exception as error:
+        raise LiveProofError("phase9_live_proof_rollback_execution_failed") from error
+
+
+def _expected_rollback_execution_id(context: ProofContext) -> str:
+    capability = _verified_rollback_capability(context)
+    evidence = rollback_capability_evidence(capability)
+    runtime_binding = {
+        "package_manifest_sha256": evidence.package_manifest_sha256,
+        "installation_execution_id": evidence.installation_execution_id,
+        "controller_runtime_receipt_sha256": (
+            evidence.controller_runtime_receipt_sha256
+        ),
+        "controller_runtime_root": evidence.controller_runtime_root,
+        "controller_runtime_tree_sha256": (
+            evidence.controller_runtime_tree_sha256
+        ),
+        "controller_release_root": evidence.controller_release_root,
+        "controller_release_tree_sha256": (
+            evidence.controller_release_tree_sha256
+        ),
+        "controller_release_package_manifest_path": (
+            evidence.controller_release_package_manifest_path
+        ),
+        "controller_runtime_interpreter_path": (
+            evidence.controller_runtime_interpreter_path
+        ),
+        "controller_runtime_interpreter_sha256": (
+            evidence.controller_runtime_interpreter_sha256
+        ),
+        "controller_runtime_inventory_path": (
+            evidence.controller_runtime_inventory_path
+        ),
+        "controller_runtime_inventory_sha256": (
+            evidence.controller_runtime_inventory_sha256
+        ),
+        "controller_requirements_lock_sha256": (
+            evidence.controller_requirements_lock_sha256
+        ),
+        "supervisor_launcher_path": evidence.supervisor_launcher_path,
+        "supervisor_launcher_sha256": evidence.supervisor_launcher_sha256,
+    }
+    execution_sha = _sha(
+        b"governed-memory-empty-rollback-execution-v3\x00"
+        + _canonical(
+            {
+                "operation": evidence.operation,
+                "scope_sha256": evidence.scope_sha256,
+                "authorization_sha256": evidence.authorization_sha256,
+                "trust_bundle_sha256": evidence.trust_bundle_sha256,
+                "plan_sha256": evidence.rollback_plan_sha256,
+                **runtime_binding,
+            }
+        )
+    )
+    return execution_sha
 
 
 def _run_absence_worker(context: ProofContext) -> Mapping[str, object]:
     # A completed public rollback replay does not trust the earlier receipt.
     # It reacquires the exact ledger-bound composition and re-proves terminal
     # resource absence before returning the same durable receipt.
-    replay_receipt = _run_rollback_worker(context)
+    replay_receipt = _run_rollback_worker(
+        context,
+        start_from_reservation=False,
+    )
+    return _terminal_absence_from_replay(context, replay_receipt)
+
+
+def _terminal_absence_from_replay(
+    context: ProofContext,
+    replay_receipt: Mapping[str, object],
+) -> Mapping[str, object]:
+    """Bind terminal absence to one just-completed public rollback replay."""
+
     replay = verify_empty_rollback_receipt(replay_receipt)
     retained_runtime = verify_controller_runtime_capability(
         context.verified_package_capability,
@@ -1448,10 +1949,24 @@ def _run_absence_worker(context: ProofContext) -> Mapping[str, object]:
 def _dispatch_worker(
     mode: WorkerMode, context: ProofContext
 ) -> Mapping[str, object]:
-    if mode in {WorkerMode.INSTALL, WorkerMode.RESUME_INSTALL}:
-        return _run_install_worker(context)
-    if mode in {WorkerMode.ROLLBACK, WorkerMode.RESUME_ROLLBACK}:
-        return _run_rollback_worker(context)
+    if mode is WorkerMode.START_OR_RECOVER:
+        return _run_start_or_recovery_selection_worker(context)
+    if mode is WorkerMode.RECOVER_ONLY:
+        return _run_recovery_selection_worker(context)
+    if mode is WorkerMode.INSTALL:
+        return _run_install_worker(context, resume_only=False)
+    if mode is WorkerMode.RESUME_INSTALL:
+        return _run_install_worker(context, resume_only=True)
+    if mode is WorkerMode.ROLLBACK:
+        return _run_rollback_worker(
+            context,
+            start_from_reservation=True,
+        )
+    if mode is WorkerMode.RESUME_ROLLBACK:
+        return _run_rollback_worker(
+            context,
+            start_from_reservation=False,
+        )
     if mode is WorkerMode.VERIFY_ABSENCE:
         return _run_absence_worker(context)
     raise LiveProofError("phase9_live_proof_worker_mode_refused")
@@ -1474,16 +1989,21 @@ def _fork_worker(
 ) -> tuple[int, int]:
     if not hasattr(os, "fork"):
         raise LiveProofError("phase9_live_proof_linux_fork_required")
-    read_fd, write_fd = os.pipe()
-    pid = os.fork()
+    try:
+        read_fd, write_fd = os.pipe()
+    except OSError as error:
+        raise LiveProofError("phase9_live_proof_worker_pipe_failed") from error
+    try:
+        pid = os.fork()
+    except OSError as error:
+        for descriptor in (read_fd, write_fd):
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        raise LiveProofError("phase9_live_proof_worker_fork_failed") from error
     if pid == 0:
         os.close(read_fd)
-        for signing_fd in (ROLLBACK_REQUEST_FD, ROLLBACK_RESPONSE_FD):
-            if signing_fd != write_fd:
-                try:
-                    os.close(signing_fd)
-                except OSError:
-                    pass
         exit_code = 1
         try:
             result = _dispatch_worker(mode, context)
@@ -1500,7 +2020,18 @@ def _fork_worker(
         finally:
             os.close(write_fd)
             os._exit(exit_code)
-    os.close(write_fd)
+    try:
+        os.close(write_fd)
+    except OSError as error:
+        try:
+            _terminate_and_reap_worker(pid, read_fd)
+        except BaseException as cleanup_error:
+            raise LiveProofError(
+                "phase9_live_proof_worker_cleanup_unproved"
+            ) from cleanup_error
+        raise LiveProofError(
+            "phase9_live_proof_worker_parent_setup_failed"
+        ) from error
     return pid, read_fd
 
 
@@ -1524,10 +2055,92 @@ def _read_pipe(descriptor: int) -> bytes:
 
 
 def _wait_worker(pid: int, read_fd: int) -> Mapping[str, object]:
-    raw = _read_pipe(read_fd)
-    waited, status = os.waitpid(pid, 0)
-    if waited != pid:
+    """Bound, own and reap one exact worker while draining its result pipe."""
+
+    deadline = time.monotonic() + WORKER_COMPLETION_TIMEOUT_SECONDS
+    data = bytearray()
+    descriptor_owned = True
+    child_owned = True
+    status: int | None = None
+    try:
+        while child_owned or descriptor_owned:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise LiveProofError("phase9_live_proof_worker_timeout")
+            if child_owned:
+                try:
+                    waited, observed_status = os.waitpid(pid, os.WNOHANG)
+                except InterruptedError:
+                    continue
+                except OSError as error:
+                    raise LiveProofError(
+                        "phase9_live_proof_worker_wait_failed"
+                    ) from error
+                if waited == pid:
+                    child_owned = False
+                    status = observed_status
+                elif waited != 0:
+                    raise LiveProofError(
+                        "phase9_live_proof_worker_wait_failed"
+                    )
+            if descriptor_owned:
+                try:
+                    ready, unused_write, unused_exception = select.select(
+                        [read_fd], [], [], min(remaining, POLL_INTERVAL_SECONDS)
+                    )
+                except (OSError, ValueError) as error:
+                    raise LiveProofError(
+                        "phase9_live_proof_worker_pipe_failed"
+                    ) from error
+                if ready:
+                    try:
+                        block = os.read(
+                            read_fd,
+                            min(
+                                65536,
+                                MAX_WORKER_RESULT_BYTES + 1 - len(data),
+                            ),
+                        )
+                    except OSError as error:
+                        raise LiveProofError(
+                            "phase9_live_proof_worker_pipe_failed"
+                        ) from error
+                    if not block:
+                        os.close(read_fd)
+                        descriptor_owned = False
+                    else:
+                        data.extend(block)
+                        if len(data) > MAX_WORKER_RESULT_BYTES:
+                            raise LiveProofError(
+                                "phase9_live_proof_worker_result_too_large"
+                            )
+            elif child_owned:
+                time.sleep(min(remaining, POLL_INTERVAL_SECONDS))
+    except BaseException as error:
+        cleanup_error: BaseException | None = None
+        if child_owned:
+            try:
+                _terminate_and_reap_worker(
+                    pid, read_fd if descriptor_owned else None
+                )
+                child_owned = False
+                descriptor_owned = False
+            except BaseException as observed:
+                cleanup_error = observed
+        elif descriptor_owned:
+            try:
+                os.close(read_fd)
+                descriptor_owned = False
+            except OSError as observed:
+                cleanup_error = observed
+        if cleanup_error is not None:
+            raise LiveProofError(
+                "phase9_live_proof_worker_cleanup_unproved"
+            ) from cleanup_error
+        raise error
+    if status is None:
         raise LiveProofError("phase9_live_proof_worker_wait_failed")
+    raw = bytes(data)
     try:
         document = _parse_canonical_object(
             raw, "phase9_live_proof_worker_result_invalid"
@@ -1545,6 +2158,40 @@ def _wait_worker(pid: int, read_fd: int) -> Mapping[str, object]:
             code if type(code) is str else "phase9_live_proof_worker_failed"
         )
     return MappingProxyType(dict(document["result"]))
+
+
+def _terminate_and_reap_worker(
+    pid: int, read_fd: int | None
+) -> int | None:
+    """Boundedly terminate and reap one exact owned child process."""
+
+    if read_fd is not None:
+        try:
+            os.close(read_fd)
+        except OSError:
+            pass
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    except OSError:
+        # Reaping below is still authoritative for whether the child remains.
+        pass
+    deadline = time.monotonic() + WORKER_CLEANUP_TIMEOUT_SECONDS
+    while True:
+        try:
+            waited, status = os.waitpid(pid, os.WNOHANG)
+        except InterruptedError:
+            continue
+        except ChildProcessError:
+            return None
+        if waited == pid:
+            return status
+        if waited != 0:
+            raise LiveProofError("phase9_live_proof_worker_cleanup_unproved")
+        if time.monotonic() >= deadline:
+            raise LiveProofError("phase9_live_proof_worker_cleanup_unproved")
+        time.sleep(POLL_INTERVAL_SECONDS)
 
 
 def _execution_directories() -> frozenset[str]:
@@ -1584,65 +2231,124 @@ def _journal_has_boundary(path: Path, step_id: str) -> bool:
     return False
 
 
+def _install_journal_compensation_complete(path: Path) -> bool:
+    """Read one strict install journal terminal state; malformed bytes refuse."""
+
+    raw = _read_optional_root_regular_no_follow(
+        path,
+        maximum=16 * 1024 * 1024,
+    )
+    if raw is None:
+        return False
+    if not raw or not raw.endswith(b"\n"):
+        raise LiveProofError("phase9_live_proof_install_journal_invalid")
+    records: list[dict[str, object]] = []
+    for line in raw.splitlines():
+        try:
+            record = json.loads(line.decode("ascii"))
+        except (UnicodeError, json.JSONDecodeError) as error:
+            raise LiveProofError(
+                "phase9_live_proof_install_journal_invalid"
+            ) from error
+        if type(record) is not dict or _canonical(record) != line:
+            raise LiveProofError("phase9_live_proof_install_journal_invalid")
+        records.append(record)
+    terminal = records[-1]
+    return (
+        terminal.get("step_id") == "I00_ATTEMPT"
+        and terminal.get("event") == "compensation_complete"
+    )
+
+
 def _kill_after_new_durable_boundary(
     *,
     pid: int,
     read_fd: int,
-    prior_directories: frozenset[str],
+    expected_execution_id: str,
+    allowed_existing_directories: frozenset[str],
     journal_name: str,
     step_id: str,
 ) -> str:
+    _require_hash(expected_execution_id)
+    if (
+        type(allowed_existing_directories) is not frozenset
+        or any(
+            _EXECUTION_DIRECTORY_RE.fullmatch(item) is None
+            for item in allowed_existing_directories
+        )
+        or expected_execution_id in allowed_existing_directories
+    ):
+        raise LiveProofError("phase9_live_proof_boundary_identity_invalid")
     deadline = time.monotonic() + BOUNDARY_TIMEOUT_SECONDS
-    while time.monotonic() < deadline:
-        waited, status = os.waitpid(pid, os.WNOHANG)
-        if waited == pid:
-            raw = _read_pipe(read_fd)
-            try:
-                detail = _parse_canonical_object(
-                    raw, "phase9_live_proof_worker_result_invalid"
-                )
-                code = detail.get("error_code")
-            except LiveProofError:
-                code = None
-            raise LiveProofError(
-                code
-                if type(code) is str
-                else "phase9_live_proof_worker_exited_before_boundary"
-            )
-        new_directories = _execution_directories() - prior_directories
-        if len(new_directories) > 1:
-            raise LiveProofError(
-                "phase9_live_proof_parallel_execution_detected"
-            )
-        if len(new_directories) == 1:
-            execution_id = next(iter(new_directories))
-            journal_path = EXECUTIONS_ROOT / execution_id / journal_name
-            if _journal_has_boundary(journal_path, step_id):
-                try:
-                    os.kill(pid, signal.SIGKILL)
-                except ProcessLookupError as error:
-                    raise LiveProofError(
-                        "phase9_live_proof_worker_exited_at_boundary"
-                    ) from error
-                waited, status = os.waitpid(pid, 0)
-                os.close(read_fd)
-                if (
-                    waited != pid
-                    or not os.WIFSIGNALED(status)
-                    or os.WTERMSIG(status) != signal.SIGKILL
-                ):
-                    raise LiveProofError(
-                        "phase9_live_proof_process_death_unproved"
-                    )
-                return execution_id
-        time.sleep(POLL_INTERVAL_SECONDS)
+    child_owned = True
+    descriptor_owned = True
     try:
-        os.kill(pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
-    os.waitpid(pid, 0)
-    os.close(read_fd)
-    raise LiveProofError("phase9_live_proof_boundary_timeout")
+        while time.monotonic() < deadline:
+            waited, status = os.waitpid(pid, os.WNOHANG)
+            if waited == pid:
+                child_owned = False
+                raw = _read_pipe(read_fd)
+                descriptor_owned = False
+                try:
+                    detail = _parse_canonical_object(
+                        raw, "phase9_live_proof_worker_result_invalid"
+                    )
+                    code = detail.get("error_code")
+                except LiveProofError:
+                    code = None
+                raise LiveProofError(
+                    code
+                    if type(code) is str
+                    else "phase9_live_proof_worker_exited_before_boundary"
+                )
+            if waited != 0:
+                raise LiveProofError("phase9_live_proof_worker_wait_failed")
+            observed_directories = _execution_directories()
+            unexpected = observed_directories - (
+                allowed_existing_directories | {expected_execution_id}
+            )
+            missing_prior = allowed_existing_directories - observed_directories
+            if unexpected or missing_prior:
+                raise LiveProofError(
+                    "phase9_live_proof_parallel_execution_detected"
+                )
+            if expected_execution_id in observed_directories:
+                journal_path = (
+                    EXECUTIONS_ROOT / expected_execution_id / journal_name
+                )
+                if _journal_has_boundary(journal_path, step_id):
+                    status = _terminate_and_reap_worker(pid, read_fd)
+                    child_owned = False
+                    descriptor_owned = False
+                    if (
+                        status is None
+                        or not os.WIFSIGNALED(status)
+                        or os.WTERMSIG(status) != signal.SIGKILL
+                    ):
+                        raise LiveProofError(
+                            "phase9_live_proof_process_death_unproved"
+                        )
+                    return expected_execution_id
+            time.sleep(POLL_INTERVAL_SECONDS)
+        raise LiveProofError("phase9_live_proof_boundary_timeout")
+    except BaseException as original_error:
+        if child_owned:
+            try:
+                _terminate_and_reap_worker(
+                    pid, read_fd if descriptor_owned else None
+                )
+                child_owned = False
+                descriptor_owned = False
+            except BaseException as cleanup_error:
+                raise LiveProofError(
+                    "phase9_live_proof_worker_cleanup_unproved"
+                ) from cleanup_error
+        elif descriptor_owned:
+            try:
+                os.close(read_fd)
+            except OSError:
+                pass
+        raise original_error
 
 
 def _boundary_sha256(step_id: str) -> str:
@@ -1669,7 +2375,7 @@ def verify_live_proof_receipt(
         != "one_bounded_disposable_linux_execution_terminal_snapshot"
         or receipt.get("cold_restart_scope")
         != "controller_worker_process_only"
-        or receipt.get("exact_targets_absent_count") != 15
+        or receipt.get("exact_rollback_resources_absent_count") != 15
         or receipt.get("source_postgres_read_count") != 0
         or receipt.get("source_postgres_write_count") != 0
         or receipt.get("provider_calls") != 0
@@ -1685,6 +2391,8 @@ def verify_live_proof_receipt(
         is not False
         or receipt.get("terminal_absence_is_continuous_guarantee")
         is not False
+        or receipt.get("ephemeral_private_signer_retained_at_execution_start")
+        is not False
     ):
         raise LiveProofError("phase9_live_proof_receipt_invalid")
     required_true = (
@@ -1699,6 +2407,10 @@ def verify_live_proof_receipt(
         "completed_public_rollback_replayed",
         "exact_resources_absent_at_terminal_observation",
         "controller_runtime_capability_reverified",
+        "host_clock_synchronization_preflight_passed",
+        "recovery_capsule_published_before_first_install_effect",
+        "recovery_reservation_claimed_before_first_install_effect",
+        "recovery_capsule_retained_at_terminal_observation",
     )
     required_false = (
         "stores_installed_at_terminal_observation",
@@ -1712,7 +2424,8 @@ def verify_live_proof_receipt(
         "package_manifest_sha256",
         "controller_runtime_receipt_sha256",
         "live_proof_receipt_schema_sha256",
-        "external_proof_permit_sha256",
+        "recovery_capsule_sha256",
+        "recovery_reservation_claim_sha256",
         "authorization_text_sha256",
         "installation_execution_id",
         "installation_receipt_sha256",
@@ -1740,12 +2453,62 @@ def verify_live_proof_receipt(
     return dict(receipt)
 
 
+def verify_recovery_receipt(
+    value: Mapping[str, object],
+) -> dict[str, object]:
+    receipt = dict(value)
+    if (
+        set(receipt) != _RECOVERY_RECEIPT_KEYS
+        or receipt.get("schema_version") != RECOVERY_RECEIPT_SCHEMA
+        or receipt.get("result")
+        != "exact_reserved_install_recovered_and_rolled_back_empty"
+        or receipt.get("exact_resources_absent") is not True
+        or receipt.get("stores_installed") is not False
+        or receipt.get("stores_supervisor_installed") is not False
+        or receipt.get("install_initiated_by_recovery_mode") is not False
+        or receipt.get("provider_calls") != 0
+        or receipt.get("production_data_read") is not False
+        or receipt.get("activation_performed") is not False
+    ):
+        raise LiveProofError("phase9_live_proof_recovery_receipt_invalid")
+    for key in (
+        "package_manifest_sha256",
+        "controller_runtime_receipt_sha256",
+        "recovery_capsule_sha256",
+        "installation_execution_id",
+        "installation_receipt_sha256",
+        "empty_rollback_execution_id",
+        "empty_rollback_receipt_sha256",
+        "receipt_sha256",
+    ):
+        if type(receipt.get(key)) is not str or _HASH_RE.fullmatch(
+            str(receipt[key])
+        ) is None:
+            raise LiveProofError(
+                "phase9_live_proof_recovery_receipt_invalid"
+            )
+    for key in ("candidate_git_commit", "candidate_git_tree"):
+        if type(receipt.get(key)) is not str or _COMMIT_RE.fullmatch(
+            str(receipt[key])
+        ) is None:
+            raise LiveProofError(
+                "phase9_live_proof_recovery_receipt_invalid"
+            )
+    if receipt["receipt_sha256"] != _document_sha(
+        {key: item for key, item in receipt.items() if key != "receipt_sha256"}
+    ):
+        raise LiveProofError("phase9_live_proof_recovery_receipt_invalid")
+    return receipt
+
+
 def _proof_receipt(
     *,
     context: ProofContext,
     install_receipt: Mapping[str, object],
     rollback_receipt: Mapping[str, object],
     absence: Mapping[str, object],
+    host_clock_synchronization_preflight_passed: bool,
+    recovery_reservation_claim_sha256: str,
 ) -> dict[str, object]:
     install = verify_install_receipt(install_receipt)
     rollback = verify_empty_rollback_receipt(rollback_receipt)
@@ -1765,9 +2528,18 @@ def _proof_receipt(
         or rollback["production_data_read"] is not False
         or rollback["application_services_installed"] is not False
         or rollback["activation_performed"] is not False
-        or rollback["exact_targets_absent_count"] != 15
+        or rollback["exact_rollback_resources_absent_count"] != 15
+        or host_clock_synchronization_preflight_passed is not True
+        or _HASH_RE.fullmatch(recovery_reservation_claim_sha256) is None
     ):
         raise LiveProofError("phase9_live_proof_receipt_effect_boundary_invalid")
+    terminal_capsule = _load_verified_recovery_capsule(
+        context.inputs,
+        context.artifacts,
+        require_current=False,
+    )
+    if terminal_capsule.raw != context.recovery_capsule.raw:
+        raise LiveProofError("phase9_live_proof_recovery_capsule_changed")
     receipt: dict[str, object] = {
         "schema_version": LIVE_PROOF_RECEIPT_SCHEMA,
         "result": "disposable_install_crash_resume_and_empty_rollback_proved",
@@ -1781,7 +2553,14 @@ def _proof_receipt(
             context.inputs.controller_runtime_receipt_sha256
         ),
         "live_proof_receipt_schema_sha256": _sha(schema_raw),
-        "external_proof_permit_sha256": _sha(context.permit.raw),
+        "recovery_capsule_sha256": _sha(context.recovery_capsule.raw),
+        "recovery_reservation_claim_sha256": (
+            recovery_reservation_claim_sha256
+        ),
+        "recovery_capsule_published_before_first_install_effect": True,
+        "recovery_reservation_claimed_before_first_install_effect": True,
+        "ephemeral_private_signer_retained_at_execution_start": False,
+        "recovery_capsule_retained_at_terminal_observation": True,
         "authorization_text_sha256": AUTHORIZED_TEXT_SHA256,
         "installation_execution_id": install["execution_id"],
         "installation_receipt_sha256": install["receipt_sha256"],
@@ -1811,8 +2590,8 @@ def _proof_receipt(
         "completed_public_rollback_replayed": absence[
             "completed_public_rollback_replayed"
         ],
-        "exact_targets_absent_count": rollback[
-            "exact_targets_absent_count"
+        "exact_rollback_resources_absent_count": rollback[
+            "exact_rollback_resources_absent_count"
         ],
         "exact_resources_absent_at_terminal_observation": absence[
             "exact_resources_absent"
@@ -1827,6 +2606,7 @@ def _proof_receipt(
         "controller_runtime_capability_reverified": absence[
             "controller_runtime_capability_reverified"
         ],
+        "host_clock_synchronization_preflight_passed": True,
         "source_postgres_read_count": rollback[
             "source_postgres_read_count"
         ],
@@ -1850,7 +2630,8 @@ def _complete_exact_rollback_recovery(
     context: ProofContext,
     install_receipt: Mapping[str, object],
     rollback_context: ProofContext | None,
-) -> None:
+    start_from_reservation: bool,
+) -> tuple[Mapping[str, object], Mapping[str, object]]:
     """Recover only the exact installed ledger through public rollback."""
 
     selected = rollback_context
@@ -1860,8 +2641,12 @@ def _complete_exact_rollback_recovery(
             install_receipt=install_receipt,
         )
         selected = replace(context, rollback_documents=documents)
-    _verified_rollback_capability(selected)
-    pid, descriptor = _fork_worker(WorkerMode.RESUME_ROLLBACK, selected)
+    mode = (
+        WorkerMode.ROLLBACK
+        if start_from_reservation
+        else WorkerMode.RESUME_ROLLBACK
+    )
+    pid, descriptor = _fork_worker(mode, selected)
     recovered = verify_empty_rollback_receipt(
         _wait_worker(pid, descriptor)
     )
@@ -1871,6 +2656,7 @@ def _complete_exact_rollback_recovery(
     absence = _wait_worker(pid, descriptor)
     if absence.get("exact_resources_absent") is not True:
         raise LiveProofError("phase9_live_proof_exact_rollback_recovery_failed")
+    return MappingProxyType(dict(recovered)), MappingProxyType(dict(absence))
 
 
 def _recover_verified_install_receipt(
@@ -1878,30 +2664,430 @@ def _recover_verified_install_receipt(
     context: ProofContext,
     execution_id: str,
 ) -> Mapping[str, object]:
-    """Recover a lost worker result without selecting a receipt path."""
+    """Recover only an exact install whose durable authority claim exists."""
 
-    try:
-        durable = DurableReceiptStore.production().read(
-            ReceiptArtifact.INSTALL, execution_id
-        )
-        receipt = verify_install_receipt(durable.canonical_receipt)
-    except Exception:
-        # If the receipt was not yet committed, one bounded invocation of the
-        # same public install composition resumes the already claimed journal.
-        pid, descriptor = _fork_worker(WorkerMode.RESUME_INSTALL, context)
-        receipt = verify_install_receipt(_wait_worker(pid, descriptor))
+    _exact_install_execution_evidence_present(context, execution_id)
+    # The same public install composition performs any durable-receipt replay
+    # or journal resume only after it acquires the global execution lock.
+    pid, descriptor = _fork_worker(WorkerMode.RESUME_INSTALL, context)
+    receipt = verify_install_receipt(_wait_worker(pid, descriptor))
     if receipt["execution_id"] != execution_id:
         raise LiveProofError("phase9_live_proof_install_recovery_mismatch")
     return MappingProxyType(dict(receipt))
 
 
-def run_live_proof(inputs: ProofInputs) -> Mapping[str, object]:
+def _exact_install_execution_evidence_present(
+    context: ProofContext,
+    execution_id: str,
+) -> None:
+    """Require a preexisting exact claim without creating any install claim."""
+
+    if execution_id != _expected_install_execution_id(context):
+        raise LiveProofError("phase9_live_proof_install_recovery_mismatch")
+    material = _install_authority_material(
+        context.verified_scope_capability
+    )
+    with GlobalExecutionLock(GLOBAL_LOCK_PATH, expected_uid=0) as lock:
+        held = lock.held_capability()
+        _verify_host_clock_synchronized()
+        state = _authority_state(allow_create=False)
+        _claim_or_verify_recovery_reservation(
+            context,
+            state=state,
+            held_lock=held,
+            allow_new_claim=False,
+            require_current=False,
+        )
+        try:
+            claim = state.claim_nonce(
+                material["nonce"],
+                operation=material["operation"],
+                execution_sha256=material["execution_sha256"],
+                authorization_sha256=material["authorization_sha256"],
+                scope_sha256=material["scope_sha256"],
+                trust_bundle_sha256=material["trust_bundle_sha256"],
+                held_lock=held,
+                allow_new_claim=False,
+            )
+        except AuthorityClaimNotAllowedError as error:
+            raise LiveProofError(
+                "phase9_live_proof_install_recovery_evidence_absent"
+            ) from error
+        except Exception as error:
+            raise LiveProofError(
+                "phase9_live_proof_install_recovery_evidence_invalid"
+            ) from error
+        if claim.result != "exact_execution_resumed":
+            raise LiveProofError(
+                "phase9_live_proof_install_recovery_evidence_invalid"
+            )
+
+
+def _exact_install_claim_present_locked(
+    context: ProofContext,
+    *,
+    state: AuthorityState,
+    held_lock: object,
+) -> bool:
+    material = _install_authority_material(
+        context.verified_scope_capability
+    )
+    try:
+        claim = state.claim_nonce(
+            material["nonce"],
+            operation=material["operation"],
+            execution_sha256=material["execution_sha256"],
+            authorization_sha256=material["authorization_sha256"],
+            scope_sha256=material["scope_sha256"],
+            trust_bundle_sha256=material["trust_bundle_sha256"],
+            held_lock=held_lock,
+            allow_new_claim=False,
+        )
+    except AuthorityClaimNotAllowedError:
+        return False
+    except Exception as error:
+        raise LiveProofError(
+            "phase9_live_proof_install_recovery_evidence_invalid"
+        ) from error
+    if claim.result != "exact_execution_resumed":
+        raise LiveProofError(
+            "phase9_live_proof_install_recovery_evidence_invalid"
+        )
+    return True
+
+
+def _rollback_claim_present_locked(
+    context: ProofContext,
+    *,
+    state: AuthorityState,
+    held_lock: object,
+    install_receipt: Mapping[str, object],
+) -> bool:
+    documents = _build_rollback_documents(
+        context=context,
+        install_receipt=install_receipt,
+        state=state,
+        held_lock=held_lock,
+    )
+    selected = replace(context, rollback_documents=documents)
+    evidence = rollback_capability_evidence(
+        _verified_rollback_capability(selected)
+    )
+    try:
+        return state.inspect_nonce_claim(
+            evidence.nonce,
+            held_lock=held_lock,
+        ).present
+    except Exception as error:
+        raise LiveProofError(
+            "phase9_live_proof_rollback_state_invalid"
+        ) from error
+
+
+def _recovery_selection_worker(
+    context: ProofContext,
+    *,
+    allow_start: bool,
+) -> Mapping[str, object]:
+    """Choose start/recovery from exact claims and receipt under one lock."""
+
+    if type(allow_start) is not bool:
+        raise LiveProofError("phase9_live_proof_recovery_policy_invalid")
+    with GlobalExecutionLock(GLOBAL_LOCK_PATH, expected_uid=0) as lock:
+        held = lock.held_capability()
+        _verify_host_clock_synchronized()
+        try:
+            state = _authority_state(allow_create=allow_start)
+        except LiveProofError:
+            raise
+        binding = recovery_reservation_binding(
+            context.verified_recovery_delegation_capability
+        )
+        reservation_present = state.inspect_nonce_claim(
+            binding.nonce,
+            held_lock=held,
+        ).present
+        install_present = _exact_install_claim_present_locked(
+            context,
+            state=state,
+            held_lock=held,
+        )
+        execution_id = _expected_install_execution_id(context)
+        receipt_store = DurableReceiptStore.production()
+        receipt_evidence = receipt_store.read_if_present(
+            ReceiptArtifact.INSTALL,
+            execution_id,
+        )
+        if not reservation_present:
+            if install_present or receipt_evidence is not None:
+                raise LiveProofError(
+                    "phase9_live_proof_recovery_state_inconsistent"
+                )
+            if allow_start:
+                reservation = _claim_or_verify_recovery_reservation(
+                    context,
+                    state=state,
+                    held_lock=held,
+                    allow_new_claim=True,
+                    require_current=True,
+                )
+                if reservation.get("result") != "nonce_claimed":
+                    raise LiveProofError(
+                        "phase9_live_proof_recovery_state_inconsistent"
+                    )
+                return MappingProxyType(
+                    {
+                        "action": "start",
+                        "recovery_reservation_claim_sha256": reservation[
+                            "claim_sha256"
+                        ],
+                    }
+                )
+            raise LiveProofError(
+                "phase9_live_proof_recovery_no_effects_reserved"
+            )
+        _claim_or_verify_recovery_reservation(
+            context,
+            state=state,
+            held_lock=held,
+            allow_new_claim=False,
+            require_current=False,
+        )
+        if not install_present:
+            if receipt_evidence is not None:
+                raise LiveProofError(
+                    "phase9_live_proof_recovery_state_inconsistent"
+                )
+            raise LiveProofError(
+                "phase9_live_proof_recovery_reserved_without_install_claim"
+            )
+        rollback_present = False
+        if receipt_evidence is not None:
+            install = verify_install_receipt(
+                receipt_evidence.canonical_receipt
+            )
+            rollback_present = _rollback_claim_present_locked(
+                context,
+                state=state,
+                held_lock=held,
+                install_receipt=install,
+            )
+        else:
+            rollback_nonce = str(context.recovery_capsule.rollback_nonce)
+            if state.inspect_nonce_claim(
+                rollback_nonce,
+                held_lock=held,
+            ).present:
+                raise LiveProofError(
+                    "phase9_live_proof_rollback_state_without_install_receipt"
+                )
+            install_journal = EXECUTIONS_ROOT / execution_id / "journal.jsonl"
+            if _install_journal_compensation_complete(install_journal):
+                raise LiveProofError(
+                    "phase9_live_proof_install_compensation_manual_recovery_required"
+                )
+            install = verify_install_receipt(
+                _execute_install_locked(
+                    context,
+                    state=state,
+                    held_lock=held,
+                    resume_only=True,
+                )
+            )
+            if install.get("execution_id") != execution_id:
+                raise LiveProofError(
+                    "phase9_live_proof_install_recovery_mismatch"
+                )
+        documents = _build_rollback_documents(
+            context=context,
+            install_receipt=install,
+            state=state,
+            held_lock=held,
+        )
+        selected = replace(context, rollback_documents=documents)
+        rollback = verify_empty_rollback_receipt(
+            _execute_rollback_locked(
+                selected,
+                state=state,
+                held_lock=held,
+                start_from_reservation=not rollback_present,
+            )
+        )
+        if rollback.get("exact_resources_absent") is not True:
+            raise LiveProofError(
+                "phase9_live_proof_exact_rollback_recovery_failed"
+            )
+        replay = _execute_rollback_locked(
+            selected,
+            state=state,
+            held_lock=held,
+            start_from_reservation=False,
+        )
+        absence = _terminal_absence_from_replay(selected, replay)
+        return MappingProxyType(
+            {
+                "action": "recovered",
+                "install_receipt": dict(install),
+                "rollback_receipt": dict(rollback),
+                "absence": dict(absence),
+            }
+        )
+
+
+def _run_recovery_selection_worker(
+    context: ProofContext,
+) -> Mapping[str, object]:
+    return _recovery_selection_worker(context, allow_start=False)
+
+
+def _run_start_or_recovery_selection_worker(
+    context: ProofContext,
+) -> Mapping[str, object]:
+    return _recovery_selection_worker(context, allow_start=True)
+
+
+def _recovery_receipt(
+    *,
+    context: ProofContext,
+    install_receipt: Mapping[str, object],
+    rollback_receipt: Mapping[str, object],
+    absence: Mapping[str, object],
+) -> Mapping[str, object]:
+    install = verify_install_receipt(install_receipt)
+    rollback = verify_empty_rollback_receipt(rollback_receipt)
+    if (
+        absence.get("exact_resources_absent") is not True
+        or absence.get("stores_installed") is not False
+        or absence.get("stores_supervisor_installed") is not False
+    ):
+        raise LiveProofError("phase9_live_proof_recovery_receipt_invalid")
+    receipt: dict[str, object] = {
+        "schema_version": RECOVERY_RECEIPT_SCHEMA,
+        "result": "exact_reserved_install_recovered_and_rolled_back_empty",
+        "candidate_git_commit": context.inputs.candidate_git_commit,
+        "candidate_git_tree": context.inputs.candidate_git_tree,
+        "package_manifest_sha256": context.inputs.package_manifest_sha256,
+        "controller_runtime_receipt_sha256": (
+            context.inputs.controller_runtime_receipt_sha256
+        ),
+        "recovery_capsule_sha256": _sha(context.recovery_capsule.raw),
+        "installation_execution_id": install["execution_id"],
+        "installation_receipt_sha256": install["receipt_sha256"],
+        "empty_rollback_execution_id": rollback["execution_id"],
+        "empty_rollback_receipt_sha256": rollback["receipt_sha256"],
+        "exact_resources_absent": True,
+        "stores_installed": False,
+        "stores_supervisor_installed": False,
+        "install_initiated_by_recovery_mode": False,
+        "provider_calls": 0,
+        "production_data_read": False,
+        "activation_performed": False,
+    }
+    receipt["receipt_sha256"] = _document_sha(receipt)
+    return MappingProxyType(verify_recovery_receipt(receipt))
+
+
+def recover_live_proof(inputs: ProofInputs) -> Mapping[str, object]:
+    """Resume only an exact preclaimed install and its derived rollback."""
+
+    _verify_host_clock_synchronized()
+    context, unused_capsule = _verified_install_context(
+        inputs,
+        require_current=False,
+    )
+    _prepare_fixed_substrate()
+    pid, descriptor = _fork_worker(WorkerMode.RECOVER_ONLY, context)
+    selection = _wait_worker(pid, descriptor)
+    if selection.get("action") != "recovered":
+        raise LiveProofError("phase9_live_proof_recovery_selection_invalid")
+    install_raw = selection.get("install_receipt")
+    rollback_raw = selection.get("rollback_receipt")
+    absence = selection.get("absence")
+    if (
+        type(install_raw) is not dict
+        or type(rollback_raw) is not dict
+        or type(absence) is not dict
+    ):
+        raise LiveProofError("phase9_live_proof_recovery_selection_invalid")
+    install = verify_install_receipt(install_raw)
+    rollback = verify_empty_rollback_receipt(rollback_raw)
+    return _recovery_receipt(
+        context=context,
+        install_receipt=install,
+        rollback_receipt=rollback,
+        absence=absence,
+    )
+
+
+def start_or_recover_live_proof(inputs: ProofInputs) -> Mapping[str, object]:
+    """Start once only from untouched state, otherwise select closed recovery."""
+
+    context, unused_capsule = _verified_install_context(
+        inputs,
+        require_current=False,
+    )
+    _prepare_fixed_substrate()
+    pid, descriptor = _fork_worker(WorkerMode.START_OR_RECOVER, context)
+    selection = _wait_worker(pid, descriptor)
+    if selection.get("action") == "start":
+        # Fresh start re-verifies the capsule's current window immediately
+        # before the durable reservation and first worker.
+        _verified_install_context(inputs, require_current=True)
+        claim_sha256 = selection.get("recovery_reservation_claim_sha256")
+        if type(claim_sha256) is not str or _HASH_RE.fullmatch(
+            claim_sha256
+        ) is None:
+            raise LiveProofError(
+                "phase9_live_proof_recovery_selection_invalid"
+            )
+        return run_live_proof(
+            inputs,
+            expected_reservation_claim_sha256=claim_sha256,
+        )
+    if selection.get("action") != "recovered":
+        raise LiveProofError("phase9_live_proof_recovery_selection_invalid")
+    install_raw = selection.get("install_receipt")
+    rollback_raw = selection.get("rollback_receipt")
+    absence = selection.get("absence")
+    if (
+        type(install_raw) is not dict
+        or type(rollback_raw) is not dict
+        or type(absence) is not dict
+    ):
+        raise LiveProofError("phase9_live_proof_recovery_selection_invalid")
+    return _recovery_receipt(
+        context=context,
+        install_receipt=verify_install_receipt(install_raw),
+        rollback_receipt=verify_empty_rollback_receipt(rollback_raw),
+        absence=absence,
+    )
+
+
+def run_live_proof(
+    inputs: ProofInputs,
+    *,
+    expected_reservation_claim_sha256: str | None = None,
+) -> Mapping[str, object]:
     """Run the one exact install/kill/resume/rollback/kill/resume proof."""
 
+    host_clock_synchronization_preflight_passed = (
+        _verify_host_clock_synchronized()
+    )
+    context, unused_capsule = _verified_install_context(inputs)
     _prepare_fixed_substrate()
-    context, unused_permit = _verified_install_context(inputs)
+    reservation = _claim_recovery_reservation_before_install(context)
+    reservation_claim_sha256 = str(reservation["claim_sha256"])
+    if (
+        expected_reservation_claim_sha256 is not None
+        and reservation_claim_sha256
+        != expected_reservation_claim_sha256
+    ):
+        raise LiveProofError(
+            "phase9_live_proof_recovery_reservation_mismatch"
+        )
     rollback_context: ProofContext | None = None
     verified_install: Mapping[str, object] | None = None
+    install_worker_started = False
     # The install execution identifier is a deterministic function of the
     # pre-signed install capability.  Compute it before the first worker so a
     # death immediately after durable authority claim can still resume the
@@ -1909,11 +3095,17 @@ def run_live_proof(inputs: ProofInputs) -> Mapping[str, object]:
     installation_execution_id = _expected_install_execution_id(context)
     try:
         before_install = _execution_directories()
+        if installation_execution_id in before_install:
+            raise LiveProofError(
+                "phase9_live_proof_install_execution_preexisting"
+            )
         pid, descriptor = _fork_worker(WorkerMode.INSTALL, context)
+        install_worker_started = True
         killed_install_execution = _kill_after_new_durable_boundary(
             pid=pid,
             read_fd=descriptor,
-            prior_directories=before_install,
+            expected_execution_id=installation_execution_id,
+            allowed_existing_directories=before_install,
             journal_name="journal.jsonl",
             step_id=INSTALL_KILL_STEP,
         )
@@ -1933,18 +3125,22 @@ def run_live_proof(inputs: ProofInputs) -> Mapping[str, object]:
         rollback_context = replace(
             context, rollback_documents=rollback_documents
         )
-        # Verification mints the distinct rollback authority before a worker
-        # can create its durable claim or perform any rollback effect.
-        _verified_rollback_capability(rollback_context)
-
         before_rollback = _execution_directories()
+        rollback_execution_id = _expected_rollback_execution_id(
+            rollback_context
+        )
+        if rollback_execution_id in before_rollback:
+            raise LiveProofError(
+                "phase9_live_proof_rollback_execution_preexisting"
+            )
         pid, descriptor = _fork_worker(
             WorkerMode.ROLLBACK, rollback_context
         )
         killed_rollback_execution = _kill_after_new_durable_boundary(
             pid=pid,
             read_fd=descriptor,
-            prior_directories=before_rollback,
+            expected_execution_id=rollback_execution_id,
+            allowed_existing_directories=before_rollback,
             journal_name="rollback.jsonl",
             step_id=ROLLBACK_KILL_STEP,
         )
@@ -1965,6 +3161,12 @@ def run_live_proof(inputs: ProofInputs) -> Mapping[str, object]:
                 install_receipt=install,
                 rollback_receipt=rollback,
                 absence=absence,
+                host_clock_synchronization_preflight_passed=(
+                    host_clock_synchronization_preflight_passed
+                ),
+                recovery_reservation_claim_sha256=(
+                    reservation_claim_sha256
+                ),
             )
         )
     except BaseException as original_error:
@@ -1972,7 +3174,7 @@ def run_live_proof(inputs: ProofInputs) -> Mapping[str, object]:
         # install receipt has verified, even a failure while constructing its
         # first rollback capability must retry that exact construction and
         # finish only through the public ledger-bound rollback.
-        if verified_install is None and installation_execution_id is not None:
+        if verified_install is None and install_worker_started:
             try:
                 verified_install = _recover_verified_install_receipt(
                     context=context,
@@ -1988,6 +3190,7 @@ def run_live_proof(inputs: ProofInputs) -> Mapping[str, object]:
                     context=context,
                     install_receipt=verified_install,
                     rollback_context=rollback_context,
+                    start_from_reservation=(rollback_context is None),
                 )
             except BaseException as recovery_error:
                 raise LiveProofError(
@@ -2004,7 +3207,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "mode",
         choices=(
-            "run",
+            *(item.value for item in RunnerMode),
             *(item.value for item in WorkerMode),
         ),
     )
@@ -2033,9 +3236,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     # Worker modes are real, closed in-process modes used only through forked
     # ProofContext objects.  They cannot be invoked externally with loose
     # filesystem or authority inputs.
-    if mode != "run":
+    if mode in {item.value for item in WorkerMode}:
         raise LiveProofError("phase9_live_proof_worker_context_required")
-    receipt = run_live_proof(inputs)
+    try:
+        guard = GlobalExecutionLock.from_inherited_descriptor(
+            LIVE_PROOF_GUARD_PATH,
+            LIVE_PROOF_GUARD_FD,
+            expected_uid=0,
+            expected_gid=0,
+        )
+    except Exception as error:
+        raise LiveProofError("phase9_live_proof_guard_invalid") from error
+    with guard:
+        if mode == RunnerMode.START_OR_RECOVER.value:
+            receipt = start_or_recover_live_proof(inputs)
+        elif mode == RunnerMode.RECOVER_ONLY.value:
+            receipt = recover_live_proof(inputs)
+        else:
+            raise LiveProofError("phase9_live_proof_mode_invalid")
     sys.stdout.buffer.write(_canonical(dict(receipt)) + b"\n")
     return 0
 

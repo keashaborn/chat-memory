@@ -91,7 +91,7 @@ RECEIPT_SCHEMA_VERSION: Final = (
     "governed-memory-dormant-store-install-disposable-proof-receipt-v2"
 )
 CONTRACT_SCHEMA_VERSION: Final = (
-    "governed-memory-dormant-store-install-disposable-proof-contract-v2"
+    "governed-memory-dormant-store-install-disposable-proof-contract-v3"
 )
 PROOF_SCOPE: Final = "synthetic_in_process_model_only"
 PROOF_OUTCOME: Final = "synthetic_matrix_passed"

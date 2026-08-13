@@ -196,8 +196,13 @@ EXPECTED_TEST_FILES = {
     "test_once_worker.py",
     "test_openai_adapters.py",
     "test_pilot_marker.py",
-    "test_postgres_source_closure.py",
+    "test_disposable_installation_live_proof.py",
+    "test_linux_runtime_publication_primitives.py",
     "test_postgres_native_stages.py",
+    "test_psycopg_postgres_adapter.py",
+    "test_publish_phase9_controller_runtime.py",
+    "test_runtime_input_stager.py",
+    "test_standalone_cpython_inspector.py",
     "test_execution_authority_state.py",
     "test_dormant_store_install_controller.py",
     "test_installation_package.py",
@@ -301,15 +306,23 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
             active["package_verifier"],
             active["install_entrypoint"],
             active["empty_rollback_entrypoint"],
+            active["durable_receipt_store"],
+            active["closed_linux_install_adapter"],
+            active["fixed_loopback_readiness_adapter"],
+            active["physical_empty_rollback_adapter"],
+            active["controller_runtime_release_builder"],
             active["synthetic_proof_entrypoint"],
+            active["disposable_linux_proof_entrypoint"],
             active["closed_live_transport_contracts"],
             active["closed_non_postgresql_live_linux_adapters"],
             active["controller_rollback_marker_transport"],
-            active["postgresql_source_closure_module"],
-            active["postgresql_source_closure_contract"],
+            active["postgresql_driver_adapter"],
             active["postgresql_native_stage_machine"],
             active["postgresql_native_stage_contract"],
             active["controller_runtime_publication_policy_transport"],
+            active["controller_runtime_publication_primitives"],
+            active["controller_runtime_input_stager"],
+            active["standalone_cpython_inspector"],
         }
         for relative in active_files:
             self.assertTrue((ROOT / relative).is_file(), relative)
@@ -371,44 +384,44 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         )
         for field in (
             "empty_rollback_controller_authority_marker_packaged",
-            "fresh_live_semantic_empty_recheck_required_at_r05_under_controller_marker",
+            "fresh_live_semantic_empty_recheck_required_at_r06_under_administrative_writer_fence",
             "closed_live_transport_contracts_packaged",
-            "postgresql_source_closure_contract_packaged",
+            "complete_closed_live_transport_substrate_set_packaged",
+            "complete_closed_live_transport_substrate_set_integrated_into_bound_factory",
             "driver_native_postgresql_stage_contract_packaged",
             "driver_native_postgresql_executable_stage_machine_packaged",
+            "concrete_psycopg_postgresql_transport_packaged",
             "runtime_input_selection_contract_repaired",
-            "runtime_build_receipt_provenance_v3_packaged",
+            "runtime_build_receipt_provenance_v4_packaged",
             "exact_postgresql_16_14_and_qdrant_1_19_0_readiness_required",
+            "approved_terminal_postgresql_catalog_manifest_selected",
             "durable_controller_rollback_marker_transport_packaged",
-            "controller_marker_empty_recheck_then_stop_then_physical_removal_order_implemented",
+            "controller_authority_marker_then_supervisor_removal_then_writer_fence_empty_recheck_then_store_stop_and_physical_removal_order_implemented",
             "selected_non_postgresql_live_linux_platform_transport_factory_packaged",
+            "selected_live_linux_platform_transports_packaged",
+            "pinned_postgresql_driver_selected_or_packaged",
             "controller_runtime_publication_policy_transport_packaged",
             "runtime_publication_durable_intent_before_first_rename_packaged",
             "runtime_publication_post_intent_generic_cleanup_forbidden",
             "runtime_publication_crash_prefix_manual_review_fence_packaged",
             "runtime_publication_same_device_rename_precondition_packaged",
             "runtime_publication_exact_terminal_replay_with_renewed_fsyncs_packaged",
+            "production_runtime_publication_primitives_packaged",
+            "approved_standalone_cpython_substrate_digest_bound",
+            "independent_standalone_cpython_payload_tree_proof_packaged",
         ):
             self.assertTrue(controller[field], field)
         for field in (
-            "complete_closed_live_transport_substrate_set_packaged",
-            "complete_closed_live_transport_substrate_set_integrated_into_bound_factory",
-            "concrete_psycopg_postgresql_transport_packaged",
-            "approved_terminal_postgresql_catalog_manifest_selected",
             "physical_postgresql_qdrant_writer_exclusion_transport_packaged",
             "external_direct_writer_exclusion_implemented",
             "stopped_store_semantic_empty_recheck_is_valid",
             "destructive_rollback_steps_atomically_recheck_empty_under_fence",
-            "production_runtime_publication_primitives_packaged",
-            "independent_standalone_cpython_payload_tree_proof_packaged",
         ):
             self.assertFalse(controller[field], field)
         self.assertTrue(controller["concrete_install_store_effect_adapters_packaged"])
         self.assertTrue(
             controller["concrete_empty_rollback_store_effect_adapters_packaged"]
         )
-        self.assertFalse(controller["selected_live_linux_platform_transports_packaged"])
-        self.assertFalse(controller["pinned_postgresql_driver_selected_or_packaged"])
         self.assertFalse(controller["activation_entrypoint_packaged"])
         safety = disposition["safety"]
         for field in (
@@ -455,9 +468,8 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         manifest = self.load_manifest()
         self.assertEqual(
             manifest["phase"],
-            "phase9h_repository_only_non_postgresql_live_transports_"
-            "postgresql_stage_machine_runtime_publication_policy_and_"
-            "rollback_marker_packaged_inactive_activation_blocked",
+            "phase9j_install_ready_closed_runtime_and_store_transports_"
+            "packaged_inactive_activation_blocked",
         )
         self.assertFalse(manifest["production_state_changed"])
         self.assertFalse(manifest["legacy_imports_allowed"])
@@ -585,36 +597,29 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         self.assertEqual(current["scope"], "current_inactive_stores_only_package")
         self.assertEqual(
             current["state"],
-            "phase9h_repository_only_non_postgresql_live_transports_"
-            "postgresql_stage_machine_runtime_publication_policy_and_"
-            "rollback_marker_packaged_not_authorized",
+            "phase9j_install_ready_closed_runtime_and_store_transports_"
+            "packaged_not_installed_not_activated",
         )
-        self.assertEqual(current["package_artifact_count"], 70)
+        self.assertEqual(current["package_artifact_count"], 74)
         self.assertEqual(
             current["package_manifest_sha256"],
-            "ec195d011a6345c823420fcf3426ef8400f05cb3fc16c45533ecbddc37d699ef",
+            "74f1a0c82e33ece56fa26f90ee1a30c5f4bd742b3dfd2f0b34b8cdefd62d82a8",
         )
         self.assertEqual(
             current["contract_canonical_sha256"],
-            "beb415b93d08221ab71917b6a2588c7d8ad3ac2d8db4dde3698ff13b0b8c5bed",
+            "82d1acb2379ba8c3cebcde8f5b819736f174572a5eb4e6932f4ea209d56ab9a0",
         )
         self.assertEqual(
             current["controller_plan_canonical_sha256"],
-            "d6846be50c1bab2657f831be699a4653defa933dbaee88e1976d9120e341de9e",
+            "577ceb84d7d2a25f2386c647dcc837e237a8c644b39ba0399b9464b60e6be766",
         )
         self.assertEqual(
             current["execution_contract_canonical_sha256"],
-            "1bd4642cc512367c02c2d9282a93397a2230a8770868dae80bab90519993a53f",
+            "f6f9657efaea3c75d4f63b2fc2a7bfaf24002d3f33691a4f2c11cfc243fa63fd",
         )
         self.assertEqual(
             current["controller_runtime_contract_canonical_sha256"],
-            "c3496ae3baa613870937a542783bdd94b1fe95320c4c461a4a5815f83161c08f",
-        )
-        self.assertEqual(
-            current[
-                "postgres_source_closure_contract_canonical_sha256"
-            ],
-            "1d4429f46aecee0ddbc348c952d767b0dbe870ecb9bee8be51819de4e312b295",
+            "60580592361d52b6af3d57d023d7bdd3f0876d677f736e6ee00aeb85841d79ac",
         )
         self.assertEqual(
             current["postgres_native_stage_contract"],
@@ -622,7 +627,7 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         )
         self.assertEqual(
             current["postgres_native_stage_contract_canonical_sha256"],
-            "7ed91be76c6296d8fbb15457f327e2de11c78957c1ba1abd68d9a978c4c4cdf3",
+            "beb37dc03b77148aa669ca0026341ada88351560c7d1f4e08d0e15d127e1e6df",
         )
         self.assertEqual(current["store_migration_file_count"], 9)
         self.assertTrue(current["static_package_verification_complete"])
@@ -673,44 +678,44 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         )
         for field in (
             "empty_rollback_controller_authority_marker_packaged",
-            "fresh_live_semantic_empty_recheck_required_at_r05_under_controller_marker",
+            "fresh_live_semantic_empty_recheck_required_at_r06_under_administrative_writer_fence",
             "closed_live_transport_contracts_packaged",
-            "postgresql_source_closure_contract_packaged",
+            "complete_closed_live_transport_substrate_set_packaged",
+            "complete_closed_live_transport_substrate_set_integrated_into_bound_factory",
             "driver_native_postgresql_stage_contract_packaged",
             "driver_native_postgresql_executable_stage_machine_packaged",
+            "concrete_psycopg_postgresql_transport_packaged",
             "runtime_input_selection_contract_repaired",
-            "runtime_build_receipt_provenance_v3_packaged",
+            "runtime_build_receipt_provenance_v4_packaged",
             "exact_postgresql_16_14_and_qdrant_1_19_0_readiness_required",
+            "approved_terminal_postgresql_catalog_manifest_selected",
             "durable_controller_rollback_marker_transport_packaged",
-            "controller_marker_empty_recheck_then_stop_then_physical_removal_order_implemented",
+            "controller_authority_marker_then_supervisor_removal_then_writer_fence_empty_recheck_then_store_stop_and_physical_removal_order_implemented",
             "selected_non_postgresql_live_linux_platform_transport_factory_packaged",
+            "selected_live_linux_platform_transports_packaged",
+            "pinned_postgresql_driver_selected_or_packaged",
             "controller_runtime_publication_policy_transport_packaged",
             "runtime_publication_durable_intent_before_first_rename_packaged",
             "runtime_publication_post_intent_generic_cleanup_forbidden",
             "runtime_publication_crash_prefix_manual_review_fence_packaged",
             "runtime_publication_same_device_rename_precondition_packaged",
             "runtime_publication_exact_terminal_replay_with_renewed_fsyncs_packaged",
+            "production_runtime_publication_primitives_packaged",
+            "approved_standalone_cpython_substrate_digest_bound",
+            "independent_standalone_cpython_payload_tree_proof_packaged",
         ):
             self.assertTrue(current[field], field)
         for field in (
-            "complete_closed_live_transport_substrate_set_packaged",
-            "complete_closed_live_transport_substrate_set_integrated_into_bound_factory",
-            "concrete_psycopg_postgresql_transport_packaged",
-            "approved_terminal_postgresql_catalog_manifest_selected",
             "physical_postgresql_qdrant_writer_exclusion_transport_packaged",
             "external_direct_writer_exclusion_implemented",
             "stopped_store_semantic_empty_recheck_is_valid",
             "destructive_rollback_steps_atomically_recheck_empty_under_fence",
-            "production_runtime_publication_primitives_packaged",
-            "independent_standalone_cpython_payload_tree_proof_packaged",
         ):
             self.assertFalse(current[field], field)
         self.assertTrue(current["concrete_install_store_effect_adapters_packaged"])
         self.assertTrue(
             current["concrete_empty_rollback_store_effect_adapters_packaged"]
         )
-        self.assertFalse(current["selected_live_linux_platform_transports_packaged"])
-        self.assertFalse(current["pinned_postgresql_driver_selected_or_packaged"])
         self.assertTrue(current["install_controller_emits_canonical_receipt"])
         self.assertTrue(current["empty_rollback_controller_emits_canonical_receipt"])
         self.assertFalse(current["activation_executor_packaged"])
@@ -734,20 +739,23 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         self.assertFalse(infrastructure["persistent_composition_packaged"])
         for field in (
             "closed_live_transport_contracts_packaged",
+            "complete_closed_live_transport_substrate_set_packaged",
+            "complete_closed_live_transport_substrate_set_integrated_into_bound_factory",
             "driver_native_postgresql_stage_contract_packaged",
             "driver_native_postgresql_executable_stage_machine_packaged",
+            "concrete_psycopg_postgresql_transport_packaged",
+            "runtime_input_selection_contract_repaired",
+            "runtime_build_receipt_provenance_v4_packaged",
+            "approved_terminal_postgresql_catalog_manifest_selected",
             "durable_controller_rollback_marker_transport_packaged",
+            "selected_live_linux_platform_transports_packaged",
             "selected_non_postgresql_live_linux_platform_transport_factory_packaged",
+            "pinned_postgresql_driver_selected_or_packaged",
         ):
             self.assertTrue(infrastructure[field], field)
         for field in (
-            "complete_closed_live_transport_substrate_set_packaged",
-            "complete_closed_live_transport_substrate_set_integrated_into_bound_factory",
-            "concrete_psycopg_postgresql_transport_packaged",
-            "approved_terminal_postgresql_catalog_manifest_selected",
             "physical_postgresql_qdrant_writer_exclusion_transport_packaged",
             "external_direct_writer_exclusion_implemented",
-            "selected_live_linux_platform_transports_packaged",
         ):
             self.assertFalse(infrastructure[field], field)
         self.assertFalse(infrastructure["phase8d_live_store_state_reverified"])
@@ -1120,6 +1128,9 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
             {
                 "postgres_bootstrap.pgsql",
                 "run_disposable_successor.sh",
+                "issue_disposable_installation_live_proof.py",
+                "publish_phase9_controller_runtime.py",
+                "run_disposable_installation_live_proof.py",
                 "runtime_packages.json",
                 "generate_installation_package_manifest.py",
                 "run_installation_synthetic_proof.py",
@@ -1133,7 +1144,10 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
                 "__init__.py",
                 "build_candidate_runtime.py",
                 "controller_runtime_builder.py",
+                "inspect_standalone_cpython.py",
+                "linux_runtime_publication_primitives.py",
                 "release_guard.py",
+                "runtime_input_stager.py",
                 "runtime_publication_transport.py",
             },
         )
@@ -1163,7 +1177,7 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
                 "package.py",
                 "package_capability.py",
                 "postgres_native_stages.py",
-                "postgres_source_closure.py",
+                "psycopg_postgres_adapter.py",
                 "receipts.py",
                 "resource_identity.py",
                 "rollback.py",
@@ -1213,23 +1227,29 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
     def test_docs_describe_current_inactive_boundary(self) -> None:
         normalized = " ".join(README.read_text(encoding="utf-8").split())
         for required in (
+            "Phase 9J",
             "Phase 8G",
-            "Phase 8D",
             "Phase 7C",
             "installation/current/package_manifest.json",
-            "Phase 9D",
-            "Phase 9F",
-            "claim-bound non-CLI install and empty-rollback controller compositions",
+            "exact 74-artifact stores/controller package",
+            "claim-bound install and empty-rollback controllers",
+            "concrete Psycopg adapter",
+            "standalone CPython inspector",
+            "external Phase 9J disposable Linux proof receipt is not yet present",
             "structured LifeSwitch data",
-            "No service was installed, no route activated",
-            "production Docker inventory retained their pre-run identities",
-            "do not attest the current candidate",
-            "passed the current-candidate disposable application, PostgreSQL, "
-            "Qdrant, and chat-deletion proof",
-            "inactive_installation_package_not_authorized",
+            "Chat erasure is limited to chat threads, transcripts, attachments",
+            "does not delete accounts",
+            "does not substitute for the Phase 9J installation/rollback proof",
+            "not reusable as current evidence",
         ):
             self.assertIn(required, normalized)
-        self.assertNotIn("successor remains inactive, uninstalled", normalized)
+        for forbidden in (
+            "Phase 9D",
+            "Phase 9F",
+            "postgresql_source_closure",
+            "successor remains inactive, uninstalled",
+        ):
+            self.assertNotIn(forbidden, normalized)
         runner = (
             VALIDATION_TOOLS / "run_disposable_successor.sh"
         ).read_text(encoding="utf-8")

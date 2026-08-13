@@ -151,7 +151,7 @@ def validate_store_spec(spec: object, *, allow_placeholders: bool = True) -> dic
     )
     if root["schema_version"] != SCHEMA_VERSION:
         raise LinuxPlanError("store_spec_schema_invalid")
-    if root["state"] != "repository-only-current-store-spec-not-installed-not-authorized":
+    if root["state"] != "canonical-dormant-store-spec-v2":
         raise LinuxPlanError("store_spec_state_invalid")
     candidate_id = root["candidate_id"]
     if type(candidate_id) is not str:
@@ -372,7 +372,7 @@ def validate_store_spec(spec: object, *, allow_placeholders: bool = True) -> dic
         )
         if healthcheck != {
             "container_healthcheck": "disabled",
-            "external_readiness_probe": "unimplemented_disposable_proof_required",
+            "external_readiness_probe": "closed_fixed_loopback_readiness_probe_v1",
         }:
             raise LinuxPlanError("store_spec_healthcheck_invalid")
         logging = _require_closed_keys(

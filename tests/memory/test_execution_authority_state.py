@@ -27,6 +27,7 @@ from tools.governed_memory_install.execution_authority import (
     ExecutionAuthorityError,
     claim_execution_authority,
     read_trusted_utc,
+    resume_execution_authority,
 )
 from tools.governed_memory_install.execution_lock import (
     ExecutionLockBusyError,
@@ -494,6 +495,56 @@ class TrustedClockAndExecutionAuthorityTests(unittest.TestCase):
                         held_lock=held,
                         expected_operation="dormant_install",
                     )
+
+    def test_resume_only_refuses_absent_claim_and_resumes_exact_claim_after_expiry(
+        self,
+    ) -> None:
+        with SecureTemporaryDirectory() as directory:
+            state = AuthorityState(
+                directory / "authority.sqlite3",
+                create=True,
+            )
+            with GlobalExecutionLock(directory / "execution.lock") as lock:
+                held = lock.held_capability()
+                valid_clock = FixedClock(
+                    datetime(2026, 8, 11, 12, 5, tzinfo=timezone.utc)
+                )
+                with self.assertRaisesRegex(
+                    ExecutionAuthorityError,
+                    "execution_authority_claim_absent",
+                ):
+                    resume_execution_authority(
+                        execution_capability(),
+                        state=state,
+                        clock=valid_clock,
+                        held_lock=held,
+                        expected_operation="dormant_install",
+                    )
+                self.assertFalse(
+                    state.inspect_nonce_claim(NONCE, held_lock=held).present
+                )
+
+                claimed = claim_execution_authority(
+                    execution_capability(),
+                    state=state,
+                    clock=valid_clock,
+                    held_lock=held,
+                    expected_operation="dormant_install",
+                )
+                self.assertEqual(claimed.result, "execution_authority_claimed")
+
+                resumed = resume_execution_authority(
+                    execution_capability(),
+                    state=state,
+                    clock=FixedClock(
+                        datetime(2026, 8, 11, 12, 20, tzinfo=timezone.utc)
+                    ),
+                    held_lock=held,
+                    expected_operation="dormant_install",
+                )
+                self.assertEqual(
+                    resumed.result, "execution_authority_exact_resume"
+                )
 
     def test_structural_evidence_and_closed_lock_cannot_claim_nonce(self) -> None:
         with SecureTemporaryDirectory() as directory:

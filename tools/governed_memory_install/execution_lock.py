@@ -75,13 +75,18 @@ class GlobalExecutionLock:
         path: Path,
         *,
         expected_uid: int | None = None,
+        expected_gid: int | None = None,
     ) -> None:
         self.path = Path(path)
         self.expected_uid = os.geteuid() if expected_uid is None else expected_uid
+        self.expected_gid = os.getegid() if expected_gid is None else expected_gid
         if (
             not isinstance(self.expected_uid, int)
             or isinstance(self.expected_uid, bool)
             or self.expected_uid < 0
+            or not isinstance(self.expected_gid, int)
+            or isinstance(self.expected_gid, bool)
+            or self.expected_gid < 0
         ):
             raise ExecutionLockSecurityError("execution_lock_uid_invalid")
         if not self.path.name or self.path.name in {".", ".."}:
@@ -89,6 +94,7 @@ class GlobalExecutionLock:
         self._directory_fd = -1
         self._fd = -1
         self._inode: tuple[int, int] | None = None
+        self._unlock_on_close = True
         self._acquire()
 
     @staticmethod
@@ -118,7 +124,11 @@ class GlobalExecutionLock:
             not stat.S_ISDIR(opened.st_mode)
             or not stat.S_ISDIR(named.st_mode)
             or stat.S_IMODE(opened.st_mode) != 0o700
+            or stat.S_IMODE(named.st_mode) != 0o700
             or opened.st_uid != self.expected_uid
+            or named.st_uid != self.expected_uid
+            or opened.st_gid != self.expected_gid
+            or named.st_gid != self.expected_gid
             or (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)
         ):
             raise ExecutionLockSecurityError("execution_lock_directory_invalid")
@@ -153,6 +163,7 @@ class GlobalExecutionLock:
                 ) from error
 
             if created:
+                os.fchown(self._fd, self.expected_uid, self.expected_gid)
                 os.fchmod(self._fd, 0o600)
                 os.fsync(self._fd)
                 os.fsync(self._directory_fd)
@@ -188,12 +199,20 @@ class GlobalExecutionLock:
             or not stat.S_ISDIR(named_directory.st_mode)
             or stat.S_IMODE(directory.st_mode) != 0o700
             or directory.st_uid != self.expected_uid
+            or directory.st_gid != self.expected_gid
+            or stat.S_IMODE(named_directory.st_mode) != 0o700
+            or named_directory.st_uid != self.expected_uid
+            or named_directory.st_gid != self.expected_gid
             or (directory.st_dev, directory.st_ino)
             != (named_directory.st_dev, named_directory.st_ino)
             or not stat.S_ISREG(opened.st_mode)
             or not stat.S_ISREG(named.st_mode)
             or stat.S_IMODE(opened.st_mode) != 0o600
             or opened.st_uid != self.expected_uid
+            or opened.st_gid != self.expected_gid
+            or stat.S_IMODE(named.st_mode) != 0o600
+            or named.st_uid != self.expected_uid
+            or named.st_gid != self.expected_gid
             or opened.st_nlink != 1
             or opened.st_size != 0
             or (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)
@@ -215,10 +234,114 @@ class GlobalExecutionLock:
         self.validate()
         return HeldExecutionLockCapability(self, _HELD_CAPABILITY_TOKEN)
 
+    @property
+    def descriptor(self) -> int:
+        """Return the validated open lock descriptor for fixed-FD inheritance."""
+
+        self.validate()
+        return self._fd
+
+    def retain_across_inherited_processes(self) -> None:
+        """Release by last close, never by an explicit unlock from this owner.
+
+        A supervisor calls this before sharing the open file description with
+        a child process group.  If the supervisor exits while a child remains,
+        its close cannot unlock the shared flock out from under that child.
+        """
+
+        self.validate()
+        self._unlock_on_close = False
+
+    @classmethod
+    def from_inherited_descriptor(
+        cls,
+        path: Path,
+        descriptor: int,
+        *,
+        expected_uid: int | None = None,
+        expected_gid: int | None = None,
+    ) -> GlobalExecutionLock:
+        """Adopt an already locked open file description without relocking it."""
+
+        if type(descriptor) is not int or descriptor < 0:
+            raise ExecutionLockSecurityError(
+                "execution_lock_inherited_descriptor_invalid"
+            )
+        selected = object.__new__(cls)
+        selected.path = Path(path)
+        selected.expected_uid = (
+            os.geteuid() if expected_uid is None else expected_uid
+        )
+        selected.expected_gid = (
+            os.getegid() if expected_gid is None else expected_gid
+        )
+        if (
+            not isinstance(selected.expected_uid, int)
+            or isinstance(selected.expected_uid, bool)
+            or selected.expected_uid < 0
+            or not isinstance(selected.expected_gid, int)
+            or isinstance(selected.expected_gid, bool)
+            or selected.expected_gid < 0
+        ):
+            raise ExecutionLockSecurityError("execution_lock_uid_invalid")
+        selected._directory_fd = -1
+        selected._fd = -1
+        selected._inode = None
+        selected._unlock_on_close = False
+        try:
+            selected._open_directory()
+            selected._fd = os.dup(descriptor)
+            selected._validate_open_file()
+            independent = -1
+            try:
+                independent = os.open(
+                    selected.path.name,
+                    os.O_RDWR
+                    | os.O_CLOEXEC
+                    | selected._nofollow_flag(),
+                    dir_fd=selected._directory_fd,
+                )
+                try:
+                    fcntl.flock(
+                        independent,
+                        fcntl.LOCK_EX | fcntl.LOCK_NB,
+                    )
+                except BlockingIOError:
+                    pass
+                else:
+                    fcntl.flock(independent, fcntl.LOCK_UN)
+                    raise ExecutionLockSecurityError(
+                        "execution_lock_inherited_descriptor_not_locked"
+                    )
+                try:
+                    fcntl.flock(
+                        selected._fd,
+                        fcntl.LOCK_EX | fcntl.LOCK_NB,
+                    )
+                except (BlockingIOError, OSError) as error:
+                    raise ExecutionLockSecurityError(
+                        "execution_lock_inherited_descriptor_not_locked"
+                    ) from error
+            except ExecutionLockSecurityError:
+                raise
+            except OSError as error:
+                raise ExecutionLockSecurityError(
+                    "execution_lock_inherited_descriptor_not_locked"
+                ) from error
+            finally:
+                if independent >= 0:
+                    os.close(independent)
+            selected._validate_open_file()
+            return selected
+        except BaseException:
+            selected.close()
+            raise
+
     def close(self) -> None:
         if self._fd >= 0:
             try:
-                fcntl.flock(self._fd, fcntl.LOCK_UN)
+                if self._unlock_on_close:
+                    fcntl.flock(self._fd, fcntl.LOCK_UN)
             finally:
                 os.close(self._fd)
                 self._fd = -1

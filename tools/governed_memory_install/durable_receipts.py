@@ -351,12 +351,39 @@ def _open_receipt(
     *,
     expected_uid: int,
 ) -> int:
+    descriptor = _open_receipt_if_present(
+        directory_fd,
+        name,
+        expected_uid=expected_uid,
+    )
+    if descriptor is None:
+        raise DurableReceiptError("durable_receipt_file_absent")
+    return descriptor
+
+
+def _open_receipt_if_present(
+    directory_fd: int,
+    name: str,
+    *,
+    expected_uid: int,
+) -> int | None:
     try:
         descriptor = os.open(
             name,
             os.O_RDONLY | os.O_CLOEXEC | _nofollow(),
             dir_fd=directory_fd,
         )
+    except FileNotFoundError:
+        try:
+            os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return None
+        except OSError as error:
+            raise DurableReceiptError("durable_receipt_file_invalid") from error
+        raise DurableReceiptError("durable_receipt_file_appeared_during_read")
+    except OSError as error:
+        raise DurableReceiptError("durable_receipt_file_invalid") from error
+    try:
         opened = os.fstat(descriptor)
         named = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
     except OSError as error:
@@ -575,6 +602,150 @@ class DurableReceiptStore:
             if directory_fd >= 0:
                 os.close(directory_fd)
 
+    def read_if_present(
+        self,
+        artifact: ReceiptArtifact,
+        execution_id: str,
+    ) -> DurableReceiptEvidence | None:
+        """Read one exact receipt, returning None only for stable ENOENT."""
+
+        path = self.path(artifact, execution_id)
+        root_fd = directory_fd = file_fd = -1
+        try:
+            root_fd = _open_directory_nofollow(
+                self._root, expected_uid=self._expected_uid
+            )
+            root_identity = _validate_directory(
+                root_fd,
+                self._root,
+                expected_uid=self._expected_uid,
+            )
+            flags = os.O_RDONLY | os.O_CLOEXEC | _nofollow()
+            flags |= getattr(os, "O_DIRECTORY", 0)
+            try:
+                directory_fd = os.open(
+                    execution_id,
+                    flags,
+                    dir_fd=root_fd,
+                )
+            except FileNotFoundError:
+                try:
+                    os.stat(
+                        execution_id,
+                        dir_fd=root_fd,
+                        follow_symlinks=False,
+                    )
+                except FileNotFoundError:
+                    pass
+                except OSError as error:
+                    raise DurableReceiptError(
+                        "durable_receipt_directory_invalid"
+                    ) from error
+                else:
+                    raise DurableReceiptError(
+                        "durable_receipt_directory_appeared"
+                    )
+                if _validate_directory(
+                    root_fd,
+                    self._root,
+                    expected_uid=self._expected_uid,
+                ) != root_identity:
+                    raise DurableReceiptError(
+                        "durable_receipt_root_replaced"
+                    )
+                return None
+            except OSError as error:
+                raise DurableReceiptError(
+                    "durable_receipt_directory_invalid"
+                ) from error
+            directory_identity = _validate_directory(
+                directory_fd,
+                path.parent,
+                expected_uid=self._expected_uid,
+            )
+            try:
+                file_fd = os.open(
+                    path.name,
+                    os.O_RDONLY | os.O_CLOEXEC | _nofollow(),
+                    dir_fd=directory_fd,
+                )
+            except FileNotFoundError:
+                try:
+                    os.stat(
+                        path.name,
+                        dir_fd=directory_fd,
+                        follow_symlinks=False,
+                    )
+                except FileNotFoundError:
+                    pass
+                except OSError as error:
+                    raise DurableReceiptError(
+                        "durable_receipt_file_invalid"
+                    ) from error
+                else:
+                    raise DurableReceiptError(
+                        "durable_receipt_file_appeared_during_read"
+                    )
+                if _validate_directory(
+                    directory_fd,
+                    path.parent,
+                    expected_uid=self._expected_uid,
+                ) != directory_identity:
+                    raise DurableReceiptError(
+                        "durable_receipt_directory_replaced"
+                    )
+                if _validate_directory(
+                    root_fd,
+                    self._root,
+                    expected_uid=self._expected_uid,
+                ) != root_identity:
+                    raise DurableReceiptError("durable_receipt_root_replaced")
+                return None
+            except OSError as error:
+                raise DurableReceiptError(
+                    "durable_receipt_file_invalid"
+                ) from error
+            opened = os.fstat(file_fd)
+            named = os.stat(
+                path.name,
+                dir_fd=directory_fd,
+                follow_symlinks=False,
+            )
+            if (
+                not stat.S_ISREG(opened.st_mode)
+                or not stat.S_ISREG(named.st_mode)
+                or stat.S_IMODE(opened.st_mode) != 0o600
+                or opened.st_uid != self._expected_uid
+                or opened.st_nlink != 1
+                or opened.st_size > MAX_DURABLE_RECEIPT_BYTES
+                or (opened.st_dev, opened.st_ino)
+                != (named.st_dev, named.st_ino)
+            ):
+                raise DurableReceiptError("durable_receipt_file_invalid")
+            raw = _read_stable(file_fd, directory_fd, path.name)
+            if _validate_directory(
+                directory_fd,
+                path.parent,
+                expected_uid=self._expected_uid,
+            ) != directory_identity:
+                raise DurableReceiptError(
+                    "durable_receipt_directory_replaced"
+                )
+            if _validate_directory(
+                root_fd,
+                self._root,
+                expected_uid=self._expected_uid,
+            ) != root_identity:
+                raise DurableReceiptError("durable_receipt_root_replaced")
+            return self._evidence(artifact, execution_id, path, raw)
+        finally:
+            if file_fd >= 0:
+                os.close(file_fd)
+            if directory_fd >= 0:
+                os.close(directory_fd)
+            if root_fd >= 0:
+                os.close(root_fd)
+
     def write_once(
         self,
         artifact: ReceiptArtifact,
@@ -596,38 +767,39 @@ class DurableReceiptStore:
                 path.parent,
                 expected_uid=self._expected_uid,
             )
-            existing_fd = -1
+            existing_fd = _open_receipt_if_present(
+                directory_fd,
+                path.name,
+                expected_uid=self._expected_uid,
+            )
             try:
-                existing_fd = _open_receipt(
-                    directory_fd,
-                    path.name,
-                    expected_uid=self._expected_uid,
-                )
-                existing_raw = _read_stable(
-                    existing_fd, directory_fd, path.name
-                )
-            except DurableReceiptError as error:
-                if error.args != ("durable_receipt_file_invalid",):
-                    raise
-            else:
-                existing = self._evidence(
-                    artifact, execution_id, path, existing_raw
-                )
-                if existing.canonical_file_sha256 != hashlib.sha256(
-                    canonical
-                ).hexdigest():
-                    raise DurableReceiptError("durable_receipt_replace_refused")
-                if _validate_directory(
-                    directory_fd,
-                    path.parent,
-                    expected_uid=self._expected_uid,
-                ) != directory_identity:
-                    raise DurableReceiptError(
-                        "durable_receipt_directory_replaced"
+                if existing_fd is not None:
+                    existing_raw = _read_stable(
+                        existing_fd, directory_fd, path.name
                     )
-                return existing
+                else:
+                    existing_raw = None
+                if existing_raw is not None:
+                    existing = self._evidence(
+                        artifact, execution_id, path, existing_raw
+                    )
+                    if existing.canonical_file_sha256 != hashlib.sha256(
+                        canonical
+                    ).hexdigest():
+                        raise DurableReceiptError(
+                            "durable_receipt_replace_refused"
+                        )
+                    if _validate_directory(
+                        directory_fd,
+                        path.parent,
+                        expected_uid=self._expected_uid,
+                    ) != directory_identity:
+                        raise DurableReceiptError(
+                            "durable_receipt_directory_replaced"
+                        )
+                    return existing
             finally:
-                if existing_fd >= 0:
+                if existing_fd is not None:
                     os.close(existing_fd)
 
             temporary_name = (

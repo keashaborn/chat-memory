@@ -13,6 +13,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 import re
+from time import monotonic as _monotonic, sleep as _sleep
 from typing import Final, Mapping, Protocol
 
 from .store_readiness import (
@@ -38,6 +39,14 @@ from .store_readiness import (
 
 MAX_CATALOG_IDENTITIES: Final = 4096
 MAX_IDENTITY_TEXT_BYTES: Final = 512
+READINESS_TRANSPORT_TIMEOUT_SECONDS: Final = 60.0
+READINESS_TRANSPORT_RETRY_INTERVAL_SECONDS: Final = 0.1
+_RETRYABLE_TRANSPORT_FAILURE_CODES: Final = frozenset(
+    {
+        "postgres_fixed_connect_failed",
+        "qdrant_exchange_failed",
+    }
+)
 _SAFE_IDENTIFIER_RE = re.compile(
     r"[A-Za-z_][A-Za-z0-9_.:()\[\], -]{0,511}\Z", re.ASCII
 )
@@ -46,6 +55,38 @@ _HASH_RE = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 
 class LinuxStoreReadinessError(RuntimeError):
     """Content-free refusal from a fixed dormant-store readiness probe."""
+
+
+def _inspect_transport_pair(
+    postgres_inspect: object,
+    qdrant_inspect: object,
+    *,
+    failure_code: str,
+) -> tuple[object, object]:
+    """Retry only transport-call failures within one fixed startup window."""
+
+    if (
+        not callable(postgres_inspect)
+        or not callable(qdrant_inspect)
+        or failure_code not in {
+            "fresh_store_probe_failed",
+            "terminal_store_probe_failed",
+        }
+    ):
+        raise LinuxStoreReadinessError("readiness_transport_invalid")
+    deadline = _monotonic() + READINESS_TRANSPORT_TIMEOUT_SECONDS
+    while True:
+        try:
+            return postgres_inspect(), qdrant_inspect()
+        except Exception as error:
+            if str(error) not in _RETRYABLE_TRANSPORT_FAILURE_CODES:
+                raise LinuxStoreReadinessError(failure_code) from None
+            remaining = deadline - _monotonic()
+            if remaining <= 0:
+                raise LinuxStoreReadinessError(failure_code) from None
+            _sleep(
+                min(READINESS_TRANSPORT_RETRY_INTERVAL_SECONDS, remaining)
+            )
 
 
 def _canonical_sha256(value: object) -> str:
@@ -441,11 +482,11 @@ class ClosedStoreReadinessProbe:
         )
 
     def verify_fresh_empty_stores(self) -> EmptyStoreReadiness:
-        try:
-            postgres = self._postgres.inspect_prebootstrap()
-            qdrant = self._qdrant.inspect_prebootstrap()
-        except Exception:
-            raise LinuxStoreReadinessError("fresh_store_probe_failed") from None
+        postgres, qdrant = _inspect_transport_pair(
+            self._postgres.inspect_prebootstrap,
+            self._qdrant.inspect_prebootstrap,
+            failure_code="fresh_store_probe_failed",
+        )
         if (
             type(postgres) is not PrebootstrapPostgreSQLSnapshot
             or postgres.target_database_exists is not False
@@ -532,11 +573,11 @@ class ClosedStoreReadinessProbe:
     def verify_terminal_canonical_stores(
         self,
     ) -> TerminalCanonicalStoreReadiness:
-        try:
-            postgres = self._postgres.inspect_terminal()
-            qdrant = self._qdrant.inspect_terminal()
-        except Exception:
-            raise LinuxStoreReadinessError("terminal_store_probe_failed") from None
+        postgres, qdrant = _inspect_transport_pair(
+            self._postgres.inspect_terminal,
+            self._qdrant.inspect_terminal,
+            failure_code="terminal_store_probe_failed",
+        )
         if (
             type(postgres) is not TerminalPostgreSQLSnapshot
             or type(qdrant) is not TerminalQdrantSnapshot

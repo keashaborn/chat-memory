@@ -79,6 +79,8 @@ def _request() -> RollbackOperationRequest:
         supervisor_launcher_sha256=_hash("supervisor-launcher"),
         installation_execution_id=_hash("installation-execution"),
         installation_receipt_sha256=_hash("installation-receipt"),
+        recovery_reservation_claim_sha256="0" * 64,
+        retained_evidence_sha256=_hash("retained-evidence"),
         eligibility_receipt_sha256=_hash("eligibility-receipt"),
         resource_ledger_binding_sha256=_hash("ledger-binding"),
         resource_ledger_head_sha256=_hash("ledger-head"),

@@ -93,7 +93,7 @@ def _rollback_receipt() -> dict[str, object]:
         resource_ledger_sequence=18,
         eligibility_receipt_sha256="c" * 64,
         retained_audit_set_sha256="d" * 64,
-        exact_targets_absent_count=15,
+        exact_rollback_resources_absent_count=15,
     )
 
 

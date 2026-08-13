@@ -19,15 +19,13 @@ import re
 from typing import Final
 
 from .authority_state import AuthorityState, HASH_RE
-from .authority import (
-    AuthorityVerificationError,
-    canonical_json_bytes,
-    _execution_capability_evidence,
-)
+from .authority import canonical_json_bytes
 from .execution_authority import (
     ExecutionAuthorityError,
     TrustedUtcClock,
     claim_execution_authority,
+    resume_execution_authority,
+    verified_execution_authority_identity,
 )
 from .execution_lock import (
     ExecutionLockError,
@@ -119,6 +117,26 @@ class ClaimedExecutionBindingEvidence:
     journal_binding_sha256: str
 
 
+@dataclass(frozen=True, slots=True)
+class DormantInstallAuthorityIdentity:
+    """Immutable exact identity of one verified dormant-install authority."""
+
+    operation: str
+    authorization_namespace: str
+    thread_id: str
+    scope_id: str
+    authorization_id: str
+    authorization_nonce: str
+    authorization_nonce_sha256: str
+    operation_sha256: str
+    execution_sha256: str
+    authorization_sha256: str
+    scope_sha256: str
+    trust_bundle_sha256: str
+    claim_sha256: str
+    execution_id: str
+
+
 _CLAIMED_EXECUTION_TOKEN = object()
 
 
@@ -206,6 +224,43 @@ def _hash_document(domain: bytes, document: dict[str, str]) -> str:
     return hashlib.sha256(domain + canonical_json_bytes(document)).hexdigest()
 
 
+def verified_dormant_install_authority_identity(
+    verified_scope_capability: object,
+) -> DormantInstallAuthorityIdentity:
+    """Derive the exact install claim and execution ID without claiming it."""
+
+    try:
+        authority_identity = verified_execution_authority_identity(
+            verified_scope_capability,
+            expected_operation="dormant_install",
+        )
+    except ExecutionAuthorityError as error:
+        raise ClaimedExecutionBindingError(
+            "claimed_execution_capability_invalid"
+        ) from error
+    claim_material = {
+        "claim_sha256": authority_identity.claim_sha256,
+        "execution_sha256": authority_identity.execution_sha256,
+        "operation_sha256": authority_identity.operation_sha256,
+    }
+    return DormantInstallAuthorityIdentity(
+        operation=authority_identity.operation,
+        authorization_namespace=authority_identity.authorization_namespace,
+        thread_id=authority_identity.thread_id,
+        scope_id=authority_identity.scope_id,
+        authorization_id=authority_identity.authorization_id,
+        authorization_nonce=authority_identity.nonce,
+        authorization_nonce_sha256=authority_identity.nonce_sha256,
+        operation_sha256=authority_identity.operation_sha256,
+        execution_sha256=authority_identity.execution_sha256,
+        authorization_sha256=authority_identity.authorization_sha256,
+        scope_sha256=authority_identity.scope_sha256,
+        trust_bundle_sha256=authority_identity.trust_bundle_sha256,
+        claim_sha256=authority_identity.claim_sha256,
+        execution_id=_hash_document(_EXECUTION_ID_DOMAIN, claim_material),
+    )
+
+
 def _require_package_capability(value: object):
     try:
         return _package_capability_parts(value)
@@ -215,7 +270,7 @@ def _require_package_capability(value: object):
         ) from error
 
 
-def claim_dormant_store_install_execution_binding(
+def _dormant_store_install_execution_binding(
     verified_scope_capability: object,
     *,
     verified_package_capability: object,
@@ -223,6 +278,7 @@ def claim_dormant_store_install_execution_binding(
     state: AuthorityState,
     clock: TrustedUtcClock,
     held_lock: HeldExecutionLockCapability,
+    resume_only: bool,
 ) -> object:
     """Claim authority and mint a stable opaque execution binding.
 
@@ -231,18 +287,9 @@ def claim_dormant_store_install_execution_binding(
     check before it accesses a journal path.
     """
 
-    try:
-        scope_evidence = _execution_capability_evidence(
-            verified_scope_capability
-        )
-    except AuthorityVerificationError as error:
-        raise ClaimedExecutionBindingError(
-            "claimed_execution_capability_invalid"
-        ) from error
-    if scope_evidence.operation != "dormant_install":
-        raise ClaimedExecutionBindingError(
-            "claimed_execution_operation_invalid"
-        )
+    install_identity = verified_dormant_install_authority_identity(
+        verified_scope_capability
+    )
     if type(state) is not AuthorityState:
         raise ClaimedExecutionBindingError("claimed_execution_state_invalid")
     try:
@@ -266,8 +313,8 @@ def claim_dormant_store_install_execution_binding(
         ) from error
     if (
         package_evidence.authorization_sha256
-        != scope_evidence.authorization_sha256
-        or package_evidence.scope_sha256 != scope_evidence.scope_sha256
+        != install_identity.authorization_sha256
+        or package_evidence.scope_sha256 != install_identity.scope_sha256
     ):
         raise ClaimedExecutionBindingError(
             "claimed_execution_package_scope_mismatch"
@@ -348,7 +395,12 @@ def claim_dormant_store_install_execution_binding(
         authority_state_path.encode("utf-8")
     ).hexdigest()
     try:
-        permit = claim_execution_authority(
+        authority_function = (
+            resume_execution_authority
+            if resume_only
+            else claim_execution_authority
+        )
+        permit = authority_function(
             verified_scope_capability,
             state=state,
             clock=clock,
@@ -360,12 +412,21 @@ def claim_dormant_store_install_execution_binding(
             "claimed_execution_authority_refused"
         ) from error
 
+    if (
+        permit.claim_sha256 != install_identity.claim_sha256
+        or permit.execution_sha256 != install_identity.execution_sha256
+        or permit.operation_sha256 != install_identity.operation_sha256
+        or permit.nonce_sha256 != install_identity.authorization_nonce_sha256
+    ):
+        raise ClaimedExecutionBindingError(
+            "claimed_execution_authority_identity_mismatch"
+        )
     claim_material = {
         "claim_sha256": permit.claim_sha256,
         "execution_sha256": permit.execution_sha256,
         "operation_sha256": permit.operation_sha256,
     }
-    execution_id = _hash_document(_EXECUTION_ID_DOMAIN, claim_material)
+    execution_id = install_identity.execution_id
     attempt_digest = _hash_document(_ATTEMPT_ID_DOMAIN, claim_material)
     attempt_id = "install-" + attempt_digest[:40]
     execution_journal_path = execution_journal_template.replace(
@@ -390,7 +451,7 @@ def claim_dormant_store_install_execution_binding(
         **bindings,
         **claim_material,
         "authorization_sha256": permit.authorization_sha256,
-        "authorization_id": scope_evidence.authorization_id,
+        "authorization_id": install_identity.authorization_id,
         "authorization_nonce_sha256": permit.nonce_sha256,
         "scope_sha256": permit.scope_sha256,
         "trust_bundle_sha256": permit.trust_bundle_sha256,
@@ -451,7 +512,7 @@ def claim_dormant_store_install_execution_binding(
             static_store_spec,
             ExecutionBinding(
                 binding_sha256=journal_binding,
-                authorization_id=scope_evidence.authorization_id,
+                authorization_id=install_identity.authorization_id,
                 authorization_nonce_sha256=permit.nonce_sha256,
                 execution_id=execution_id,
                 package_manifest_sha256=bindings["package_manifest_sha256"],
@@ -471,7 +532,7 @@ def claim_dormant_store_install_execution_binding(
         claim_sha256=permit.claim_sha256,
         execution_sha256=permit.execution_sha256,
         authorization_sha256=permit.authorization_sha256,
-        authorization_id=scope_evidence.authorization_id,
+        authorization_id=install_identity.authorization_id,
         authorization_nonce_sha256=permit.nonce_sha256,
         scope_sha256=permit.scope_sha256,
         trust_bundle_sha256=permit.trust_bundle_sha256,
@@ -522,7 +583,110 @@ def claim_dormant_store_install_execution_binding(
     return _ClaimedExecutionBinding(evidence, _CLAIMED_EXECUTION_TOKEN)
 
 
+def claim_dormant_store_install_execution_binding(
+    verified_scope_capability: object,
+    *,
+    verified_package_capability: object,
+    verified_controller_runtime_capability: object,
+    state: AuthorityState,
+    clock: TrustedUtcClock,
+    held_lock: HeldExecutionLockCapability,
+) -> object:
+    """Claim new-or-exact-resume install authority and mint its binding."""
+
+    return _dormant_store_install_execution_binding(
+        verified_scope_capability,
+        verified_package_capability=verified_package_capability,
+        verified_controller_runtime_capability=(
+            verified_controller_runtime_capability
+        ),
+        state=state,
+        clock=clock,
+        held_lock=held_lock,
+        resume_only=False,
+    )
+
+
+def resume_dormant_store_install_execution_binding(
+    verified_scope_capability: object,
+    *,
+    verified_package_capability: object,
+    verified_controller_runtime_capability: object,
+    state: AuthorityState,
+    clock: TrustedUtcClock,
+    held_lock: HeldExecutionLockCapability,
+) -> object:
+    """Mint the binding only from an exact preexisting install claim."""
+
+    return _dormant_store_install_execution_binding(
+        verified_scope_capability,
+        verified_package_capability=verified_package_capability,
+        verified_controller_runtime_capability=(
+            verified_controller_runtime_capability
+        ),
+        state=state,
+        clock=clock,
+        held_lock=held_lock,
+        resume_only=True,
+    )
+
+
+def reconstruct_resolved_store_spec_from_claimed_binding(
+    claimed_execution_binding: object,
+    *,
+    verified_package_capability: object,
+) -> dict[str, object]:
+    """Rebuild the exact secret-free spec from sealed bytes and one claim."""
+
+    evidence = _claimed_execution_binding_evidence(claimed_execution_binding)
+    package_evidence, unused_scope, artifacts = _require_package_capability(
+        verified_package_capability
+    )
+    if (
+        package_evidence.package_manifest_sha256
+        != evidence.package_manifest_sha256
+        or package_evidence.authorization_sha256
+        != evidence.authorization_sha256
+        or package_evidence.scope_sha256 != evidence.scope_sha256
+    ):
+        raise ClaimedExecutionBindingError(
+            "claimed_execution_package_scope_mismatch"
+        )
+    try:
+        static_store_spec = _parse_json_document(
+            artifacts["ops/governed_memory/installation/store_spec.json"],
+            "claimed_execution_store_spec_invalid",
+        )
+        resolved = bind_store_spec(
+            static_store_spec,
+            ExecutionBinding(
+                binding_sha256=evidence.journal_binding_sha256,
+                authorization_id=evidence.authorization_id,
+                authorization_nonce_sha256=(
+                    evidence.authorization_nonce_sha256
+                ),
+                execution_id=evidence.execution_id,
+                package_manifest_sha256=evidence.package_manifest_sha256,
+            ),
+        )
+    except (KeyError, LinuxPlanError) as error:
+        raise ClaimedExecutionBindingError(
+            "claimed_execution_store_spec_invalid"
+        ) from error
+    if hashlib.sha256(canonical_json_bytes(resolved)).hexdigest() != (
+        evidence.resolved_store_spec_sha256
+    ):
+        raise ClaimedExecutionBindingError(
+            "claimed_execution_store_spec_binding_mismatch"
+        )
+    return resolved
+
+
 __all__ = [
     "ClaimedExecutionBindingError",
+    "DormantInstallAuthorityIdentity",
     "claim_dormant_store_install_execution_binding",
+    "reconstruct_resolved_store_spec_from_claimed_binding",
+    "resume_dormant_store_install_execution_binding",
+    "verified_dormant_install_authority_identity",
 ]

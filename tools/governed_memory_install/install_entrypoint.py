@@ -11,6 +11,7 @@ Linux transports, and closed host operations internally after authority claim.
 
 import hashlib
 import os
+from enum import Enum
 from pathlib import Path
 import stat
 from typing import Final, Mapping, Protocol
@@ -23,6 +24,7 @@ from .execution_capability import (
     ClaimedExecutionBindingError,
     _claimed_execution_binding_evidence,
     claim_dormant_store_install_execution_binding,
+    resume_dormant_store_install_execution_binding,
 )
 from .execution_lock import (
     HeldExecutionLockCapability,
@@ -69,6 +71,11 @@ _PRODUCTION_RESOURCE_LEDGER_NAME: Final = "resources.jsonl"
 
 class InstallEntrypointError(RuntimeError):
     """Content-free refusal at the only install composition surface."""
+
+
+class InstallAuthorityMode(str, Enum):
+    START_INSTALL = "start-install"
+    RESUME_INSTALL = "resume-install"
 
 
 class JournalFactory(Protocol):
@@ -399,6 +406,7 @@ def _run_authorized_dormant_store_install(
     prerequisites: InstallPrerequisites,
     resource_identity_ledger_factory: ResourceIdentityLedgerFactory | None,
     receipt_store: DurableReceiptStore,
+    authority_mode: InstallAuthorityMode,
     require_production_receipt_store: bool,
 ) -> Mapping[str, object]:
     """Shared production/synthetic composition over the sealed current plan."""
@@ -412,6 +420,7 @@ def _run_authorized_dormant_store_install(
     if (
         type(prerequisites) is not InstallPrerequisites
         or type(receipt_store) is not DurableReceiptStore
+        or type(authority_mode) is not InstallAuthorityMode
         or type(require_production_receipt_store) is not bool
         or (
             require_production_receipt_store
@@ -508,7 +517,12 @@ def _run_authorized_dormant_store_install(
             raise InstallEntrypointError(
                 "dormant_install_controller_runtime_prerequisite_mismatch"
             )
-        claimed = claim_dormant_store_install_execution_binding(
+        authority_function = (
+            resume_dormant_store_install_execution_binding
+            if authority_mode is InstallAuthorityMode.RESUME_INSTALL
+            else claim_dormant_store_install_execution_binding
+        )
+        claimed = authority_function(
             verified_scope_capability,
             verified_package_capability=verified_package_capability,
             verified_controller_runtime_capability=(
@@ -519,6 +533,20 @@ def _run_authorized_dormant_store_install(
             held_lock=held_lock,
         )
         evidence = _claimed_execution_binding_evidence(claimed)
+        if (
+            authority_mode is InstallAuthorityMode.START_INSTALL
+            and evidence.claim_result != "execution_authority_claimed"
+        ):
+            raise InstallEntrypointError(
+                "dormant_install_start_already_claimed"
+            )
+        if (
+            authority_mode is InstallAuthorityMode.RESUME_INSTALL
+            and evidence.claim_result != "execution_authority_exact_resume"
+        ):
+            raise InstallEntrypointError(
+                "dormant_install_resume_claim_invalid"
+            )
         resolved_store_spec = bind_store_spec(
             store_spec,
             ExecutionBinding(
@@ -774,6 +802,42 @@ def _run_authorized_dormant_store_install_synthetic(
         prerequisites=prerequisites,
         resource_identity_ledger_factory=resource_identity_ledger_factory,
         receipt_store=receipt_store,
+        authority_mode=InstallAuthorityMode.START_INSTALL,
+        require_production_receipt_store=False,
+    )
+
+
+def _resume_authorized_dormant_store_install_synthetic(
+    *,
+    verified_scope_capability: object,
+    verified_package_capability: object,
+    verified_controller_runtime_capability: object,
+    authority_state: AuthorityState,
+    clock: TrustedUtcClock,
+    held_lock: HeldExecutionLockCapability,
+    journal_factory: JournalFactory,
+    dependencies_factory: ClaimBoundInstallDependenciesFactory,
+    prerequisites: InstallPrerequisites,
+    resource_identity_ledger_factory: ResourceIdentityLedgerFactory,
+    receipt_store: DurableReceiptStore,
+) -> Mapping[str, object]:
+    """Private synthetic exact-resume path; it cannot create a nonce claim."""
+
+    return _run_authorized_dormant_store_install(
+        verified_scope_capability=verified_scope_capability,
+        verified_package_capability=verified_package_capability,
+        verified_controller_runtime_capability=(
+            verified_controller_runtime_capability
+        ),
+        authority_state=authority_state,
+        clock=clock,
+        held_lock=held_lock,
+        journal_factory=journal_factory,
+        dependencies_factory=dependencies_factory,
+        prerequisites=prerequisites,
+        resource_identity_ledger_factory=resource_identity_ledger_factory,
+        receipt_store=receipt_store,
+        authority_mode=InstallAuthorityMode.RESUME_INSTALL,
         require_production_receipt_store=False,
     )
 
@@ -811,15 +875,50 @@ def run_authorized_dormant_store_install(
         prerequisites=prerequisites,
         resource_identity_ledger_factory=None,
         receipt_store=receipt_store,
+        authority_mode=InstallAuthorityMode.START_INSTALL,
+        require_production_receipt_store=True,
+    )
+
+
+def resume_authorized_dormant_store_install(
+    *,
+    verified_scope_capability: object,
+    verified_package_capability: object,
+    verified_controller_runtime_capability: object,
+    authority_state: AuthorityState,
+    clock: TrustedUtcClock,
+    held_lock: HeldExecutionLockCapability,
+    prerequisites: InstallPrerequisites,
+    receipt_store: DurableReceiptStore,
+) -> Mapping[str, object]:
+    """Resume only the exact previously claimed install execution."""
+
+    return _run_authorized_dormant_store_install(
+        verified_scope_capability=verified_scope_capability,
+        verified_package_capability=verified_package_capability,
+        verified_controller_runtime_capability=(
+            verified_controller_runtime_capability
+        ),
+        authority_state=authority_state,
+        clock=clock,
+        held_lock=held_lock,
+        journal_factory=None,
+        dependencies_factory=None,
+        prerequisites=prerequisites,
+        resource_identity_ledger_factory=None,
+        receipt_store=receipt_store,
+        authority_mode=InstallAuthorityMode.RESUME_INSTALL,
         require_production_receipt_store=True,
     )
 
 
 __all__ = [
     "INACTIVE_REFUSAL_CODE",
+    "InstallAuthorityMode",
     "ClaimBoundInstallDependenciesFactory",
     "InstallEntrypointError",
     "ResourceIdentityLedgerFactory",
     "production_install_postgres_stage_receipt_sink",
     "run_authorized_dormant_store_install",
+    "resume_authorized_dormant_store_install",
 ]

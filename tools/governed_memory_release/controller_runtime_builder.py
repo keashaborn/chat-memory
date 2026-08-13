@@ -558,9 +558,8 @@ def _selected_postgresql_driver(
     """Return the exact ready driver selection closed by the contract.
 
     A preferred-but-not-yet-locked selection is audit metadata, not a runtime
-    build input.  In particular, the repository's current Phase 9H contract
-    must remain unbuildable until a later authorized artifact-staging phase
-    closes both selected wheels and their native-library evidence.
+    build input. The Phase 9J contract is buildable only when every selected
+    wheel and its native-library evidence exactly match the closed contract.
     """
 
     selected = contract.get("selected_runtime_inputs")

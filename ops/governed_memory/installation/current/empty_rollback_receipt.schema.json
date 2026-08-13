@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:governed-memory:empty-store-rollback-receipt:v3",
-  "title": "Governed Memory empty store rollback receipt v3",
+  "$id": "urn:governed-memory:empty-store-rollback-receipt:v4",
+  "title": "Governed Memory empty store rollback receipt v4",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -35,7 +35,7 @@
     "resource_ledger_sequence",
     "eligibility_receipt_sha256",
     "retained_audit_set_sha256",
-    "exact_targets_absent_count",
+    "exact_rollback_resources_absent_count",
     "exact_resources_absent",
     "stores_installed",
     "stores_supervisor_installed",
@@ -48,7 +48,7 @@
     "receipt_sha256"
   ],
   "properties": {
-    "schema_version": {"const": "governed-memory-empty-store-rollback-receipt-v3"},
+    "schema_version": {"const": "governed-memory-empty-store-rollback-receipt-v4"},
     "operation": {"const": "empty_store_rollback"},
     "result": {"const": "empty_store_rollback_complete"},
     "execution_id": {"$ref": "#/$defs/sha256"},
@@ -78,7 +78,7 @@
     "resource_ledger_sequence": {"type": "integer", "minimum": 1},
     "eligibility_receipt_sha256": {"$ref": "#/$defs/sha256"},
     "retained_audit_set_sha256": {"$ref": "#/$defs/sha256"},
-    "exact_targets_absent_count": {"const": 15},
+    "exact_rollback_resources_absent_count": {"const": 15},
     "exact_resources_absent": {"const": true},
     "stores_installed": {"const": false},
     "stores_supervisor_installed": {"const": false},

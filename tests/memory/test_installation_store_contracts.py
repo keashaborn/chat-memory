@@ -382,6 +382,7 @@ class DormantStoreInstallStorePackageTests(unittest.TestCase):
 
     def test_static_store_spec_and_pure_plan_are_exact_and_stores_only(self) -> None:
         spec = self._bound_spec()
+        self.assertEqual(spec["state"], "canonical-dormant-store-spec-v2")
         plan = build_store_create_plan(spec)
         self.assertEqual(len(plan), 5)
         self.assertEqual(len({step.step_id for step in plan}), 5)
@@ -501,7 +502,7 @@ class DormantStoreInstallStorePackageTests(unittest.TestCase):
                 {
                     "container_healthcheck": "disabled",
                     "external_readiness_probe": (
-                        "unimplemented_disposable_proof_required"
+                        "closed_fixed_loopback_readiness_probe_v1"
                     ),
                 },
             )

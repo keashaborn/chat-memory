@@ -21,6 +21,7 @@ from tools.governed_memory_install.controller_runtime import (
     RUNTIME_RECEIPT_SCHEMA,
     _ObservedRuntime,
     _ProcessProbeResult,
+    _hash_tree,
     _read_regular,
     _observe_release_tree,
     _requirements_from_lock,
@@ -712,6 +713,83 @@ class RuntimeCapabilityTests(unittest.TestCase):
             self.assertEqual(raw, b"pass\n")
             self.assertEqual(digest, hashlib.sha256(raw).hexdigest())
             self.assertEqual(mode, 0o555)
+
+    def test_tree_hashes_use_global_canonical_path_order(self) -> None:
+        artifacts = {
+            "a/z.py": b"VALUE = 1\n",
+            "a.txt": b"root sibling\n",
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest_sha = self._write_release(root, artifacts)
+            expected_files = {
+                path: hashlib.sha256(raw).hexdigest()
+                for path, raw in artifacts.items()
+            }
+            expected_files[str(PACKAGE_MANIFEST_RELATIVE_PATH)] = manifest_sha
+            expected_directories: set[str] = set()
+            for path in expected_files:
+                parts = Path(path).parts
+                for limit in range(1, len(parts)):
+                    expected_directories.add("/".join(parts[:limit]))
+            expected_entries = [
+                {
+                    "path": path + ("/" if path in expected_directories else ""),
+                    "mode": 0o555 if path in expected_directories else 0o444,
+                    "sha256": (
+                        "directory"
+                        if path in expected_directories
+                        else expected_files[path]
+                    ),
+                }
+                for path in sorted(expected_directories | set(expected_files))
+            ]
+            expected_release_sha = hashlib.sha256(
+                _canonical(
+                    {
+                        "schema_version": (
+                            "governed-memory-controller-release-tree-v1"
+                        ),
+                        "package_manifest_path": str(
+                            PACKAGE_MANIFEST_RELATIVE_PATH
+                        ),
+                        "package_manifest_sha256": manifest_sha,
+                        "root_mode": 0o555,
+                        "entries": expected_entries,
+                    }
+                )
+            ).hexdigest()
+            expected_runtime_sha = hashlib.sha256(
+                _canonical(
+                    {
+                        "schema_version": (
+                            "governed-memory-controller-runtime-tree-v1"
+                        ),
+                        "entries": expected_entries,
+                    }
+                )
+            ).hexdigest()
+
+            self._seal_release_directories(root)
+            descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                with patch(
+                    "tools.governed_memory_install.controller_runtime."
+                    "_EXPECTED_UID",
+                    os.getuid(),
+                ):
+                    observed_release_sha = _observe_release_tree(
+                        descriptor,
+                        package_artifacts=artifacts,
+                        package_manifest_sha256=manifest_sha,
+                    )
+                    observed_runtime_sha = _hash_tree(descriptor)
+            finally:
+                os.close(descriptor)
+                self._unseal_release_directories(root)
+
+            self.assertEqual(observed_release_sha, expected_release_sha)
+            self.assertEqual(observed_runtime_sha, expected_runtime_sha)
 
     def test_release_tree_rejects_extra_symlink_content_and_manifest_drift(self):
         artifacts = {

@@ -6,11 +6,10 @@ This module is the concrete step dispatcher.  It never accepts argv, shell
 text, SQL selected by a caller, URLs, host names, ports, HTTP paths, or raw
 credentials.  Low-level Docker, systemd, PostgreSQL, Qdrant, and root-file
 drivers are pre-bound to the exact validated store specification by an
-injected platform factory.  Phase 9H packages the driver-native PostgreSQL
-stage machine and selected non-PostgreSQL live transports, while deliberately
-leaving the concrete Psycopg transport, selected driver wheels, approved
-terminal catalog, complete production factory, installation, and activation
-absent.
+injected platform factory. Phase 9J closes the driver-native PostgreSQL stage
+machine, concrete Psycopg transport, selected runtime inputs, approved terminal
+catalog, and platform factory. Installation and activation remain separate,
+authority-gated operations.
 """
 
 from dataclasses import dataclass

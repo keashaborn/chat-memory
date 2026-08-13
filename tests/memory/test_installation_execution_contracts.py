@@ -34,7 +34,7 @@ class DormantStoreInstallExecutionContractTests(unittest.TestCase):
         )
         self.assertEqual(
             contract["schema_version"],
-            "governed-memory-dormant-store-install-inactive-execution-package-v3",
+            "governed-memory-dormant-store-install-inactive-execution-package-v4",
         )
         self.assertEqual(contract["server"], "seebx")
         relationship = contract["package_manifest_relationship"]
@@ -127,6 +127,14 @@ class DormantStoreInstallExecutionContractTests(unittest.TestCase):
         self.assertFalse(
             binding["hostile_same_process_capability_forgery_resisted"]
         )
+        self.assertTrue(
+            binding["signed_public_pre_effect_recovery_delegation_required"]
+        )
+        self.assertTrue(
+            binding[
+                "durable_recovery_reservation_claim_required_before_first_install_effect"
+            ]
+        )
 
         durability = contract["durability_policy"]
         for key in (
@@ -172,6 +180,19 @@ class DormantStoreInstallExecutionContractTests(unittest.TestCase):
             host["approved_terminal_postgresql_catalog_manifest_selected"]
         )
         self.assertTrue(host["bounded_image_inspection_command_primitive_packaged"])
+        self.assertEqual(
+            host["fixed_host_clock_synchronization_preflight_binary"],
+            "/usr/bin/timedatectl",
+        )
+        self.assertEqual(
+            host["fixed_host_clock_synchronization_preflight_arguments"],
+            ["show", "--property=NTPSynchronized", "--value"],
+        )
+        self.assertEqual(
+            host["fixed_host_clock_synchronization_preflight_exact_stdout"],
+            "yes\n",
+        )
+        self.assertFalse(host["caller_selected_clock_command_or_path_allowed"])
         self.assertTrue(
             host[
                 "image_inspection_projection_is_id_repo_digests_os_architecture_only"
@@ -201,10 +222,26 @@ class DormantStoreInstallExecutionContractTests(unittest.TestCase):
                 "final_rollback_receipt_persistence_while_controller_authority_marker_held_required"
             ]
         )
+        self.assertTrue(
+            receipts[
+                "live_proof_receipt_binds_host_clock_synchronization_preflight_passed"
+            ]
+        )
         self.assertNotIn(
             "canonical_install_receipt_emission_not_integrated",
             contract["remaining_blockers"],
         )
+        for retired in (
+            "exact_local_image_identity_receipt_not_published",
+            "authority_substrate_and_trusted_clock_not_installed",
+            "host_clock_synchronization_preflight_not_implemented",
+        ):
+            self.assertNotIn(retired, contract["remaining_blockers"])
+        for current in (
+            "exact_local_image_digest_and_id_reinspection_pending_for_disposable_live_proof",
+            "durable_recovery_capsule_and_pre_effect_reservation_not_live_executed",
+        ):
+            self.assertIn(current, contract["remaining_blockers"])
 
         proof = contract["proof_boundary"]
         self.assertEqual(
@@ -323,9 +360,42 @@ class DormantStoreInstallExecutionContractTests(unittest.TestCase):
             "empty_store_rollback",
         )
         self.assertEqual(
-            rollback["properties"]["exact_targets_absent_count"]["const"],
+            rollback["properties"]["exact_rollback_resources_absent_count"][
+                "const"
+            ],
             15,
         )
+
+    def test_live_proof_receipt_binds_durable_recovery_without_overclaiming(self) -> None:
+        schema = json.loads(
+            (CURRENT / "live_proof_receipt.schema.json").read_text(
+                encoding="ascii"
+            )
+        )
+        self.assertEqual(
+            schema["$id"],
+            "urn:governed-memory:phase9:disposable-live-proof-receipt:v3",
+        )
+        self.assertFalse(schema["additionalProperties"])
+        self.assertEqual(set(schema["required"]), set(schema["properties"]))
+        properties = schema["properties"]
+        self.assertEqual(
+            properties["exact_rollback_resources_absent_count"]["const"],
+            15,
+        )
+        for key in (
+            "recovery_capsule_published_before_first_install_effect",
+            "recovery_reservation_claimed_before_first_install_effect",
+            "recovery_capsule_retained_at_terminal_observation",
+        ):
+            self.assertTrue(properties[key]["const"], key)
+        for key in (
+            "ephemeral_private_signer_retained_at_execution_start",
+            "host_reboot_proven",
+            "issuer_or_host_death_durable_cleanup_proven",
+            "persistent_store_restart_supervision_and_boot_recovery_proven",
+        ):
+            self.assertFalse(properties[key]["const"], key)
 
 
 if __name__ == "__main__":

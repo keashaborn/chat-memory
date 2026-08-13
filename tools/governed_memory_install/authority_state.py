@@ -176,6 +176,27 @@ class NonceClaim:
 
 
 @dataclass(frozen=True, slots=True)
+class NonceClaimIdentity:
+    """Canonical content-free identity of one authority nonce claim."""
+
+    nonce_sha256: str
+    operation_sha256: str
+    execution_sha256: str
+    authorization_sha256: str
+    scope_sha256: str
+    trust_bundle_sha256: str
+    claim_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class NonceClaimPresence:
+    """Content-free presence of one nonce claim, independent of its binding."""
+
+    present: bool
+    nonce_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
 class JournalAnchor:
     result: str
     binding_sha256: str
@@ -267,6 +288,55 @@ def _claim_sha256(
         )
     )
     return hashlib.sha256(_CLAIM_DOMAIN + material).hexdigest()
+
+
+def derive_nonce_claim_identity(
+    nonce: str,
+    *,
+    operation: str,
+    execution_sha256: str,
+    authorization_sha256: str,
+    scope_sha256: str,
+    trust_bundle_sha256: str,
+) -> NonceClaimIdentity:
+    """Derive the exact identity persisted by :meth:`claim_nonce`.
+
+    This function does not read or mutate durable state.  Keeping this formula
+    beside the state implementation prevents preflight identity derivation from
+    drifting away from the actual durable claim.
+    """
+
+    nonce_hash = nonce_sha256(nonce)
+    operation_hash = operation_sha256(operation)
+    execution_hash = _require_hash(
+        execution_sha256,
+        "authority_execution_hash_invalid",
+    )
+    authorization_hash = _require_hash(
+        authorization_sha256,
+        "authority_authorization_hash_invalid",
+    )
+    scope_hash = _require_hash(scope_sha256, "authority_scope_hash_invalid")
+    trust_bundle_hash = _require_hash(
+        trust_bundle_sha256,
+        "authority_trust_bundle_hash_invalid",
+    )
+    return NonceClaimIdentity(
+        nonce_sha256=nonce_hash,
+        operation_sha256=operation_hash,
+        execution_sha256=execution_hash,
+        authorization_sha256=authorization_hash,
+        scope_sha256=scope_hash,
+        trust_bundle_sha256=trust_bundle_hash,
+        claim_sha256=_claim_sha256(
+            nonce_hash=nonce_hash,
+            operation_hash=operation_hash,
+            execution_hash=execution_hash,
+            authorization_hash=authorization_hash,
+            scope_hash=scope_hash,
+            trust_bundle_hash=trust_bundle_hash,
+        ),
+    )
 
 
 class AuthorityState:
@@ -837,38 +907,15 @@ class AuthorityState:
                 "authority_new_claim_policy_invalid"
             )
 
-        nonce_hash = nonce_sha256(nonce)
-        operation_hash = operation_sha256(operation)
-        execution_hash = _require_hash(
-            execution_sha256,
-            "authority_execution_hash_invalid",
+        identity = derive_nonce_claim_identity(
+            nonce,
+            operation=operation,
+            execution_sha256=execution_sha256,
+            authorization_sha256=authorization_sha256,
+            scope_sha256=scope_sha256,
+            trust_bundle_sha256=trust_bundle_sha256,
         )
-        authorization_hash = _require_hash(
-            authorization_sha256,
-            "authority_authorization_hash_invalid",
-        )
-        scope_hash = _require_hash(scope_sha256, "authority_scope_hash_invalid")
-        trust_bundle_hash = _require_hash(
-            trust_bundle_sha256,
-            "authority_trust_bundle_hash_invalid",
-        )
-        claim_hash = _claim_sha256(
-            nonce_hash=nonce_hash,
-            operation_hash=operation_hash,
-            execution_hash=execution_hash,
-            authorization_hash=authorization_hash,
-            scope_hash=scope_hash,
-            trust_bundle_hash=trust_bundle_hash,
-        )
-        expected = (
-            nonce_hash,
-            operation_hash,
-            execution_hash,
-            authorization_hash,
-            scope_hash,
-            trust_bundle_hash,
-            claim_hash,
-        )
+        expected = tuple(getattr(identity, key) for key in _NONCE_COLUMNS)
 
         connection = self._connect()
         try:
@@ -881,7 +928,7 @@ class AuthorityState:
                 FROM nonce_claim_v1
                 WHERE nonce_sha256 = ?
                 """,
-                (nonce_hash,),
+                (identity.nonce_sha256,),
             ).fetchone()
             if row is None:
                 if not allow_new_claim:
@@ -930,6 +977,48 @@ class AuthorityState:
         )
         self._validate_path()
         return NonceClaim(result=result, **dict(zip(_NONCE_COLUMNS, expected)))
+
+    def inspect_nonce_claim(
+        self,
+        nonce: str,
+        *,
+        held_lock: HeldExecutionLockCapability,
+    ) -> NonceClaimPresence:
+        """Inspect only whether a nonce is claimed while the global lock is held."""
+
+        _require_held_lock(
+            held_lock,
+            code="authority_nonce_inspection_lock_not_held",
+        )
+        nonce_hash = nonce_sha256(nonce)
+        connection = self._connect()
+        try:
+            row = connection.execute(
+                """
+                SELECT nonce_sha256
+                FROM nonce_claim_v1
+                WHERE nonce_sha256 = ?
+                """,
+                (nonce_hash,),
+            ).fetchone()
+        except sqlite3.OperationalError as error:
+            raise AuthorityStateBusyError("authority_state_busy") from error
+        except sqlite3.DatabaseError as error:
+            raise AuthorityStateIntegrityError(
+                "authority_state_database_invalid"
+            ) from error
+        finally:
+            connection.close()
+        _require_held_lock(
+            held_lock,
+            code="authority_nonce_inspection_lock_not_held",
+        )
+        self._validate_path()
+        if row is not None and tuple(row) != (nonce_hash,):
+            raise AuthorityStateIntegrityError(
+                "authority_state_nonce_row_invalid"
+            )
+        return NonceClaimPresence(row is not None, nonce_hash)
 
     def read_anchor(self, binding_sha256: str) -> JournalAnchor:
         binding = _require_hash(binding_sha256, "journal_anchor_binding_invalid")

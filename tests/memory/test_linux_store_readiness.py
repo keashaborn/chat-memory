@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import replace
 import unittest
+from unittest import mock
 
+from tools.governed_memory_install import linux_store_readiness as readiness
 from tools.governed_memory_install.linux_store_readiness import (
     CanonicalPostgreSQLRole,
     ClosedStoreReadinessProbe,
@@ -120,6 +122,8 @@ class _Qdrant:
     bind = QDRANT_BIND
 
     def __init__(self) -> None:
+        self.prebootstrap_calls = 0
+        self.terminal_calls = 0
         self.prebootstrap = PrebootstrapQdrantSnapshot(
             bind=QDRANT_BIND,
             server_version=QDRANT_SERVER_VERSION,
@@ -130,13 +134,210 @@ class _Qdrant:
         self.terminal = _terminal_qdrant()
 
     def inspect_prebootstrap(self) -> PrebootstrapQdrantSnapshot:
+        self.prebootstrap_calls += 1
         return self.prebootstrap
 
     def inspect_terminal(self) -> TerminalQdrantSnapshot:
+        self.terminal_calls += 1
         return self.terminal
 
 
+class _Clock:
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.sleeps: list[float] = []
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+class _FailFirstPostgres(_Postgres):
+    def __init__(self, failures: int) -> None:
+        super().__init__()
+        self.failures = failures
+        self.prebootstrap_calls = 0
+        self.terminal_calls = 0
+
+    def inspect_prebootstrap(self) -> PrebootstrapPostgreSQLSnapshot:
+        self.prebootstrap_calls += 1
+        if self.prebootstrap_calls <= self.failures:
+            raise RuntimeError("postgres_fixed_connect_failed")
+        return super().inspect_prebootstrap()
+
+    def inspect_terminal(self) -> TerminalPostgreSQLSnapshot:
+        self.terminal_calls += 1
+        if self.terminal_calls <= self.failures:
+            raise RuntimeError("postgres_fixed_connect_failed")
+        return super().inspect_terminal()
+
+
 class LinuxStoreReadinessTests(unittest.TestCase):
+    def test_fresh_and_terminal_probes_retry_transport_failures_then_succeed(
+        self,
+    ) -> None:
+        for method_name, call_attribute in (
+            ("verify_fresh_empty_stores", "prebootstrap_calls"),
+            ("verify_terminal_canonical_stores", "terminal_calls"),
+        ):
+            with self.subTest(method_name=method_name):
+                clock = _Clock()
+                postgres = _FailFirstPostgres(3)
+                probe = ClosedStoreReadinessProbe(
+                    postgres=postgres,
+                    qdrant=_Qdrant(),
+                    expected_postgres_catalog_sha256=(
+                        EXPECTED_TEST_CATALOG_SHA256
+                    ),
+                )
+                with (
+                    mock.patch.object(
+                        readiness, "_monotonic", side_effect=clock.monotonic
+                    ),
+                    mock.patch.object(
+                        readiness, "_sleep", side_effect=clock.sleep
+                    ),
+                ):
+                    result = getattr(probe, method_name)()
+                self.assertIsNotNone(result)
+                self.assertEqual(getattr(postgres, call_attribute), 4)
+                self.assertEqual(
+                    clock.sleeps,
+                    [
+                        readiness.READINESS_TRANSPORT_RETRY_INTERVAL_SECONDS
+                    ]
+                    * 3,
+                )
+
+    def test_fresh_and_terminal_transport_retry_stops_at_fixed_deadline(
+        self,
+    ) -> None:
+        for method_name, failure_code in (
+            ("verify_fresh_empty_stores", "fresh_store_probe_failed"),
+            (
+                "verify_terminal_canonical_stores",
+                "terminal_store_probe_failed",
+            ),
+        ):
+            with self.subTest(method_name=method_name):
+                clock = _Clock()
+                postgres = _FailFirstPostgres(10_000)
+                probe = ClosedStoreReadinessProbe(
+                    postgres=postgres,
+                    qdrant=_Qdrant(),
+                    expected_postgres_catalog_sha256=(
+                        EXPECTED_TEST_CATALOG_SHA256
+                    ),
+                )
+                with (
+                    mock.patch.object(
+                        readiness, "_monotonic", side_effect=clock.monotonic
+                    ),
+                    mock.patch.object(
+                        readiness, "_sleep", side_effect=clock.sleep
+                    ),
+                    self.assertRaisesRegex(
+                        LinuxStoreReadinessError, failure_code
+                    ),
+                ):
+                    getattr(probe, method_name)()
+                self.assertEqual(
+                    clock.now, readiness.READINESS_TRANSPORT_TIMEOUT_SECONDS
+                )
+                self.assertTrue(clock.sleeps)
+
+    def test_semantic_snapshot_mismatch_is_not_retried(self) -> None:
+        postgres = _Postgres()
+        postgres.prebootstrap = replace(
+            postgres.prebootstrap, target_database_exists=True
+        )
+        clock = _Clock()
+        probe = ClosedStoreReadinessProbe(
+            postgres=postgres,
+            qdrant=_Qdrant(),
+            expected_postgres_catalog_sha256=EXPECTED_TEST_CATALOG_SHA256,
+        )
+        with (
+            mock.patch.object(
+                readiness, "_monotonic", side_effect=clock.monotonic
+            ),
+            mock.patch.object(readiness, "_sleep", side_effect=clock.sleep),
+            self.assertRaisesRegex(
+                LinuxStoreReadinessError, "fresh_store_probe_not_empty"
+            ),
+        ):
+            probe.verify_fresh_empty_stores()
+        self.assertEqual(clock.sleeps, [])
+
+        terminal_postgres = _FailFirstPostgres(0)
+        terminal_postgres.terminal = replace(
+            terminal_postgres.terminal,
+            catalog_identities=(
+                *terminal_postgres.terminal.catalog_identities,
+                PostgreSQLCatalogIdentity(
+                    "schema",
+                    "memory",
+                    "unexpected",
+                    "governed_memory_owner",
+                    "f" * 64,
+                ),
+            ),
+        )
+        terminal_clock = _Clock()
+        terminal_probe = ClosedStoreReadinessProbe(
+            postgres=terminal_postgres,
+            qdrant=_Qdrant(),
+            expected_postgres_catalog_sha256=EXPECTED_TEST_CATALOG_SHA256,
+        )
+        with (
+            mock.patch.object(
+                readiness,
+                "_monotonic",
+                side_effect=terminal_clock.monotonic,
+            ),
+            mock.patch.object(
+                readiness, "_sleep", side_effect=terminal_clock.sleep
+            ),
+            self.assertRaisesRegex(
+                LinuxStoreReadinessError,
+                "terminal_postgres_catalog_mismatch",
+            ),
+        ):
+            terminal_probe.verify_terminal_canonical_stores()
+        self.assertEqual(terminal_postgres.terminal_calls, 1)
+        self.assertEqual(terminal_clock.sleeps, [])
+
+        config_qdrant = _Qdrant()
+        config_clock = _Clock()
+        config_probe = ClosedStoreReadinessProbe(
+            postgres=_Postgres(),
+            qdrant=config_qdrant,
+            expected_postgres_catalog_sha256=EXPECTED_TEST_CATALOG_SHA256,
+        )
+        with (
+            mock.patch.object(
+                readiness, "_monotonic", side_effect=config_clock.monotonic
+            ),
+            mock.patch.object(
+                readiness, "_sleep", side_effect=config_clock.sleep
+            ),
+            mock.patch.object(
+                readiness,
+                "EXPECTED_QDRANT_COLLECTION_CONFIG_SHA256",
+                "0" * 64,
+            ),
+            self.assertRaisesRegex(
+                LinuxStoreReadinessError,
+                "terminal_qdrant_collection_config_mismatch",
+            ),
+        ):
+            config_probe.verify_terminal_canonical_stores()
+        self.assertEqual(config_qdrant.terminal_calls, 1)
+        self.assertEqual(config_clock.sleeps, [])
+
     def test_fixed_prebootstrap_probe_proves_database_and_all_five_roles_absent(
         self,
     ) -> None:
@@ -212,17 +413,27 @@ class LinuxStoreReadinessTests(unittest.TestCase):
 
         error: LinuxStoreReadinessError | None = None
         try:
-            ClosedStoreReadinessProbe(
-                postgres=FailingPostgres(),
-                qdrant=_Qdrant(),
-                expected_postgres_catalog_sha256=EXPECTED_TEST_CATALOG_SHA256,
-            ).verify_fresh_empty_stores()
+            clock = _Clock()
+            with (
+                mock.patch.object(
+                    readiness, "_monotonic", side_effect=clock.monotonic
+                ),
+                mock.patch.object(readiness, "_sleep", side_effect=clock.sleep),
+            ):
+                ClosedStoreReadinessProbe(
+                    postgres=FailingPostgres(),
+                    qdrant=_Qdrant(),
+                    expected_postgres_catalog_sha256=(
+                        EXPECTED_TEST_CATALOG_SHA256
+                    ),
+                ).verify_fresh_empty_stores()
         except LinuxStoreReadinessError as caught:
             error = caught
         self.assertIsNotNone(error)
         self.assertEqual(str(error), "fresh_store_probe_failed")
         self.assertIsNone(error.__cause__)
         self.assertNotIn("secret", repr(error).lower())
+        self.assertEqual(clock.sleeps, [])
 
     def test_refuses_version_drift_and_unapproved_catalog(self) -> None:
         postgres = _Postgres()

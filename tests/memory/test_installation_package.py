@@ -229,6 +229,17 @@ class DormantStoreInstallPackageTests(unittest.TestCase):
 
     def test_current_installation_and_controller_directories_are_closed(self) -> None:
         package._verify_current_directory_closure()
+
+    def test_retired_disposable_proof_authority_module_is_absent(self) -> None:
+        retired = (
+            ROOT
+            / "tools/governed_memory_validation/phase9_disposable_proof_authority.py"
+        )
+        self.assertFalse(retired.exists())
+        self.assertNotIn(
+            retired.relative_to(ROOT).as_posix(),
+            package.EXPECTED_ARTIFACTS,
+        )
         self.assertEqual(
             package._repository_regular_file_inventory(
                 "ops/governed_memory/installation"
@@ -240,6 +251,153 @@ class DormantStoreInstallPackageTests(unittest.TestCase):
                 "tools/governed_memory_install"
             ),
             package.EXPECTED_INSTALL_TOOL_DIRECTORY_FILES,
+        )
+
+    def test_image_authority_is_in_memory_and_capsule_embeds_trust(self) -> None:
+        contract = json.loads(package.CONTRACT.read_text(encoding="ascii"))
+        targets = contract["exact_targets"]
+        filesystem = contract["filesystem_policy"]
+        images = contract["image_policy"]
+        authority = contract["authority_policy"]
+        receipts = contract["receipt_policy"]
+
+        self.assertNotIn("image_receipt", targets)
+        self.assertNotIn("trust_anchor", targets)
+        self.assertEqual(
+            targets["recovery_capsule"],
+            "/var/lib/governed-memory-controller/phase9-disposable-proof-recovery-capsule.json",
+        )
+        self.assertEqual(
+            targets["proof_supervision_lock"],
+            "/run/lock/governed-memory-controller/phase9-disposable-live-proof.lock",
+        )
+        self.assertNotIn("trust_anchor", filesystem)
+        self.assertEqual(
+            filesystem["recovery_capsule"],
+            {
+                "owner": "root:root",
+                "mode": "0400",
+                "external_or_persistent_hard_link_allowed": False,
+                "fixed_publication_temp_suffix": ".publishing",
+                "transient_same_inode_publication_hard_link_allowed": True,
+                "terminal_link_count": 1,
+                "interrupted_same_inode_link_count_two_reconciled_before_execution": True,
+                "no_replace_publication_required": True,
+                "partial_different_inode_or_metadata_drift_refused": True,
+                "create_once": True,
+                "embeds_trust_bundle": True,
+                "symlink_allowed": False,
+                "retained_after_terminal_observation": True,
+                "file_and_parent_fsync_required": True,
+            },
+        )
+        self.assertEqual(
+            filesystem["proof_supervision_lock"],
+            {
+                "owner": "root:root",
+                "mode": "0600",
+                "hard_link_allowed": False,
+                "symlink_allowed": False,
+                "link_count": 1,
+                "empty_file_required": True,
+                "parent_owner": "root:root",
+                "parent_mode": "0700",
+                "issuer_creates_if_absent_or_securely_reopens": True,
+                "never_unlinked": True,
+                "nonblocking_exclusive_lock_required": True,
+                "held_for_full_run_or_recover_lifecycle": True,
+                "inherited_through_sealed_runner_process_group": True,
+                "retained_after_terminal_observation": True,
+            },
+        )
+        for retired in (
+            "authority_substrate_must_preexist_execution",
+            "image_staging_substrate_must_preexist_execution",
+            "package_may_create_authority_substrate",
+            "package_may_create_image_staging_substrate",
+        ):
+            self.assertNotIn(retired, filesystem)
+        self.assertFalse(filesystem["persistent_authority_key_file_required"])
+        self.assertFalse(filesystem["persistent_image_staging_substrate_required"])
+        self.assertTrue(
+            filesystem["proof_substrate_directories_must_preexist_execution"]
+        )
+        self.assertTrue(
+            filesystem[
+                "proof_runner_validates_but_never_creates_chmods_or_chowns_substrate_directories"
+            ]
+        )
+        self.assertEqual(images["pull_policy"], "never")
+        self.assertTrue(
+            images["exact_local_repo_digest_and_image_id_reinspection_required"]
+        )
+        self.assertTrue(images["canonical_image_identity_set_constructed_in_memory"])
+        self.assertFalse(images["persistent_image_staging_receipt_required"])
+        self.assertTrue(authority["recovery_capsule_path_is_fixed"])
+        self.assertTrue(
+            authority["recovery_capsule_root_owned_mode_0400_required"]
+        )
+        self.assertTrue(
+            authority["trust_bundle_is_embedded_in_recovery_capsule"]
+        )
+        self.assertFalse(authority["persistent_trusted_owner_key_file_required"])
+        self.assertTrue(
+            authority["signed_public_pre_effect_recovery_delegation_required"]
+        )
+        self.assertTrue(
+            authority[
+                "durable_recovery_reservation_claim_required_before_first_install_effect"
+            ]
+        )
+        self.assertFalse(authority["ephemeral_private_signer_retained_for_execution"])
+        recovery = contract["recovery_policy"]
+        preauthorized_rollback = (
+            "postflight_empty_rollback_requires_distinct_pre_signed_"
+            "recovery_delegation_and_preclaimed_reservation"
+        )
+        self.assertTrue(recovery[preauthorized_rollback])
+        self.assertEqual(
+            authority["host_clock_synchronization_preflight_binary"],
+            "/usr/bin/timedatectl",
+        )
+        self.assertEqual(
+            authority["host_clock_synchronization_preflight_arguments"],
+            ["show", "--property=NTPSynchronized", "--value"],
+        )
+        self.assertEqual(
+            authority["host_clock_synchronization_preflight_exact_stdout"],
+            "yes\n",
+        )
+        self.assertTrue(
+            authority[
+                "host_clock_synchronization_preflight_runs_before_substrate_validation"
+            ]
+        )
+        self.assertTrue(
+            receipts[
+                "install_receipt_binds_canonical_in_memory_image_identity_set_sha256"
+            ]
+        )
+        self.assertTrue(
+            receipts[
+                "live_proof_receipt_binds_canonical_in_memory_image_identity_set_sha256"
+            ]
+        )
+        self.assertTrue(
+            receipts[
+                "live_proof_receipt_binds_host_clock_synchronization_preflight_passed"
+            ]
+        )
+        blockers = contract["remaining_blockers"]
+        self.assertNotIn("trusted_authority_substrate_not_installed", blockers)
+        self.assertNotIn("exact_local_image_identity_receipt_not_published", blockers)
+        self.assertIn(
+            "durable_recovery_capsule_and_pre_effect_reservation_not_live_executed",
+            blockers,
+        )
+        self.assertIn(
+            "exact_local_image_digest_and_id_reinspection_pending_for_disposable_live_proof",
+            blockers,
         )
 
     def test_directory_closure_rejects_unlisted_file_and_symlink(self) -> None:

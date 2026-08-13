@@ -36,13 +36,22 @@ from tools.governed_memory_install.rollback import (
     verified_rollback_resource_parts,
 )
 from tools.governed_memory_install.rollback_authority import (
+    EmptyRollbackRecoveryReservationBinding,
     EmptyRollbackExpectedBindings,
+    RECOVERY_RESERVATION_OPERATION,
+    _CAPABILITY_TOKEN,
+    _VerifiedEmptyRollbackCapability,
+    rollback_capability_evidence,
+)
+from tools.governed_memory_install.execution_capability import (
+    verified_dormant_install_authority_identity,
 )
 from tools.governed_memory_install.package_capability import (
     verified_package_evidence,
 )
 from tools.governed_memory_install.resource_identity import load_ledger
 from tests.memory.test_empty_rollback_authority import (
+    INSTALL_PACKAGE_TEST_NONCE_SHA256,
     build_verified_controller_runtime,
     build_verified_install_package,
     build_verified_rollback_capability,
@@ -620,6 +629,8 @@ class DurableRollbackJournalTailTests(unittest.TestCase):
             ),
             supervisor_launcher_sha256="9" * 64,
             installation_execution_id="a" * 64,
+            recovery_reservation_claim_sha256="0" * 64,
+            retained_evidence_sha256="b" * 64,
             journal_binding_sha256="1" * 64,
             journal_path=str(self.path),
             authority_state_path_sha256=hashlib.sha256(
@@ -807,7 +818,15 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
         self.receipt_root = root / "executions"
         self.receipt_root.mkdir(mode=0o700)
         os.chmod(self.receipt_root, 0o700)
-        self.installation_execution_id = "3" * 64
+        (
+            self.install_scope_capability,
+            self.package_capability,
+        ) = build_verified_install_package(return_scope_capability=True)
+        self.installation_execution_id = (
+            verified_dormant_install_authority_identity(
+                self.install_scope_capability
+            ).execution_id
+        )
         installation_receipt_root = (
             self.receipt_root / self.installation_execution_id
         )
@@ -817,7 +836,6 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
         _JournalFactory.synthetic_receipt_root = self.receipt_root
         self.state = AuthorityState(self.state_path, create=True)
         self.lock = GlobalExecutionLock(self.lock_path)
-        self.package_capability = build_verified_install_package()
         self.runtime_capability = build_verified_controller_runtime(
             self.package_capability
         )
@@ -862,6 +880,15 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
         records = load_ledger(
             ledger_path, expected_binding_sha256="9" * 64
         )
+        held = self.lock.held_capability()
+        for sequence, record in enumerate(records, start=1):
+            self.state.advance_resource_ledger_anchor(
+                "9" * 64,
+                ledger_sequence=sequence,
+                ledger_head_sha256=record.entry_sha256,
+                ledger_prior_head_sha256=record.previous_entry_sha256,
+                held_lock=held,
+            )
         ledger_head = records[-1].entry_sha256
         self.resources = derive_exact_rollback_resources_from_ledger(
             records,
@@ -973,6 +1000,7 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
             installation_execution_id=str(
                 self.eligibility["installation_execution_id"]
             ),
+            installation_nonce_sha256=INSTALL_PACKAGE_TEST_NONCE_SHA256,
             installation_receipt_sha256=str(
                 self.eligibility["installation_receipt_sha256"]
             ),
@@ -984,6 +1012,7 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
             ),
         )
         return build_verified_rollback_capability(
+            install_scope_capability=self.install_scope_capability,
             package_capability=self.package_capability,
             controller_runtime_capability=self.runtime_capability,
             bindings=bindings,
@@ -991,6 +1020,15 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
         )
 
     def _run(self, factory: _JournalFactory, operations: _Operations):
+        held = self.lock.held_capability()
+        evidence = rollback_capability_evidence(self.capability)
+        authority_mode = (
+            rollback_entrypoint.RollbackAuthorityMode.RESUME_ROLLBACK
+            if self.state.inspect_nonce_claim(
+                evidence.nonce, held_lock=held
+            ).present
+            else rollback_entrypoint.RollbackAuthorityMode.START_ROLLBACK
+        )
         with (
             patch.object(rollback_entrypoint, "AUTHORITY_STATE_PATH", self.state_path),
             patch.object(rollback_entrypoint, "GLOBAL_LOCK_PATH", self.lock_path),
@@ -1003,10 +1041,11 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
                 resources=self.resources,
                 authority_state=self.state,
                 clock=_Clock(),
-                held_lock=self.lock.held_capability(),
+                held_lock=held,
                 journal_factory=factory,
                 operations=operations,
                 receipt_store=self.receipt_store,
+                authority_mode=authority_mode,
             )
 
     def _operations(self) -> _Operations:
@@ -1014,6 +1053,156 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
             self.eligibility,
             self.install_receipt_bytes,
             self.resources,
+        )
+
+    def _run_explicit(
+        self,
+        capability: object,
+        *,
+        authority_mode: object,
+        clock: object,
+        factory: _JournalFactory,
+        operations: _Operations,
+    ):
+        with (
+            patch.object(rollback_entrypoint, "AUTHORITY_STATE_PATH", self.state_path),
+            patch.object(rollback_entrypoint, "GLOBAL_LOCK_PATH", self.lock_path),
+        ):
+            return rollback_entrypoint._run_authorized_empty_store_rollback_synthetic(
+                verified_rollback_capability=capability,
+                verified_package_capability=self.package_capability,
+                verified_controller_runtime_capability=self.runtime_capability,
+                eligibility_receipt=self.eligibility,
+                resources=self.resources,
+                authority_state=self.state,
+                clock=clock,
+                held_lock=self.lock.held_capability(),
+                journal_factory=factory,
+                operations=operations,
+                receipt_store=self.receipt_store,
+                authority_mode=authority_mode,
+            )
+
+    def test_missing_install_receipt_never_consumes_rollback_nonce(self) -> None:
+        receipt_path = (
+            self.receipt_root
+            / self.installation_execution_id
+            / "install-receipt.json"
+        )
+        receipt_path.unlink()
+        evidence = rollback_capability_evidence(self.capability)
+        with self.assertRaisesRegex(
+            EmptyRollbackExecutionError,
+            "preclaim_receipt_validation_failed",
+        ):
+            self._run_explicit(
+                self.capability,
+                authority_mode=rollback_entrypoint.RollbackAuthorityMode.START_ROLLBACK,
+                clock=_Clock(),
+                factory=_JournalFactory(),
+                operations=self._operations(),
+            )
+        self.assertFalse(
+            self.state.inspect_nonce_claim(
+                evidence.nonce,
+                held_lock=self.lock.held_capability(),
+            ).present
+        )
+
+    def test_malformed_install_receipt_never_consumes_rollback_nonce(self) -> None:
+        receipt_path = (
+            self.receipt_root
+            / self.installation_execution_id
+            / "install-receipt.json"
+        )
+        receipt_path.write_bytes(b"{}")
+        os.chmod(receipt_path, 0o600)
+        evidence = rollback_capability_evidence(self.capability)
+        with self.assertRaisesRegex(
+            EmptyRollbackExecutionError,
+            "preclaim_receipt_validation_failed",
+        ):
+            self._run_explicit(
+                self.capability,
+                authority_mode=rollback_entrypoint.RollbackAuthorityMode.START_ROLLBACK,
+                clock=_Clock(),
+                factory=_JournalFactory(),
+                operations=self._operations(),
+            )
+        self.assertFalse(
+            self.state.inspect_nonce_claim(
+                evidence.nonce,
+                held_lock=self.lock.held_capability(),
+            ).present
+        )
+
+    def test_resume_without_claim_refuses_and_leaves_state_unchanged(self) -> None:
+        evidence = rollback_capability_evidence(self.capability)
+        with self.assertRaisesRegex(
+            EmptyRollbackExecutionError,
+            "resume_claim_absent",
+        ):
+            self._run_explicit(
+                self.capability,
+                authority_mode=rollback_entrypoint.RollbackAuthorityMode.RESUME_ROLLBACK,
+                clock=_ExpiredClock(),
+                factory=_JournalFactory(),
+                operations=self._operations(),
+            )
+        self.assertFalse(
+            self.state.inspect_nonce_claim(
+                evidence.nonce,
+                held_lock=self.lock.held_capability(),
+            ).present
+        )
+
+    def test_exact_resume_remains_available_after_expiry(self) -> None:
+        factory = _JournalFactory()
+        operations = self._operations()
+        first = self._run_explicit(
+            self.capability,
+            authority_mode=rollback_entrypoint.RollbackAuthorityMode.START_ROLLBACK,
+            clock=_Clock(),
+            factory=factory,
+            operations=operations,
+        )
+        resumed = self._run_explicit(
+            self.capability,
+            authority_mode=rollback_entrypoint.RollbackAuthorityMode.RESUME_ROLLBACK,
+            clock=_ExpiredClock(),
+            factory=factory,
+            operations=operations,
+        )
+        self.assertEqual(first.outcome, "empty_store_rollback_complete")
+        self.assertEqual(resumed.outcome, "empty_store_rollback_already_complete")
+
+    def test_install_and_rollback_nonce_collision_refuses_before_claim(self) -> None:
+        ordinary = rollback_capability_evidence(self.capability)
+        collided = _VerifiedEmptyRollbackCapability(
+            replace(
+                ordinary,
+                installation_nonce_sha256=rollback_entrypoint.nonce_sha256(
+                    ordinary.nonce
+                ),
+            ),
+            _CAPABILITY_TOKEN,
+        )
+        with self.assertRaisesRegex(
+            EmptyRollbackExecutionError,
+            "nonce_collision",
+        ):
+            self._run_explicit(
+                collided,
+                authority_mode=rollback_entrypoint.RollbackAuthorityMode.START_ROLLBACK,
+                clock=_Clock(),
+                factory=_JournalFactory(),
+                operations=self._operations(),
+            )
+        self.assertFalse(
+            self.state.inspect_nonce_claim(
+                ordinary.nonce,
+                held_lock=self.lock.held_capability(),
+            ).present
         )
 
     def test_exact_rollback_runs_once_and_exact_resume_is_idempotent(self) -> None:
@@ -1030,7 +1219,8 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
         self.assertGreater(len(factory.journal.reserve_calls), 0)  # type: ignore[union-attr]
         canonical = verify_empty_rollback_receipt(receipt.canonical_receipt)
         self.assertEqual(
-            canonical["exact_targets_absent_count"], len(ROLLBACK_RESOURCE_KEYS)
+            canonical["exact_rollback_resources_absent_count"],
+            len(ROLLBACK_RESOURCE_KEYS),
         )
         self.assertEqual(canonical["journal_head_sha256"], receipt.journal_head_sha256)
         self.assertEqual(canonical["journal_sequence"], receipt.journal_sequence)
@@ -1121,6 +1311,176 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
         self.assertFalse(eligibility_path.exists())
         self.assertIsNone(factory.journal)
         self.assertEqual(operations.apply_count, {})
+
+    def _reserved_recovery_capability(self) -> tuple[object, EmptyRollbackRecoveryReservationBinding]:
+        ordinary = rollback_capability_evidence(self.capability)
+        reservation = EmptyRollbackRecoveryReservationBinding(
+            nonce="R" * 32,
+            operation=RECOVERY_RESERVATION_OPERATION,
+            execution_sha256="1" * 64,
+            authorization_sha256="2" * 64,
+            scope_sha256="3" * 64,
+            trust_bundle_sha256="4" * 64,
+            installation_execution_id=ordinary.installation_execution_id,
+            not_before=ordinary.not_before,
+            expires_at=ordinary.expires_at,
+        )
+        return (
+            _VerifiedEmptyRollbackCapability(
+                replace(ordinary, recovery_reservation=reservation),
+                _CAPABILITY_TOKEN,
+            ),
+            reservation,
+        )
+
+    def _run_with_capability(
+        self,
+        capability: object,
+        *,
+        clock: object,
+        factory: _JournalFactory,
+        operations: _Operations,
+    ):
+        held = self.lock.held_capability()
+        evidence = rollback_capability_evidence(capability)
+        authority_mode = (
+            rollback_entrypoint.RollbackAuthorityMode.RESUME_ROLLBACK
+            if self.state.inspect_nonce_claim(
+                evidence.nonce, held_lock=held
+            ).present
+            else rollback_entrypoint.RollbackAuthorityMode.START_RESERVED_ROLLBACK
+        )
+        with (
+            patch.object(rollback_entrypoint, "AUTHORITY_STATE_PATH", self.state_path),
+            patch.object(rollback_entrypoint, "GLOBAL_LOCK_PATH", self.lock_path),
+        ):
+            return rollback_entrypoint._run_authorized_empty_store_rollback_synthetic(
+                verified_rollback_capability=capability,
+                verified_package_capability=self.package_capability,
+                verified_controller_runtime_capability=self.runtime_capability,
+                eligibility_receipt=self.eligibility,
+                resources=self.resources,
+                authority_state=self.state,
+                clock=clock,
+                held_lock=held,
+                journal_factory=factory,
+                operations=operations,
+                receipt_store=self.receipt_store,
+                authority_mode=authority_mode,
+            )
+
+    def test_preclaimed_recovery_reservation_allows_first_rollback_after_expiry(self) -> None:
+        capability, reservation = self._reserved_recovery_capability()
+        self.state.claim_nonce(
+            reservation.nonce,
+            operation=reservation.operation,
+            execution_sha256=reservation.execution_sha256,
+            authorization_sha256=reservation.authorization_sha256,
+            scope_sha256=reservation.scope_sha256,
+            trust_bundle_sha256=reservation.trust_bundle_sha256,
+            held_lock=self.lock.held_capability(),
+        )
+        receipt = self._run_with_capability(
+            capability,
+            clock=_ExpiredClock(),
+            factory=_JournalFactory(),
+            operations=self._operations(),
+        )
+        self.assertEqual(receipt.outcome, "empty_store_rollback_complete")
+        with self.assertRaisesRegex(
+            EmptyRollbackExecutionError,
+            "start_already_claimed",
+        ):
+            self._run_explicit(
+                capability,
+                authority_mode=(
+                    rollback_entrypoint.RollbackAuthorityMode.START_RESERVED_ROLLBACK
+                ),
+                clock=_ExpiredClock(),
+                factory=_JournalFactory(),
+                operations=self._operations(),
+            )
+
+    def test_reserved_recovery_without_preclaim_refuses_before_effects(self) -> None:
+        capability, unused = self._reserved_recovery_capability()
+        factory = _JournalFactory()
+        operations = self._operations()
+        with self.assertRaisesRegex(
+            EmptyRollbackExecutionError,
+            "empty_rollback_recovery_reservation_absent",
+        ):
+            self._run_with_capability(
+                capability,
+                clock=_ExpiredClock(),
+                factory=factory,
+                operations=operations,
+            )
+        self.assertIsNone(factory.journal)
+        self.assertEqual(operations.apply_count, {})
+
+    def test_mismatched_recovery_reservation_claim_refuses(self) -> None:
+        capability, reservation = self._reserved_recovery_capability()
+        self.state.claim_nonce(
+            reservation.nonce,
+            operation=reservation.operation,
+            execution_sha256="9" * 64,
+            authorization_sha256=reservation.authorization_sha256,
+            scope_sha256=reservation.scope_sha256,
+            trust_bundle_sha256=reservation.trust_bundle_sha256,
+            held_lock=self.lock.held_capability(),
+        )
+        operations = self._operations()
+        with self.assertRaisesRegex(
+            EmptyRollbackExecutionError,
+            "empty_rollback_recovery_reservation_invalid",
+        ):
+            self._run_with_capability(
+                capability,
+                clock=_ExpiredClock(),
+                factory=_JournalFactory(),
+                operations=operations,
+            )
+        self.assertEqual(operations.apply_count, {})
+
+    def test_reserved_recovery_exact_replay_remains_allowed_after_expiry(self) -> None:
+        capability, reservation = self._reserved_recovery_capability()
+        self.state.claim_nonce(
+            reservation.nonce,
+            operation=reservation.operation,
+            execution_sha256=reservation.execution_sha256,
+            authorization_sha256=reservation.authorization_sha256,
+            scope_sha256=reservation.scope_sha256,
+            trust_bundle_sha256=reservation.trust_bundle_sha256,
+            held_lock=self.lock.held_capability(),
+        )
+        factory = _JournalFactory()
+        operations = self._operations()
+        first = self._run_with_capability(
+            capability,
+            clock=_ExpiredClock(),
+            factory=factory,
+            operations=operations,
+        )
+        with (
+            patch.object(rollback_entrypoint, "AUTHORITY_STATE_PATH", self.state_path),
+            patch.object(rollback_entrypoint, "GLOBAL_LOCK_PATH", self.lock_path),
+        ):
+            replay = rollback_entrypoint._run_authorized_empty_store_rollback_synthetic(
+                verified_rollback_capability=capability,
+                verified_package_capability=self.package_capability,
+                verified_controller_runtime_capability=self.runtime_capability,
+                eligibility_receipt=self.eligibility,
+                resources=self.resources,
+                authority_state=self.state,
+                clock=_ExpiredClock(),
+                held_lock=self.lock.held_capability(),
+                journal_factory=factory,
+                operations=operations,
+                receipt_store=self.receipt_store,
+                authority_mode=rollback_entrypoint.RollbackAuthorityMode.RESUME_ROLLBACK,
+            )
+        self.assertEqual(first.outcome, "empty_store_rollback_complete")
+        self.assertEqual(replay.outcome, "empty_store_rollback_already_complete")
 
     def test_premature_authority_cannot_persist_eligibility_receipt(self) -> None:
         eligibility_path = (
@@ -1668,6 +2028,9 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
                 journal_factory=durable_factory,
                 operations=operations,
                 receipt_store=self.receipt_store,
+                authority_mode=(
+                    rollback_entrypoint.RollbackAuthorityMode.RESUME_ROLLBACK
+                ),
             )
         self.assertEqual(receipt.outcome, "empty_store_rollback_complete")
         self.assertEqual(
