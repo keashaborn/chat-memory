@@ -603,7 +603,7 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         self.assertEqual(current["package_artifact_count"], 74)
         self.assertEqual(
             current["package_manifest_sha256"],
-            "74f1a0c82e33ece56fa26f90ee1a30c5f4bd742b3dfd2f0b34b8cdefd62d82a8",
+            "f2169575b4bb103a1304748f3c6017f0987fad9be2e9619339e430dd84d8ddf6",
         )
         self.assertEqual(
             current["contract_canonical_sha256"],

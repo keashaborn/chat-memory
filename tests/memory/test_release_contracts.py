@@ -260,7 +260,7 @@ class Phase9JReleaseArtifactTests(unittest.TestCase):
                     {
                         "package_manifest_schema_version": (
                             "governed-memory-dormant-store-install-"
-                            "inactive-execution-package-manifest-v3"
+                            "inactive-execution-package-manifest-v4"
                         )
                     }
                 ),

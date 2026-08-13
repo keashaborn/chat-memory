@@ -161,7 +161,7 @@ EXPECTED_CURRENT_RUNTIME_RECEIPT_SHA256 = (
     "25ca53e683e53f79b726909ef64bc8afad30269cce3f59804cf66335667a8108"
 )
 EXPECTED_CURRENT_RUNTIME_MANIFEST_SHA256 = (
-    "3cb34462b2b779aee0f063ec86c38342fc6ebcadf065a95b4f6ad3418a19f7aa"
+    "253faa2d00fc9d8fb3bde1e1a7d531a1eda8a63dd886339479bedf66e3d01c4d"
 )
 EXPECTED_CURRENT_RUNTIME_SOURCE_SHA256 = (
     "b52b753dc7974ee120e4abe264bb36f16b53341fa86b2ea8e0ab5bf86c735c20"
@@ -1238,7 +1238,7 @@ def _verify_runtime_manifest(
         and current.get("package_manifest")
         == "ops/governed_memory/installation/current/package_manifest.json"
         and current.get("package_manifest_schema_version")
-        == "governed-memory-dormant-store-install-inactive-execution-package-manifest-v4"
+        == "governed-memory-dormant-store-install-inactive-execution-package-manifest-v5"
         and current.get("package_manifest_sha256")
         == package_receipt.get("package_manifest_sha256")
         and current.get("package_artifact_count")

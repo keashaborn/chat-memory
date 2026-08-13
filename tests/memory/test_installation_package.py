@@ -217,6 +217,13 @@ class DormantStoreInstallPackageTests(unittest.TestCase):
         artifacts = set(receipt["artifact_sha256"])
         self.assertEqual(artifacts, package.EXPECTED_ARTIFACTS)
         self.assertEqual(
+            json.loads(
+                package.MANIFEST.read_text(encoding="utf-8")
+            )["schema_version"],
+            "governed-memory-dormant-store-install-inactive-execution-"
+            "package-manifest-v5",
+        )
+        self.assertEqual(
             receipt["state"],
             "phase9j-install-ready-closed-runtime-and-store-transports-packaged-not-installed-not-activated",
         )

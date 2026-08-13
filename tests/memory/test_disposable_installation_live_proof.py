@@ -1363,6 +1363,42 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
         self.assertIn('"safe.directory=" + str(_ISSUER_REPOSITORY_ROOT)', source)
         self.assertIn("verify_exact_clean_candidate(inputs)", source)
 
+    def test_issuer_accepts_devnull_git_stderr_as_none(self) -> None:
+        issuer_relative = (
+            "tools/governed_memory_validation/"
+            "issue_disposable_installation_live_proof.py"
+        )
+        blob = "c" * 40
+        outputs = (
+            str(issuer._ISSUER_REPOSITORY_ROOT) + "\n",
+            COMMIT + "\n",
+            TREE + "\n",
+            "",
+            f"100644 {blob} 0\t{issuer_relative}\n",
+            blob + "\n",
+            blob + "\n",
+        )
+        completed = tuple(
+            subprocess.CompletedProcess(
+                args=("git",),
+                returncode=0,
+                stdout=value.encode("ascii"),
+                stderr=None,
+            )
+            for value in outputs
+        )
+        with mock.patch.object(
+            issuer.subprocess, "run", side_effect=completed
+        ) as run:
+            issuer.verify_exact_clean_candidate(inputs())
+        self.assertEqual(run.call_count, len(outputs))
+        self.assertTrue(
+            all(
+                call.kwargs["stderr"] is subprocess.DEVNULL
+                for call in run.call_args_list
+            )
+        )
+
     def test_issuer_has_direct_isolated_runtime_invocation_surface(self) -> None:
         completed = subprocess.run(
             (sys.executable, "-I", "-B", str(Path(issuer.__file__)), "--help"),

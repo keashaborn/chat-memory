@@ -151,7 +151,7 @@ def verify_exact_clean_candidate(inputs: runner.ProofInputs) -> None:
             if (
                 completed.returncode != 0
                 or len(completed.stdout) > 1024 * 1024
-                or completed.stderr != b""
+                or completed.stderr is not None
             ):
                 raise Phase9ProofIssuerError(
                     "phase9_proof_issuer_candidate_git_invalid"

@@ -2583,7 +2583,7 @@ def _verify_manifest(manifest: dict[str, object]) -> dict[str, str]:
         raise PackageError("dormant_store_install_package_manifest_shape_invalid")
     if (
         manifest.get("schema_version")
-        != "governed-memory-dormant-store-install-inactive-execution-package-manifest-v4"
+        != "governed-memory-dormant-store-install-inactive-execution-package-manifest-v5"
         or manifest.get("state")
         != "phase9j-install-ready-closed-runtime-and-store-transports-packaged-not-installed-not-activated"
     ):

@@ -1,5 +1,5 @@
 {
-  "schema_version": "governed-memory-dormant-store-install-inactive-execution-package-manifest-v4",
+  "schema_version": "governed-memory-dormant-store-install-inactive-execution-package-manifest-v5",
   "state": "phase9j-install-ready-closed-runtime-and-store-transports-packaged-not-installed-not-activated",
   "artifacts": {
     "governed-memory-migrations/0001_foundation/forward.pgsql": "d67c94be3c4fa026334b87a4683a942cee930eeb1654e66f7b3f73b031927d91",
@@ -50,7 +50,7 @@
     "tools/governed_memory_install/linux_store_effects.py": "8854e8ba40e0b8164291c7a70fc16ca4b97e0b08e84783e0052a822552cf379c",
     "tools/governed_memory_install/linux_store_readiness.py": "22b8a04922453047ffa68aa02b04821f20968ea6573345ea8a5c7886987b27a5",
     "tools/governed_memory_install/live_rollback_marker.py": "353b0c29d5cad6a20f774148ebc2dc8b418f8af2727583a861f4dabbb9ffb82c",
-    "tools/governed_memory_install/package.py": "0dff206c4e2d7ef01fc27aaa618e64834aa5ae982b6bf36f92bf421ee43f1ac5",
+    "tools/governed_memory_install/package.py": "a02a55364bad11a9826a8322fd850757f5eb88fafeba3ebe10a8e7f8d86c1dbd",
     "tools/governed_memory_install/package_capability.py": "36baf190dfac8724fb6a2ad98767b2b76f42f489b8633763e1bb272802c1614a",
     "tools/governed_memory_install/postgres_native_stages.py": "fef389bd96c2cb2d51f7da0898522bda3debd560f1016855b5a3866a915b102a",
     "tools/governed_memory_install/psycopg_postgres_adapter.py": "a6c54a5f3f041f698d32635c71d400cccabbbfe4a53b92c4d41546e1a6d85a9b",
@@ -72,7 +72,7 @@
     "tools/governed_memory_release/linux_runtime_publication_primitives.py": "8b66dc948f5fb795a901fe618e5cfc89d9130dfbc325d826ed977829d66015dc",
     "tools/governed_memory_release/runtime_input_stager.py": "cd09123225826066d54f123c4836be308095697f854e13089b12f2aaa50317e3",
     "tools/governed_memory_release/runtime_publication_transport.py": "f1f6ec8d806e260936045e46f69e6445fb451a7971fc23741a7fd55c3c20e568",
-    "tools/governed_memory_validation/generate_installation_package_manifest.py": "32fcd684fcf8a5f4329f661c031ce0d1fb3a2d4f99b10a24e0b80c1c544c970e",
+    "tools/governed_memory_validation/generate_installation_package_manifest.py": "441c59baef32861a41ce024f30770fbf18a8d0752b21f3f967e8f9af846576c1",
     "tools/governed_memory_validation/run_disposable_installation_live_proof.py": "8221fbcfdba278eb3de68bdf97573d5aa255bd8a0d37a03c15193771a11e4d4d",
     "tools/governed_memory_validation/run_installation_synthetic_proof.py": "5c7da9da1fbceaaece4bbe614a22a8271d2dce01a650196cbf6dd64da598e7b9",
     "tools/governed_memory_validation/verify_store_migration_manifest.py": "6cc1b361363b0ef2299310b236bd4cef62a792ff211b43349cfa41fbd59ddd9b"
