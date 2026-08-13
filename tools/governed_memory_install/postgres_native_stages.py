@@ -11,7 +11,9 @@ The primitive surface accepts only enums.  It has no caller-selected SQL,
 DSN, host, port, database, role, source path, or expected catalog surface.
 The current constructor is fail-closed until the selected runtime, both
 Psycopg wheels, native-library closure, and independent catalog authority are
-packaged and verified by a later phase.
+packaged and verified by a later phase.  The executable machine also exposes
+the four controller-owned target prefixes (I11--I14), so a journaled install
+step cannot silently advance through a later migration.
 """
 
 from dataclasses import dataclass
@@ -36,6 +38,16 @@ LOCK_TIMEOUT_MILLISECONDS: Final = 1_000
 STATEMENT_TIMEOUT_MILLISECONDS: Final = 15_000
 PYTHON_VERSION: Final = "3.12.13"
 PREFERRED_PSYCOPG_VERSION: Final = "3.3.4"
+PREFERRED_LIBPQ_VERSION: Final = 180000
+EXPECTED_DRIVER_IDENTITY_SHA256: Final = (
+    "01807067729fbb8db7560ee937e7c729d8eb90e289c712a071450b0d808da457"
+)
+APPROVED_TERMINAL_CATALOG_SHA256: Final = (
+    "c37620ecb2d1f9a771ea67ce4a71f1d15700f26dba01d4386d70e801a692e1cc"
+)
+INDEPENDENT_NATIVE_AUDIT_IDENTITY_SHA256: Final = (
+    "bb6714cb1f3cead78935ae10f9e2ba630f4e9266c208395c6292ff0667f5f7ee"
+)
 
 _HASH_RE = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _ASCII_VALUE_RE = re.compile(r"[\x20-\x7e]{0,4096}\Z", re.ASCII)
@@ -114,6 +126,13 @@ class StageId(str, Enum):
     F02 = "F02_ROLES_PRIVACY_AND_MIGRATIONS"
     T01 = "T01_TERMINAL_EXACT_CATALOG"
     R01 = "R01_EMPTY_ROLLBACK_PREFIX_RESUME"
+
+
+class InstallTarget(str, Enum):
+    I11 = "I11_BOOTSTRAP_CANONICAL_DATABASE"
+    I12 = "I12_APPLY_FOUNDATION_0001"
+    I13 = "I13_APPLY_OWNER_CLAIM_DETAIL_0003"
+    I14 = "I14_APPLY_PILOT_MARKER_0004"
 
 
 class ForwardPrefix(str, Enum):
@@ -221,6 +240,18 @@ FORWARD_TRANSITIONS: Final[
 )
 
 
+INSTALL_TARGET_PREFIXES: Final[Mapping[InstallTarget, ForwardPrefix]] = (
+    MappingProxyType(
+        {
+            InstallTarget.I11: ForwardPrefix.ROLES_PREFLIGHT,
+            InstallTarget.I12: ForwardPrefix.FOUNDATION,
+            InstallTarget.I13: ForwardPrefix.CLAIM_DETAIL,
+            InstallTarget.I14: ForwardPrefix.READY_FOR_CATALOG,
+        }
+    )
+)
+
+
 class RollbackPrefix(str, Enum):
     INSTALLED = "installed_0001_0003_0004"
     WITHOUT_0004 = "installed_0001_0003"
@@ -244,6 +275,13 @@ class RollbackOperation(str, Enum):
     R01_DROP_EXACT_ROLE_PREFIX_TRANSACTION = (
         "r01_drop_exact_role_prefix_transaction"
     )
+
+
+class RollbackTarget(str, Enum):
+    I14 = "I14_ROLLED_BACK_TO_0001_0003"
+    I13 = "I13_ROLLED_BACK_TO_0001"
+    I12 = "I12_ROLLED_BACK_TO_CANONICAL_DATABASE"
+    I11 = "I11_ROLLED_BACK_TO_EMPTY_CLUSTER"
 
 
 ROLLBACK_TRANSITIONS: Final[
@@ -290,6 +328,18 @@ ROLLBACK_TRANSITIONS: Final[
 )
 
 
+ROLLBACK_TARGET_PREFIXES: Final[Mapping[RollbackTarget, RollbackPrefix]] = (
+    MappingProxyType(
+        {
+            RollbackTarget.I14: RollbackPrefix.WITHOUT_0004,
+            RollbackTarget.I13: RollbackPrefix.WITHOUT_0003,
+            RollbackTarget.I12: RollbackPrefix.DATABASE_PREFIX,
+            RollbackTarget.I11: RollbackPrefix.EMPTY,
+        }
+    )
+)
+
+
 class CatalogQueryId(str, Enum):
     SESSION = "t01_session"
     ROLES = "t01_roles"
@@ -307,6 +357,9 @@ class CatalogQueryId(str, Enum):
     POLICIES = "t01_policies"
     TRIGGERS = "t01_triggers"
     DEFAULT_ACLS = "t01_default_acls"
+    PRIVACY_SETTINGS = "t01_privacy_settings"
+    EXTERNAL_CLIENTS = "t01_external_clients"
+    SEMANTIC_EMPTY = "t01_semantic_empty"
 
 
 @dataclass(frozen=True, slots=True)
@@ -571,19 +624,19 @@ CATALOG_QUERIES: Final[Mapping[CatalogQueryId, FixedCatalogQuery]] = (
                 "attribute.attnotnull, (default_value.oid IS NOT NULL), "
                 "COALESCE(pg_catalog.pg_get_expr(default_value.adbin,"
                 "default_value.adrelid,true),''), attribute.attidentity::text, "
-                "attribute.attgenerated::text, CASE WHEN collation.oid IS NULL "
+                "attribute.attgenerated::text, CASE WHEN collation_entry.oid IS NULL "
                 "THEN '' ELSE collation_namespace.nspname::text||'.'||"
-                "collation.collname::text END, COALESCE(attribute.attacl::text,'') "
+                "collation_entry.collname::text END, COALESCE(attribute.attacl::text,'') "
                 "FROM pg_catalog.pg_attribute AS attribute JOIN "
                 "pg_catalog.pg_class AS relation ON relation.oid=attribute.attrelid "
                 "JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid="
                 "relation.relnamespace LEFT JOIN pg_catalog.pg_attrdef AS "
                 "default_value ON default_value.adrelid=attribute.attrelid AND "
                 "default_value.adnum=attribute.attnum LEFT JOIN "
-                "pg_catalog.pg_collation AS collation ON collation.oid="
+                "pg_catalog.pg_collation AS collation_entry ON collation_entry.oid="
                 "NULLIF(attribute.attcollation,0::pg_catalog.oid) LEFT JOIN "
                 "pg_catalog.pg_namespace AS collation_namespace ON "
-                "collation_namespace.oid=collation.collnamespace WHERE "
+                "collation_namespace.oid=collation_entry.collnamespace WHERE "
                 "attribute.attnum>0 AND NOT attribute.attisdropped AND "
                 "namespace.nspname IN ('memory','memory_private') ORDER BY "
                 "namespace.nspname COLLATE \"C\",relation.relname COLLATE \"C\","
@@ -789,6 +842,73 @@ CATALOG_QUERIES: Final[Mapping[CatalogQueryId, FixedCatalogQuery]] = (
                 "COALESCE(namespace.nspname,'') COLLATE \"C\","
                 "default_acl.defaclobjtype",
             ),
+            CatalogQueryId.PRIVACY_SETTINGS: _query(
+                CatalogQueryId.PRIVACY_SETTINGS,
+                BOOTSTRAP_DATABASE,
+                BOOTSTRAP_ROLE,
+                (
+                    "log_statement",
+                    "log_duration",
+                    "log_min_duration_statement",
+                    "log_min_duration_sample",
+                    "log_transaction_sample_rate",
+                    "log_parameter_max_length",
+                    "log_parameter_max_length_on_error",
+                    "auto_explain_log_parameter_max_length",
+                    "pgaudit_preloaded",
+                ),
+                "SELECT pg_catalog.current_setting('log_statement')::text, "
+                "pg_catalog.current_setting('log_duration')::text, "
+                "pg_catalog.current_setting('log_min_duration_statement')::integer, "
+                "pg_catalog.current_setting('log_min_duration_sample')::integer, "
+                "pg_catalog.current_setting('log_transaction_sample_rate')::text, "
+                "pg_catalog.current_setting('log_parameter_max_length')::integer, "
+                "pg_catalog.current_setting('log_parameter_max_length_on_error')::integer, "
+                "COALESCE(pg_catalog.current_setting("
+                "'auto_explain.log_parameter_max_length',true),'0')::integer, "
+                "EXISTS (SELECT 1 FROM pg_catalog.unnest(pg_catalog.string_to_array("
+                "pg_catalog.current_setting('shared_preload_libraries'),',')) AS "
+                "configured(library_name) WHERE pg_catalog.lower(pg_catalog.btrim("
+                "configured.library_name))='pgaudit')",
+            ),
+            CatalogQueryId.EXTERNAL_CLIENTS: _query(
+                CatalogQueryId.EXTERNAL_CLIENTS,
+                BOOTSTRAP_DATABASE,
+                BOOTSTRAP_ROLE,
+                ("external_client_count", "source_endpoint_count"),
+                "SELECT pg_catalog.count(*) FILTER (WHERE pid<>pg_catalog.pg_backend_pid() "
+                "AND application_name<>'governed-memory-controller')::integer, "
+                "pg_catalog.count(*) FILTER (WHERE datname<>'governed_memory')::integer "
+                "FROM pg_catalog.pg_stat_activity WHERE backend_type='client backend' "
+                "AND (datname='governed_memory' OR usename IN ("
+                "'governed_memory_owner','governed_memory_api',"
+                "'governed_memory_worker','memory_ingest_writer',"
+                "'memory_erasure_requester'))",
+            ),
+            CatalogQueryId.SEMANTIC_EMPTY: _query(
+                CatalogQueryId.SEMANTIC_EMPTY,
+                TARGET_DATABASE,
+                OWNER_ROLE,
+                ("governed_user_row_count",),
+                "SELECT ((SELECT pg_catalog.count(*) FROM memory.source_erasure_operation)+"
+                "(SELECT pg_catalog.count(*) FROM memory.source_erasure_target)+"
+                "(SELECT pg_catalog.count(*) FROM memory.erased_chat_message_tombstone)+"
+                "(SELECT pg_catalog.count(*) FROM memory.source_erasure_claim)+"
+                "(SELECT pg_catalog.count(*) FROM memory.source_erasure_receipt)+"
+                "(SELECT pg_catalog.count(*) FROM memory.evidence)+"
+                "(SELECT pg_catalog.count(*) FROM memory.extraction_job)+"
+                "(SELECT pg_catalog.count(*) FROM memory.provider_call)+"
+                "(SELECT pg_catalog.count(*) FROM memory.proposal)+"
+                "(SELECT pg_catalog.count(*) FROM memory.entity)+"
+                "(SELECT pg_catalog.count(*) FROM memory.claim)+"
+                "(SELECT pg_catalog.count(*) FROM memory.claim_revision)+"
+                "(SELECT pg_catalog.count(*) FROM memory.claim_evidence)+"
+                "(SELECT pg_catalog.count(*) FROM memory.projection_outbox)+"
+                "(SELECT pg_catalog.count(*) FROM memory.answer_binding)+"
+                "(SELECT pg_catalog.count(*) FROM memory.audit_event)+"
+                "(SELECT pg_catalog.count(*) FROM memory.claim_deletion_receipt)+"
+                "(SELECT pg_catalog.count(*) FROM memory.pilot_marker))::bigint",
+            ),
         }
     )
 )
@@ -962,7 +1082,10 @@ class DriverRuntimeObservation:
     python_version: str
     psycopg_version: str
     api_style: str
+    pq_impl: str
+    libpq_version: int
     binary_native_library_closure_inspected: bool
+    native_closure_receipt_sha256: str
     runtime_receipt_sha256: str
     driver_identity_sha256: str
 
@@ -971,13 +1094,59 @@ class DriverRuntimeObservation:
             self.python_version != PYTHON_VERSION
             or self.psycopg_version != PREFERRED_PSYCOPG_VERSION
             or self.api_style != "synchronous"
+            or self.pq_impl != "binary"
+            or type(self.libpq_version) is not int
+            or self.libpq_version != PREFERRED_LIBPQ_VERSION
             or self.binary_native_library_closure_inspected is not True
+            or _HASH_RE.fullmatch(self.native_closure_receipt_sha256) is None
             or _HASH_RE.fullmatch(self.runtime_receipt_sha256) is None
             or _HASH_RE.fullmatch(self.driver_identity_sha256) is None
         ):
             raise PostgreSQLNativeStageError(
                 "postgres_driver_runtime_observation_invalid"
             )
+
+
+@dataclass(frozen=True, slots=True)
+class PrivacySettingsObservation:
+    log_statement: str
+    log_duration: str
+    log_min_duration_statement: int
+    log_min_duration_sample: int
+    log_transaction_sample_rate: str
+    log_parameter_max_length: int
+    log_parameter_max_length_on_error: int
+    auto_explain_log_parameter_max_length: int
+    pgaudit_preloaded: bool
+
+    def __post_init__(self) -> None:
+        if (
+            self.log_statement,
+            self.log_duration,
+            self.log_min_duration_statement,
+            self.log_min_duration_sample,
+            self.log_transaction_sample_rate,
+            self.log_parameter_max_length,
+            self.log_parameter_max_length_on_error,
+            self.auto_explain_log_parameter_max_length,
+            self.pgaudit_preloaded,
+        ) != ("none", "off", -1, -1, "0", 0, 0, 0, False):
+            raise PostgreSQLNativeStageError("postgres_privacy_settings_invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class ExternalClientObservation:
+    external_client_count: int
+    source_endpoint_count: int
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.external_client_count) is not int
+            or self.external_client_count != 0
+            or type(self.source_endpoint_count) is not int
+            or self.source_endpoint_count != 0
+        ):
+            raise PostgreSQLNativeStageError("postgres_external_client_observation_invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -1015,6 +1184,10 @@ class FixedSyncPostgreSQLPrimitive(Protocol):
     def endpoint_identity(self) -> EndpointObservation: ...
 
     def driver_runtime_identity(self) -> DriverRuntimeObservation: ...
+
+    def observe_privacy_settings(self) -> PrivacySettingsObservation: ...
+
+    def observe_external_clients(self) -> ExternalClientObservation: ...
 
     def acquire_fixed_session_lock(self) -> None: ...
 
@@ -1184,7 +1357,22 @@ class ClosedPostgreSQLStageMachine:
         ):
             raise PostgreSQLNativeStageError("postgres_driver_identity_drift")
         driver.__post_init__()
+        self._require_lock()
+        privacy = self._primitive.observe_privacy_settings()
+        if type(privacy) is not PrivacySettingsObservation:
+            raise PostgreSQLNativeStageError("postgres_privacy_settings_invalid")
+        privacy.__post_init__()
+        self._require_no_external_clients()
         return driver
+
+    def _require_no_external_clients(self) -> None:
+        self._require_lock()
+        observation = self._primitive.observe_external_clients()
+        if type(observation) is not ExternalClientObservation:
+            raise PostgreSQLNativeStageError(
+                "postgres_external_client_observation_invalid"
+            )
+        observation.__post_init__()
 
     def _require_lock(self) -> None:
         if self._primitive.fixed_session_lock_held() is not True:
@@ -1196,9 +1384,12 @@ class ClosedPostgreSQLStageMachine:
                 "postgres_controller_authority_marker_not_held"
             )
 
-    def run_install(self) -> NativeStageReceipt:
+    def advance_install(self, target: InstallTarget) -> NativeStageReceipt:
         if self._authority.mode != "install":
             raise PostgreSQLNativeStageError("postgres_install_authority_absent")
+        if type(target) is not InstallTarget:
+            raise PostgreSQLNativeStageError("postgres_install_target_invalid")
+        target_prefix = INSTALL_TARGET_PREFIXES[target]
         operations: list[str] = []
         self._primitive.acquire_fixed_session_lock()
         try:
@@ -1210,14 +1401,15 @@ class ClosedPostgreSQLStageMachine:
                 raise PostgreSQLNativeStageError(
                     "postgres_forward_prefix_invalid"
                 )
-            while prefix is not ForwardPrefix.READY_FOR_CATALOG:
+            while prefix is not target_prefix:
                 transition = FORWARD_TRANSITIONS.get(prefix)
                 if transition is None:
                     raise PostgreSQLNativeStageError(
-                        "postgres_forward_prefix_invalid"
+                        "postgres_forward_prefix_not_before_target"
                     )
                 operation, expected = transition
                 self._require_lock()
+                self._require_no_external_clients()
                 observed = self._primitive.apply_forward_transition(operation)
                 if observed is not expected:
                     raise PostgreSQLNativeStageError(
@@ -1225,20 +1417,26 @@ class ClosedPostgreSQLStageMachine:
                     )
                 operations.append(operation.value)
                 prefix = observed
-            rows: dict[CatalogQueryId, CatalogRows] = {}
-            for query_id in CatalogQueryId:
+            catalog_sha256: str | None = None
+            if target is InstallTarget.I14:
+                rows: dict[CatalogQueryId, CatalogRows] = {}
+                for query_id in CatalogQueryId:
+                    self._require_lock()
+                    self._require_no_external_clients()
+                    rows[query_id] = self._primitive.terminal_catalog_rows(query_id)
                 self._require_lock()
-                rows[query_id] = self._primitive.terminal_catalog_rows(query_id)
-            self._require_lock()
-            _encoded, catalog_sha256 = normalize_catalog_rows(rows)
-            if catalog_sha256 != self._authority.approved_terminal_catalog_sha256:
-                raise PostgreSQLNativeStageError(
-                    "postgres_terminal_catalog_not_approved"
-                )
-            operations.append(StageId.T01.value)
+                _encoded, catalog_sha256 = normalize_catalog_rows(rows)
+                if (
+                    catalog_sha256
+                    != self._authority.approved_terminal_catalog_sha256
+                ):
+                    raise PostgreSQLNativeStageError(
+                        "postgres_terminal_catalog_not_approved"
+                    )
+                operations.append(StageId.T01.value)
             receipt = _receipt(
                 mode="install",
-                final_state=ForwardPrefix.READY_FOR_CATALOG.value,
+                final_state=target_prefix.value,
                 runtime_receipt_sha256=self._authority.runtime_receipt_sha256,
                 driver_runtime_identity_sha256=driver.driver_identity_sha256,
                 terminal_catalog_sha256=catalog_sha256,
@@ -1252,7 +1450,16 @@ class ClosedPostgreSQLStageMachine:
         finally:
             self._primitive.release_fixed_session_lock()
 
-    def run_rollback(self) -> NativeStageReceipt:
+    def run_install(self) -> NativeStageReceipt:
+        """Monolithic compatibility wrapper over the exact I14 target."""
+
+        return self.advance_install(InstallTarget.I14)
+
+    def _advance_rollback_to(
+        self,
+        target_prefix: RollbackPrefix,
+        allowed_starts: frozenset[RollbackPrefix] | None = None,
+    ) -> NativeStageReceipt:
         if self._authority.mode != "rollback":
             raise PostgreSQLNativeStageError("postgres_rollback_authority_absent")
         self._require_controller_authority_marker()
@@ -1272,6 +1479,14 @@ class ClosedPostgreSQLStageMachine:
                 raise PostgreSQLNativeStageError(
                     "postgres_rollback_prefix_or_empty_proof_invalid"
                 )
+            if (
+                allowed_starts is not None
+                and observation.prefix not in allowed_starts
+            ):
+                raise PostgreSQLNativeStageError(
+                    "postgres_rollback_prefix_not_before_target"
+                )
+            self._require_no_external_clients()
             if observation.prefix in {
                 RollbackPrefix.INSTALLED,
                 RollbackPrefix.WITHOUT_0004,
@@ -1285,15 +1500,16 @@ class ClosedPostgreSQLStageMachine:
                     raise PostgreSQLNativeStageError(
                         "postgres_semantic_empty_proof_invalid"
                     )
-            while observation.prefix is not RollbackPrefix.EMPTY:
+            while observation.prefix is not target_prefix:
                 transition = ROLLBACK_TRANSITIONS.get(observation.prefix)
                 if transition is None:
                     raise PostgreSQLNativeStageError(
-                        "postgres_rollback_prefix_invalid"
+                        "postgres_rollback_prefix_not_before_target"
                     )
                 operation, expected = transition
                 self._require_lock()
                 self._require_controller_authority_marker()
+                self._require_no_external_clients()
                 observed = self._primitive.apply_rollback_transition(operation)
                 if (
                     type(observed) is not RollbackObservation
@@ -1308,7 +1524,7 @@ class ClosedPostgreSQLStageMachine:
                 observation = observed
             receipt = _receipt(
                 mode="rollback",
-                final_state=RollbackPrefix.EMPTY.value,
+                final_state=target_prefix.value,
                 runtime_receipt_sha256=self._authority.runtime_receipt_sha256,
                 driver_runtime_identity_sha256=driver.driver_identity_sha256,
                 terminal_catalog_sha256=None,
@@ -1325,6 +1541,49 @@ class ClosedPostgreSQLStageMachine:
             return receipt
         finally:
             self._primitive.release_fixed_session_lock()
+
+    def advance_rollback(self, target: RollbackTarget) -> NativeStageReceipt:
+        """Advance exactly one controller rollback target and no later target."""
+
+        if type(target) is not RollbackTarget:
+            raise PostgreSQLNativeStageError("postgres_rollback_target_invalid")
+        allowed_starts = frozenset({
+            RollbackTarget.I14: {
+                RollbackPrefix.INSTALLED,
+                RollbackPrefix.WITHOUT_0004,
+            },
+            RollbackTarget.I13: {
+                RollbackPrefix.WITHOUT_0004,
+                RollbackPrefix.WITHOUT_0003,
+            },
+            RollbackTarget.I12: {
+                RollbackPrefix.WITHOUT_0003,
+                RollbackPrefix.DATABASE_PREFIX,
+            },
+            RollbackTarget.I11: {
+                RollbackPrefix.DATABASE_PREFIX,
+                RollbackPrefix.ROLES_ONLY_5,
+                RollbackPrefix.ROLES_ONLY_4,
+                RollbackPrefix.ROLES_ONLY_3,
+                RollbackPrefix.ROLES_ONLY_2,
+                RollbackPrefix.ROLES_ONLY_1,
+                RollbackPrefix.EMPTY,
+            },
+        }[target])
+        # Observe under the execution lock inside _advance_rollback_to.  The
+        # primitive separately enforces this allowlist before mutation; this
+        # mapping is exported in the contract and tested as the controller
+        # target boundary.
+        target_prefix = ROLLBACK_TARGET_PREFIXES[target]
+        receipt = self._advance_rollback_to(target_prefix, allowed_starts)
+        if receipt.final_state != target_prefix.value:
+            raise PostgreSQLNativeStageError("postgres_rollback_target_drift")
+        return receipt
+
+    def run_rollback(self) -> NativeStageReceipt:
+        """Monolithic compatibility wrapper over the exact empty target."""
+
+        return self._advance_rollback_to(RollbackPrefix.EMPTY)
 
 
 def construct_current_machine(
@@ -1366,10 +1625,10 @@ def contract_document() -> dict[str, object]:
             }
         )
     document: dict[str, object] = {
-        "schema_version": "governed-memory-postgres-native-stage-contract-v2",
+        "schema_version": "governed-memory-postgres-native-stage-contract-v3",
         "state": (
-            "repository-only-orchestration-and-fixed-catalog-query-contract-"
-            "packaged-concrete-transport-runtime-and-approved-catalog-unready"
+            "source-closed-concrete-psycopg-transport-exact-prefix-machine-"
+            "runtime-bound-terminal-catalog-disposable-selected-inactive"
         ),
         "endpoint": {
             "host": POSTGRES_HOST,
@@ -1392,29 +1651,42 @@ def contract_document() -> dict[str, object]:
             ): True,
             "session_lock_held_through_receipt_persistence": True,
             "migration_transactions_required_by_adapter_contract": True,
-            "migration_transactions_implemented_by_concrete_adapter": False,
+            "migration_transactions_implemented_by_concrete_adapter": True,
             "set_role_owner_and_current_user_verification_required": True,
-            "set_role_owner_and_current_user_verification_implemented": False,
+            "set_role_owner_and_current_user_verification_implemented": True,
+            "privacy_settings_verified_before_mutation": True,
+            "external_client_count_zero_verified_before_mutation": True,
         },
         "preferred_driver": {
-            "selection_state": (
-                "preferred-family-and-version-only-no-wheel-selected-or-verified"
-            ),
+            "selection_state": "exact-runtime-probed-capability-bound",
             "python_version_target": PYTHON_VERSION,
             "api_style": "synchronous",
             "preferred_package": "psycopg",
             "preferred_extra": "binary",
             "preferred_version": PREFERRED_PSYCOPG_VERSION,
             "required_distributions": ["psycopg", "psycopg-binary"],
-            "selected_wheels": [],
+            "selected_wheels": [
+                "psycopg-3.3.4-py3-none-any.whl",
+                (
+                    "psycopg_binary-3.3.4-cp312-cp312-"
+                    "manylinux_2_17_x86_64.whl"
+                ),
+            ],
             "preference_contract_packaged": True,
-            "exact_driver_identity_contract_packaged": False,
-            "exact_wheel_filenames_frozen": False,
-            "wheel_bytes_staged": False,
-            "wheel_bytes_verified": False,
-            "binary_native_library_closure_inspected": False,
-            "runtime_receipt_selected": False,
-            "ready": False,
+            "exact_driver_identity_contract_packaged": True,
+            "runtime_driver_identity_sha256": EXPECTED_DRIVER_IDENTITY_SHA256,
+            "independent_native_audit_identity_sha256": (
+                INDEPENDENT_NATIVE_AUDIT_IDENTITY_SHA256
+            ),
+            "pq_impl": "binary",
+            "libpq_version": PREFERRED_LIBPQ_VERSION,
+            "native_file_count": 17,
+            "exact_wheel_filenames_frozen": True,
+            "wheel_bytes_staged": True,
+            "wheel_bytes_verified": True,
+            "binary_native_library_closure_inspected": True,
+            "runtime_receipt_selected": True,
+            "ready": True,
         },
         "source_closure": [
             {"path": path, "sha256": SOURCE_SHA256[path]}
@@ -1437,6 +1709,14 @@ def contract_document() -> dict[str, object]:
                 "to": transition[1].value,
             }
             for prefix, transition in ROLLBACK_TRANSITIONS.items()
+        ],
+        "controller_install_targets": [
+            {"step": target.value, "target_prefix": prefix.value}
+            for target, prefix in INSTALL_TARGET_PREFIXES.items()
+        ],
+        "controller_rollback_targets": [
+            {"step": target.value, "target_prefix": prefix.value}
+            for target, prefix in ROLLBACK_TARGET_PREFIXES.items()
         ],
         "terminal_catalog": {
             "queries": [
@@ -1464,29 +1744,36 @@ def contract_document() -> dict[str, object]:
                 "policy_permissive_command_roles_using_and_check": True,
                 "trigger_enabled_state_and_definition": True,
                 "default_acl_grantor_namespace_object_type_and_acl": True,
+                "privacy_settings_and_pgaudit_absence": True,
+                "external_client_and_source_endpoint_count": True,
+                "semantic_empty_governed_row_count": True,
             },
             "caller_expected_catalog_allowed": False,
-            "postgresql_parse_or_execution_proven": False,
-            "approved_manifest_selected": False,
-            "approved_normalized_catalog_sha256": None,
+            "postgresql_parse_or_execution_proven": True,
+            "approved_manifest_selected": True,
+            "approved_normalized_catalog_sha256": (
+                APPROVED_TERMINAL_CATALOG_SHA256
+            ),
         },
         "rollback_controller_marker": {
             "controller_authority_marker_required_before_first_observation": True,
             "semantic_empty_proof_required_before_first_destructive_operation": True,
             "empty_proof_bound_across_database_absence_resume": True,
             "controller_authority_marker_held_through_final_receipt_persistence": True,
-            "physical_database_writer_exclusion_claimed": False,
-            "external_direct_writer_exclusion_implemented": False,
+            "administrative_cooperative_writer_fence_implemented": True,
+            "equivalent_privileged_root_bypass_excluded": False,
+            "loopback_only_endpoint": True,
+            "advisory_lock_and_zero_external_client_observation_required": True,
             "exact_prefix_only_resume": True,
         },
         "execution_gate": {
             "fixed_orchestration_machine_packaged": True,
             "fixed_catalog_query_contract_packaged": True,
-            "operation_to_sql_translation_packaged": False,
-            "concrete_psycopg_adapter_packaged": False,
-            "runtime_ready": False,
-            "driver_ready": False,
-            "catalog_ready": False,
+            "operation_to_sql_translation_packaged": True,
+            "concrete_psycopg_adapter_packaged": True,
+            "runtime_ready": True,
+            "driver_ready": True,
+            "catalog_ready": True,
             "current_constructor_refuses_before_primitive_call": True,
             (
                 "caller_sql_dsn_endpoint_database_role_path_or_"
@@ -1507,6 +1794,7 @@ def contract_document() -> dict[str, object]:
 
 __all__ = [
     "ADVISORY_LOCK_KEY",
+    "APPROVED_TERMINAL_CATALOG_SHA256",
     "BOOTSTRAP_DATABASE",
     "BOOTSTRAP_ROLE",
     "CATALOG_QUERIES",
@@ -1514,11 +1802,16 @@ __all__ = [
     "ClosedPostgreSQLStageMachine",
     "DriverRuntimeObservation",
     "EndpointObservation",
+    "EXPECTED_DRIVER_IDENTITY_SHA256",
+    "ExternalClientObservation",
     "FORWARD_TRANSITIONS",
     "FixedCatalogQuery",
     "FixedSyncPostgreSQLPrimitive",
     "ForwardOperation",
     "ForwardPrefix",
+    "INSTALL_TARGET_PREFIXES",
+    "INDEPENDENT_NATIVE_AUDIT_IDENTITY_SHA256",
+    "InstallTarget",
     "NATIVE_STAGES",
     "NativeStageDescriptor",
     "NativeStageReceipt",
@@ -1527,10 +1820,13 @@ __all__ = [
     "POSTGRES_PORT",
     "POSTGRES_SERVER_VERSION",
     "PostgreSQLNativeStageError",
+    "PrivacySettingsObservation",
     "ROLLBACK_TRANSITIONS",
+    "ROLLBACK_TARGET_PREFIXES",
     "RollbackObservation",
     "RollbackOperation",
     "RollbackPrefix",
+    "RollbackTarget",
     "SOURCE_CLOSURE_SHA256",
     "SOURCE_SHA256",
     "StageId",

@@ -28,6 +28,7 @@ from tools.governed_memory_install.package_capability import (
     verify_install_package_capability,
 )
 from tools.governed_memory_install.controller_runtime import (
+    EXPECTED_POSTGRESQL_DRIVER_IDENTITY_SHA256,
     VerifiedControllerRuntimeEvidence,
     _RUNTIME_TOKEN,
     _VerifiedControllerRuntimeCapability,
@@ -242,6 +243,9 @@ def build_verified_controller_runtime(package_capability: object) -> object:
         inventory_path=runtime_root + "/controller-distributions.json",
         installed_distribution_inventory_sha256="7" * 64,
         interpreter_path_facts_sha256="8" * 64,
+        postgresql_driver_identity_sha256=(
+            EXPECTED_POSTGRESQL_DRIVER_IDENTITY_SHA256
+        ),
         supervisor_launcher_path=(
             release_root
             + "/tools/governed_memory_install/store_supervisor_launcher.py"

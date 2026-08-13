@@ -11,6 +11,7 @@ import unittest
 
 import tools.governed_memory_install.postgres_native_stages as subject
 from tools.governed_memory_install.postgres_native_stages import (
+    APPROVED_TERMINAL_CATALOG_SHA256,
     CATALOG_QUERIES,
     FORWARD_TRANSITIONS,
     NATIVE_STAGES,
@@ -20,12 +21,16 @@ from tools.governed_memory_install.postgres_native_stages import (
     ClosedPostgreSQLStageMachine,
     DriverRuntimeObservation,
     EndpointObservation,
+    ExternalClientObservation,
     ForwardOperation,
     ForwardPrefix,
+    InstallTarget,
     PostgreSQLNativeStageError,
+    PrivacySettingsObservation,
     RollbackObservation,
     RollbackOperation,
     RollbackPrefix,
+    RollbackTarget,
     StageId,
     construct_current_machine,
     contract_document,
@@ -83,6 +88,11 @@ def _catalog_rows() -> dict[CatalogQueryId, tuple[tuple[object, ...], ...]]:
             "",
         ),
     )
+    rows[CatalogQueryId.PRIVACY_SETTINGS] = (
+        ("none", "off", -1, -1, "0", 0, 0, 0, False),
+    )
+    rows[CatalogQueryId.EXTERNAL_CLIENTS] = ((0, 0),)
+    rows[CatalogQueryId.SEMANTIC_EMPTY] = ((0,),)
     return rows
 
 
@@ -128,10 +138,23 @@ class FakePrimitive:
             "3.12.13",
             "3.3.4",
             "synchronous",
+            "binary",
+            180000,
             True,
+            "5" * 64,
             RUNTIME_RECEIPT_SHA256,
             DRIVER_IDENTITY_SHA256,
         )
+
+    def observe_privacy_settings(self) -> PrivacySettingsObservation:
+        self.calls.append("observe_privacy_settings")
+        return PrivacySettingsObservation(
+            "none", "off", -1, -1, "0", 0, 0, 0, False
+        )
+
+    def observe_external_clients(self) -> ExternalClientObservation:
+        self.calls.append("observe_external_clients")
+        return ExternalClientObservation(0, 0)
 
     def acquire_fixed_session_lock(self) -> None:
         self.calls.append("acquire_lock")
@@ -252,7 +275,7 @@ class PostgreSQLNativeStageTests(unittest.TestCase):
             driver["required_distributions"],
             ["psycopg", "psycopg-binary"],
         )
-        self.assertEqual(driver["selected_wheels"], [])
+        self.assertEqual(len(driver["selected_wheels"]), 2)
         self.assertTrue(driver["preference_contract_packaged"])
         for key in (
             "exact_driver_identity_contract_packaged",
@@ -263,12 +286,12 @@ class PostgreSQLNativeStageTests(unittest.TestCase):
             "runtime_receipt_selected",
             "ready",
         ):
-            self.assertIs(driver[key], False, key)
+            self.assertIs(driver[key], True, key)
         gate = document["execution_gate"]
         self.assertTrue(gate["fixed_orchestration_machine_packaged"])
         self.assertTrue(gate["fixed_catalog_query_contract_packaged"])
-        self.assertFalse(gate["operation_to_sql_translation_packaged"])
-        self.assertFalse(gate["concrete_psycopg_adapter_packaged"])
+        self.assertTrue(gate["operation_to_sql_translation_packaged"])
+        self.assertTrue(gate["concrete_psycopg_adapter_packaged"])
         self.assertTrue(gate["current_constructor_refuses_before_primitive_call"])
         self.assertFalse(gate["live_execution_allowed"])
         self.assertFalse(
@@ -386,7 +409,10 @@ class PostgreSQLNativeStageTests(unittest.TestCase):
         for query_id in CatalogQueryId:
             query_position = primitive.calls.index(query_id)
             self.assertGreater(query_position, 0)
-            self.assertEqual(primitive.calls[query_position - 1], "lock_held")
+            self.assertEqual(
+                primitive.calls[query_position - 2 : query_position],
+                ["lock_held", "observe_external_clients"],
+            )
         self.assertTrue(
             all(
                 type(value) is ForwardOperation
@@ -394,6 +420,55 @@ class PostgreSQLNativeStageTests(unittest.TestCase):
                 if type(value) is ForwardOperation
             )
         )
+
+    def test_install_targets_stop_at_exact_controller_prefix(self) -> None:
+        cases = (
+            (InstallTarget.I11, ForwardPrefix.ROLES_PREFLIGHT),
+            (InstallTarget.I12, ForwardPrefix.FOUNDATION),
+            (InstallTarget.I13, ForwardPrefix.CLAIM_DETAIL),
+        )
+        for target, expected in cases:
+            with self.subTest(target=target.value):
+                primitive = FakePrimitive()
+                receipt = _install_machine(primitive).advance_install(target)
+                self.assertEqual(receipt.final_state, expected.value)
+                self.assertEqual(primitive.forward_prefix, expected)
+                self.assertNotIn(StageId.T01.value, receipt.operations)
+                self.assertEqual(len(primitive.persisted), 1)
+
+    def test_rollback_targets_stop_at_exact_controller_prefix(self) -> None:
+        cases = (
+            (
+                RollbackTarget.I14,
+                RollbackPrefix.INSTALLED,
+                RollbackPrefix.WITHOUT_0004,
+            ),
+            (
+                RollbackTarget.I13,
+                RollbackPrefix.WITHOUT_0004,
+                RollbackPrefix.WITHOUT_0003,
+            ),
+            (
+                RollbackTarget.I12,
+                RollbackPrefix.WITHOUT_0003,
+                RollbackPrefix.DATABASE_PREFIX,
+            ),
+        )
+        for target, start, expected in cases:
+            with self.subTest(target=target.value):
+                primitive = FakePrimitive(rollback_prefix=start)
+                receipt = _rollback_machine(primitive).advance_rollback(target)
+                self.assertEqual(receipt.final_state, expected.value)
+                self.assertEqual(primitive.rollback_prefix, expected)
+                self.assertEqual(len(receipt.operations), 1)
+
+        invalid = FakePrimitive(rollback_prefix=RollbackPrefix.INSTALLED)
+        with self.assertRaisesRegex(
+            PostgreSQLNativeStageError,
+            "postgres_rollback_prefix_not_before_target",
+        ):
+            _rollback_machine(invalid).advance_rollback(RollbackTarget.I13)
+        self.assertEqual(invalid.persisted, [])
 
     def test_catalog_queries_and_normalization_are_exact_and_order_independent(
         self,
@@ -592,13 +667,21 @@ class PostgreSQLNativeStageTests(unittest.TestCase):
         self.assertEqual(checked_in, document)
         self.assertEqual(
             document["schema_version"],
-            "governed-memory-postgres-native-stage-contract-v2",
+            "governed-memory-postgres-native-stage-contract-v3",
         )
         coverage = document["terminal_catalog"]["security_sensitive_coverage"]
         self.assertTrue(all(coverage.values()))
-        self.assertFalse(
+        self.assertTrue(
             document["terminal_catalog"]["postgresql_parse_or_execution_proven"]
         )
+        self.assertTrue(document["terminal_catalog"]["approved_manifest_selected"])
+        self.assertEqual(
+            document["terminal_catalog"]["approved_normalized_catalog_sha256"],
+            APPROVED_TERMINAL_CATALOG_SHA256,
+        )
+        columns_sql = CATALOG_QUERIES[CatalogQueryId.COLUMNS].sql
+        self.assertNotIn(" AS collation ", columns_sql)
+        self.assertIn(" AS collation_entry ", columns_sql)
         self.assertEqual(set(document["repository_phase_effect_counts"].values()), {0})
         unsigned = dict(document)
         supplied = unsigned.pop("contract_sha256")

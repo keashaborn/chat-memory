@@ -1,10 +1,37 @@
 {
   "schema_version": "governed-memory-dormant-store-install-disposable-proof-contract-v2",
   "state": "repository-only-synthetic-harness-packaged-no-promoted-receipt-no-live-execution",
+  "package_state": "phase9j-two-distinct-proof-harnesses-packaged-no-proof-executed-or-receipt-present-at-package-sealing",
+  "package_itself_does_not_claim_proof_execution": true,
+  "proof_receipt_is_external_to_package": true,
   "server_target_if_separately_authorized_later": "seebx",
   "proof_scope": "synthetic_in_process_model_only",
   "entrypoint": "tools/governed_memory_validation/run_installation_synthetic_proof.py",
+  "harnesses": {
+    "guarded_synthetic_matrix": {
+      "entrypoint": "tools/governed_memory_validation/run_installation_synthetic_proof.py",
+      "packaged": true,
+      "scope": "synthetic_in_process_model_only",
+      "requires_live_execution_authority": false,
+      "executed_before_package_sealing": false,
+      "synthetic_proof_receipt_present_at_package_sealing": false
+    },
+    "authority_gated_disposable_linux": {
+      "entrypoint": "tools/governed_memory_validation/run_disposable_installation_live_proof.py",
+      "packaged": true,
+      "scope": "bounded_disposable_linux_install_kill_resume_cold_controller_process_restart_empty_rollback_kill_resume_and_exact_absence",
+      "requires_root": true,
+      "requires_exact_distinct_proof_authority": true,
+      "accepts_only_candidate_commit_tree_package_manifest_runtime_receipt_and_exact_authority_identities": true,
+      "accepts_caller_selected_path_command_sql_url_resource_or_cleanup_target": false,
+      "uses_public_production_install_and_empty_rollback_entrypoints": true,
+      "generic_cleanup_surface_exists": false,
+      "executed_before_package_sealing": false,
+      "disposable_linux_proof_receipt_present_at_package_sealing": false
+    }
+  },
   "execution_boundary": {
+    "boundary_applies_to": "guarded_synthetic_matrix",
     "backend": "sealed_in_memory_synthetic_backend_api_boundary",
     "backend_is_constructed_internally": true,
     "backend_injection_allowed": false,
@@ -88,6 +115,20 @@
     "external_store_readiness_proven": false,
     "activation_proven": false
   },
+  "disposable_linux_runner_claims": {
+    "runner_packaged": true,
+    "runner_executed_before_package_sealing": false,
+    "disposable_linux_proof_receipt_present_at_package_sealing": false,
+    "live_execution_proven": false,
+    "live_installation_proven": false,
+    "live_rollback_proven": false,
+    "durable_process_crash_recovery_proven": false,
+    "cold_controller_process_restart_proven": false,
+    "host_reboot_recovery_proven": false,
+    "persistent_store_boot_recovery_proven": false,
+    "exact_resource_absence_proven": false,
+    "container_and_systemd_compatibility_proven": false
+  },
   "package_context": {
     "claim_bound_non_cli_install_composition_packaged_separately": true,
     "claim_bound_non_cli_empty_rollback_composition_packaged_separately": true,
@@ -117,7 +158,9 @@
     "composite_crash_recovery",
     "external_postgresql_and_qdrant_readiness",
     "container_and_systemd_compatibility",
-    "cold_restart_and_empty_rollback",
+    "cold_controller_process_restart_and_empty_rollback",
+    "host_reboot_recovery",
+    "persistent_store_boot_recovery",
     "separate_install_or_rollback_authority",
     "separate_activation_authority"
   ]

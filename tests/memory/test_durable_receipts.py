@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import os
 from pathlib import Path
 import tempfile
@@ -18,6 +19,7 @@ from tools.governed_memory_install.receipts import (
     build_empty_rollback_receipt,
     receipt_sha256,
 )
+from tools.governed_memory_install.postgres_native_stages import _receipt
 from tools.governed_memory_install.rollback import (
     build_empty_rollback_eligibility_receipt,
     eligibility_receipt_sha256,
@@ -128,6 +130,76 @@ class DurableReceiptStoreTests(unittest.TestCase):
             DurableReceiptError, "execution_id_invalid"
         ):
             self.store.path(ReceiptArtifact.INSTALL, "../escape")
+
+    def test_native_postgres_stage_receipt_is_exact_and_create_once(self) -> None:
+        receipt = _receipt(
+            mode="rollback",
+            final_state="empty",
+            runtime_receipt_sha256="3" * 64,
+            driver_runtime_identity_sha256="4" * 64,
+            terminal_catalog_sha256=None,
+            rollback_empty_proof_sha256="5" * 64,
+            operations=("r01_drop_exact_role_prefix_transaction",),
+        )
+        native = {
+            "schema_version": (
+                "governed-memory-postgres-native-stage-receipt-v1"
+            ),
+            "mode": receipt.mode,
+            "final_state": receipt.final_state,
+            "source_closure_sha256": receipt.source_closure_sha256,
+            "runtime_receipt_sha256": receipt.runtime_receipt_sha256,
+            "driver_runtime_identity_sha256": (
+                receipt.driver_runtime_identity_sha256
+            ),
+            "terminal_catalog_sha256": receipt.terminal_catalog_sha256,
+            "rollback_empty_proof_sha256": (
+                receipt.rollback_empty_proof_sha256
+            ),
+            "operations": list(receipt.operations),
+            "receipt_sha256": receipt.receipt_sha256,
+        }
+        wrapper = {
+            "schema_version": (
+                "governed-memory-postgres-native-stage-durable-receipt-v1"
+            ),
+            "execution_id": EXECUTION_ID,
+            "native_receipt": native,
+            "receipt_sha256": receipt.receipt_sha256,
+        }
+        evidence = self.store.write_once(
+            ReceiptArtifact.POSTGRES_ROLLBACK_I11,
+            EXECUTION_ID,
+            wrapper,
+        )
+        self.assertEqual(evidence.receipt_sha256, receipt.receipt_sha256)
+        self.assertEqual(
+            evidence.canonical_file_sha256,
+            hashlib.sha256(
+                __import__("json").dumps(
+                    wrapper,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=True,
+                ).encode("ascii")
+            ).hexdigest(),
+        )
+        replay = self.store.write_once(
+            ReceiptArtifact.POSTGRES_ROLLBACK_I11,
+            EXECUTION_ID,
+            wrapper,
+        )
+        self.assertEqual(replay.canonical_file_sha256, evidence.canonical_file_sha256)
+
+        wrong_stage = copy.deepcopy(wrapper)
+        with self.assertRaisesRegex(
+            DurableReceiptError, "postgres_native_receipt_invalid"
+        ):
+            self.store.write_once(
+                ReceiptArtifact.POSTGRES_ROLLBACK_I12,
+                EXECUTION_ID,
+                wrong_stage,
+            )
 
     def test_create_once_is_canonical_fsynced_and_idempotent(self) -> None:
         fsync_descriptors: list[int] = []

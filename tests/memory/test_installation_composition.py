@@ -4,6 +4,7 @@ from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime, timezone
 import hashlib
+import inspect
 import json
 import os
 from pathlib import Path
@@ -11,7 +12,8 @@ import tempfile
 import unittest
 from unittest import mock
 
-from tools.governed_memory_install import authority
+from tools.governed_memory_install import authority, install_entrypoint
+from tools.governed_memory_install import linux_live_adapters, linux_store_effects
 from tools.governed_memory_install.controller import (
     CompensationFailedError,
     CompletedStateError,
@@ -52,6 +54,7 @@ from tools.governed_memory_install.install_entrypoint import (
     INACTIVE_REFUSAL_CODE,
     InstallEntrypointError,
     _run_authorized_dormant_store_install_synthetic,
+    production_install_postgres_stage_receipt_sink,
     run_authorized_dormant_store_install,
 )
 from tools.governed_memory_install.durable_receipts import DurableReceiptStore
@@ -84,9 +87,13 @@ from tools.governed_memory_install.resource_identity import (
     ResourceIdentityError,
     ResourceIdentityLedger,
 )
+from tools.governed_memory_install.postgres_native_stages import (
+    APPROVED_TERMINAL_CATALOG_SHA256,
+)
 from tools.governed_memory_install.rollback import ROLLBACK_RESOURCE_KEYS
 from tools.governed_memory_install.receipts import verify_install_receipt
 from tools.governed_memory_install.controller_runtime import (
+    EXPECTED_POSTGRESQL_DRIVER_IDENTITY_SHA256,
     VerifiedControllerRuntimeEvidence,
     _RUNTIME_TOKEN,
     _VerifiedControllerRuntimeCapability,
@@ -202,6 +209,9 @@ def _synthetic_runtime_capability(
         inventory_path=RUNTIME_ROOT + "/controller-distributions.json",
         installed_distribution_inventory_sha256="d" * 64,
         interpreter_path_facts_sha256="9" * 64,
+        postgresql_driver_identity_sha256=(
+            EXPECTED_POSTGRESQL_DRIVER_IDENTITY_SHA256
+        ),
         supervisor_launcher_path=(
             "/opt/governed-memory-controller/releases/"
             + package_manifest_sha256
@@ -1081,7 +1091,6 @@ class InstallationCompositionTests(unittest.TestCase):
         )
 
     def test_inactive_entrypoint_refuses_before_dependencies(self) -> None:
-        calls: list[str] = []
         with self.assertRaisesRegex(InstallEntrypointError, INACTIVE_REFUSAL_CODE):
             run_authorized_dormant_store_install(
                 verified_scope_capability=None,
@@ -1090,13 +1099,210 @@ class InstallationCompositionTests(unittest.TestCase):
                 authority_state=None,  # type: ignore[arg-type]
                 clock=None,  # type: ignore[arg-type]
                 held_lock=self.lock.held_capability(),
-                journal_factory=lambda unused: calls.append("journal"),  # type: ignore[arg-type]
-                dependencies_factory=None,  # type: ignore[arg-type]
                 prerequisites=None,  # type: ignore[arg-type]
-                resource_identity_ledger_factory=None,  # type: ignore[arg-type]
                 receipt_store=None,  # type: ignore[arg-type]
             )
-        self.assertEqual(calls, [])
+
+    def test_public_install_entrypoint_has_no_factory_injection_surface(
+        self,
+    ) -> None:
+        parameters = set(
+            inspect.signature(
+                run_authorized_dormant_store_install
+            ).parameters
+        )
+        self.assertEqual(
+            parameters,
+            {
+                "verified_scope_capability",
+                "verified_package_capability",
+                "verified_controller_runtime_capability",
+                "authority_state",
+                "clock",
+                "held_lock",
+                "prerequisites",
+                "receipt_store",
+            },
+        )
+        self.assertTrue(
+            {
+                "journal_factory",
+                "resource_identity_ledger_factory",
+                "dependencies_factory",
+                "transport_factory",
+                "secret_source",
+                "postgres_receipt_sink",
+            }.isdisjoint(parameters)
+        )
+
+    def test_public_install_receipt_sink_factory_is_parameter_closed(self) -> None:
+        parameters = set(
+            inspect.signature(
+                production_install_postgres_stage_receipt_sink
+            ).parameters
+        )
+        self.assertEqual(
+            parameters,
+            {
+                "receipt_store",
+                "claimed_execution_binding",
+                "held_lock",
+            },
+        )
+        self.assertTrue(
+            {
+                "allowed_mode",
+                "marker_state",
+                "artifact",
+                "path",
+                "sink_factory",
+                "execution_id",
+            }.isdisjoint(parameters)
+        )
+        with self.assertRaisesRegex(
+            InstallEntrypointError,
+            "postgres_receipt_sink_invalid",
+        ):
+            production_install_postgres_stage_receipt_sink(
+                receipt_store=DurableReceiptStore.synthetic(
+                    Path(self.temporary.name).resolve()
+                ),
+                claimed_execution_binding=self.identity_binding,
+                held_lock=(
+                    self.identity_fixture.execution_lock.held_capability()
+                ),
+            )
+        with self.assertRaisesRegex(
+            InstallEntrypointError,
+            "postgres_receipt_sink_invalid",
+        ):
+            production_install_postgres_stage_receipt_sink(
+                receipt_store=DurableReceiptStore.production(),
+                claimed_execution_binding=self.identity_binding,
+                held_lock=(
+                    self.identity_fixture.execution_lock.held_capability()
+                ),
+            )
+        production_execution_root = (
+            Path("/var/lib/governed-memory-controller/executions")
+            / self.identity_evidence.execution_id
+        )
+        production_ledger_path = (
+            production_execution_root / "resources.jsonl"
+        )
+        production_binding = _ClaimedExecutionBinding(
+            replace(
+                self.identity_evidence,
+                execution_journal_path=str(
+                    production_execution_root / "journal.jsonl"
+                ),
+                resource_identity_ledger_path=str(production_ledger_path),
+                resource_identity_ledger_path_sha256=hashlib.sha256(
+                    str(production_ledger_path).encode("utf-8")
+                ).hexdigest(),
+            ),
+            _CLAIMED_EXECUTION_TOKEN,
+        )
+        production_sink = production_install_postgres_stage_receipt_sink(
+            receipt_store=DurableReceiptStore.production(),
+            claimed_execution_binding=production_binding,
+            held_lock=self.identity_fixture.execution_lock.held_capability(),
+        )
+        self.assertEqual(
+            type(production_sink).__name__,
+            "StoreBackedPostgreSQLStageReceiptSink",
+        )
+        self.assertFalse(
+            production_sink.postgres_controller_authority_marker_held()
+        )
+        with self.assertRaisesRegex(
+            InstallEntrypointError,
+            "postgres_receipt_sink_invalid",
+        ):
+            production_install_postgres_stage_receipt_sink(
+                receipt_store=DurableReceiptStore.production(),
+                claimed_execution_binding=production_binding,
+                held_lock=self.lock.held_capability(),
+            )
+
+    def test_production_dependencies_select_exact_closed_factories(self) -> None:
+        sink = mock.sentinel.postgres_receipt_sink
+        transports = mock.sentinel.production_transports
+        dependencies = ClaimBoundInstallDependencies(_TypedHost(), _Readiness())
+        transport_constructor = mock.Mock(return_value=transports)
+        dependencies_instance = mock.Mock(return_value=dependencies)
+        dependencies_constructor = mock.Mock(
+            return_value=dependencies_instance
+        )
+        held_lock = self.identity_fixture.execution_lock.held_capability()
+        runtime_capability = mock.sentinel.runtime_capability
+        prerequisites = _prerequisites()
+        journal = mock.sentinel.journal
+        ledger = mock.sentinel.resource_identity_ledger
+        receipt_store = DurableReceiptStore.production()
+        resolved_store_spec = _resolved_store_spec(
+            self.identity_evidence.journal_binding_sha256
+        )
+        artifacts = {"sealed": b"artifact"}
+
+        with (
+            mock.patch.object(
+                install_entrypoint,
+                "production_install_postgres_stage_receipt_sink",
+                return_value=sink,
+            ) as sink_factory,
+            mock.patch.object(
+                linux_live_adapters,
+                "ProductionLinuxStoreTransportFactory",
+                transport_constructor,
+            ),
+            mock.patch.object(
+                linux_store_effects,
+                "LinuxInstallDependenciesFactory",
+                dependencies_constructor,
+            ),
+        ):
+            selected = install_entrypoint._production_install_dependencies(
+                claimed_execution_binding=self.identity_binding,
+                resolved_store_spec=resolved_store_spec,
+                verified_artifacts=artifacts,
+                verified_controller_runtime_capability=runtime_capability,
+                prerequisites=prerequisites,
+                journal=journal,  # type: ignore[arg-type]
+                resource_identity_ledger=ledger,  # type: ignore[arg-type]
+                held_lock=held_lock,
+                receipt_store=receipt_store,
+            )
+
+        self.assertIs(selected, dependencies)
+        sink_factory.assert_called_once_with(
+            receipt_store=receipt_store,
+            claimed_execution_binding=self.identity_binding,
+            held_lock=held_lock,
+        )
+        transport_constructor.assert_called_once_with(
+            held_lock=held_lock,
+            verified_controller_runtime_capability=runtime_capability,
+            postgres_receipt_sink=sink,
+        )
+        dependencies_constructor.assert_called_once_with(
+            transport_factory=transports,
+            expected_postgres_catalog_sha256=(
+                APPROVED_TERMINAL_CATALOG_SHA256
+            ),
+        )
+        self.assertNotIn(
+            "secret_source",
+            dependencies_constructor.call_args.kwargs,
+        )
+        dependencies_instance.assert_called_once_with(
+            claimed_execution_binding=self.identity_binding,
+            resolved_store_spec=resolved_store_spec,
+            verified_artifacts=artifacts,
+            prerequisites=prerequisites,
+            journal=journal,
+            resource_identity_ledger=ledger,
+        )
 
     def test_entrypoint_emits_receipt_only_after_terminal_journal_and_ledger(
         self,
@@ -1265,9 +1471,6 @@ class InstallationCompositionTests(unittest.TestCase):
                 authority_state=state,
                 clock=_Clock(),
                 held_lock=self.lock.held_capability(),
-                journal_factory=journal_factory,
-                resource_identity_ledger_factory=ledger_factory,
-                dependencies_factory=dependencies_factory,
                 prerequisites=prerequisites,
                 receipt_store=receipt_store,
             )
@@ -1314,6 +1517,84 @@ class InstallationCompositionTests(unittest.TestCase):
         self.assertEqual(readiness_probe.fresh_calls, 1)
         self.assertEqual(readiness_probe.terminal_calls, 2)
 
+        production_journal_calls: list[str] = []
+        production_dependencies_calls: list[str] = []
+        production_held_lock = self.lock.held_capability()
+
+        def production_journal_and_ledger(
+            claimed: object,
+            *,
+            authority_state: AuthorityState,
+            held_lock: object,
+        ) -> tuple[DurableJournal, ResourceIdentityLedger]:
+            evidence = _claimed_execution_binding_evidence(claimed)
+            self.assertIs(authority_state, state)
+            self.assertIs(held_lock, production_held_lock)
+            production_journal_calls.append(evidence.execution_id)
+            return journal_factory(claimed), ledger_factory(claimed)
+
+        def production_dependencies(
+            **kwargs: object,
+        ) -> ClaimBoundInstallDependencies:
+            evidence = _claimed_execution_binding_evidence(
+                kwargs["claimed_execution_binding"]
+            )
+            self.assertIs(
+                kwargs["verified_controller_runtime_capability"],
+                runtime_capability,
+            )
+            self.assertIs(kwargs["prerequisites"], prerequisites)
+            self.assertIs(kwargs["receipt_store"], receipt_store)
+            production_dependencies_calls.append(evidence.execution_id)
+            return dependencies_factory(**kwargs)
+
+        with (
+            mock.patch.object(
+                DurableReceiptStore,
+                "require_production_binding",
+                autospec=True,
+                return_value=None,
+            ),
+            mock.patch.object(
+                install_entrypoint,
+                "_production_install_journal_and_ledger",
+                side_effect=production_journal_and_ledger,
+            ),
+            mock.patch.object(
+                install_entrypoint,
+                "_production_install_dependencies",
+                side_effect=production_dependencies,
+            ),
+        ):
+            public_receipt = run_authorized_dormant_store_install(
+                verified_scope_capability=scope_capability,
+                verified_package_capability=package_capability,
+                verified_controller_runtime_capability=runtime_capability,
+                authority_state=state,
+                clock=_Clock(),
+                held_lock=production_held_lock,
+                prerequisites=prerequisites,
+                receipt_store=receipt_store,
+            )
+            public_resumed = run_authorized_dormant_store_install(
+                verified_scope_capability=scope_capability,
+                verified_package_capability=package_capability,
+                verified_controller_runtime_capability=runtime_capability,
+                authority_state=state,
+                clock=_Clock(),
+                held_lock=production_held_lock,
+                prerequisites=prerequisites,
+                receipt_store=receipt_store,
+            )
+        self.assertEqual(public_receipt, verified)
+        self.assertEqual(public_resumed, verified)
+        self.assertEqual(len(production_journal_calls), 2)
+        self.assertEqual(len(set(production_journal_calls)), 1)
+        self.assertEqual(production_dependencies_calls, production_journal_calls)
+        self.assertEqual(len(host.operations), 19)
+        self.assertEqual(readiness_probe.fresh_calls, 1)
+        self.assertEqual(readiness_probe.terminal_calls, 4)
+
         readiness_probe.terminal_user_row_count = 1
         with self.assertRaisesRegex(
             InstallEntrypointError, "dormant_install_backend_refused"
@@ -1331,7 +1612,7 @@ class InstallationCompositionTests(unittest.TestCase):
                 prerequisites=prerequisites,
                 receipt_store=receipt_store,
             )
-        self.assertEqual(readiness_probe.terminal_calls, 3)
+        self.assertEqual(readiness_probe.terminal_calls, 5)
         self.assertEqual(len(host.operations), 19)
 
     def test_package_capability_closes_and_rehashes_all_artifacts(self) -> None:

@@ -34,10 +34,10 @@ class DormantStoreInstallPackageTests(unittest.TestCase):
     def test_current_members_verify_as_inactive_execution_package(self) -> None:
         receipt = self._verify_generated_manifest()
         self.assertEqual(receipt["schema_version"], (
-            "governed-memory-dormant-store-install-package-verification-v4"
+            "governed-memory-dormant-store-install-package-verification-v5"
         ))
-        self.assertEqual(receipt["artifact_count"], 70)
-        self.assertEqual(len(package.EXPECTED_ARTIFACTS), 70)
+        self.assertEqual(receipt["artifact_count"], 74)
+        self.assertEqual(len(package.EXPECTED_ARTIFACTS), 74)
         self.assertTrue(
             receipt["durable_install_and_rollback_journal_adapters_packaged"]
         )
@@ -47,7 +47,21 @@ class DormantStoreInstallPackageTests(unittest.TestCase):
         )
         self.assertTrue(receipt["guarded_synthetic_proof_harness_packaged"])
         self.assertFalse(receipt["synthetic_proof_executed_by_verifier"])
-        self.assertFalse(receipt["synthetic_proof_receipt_promoted"])
+        self.assertFalse(
+            receipt["synthetic_proof_receipt_present_at_package_sealing"]
+        )
+        self.assertTrue(
+            receipt["authority_gated_disposable_linux_proof_runner_packaged"]
+        )
+        self.assertFalse(
+            receipt["disposable_linux_proof_runner_executed_by_verifier"]
+        )
+        self.assertFalse(
+            receipt[
+                "disposable_linux_proof_receipt_present_at_package_sealing"
+            ]
+        )
+        self.assertTrue(receipt["proof_receipt_is_external_to_package"])
         self.assertTrue(receipt["bounded_image_inspect_runner_primitive_packaged"])
         self.assertTrue(receipt["local_image_inspect_adapter_packaged"])
         self.assertTrue(
@@ -64,27 +78,30 @@ class DormantStoreInstallPackageTests(unittest.TestCase):
             self.assertTrue(receipt[field], field)
         for field in (
             "closed_live_transport_contracts_packaged",
-            "postgresql_source_closure_contract_packaged",
+            "complete_closed_live_transport_substrate_set_packaged",
+            "complete_closed_live_transport_substrate_set_integrated_into_bound_factory",
             "driver_native_postgresql_stage_contract_packaged",
             "driver_native_postgresql_executable_stage_machine_packaged",
+            "concrete_psycopg_postgresql_transport_packaged",
             "runtime_input_selection_contract_repaired",
-            "runtime_build_receipt_provenance_v3_packaged",
+            "runtime_build_receipt_provenance_v4_packaged",
+            "approved_terminal_postgresql_catalog_manifest_selected",
             "exact_postgresql_16_14_and_qdrant_1_19_0_readiness_required",
-            "fresh_live_semantic_empty_recheck_required_at_r05_under_controller_authority_marker",
-            "controller_authority_marker_empty_recheck_then_stop_then_physical_removal_order_implemented",
+            "fresh_live_semantic_empty_recheck_required_at_r06_under_administrative_writer_fence",
+            "controller_authority_marker_then_supervisor_removal_then_writer_fence_empty_recheck_then_store_stop_and_physical_removal_order_implemented",
+            "administrative_cooperative_writer_fence_implemented",
+            "selected_live_platform_transports_packaged",
             "selected_non_postgresql_live_platform_transport_factory_packaged",
+            "pinned_postgresql_driver_selected",
+            "controller_runtime_build_transport_packaged",
             "controller_runtime_publication_policy_transport_packaged",
+            "production_runtime_publication_primitives_packaged",
+            "independent_standalone_cpython_payload_tree_proof_packaged",
         ):
             self.assertTrue(receipt[field], field)
         for field in (
-            "complete_closed_live_transport_substrate_set_packaged",
-            "complete_closed_live_transport_substrate_set_integrated_into_bound_factory",
-            "concrete_psycopg_postgresql_transport_packaged",
-            "approved_terminal_postgresql_catalog_manifest_selected",
-            "external_direct_writer_exclusion_implemented",
+            "equivalent_privileged_root_bypass_excluded",
             "stopped_store_semantic_empty_recheck_is_valid",
-            "production_runtime_publication_primitives_packaged",
-            "independent_standalone_cpython_payload_tree_proof_packaged",
         ):
             self.assertFalse(receipt[field], field)
         self.assertTrue(
@@ -110,8 +127,8 @@ class DormantStoreInstallPackageTests(unittest.TestCase):
         )
         self.assertTrue(receipt["closed_install_store_effect_adapter_packaged"])
         self.assertTrue(receipt["closed_empty_rollback_store_effect_adapter_packaged"])
-        self.assertFalse(receipt["selected_live_platform_transports_packaged"])
-        self.assertFalse(receipt["pinned_postgresql_driver_selected"])
+        self.assertTrue(receipt["selected_live_platform_transports_packaged"])
+        self.assertTrue(receipt["pinned_postgresql_driver_selected"])
         self.assertTrue(receipt["durable_create_once_receipt_store_packaged"])
         contract = json.loads(package.CONTRACT.read_text(encoding="utf-8"))
         receipts = contract["receipt_policy"]
@@ -128,7 +145,7 @@ class DormantStoreInstallPackageTests(unittest.TestCase):
         self.assertTrue(
             receipt["controller_runtime_release_builder_orchestration_packaged"]
         )
-        self.assertFalse(receipt["controller_runtime_build_transport_packaged"])
+        self.assertTrue(receipt["controller_runtime_build_transport_packaged"])
         self.assertTrue(
             receipt["operation_specific_install_and_empty_rollback_receipts_packaged"]
         )
@@ -169,12 +186,6 @@ class DormantStoreInstallPackageTests(unittest.TestCase):
             package.EXPECTED_CONTROLLER_RUNTIME_CONTRACT_CANONICAL_SHA256,
         )
         self.assertEqual(
-            receipt[
-                "postgres_source_closure_contract_canonical_sha256"
-            ],
-            package.EXPECTED_POSTGRES_SOURCE_CLOSURE_CANONICAL_SHA256,
-        )
-        self.assertEqual(
             receipt["postgres_native_stage_contract_canonical_sha256"],
             package.EXPECTED_POSTGRES_NATIVE_STAGE_CONTRACT_CANONICAL_SHA256,
         )
@@ -183,8 +194,12 @@ class DormantStoreInstallPackageTests(unittest.TestCase):
             package.EXPECTED_PROOF_CONTRACT_CANONICAL_SHA256,
         )
         self.assertEqual(
-            receipt["proof_schema_canonical_sha256"],
-            package.EXPECTED_PROOF_SCHEMA_CANONICAL_SHA256,
+            receipt["synthetic_proof_receipt_schema_canonical_sha256"],
+            package.EXPECTED_SYNTHETIC_PROOF_RECEIPT_SCHEMA_CANONICAL_SHA256,
+        )
+        self.assertEqual(
+            receipt["live_proof_receipt_schema_canonical_sha256"],
+            package.EXPECTED_LIVE_PROOF_RECEIPT_SCHEMA_CANONICAL_SHA256,
         )
         self.assertEqual(
             receipt["install_receipt_schema_canonical_sha256"],
@@ -200,6 +215,10 @@ class DormantStoreInstallPackageTests(unittest.TestCase):
         )
         artifacts = set(receipt["artifact_sha256"])
         self.assertEqual(artifacts, package.EXPECTED_ARTIFACTS)
+        self.assertEqual(
+            receipt["state"],
+            "phase9j-install-ready-closed-runtime-and-store-transports-packaged-not-installed-not-activated",
+        )
         self.assertNotIn(
             "governed-memory-migrations/schema_contract.json",
             artifacts,
@@ -268,7 +287,7 @@ class DormantStoreInstallPackageTests(unittest.TestCase):
             package.MANIFEST.read_text(encoding="ascii")
         )
         self.assertEqual(checked_in, generate_installation_package_manifest.generate())
-        self.assertEqual(package.verify()["artifact_count"], 70)
+        self.assertEqual(package.verify()["artifact_count"], 74)
 
     def test_verifier_generator_and_local_migration_binding_are_hash_bound(
         self,
@@ -279,6 +298,7 @@ class DormantStoreInstallPackageTests(unittest.TestCase):
             "ops/governed_memory/installation/current/controller_runtime_contract.json",
             "ops/governed_memory/installation/current/disposable_proof_contract.json",
             "ops/governed_memory/installation/current/disposable_proof_receipt.schema.json",
+            "ops/governed_memory/installation/current/live_proof_receipt.schema.json",
             "ops/governed_memory/installation/current/install_receipt.schema.json",
             "ops/governed_memory/installation/current/empty_rollback_receipt.schema.json",
             "ops/governed_memory/installation/current/execution_contract.json",
@@ -302,15 +322,18 @@ class DormantStoreInstallPackageTests(unittest.TestCase):
             "tools/governed_memory_install/authority.py",
             "tools/governed_memory_validation/generate_installation_package_manifest.py",
             "tools/governed_memory_validation/run_installation_synthetic_proof.py",
+            "tools/governed_memory_validation/run_disposable_installation_live_proof.py",
             "tools/governed_memory_validation/verify_store_migration_manifest.py",
             "ops/governed_memory/installation/current/postgres/migration_bindings.json",
-            "ops/governed_memory/installation/current/postgres/source_closure_contract.json",
             "ops/governed_memory/installation/current/postgres/native_stage_contract.json",
             "tools/governed_memory_install/linux_live_adapters.py",
             "tools/governed_memory_install/live_rollback_marker.py",
             "tools/governed_memory_install/postgres_native_stages.py",
             "tools/governed_memory_install/linux_live_transports.py",
-            "tools/governed_memory_install/postgres_source_closure.py",
+            "tools/governed_memory_install/psycopg_postgres_adapter.py",
+            "tools/governed_memory_release/inspect_standalone_cpython.py",
+            "tools/governed_memory_release/linux_runtime_publication_primitives.py",
+            "tools/governed_memory_release/runtime_input_stager.py",
             "tools/governed_memory_release/runtime_publication_transport.py",
         }
         self.assertTrue(required.issubset(artifacts))
@@ -357,7 +380,9 @@ class DormantStoreInstallPackageTests(unittest.TestCase):
             "tools/governed_memory_install/execution_capability_v2.py",
             "tools/governed_memory_install/inactive_installation.py",
             "tools/governed_memory_install/package_v3.py",
+            "tools/governed_memory_install/postgres_source_closure.py",
             "tools/governed_memory_install/synthetic_backend_v2.py",
+            "ops/governed_memory/installation/current/postgres/source_closure_contract.json",
         }
         canonical = {
             "tools/governed_memory_install/authority.py",
@@ -365,7 +390,11 @@ class DormantStoreInstallPackageTests(unittest.TestCase):
             "tools/governed_memory_install/execution_capability.py",
             "tools/governed_memory_install/journal.py",
             "tools/governed_memory_install/package.py",
+            "tools/governed_memory_install/psycopg_postgres_adapter.py",
             "tools/governed_memory_install/synthetic_backend.py",
+            "tools/governed_memory_release/inspect_standalone_cpython.py",
+            "tools/governed_memory_release/linux_runtime_publication_primitives.py",
+            "tools/governed_memory_release/runtime_input_stager.py",
         }
         self.assertTrue(canonical.issubset(package.EXPECTED_ARTIFACTS))
         self.assertTrue(retired.isdisjoint(package.EXPECTED_ARTIFACTS))

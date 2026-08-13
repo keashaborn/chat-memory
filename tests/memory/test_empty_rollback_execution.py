@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from dataclasses import replace
 import copy
 import hashlib
+import inspect
 import os
 from pathlib import Path
 import tempfile
@@ -53,6 +54,7 @@ from tools.governed_memory_install.controller_runtime import (
     verified_controller_runtime_evidence,
 )
 from tools.governed_memory_install import rollback_entrypoint
+from tools.governed_memory_install import rollback_live_adapter
 from tools.governed_memory_install import rollback_journal
 from tools.governed_memory_install.rollback_journal import (
     DurableRollbackJournal,
@@ -290,7 +292,9 @@ class _Operations:
         request,
         controller_authority_marker_capability: object | None,
     ) -> dict[str, object]:
-        if request.step.step_id != "R05_RECHECK_SEMANTIC_EMPTY_UNDER_CONTROLLER_AUTHORITY_MARKER":
+        if request.step.step_id != (
+            "R06_ESTABLISH_ADMINISTRATIVE_WRITER_FENCE_AND_RECHECK_SEMANTIC_EMPTY"
+        ):
             raise RuntimeError("unexpected semantic-empty step")
         self._validate_marker(request, controller_authority_marker_capability)
         self.eligibility_checks += 1
@@ -301,7 +305,8 @@ class _Operations:
         observed["qdrant_points"] = self.live_qdrant_points
         observed["receipt_sha256"] = eligibility_receipt_sha256(observed)
         if (
-            request.step.step_id == "R05_RECHECK_SEMANTIC_EMPTY_UNDER_CONTROLLER_AUTHORITY_MARKER"
+            request.step.step_id
+            == "R06_ESTABLISH_ADMINISTRATIVE_WRITER_FENCE_AND_RECHECK_SEMANTIC_EMPTY"
             and self.inject_writer_after_store_stop
         ):
             self.live_qdrant_points = 1
@@ -1243,7 +1248,7 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
         factory = _JournalFactory()
         operations = self._operations()
         operations.tamper_runtime_tree_step = (
-            "R06_DISABLE_AND_REMOVE_STORES_SUPERVISOR"
+            "R05_DISABLE_AND_REMOVE_STORES_SUPERVISOR"
         )
         with self.assertRaisesRegex(
             EmptyRollbackExecutionError,
@@ -1503,7 +1508,7 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
                     controller_authority_marker_capability,
                 )
                 if request.step.step_id == (
-                    "R05_RECHECK_SEMANTIC_EMPTY_UNDER_CONTROLLER_AUTHORITY_MARKER"
+                    "R06_ESTABLISH_ADMINISTRATIVE_WRITER_FENCE_AND_RECHECK_SEMANTIC_EMPTY"
                 ):
                     receipt["qdrant_points"] = 1
                     receipt["receipt_sha256"] = eligibility_receipt_sha256(receipt)
@@ -1516,7 +1521,10 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
         )
         with self.assertRaises(Exception):
             self._run(factory, operations)
-        self.assertEqual(operations.apply_count, {})
+        self.assertEqual(
+            operations.apply_count,
+            {"R05_DISABLE_AND_REMOVE_STORES_SUPERVISOR": 1},
+        )
 
     def test_new_writer_after_store_stop_is_refused_inside_delete_boundary(
         self,
@@ -1528,7 +1536,10 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
             EmptyRollbackExecutionError, "empty_rollback_effect_failed"
         ):
             self._run(factory, operations)
-        self.assertEqual(operations.apply_count, {})
+        self.assertEqual(
+            operations.apply_count,
+            {"R05_DISABLE_AND_REMOVE_STORES_SUPERVISOR": 1},
+        )
         self.assertNotIn(
             "R08_REMOVE_EXACT_QDRANT_CONTAINER", operations.states
         )
@@ -1576,7 +1587,6 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
         _evidence, exact = verified_rollback_resource_parts(self.resources)
         caller_resources = list(exact)
         operations = self._operations()
-        factory = _JournalFactory()
         index = ROLLBACK_RESOURCE_KEYS.index(
             "canonical_database_and_roles"
         )
@@ -1597,11 +1607,9 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
                     authority_state=self.state,
                     clock=_Clock(),
                     held_lock=self.lock.held_capability(),
-                    journal_factory=factory,
-                    operations=operations,
+                    resolved_store_spec={},
                     receipt_store=self.receipt_store,
                 )
-        self.assertIsNone(factory.journal)
         self.assertEqual(operations.apply_count, {})
 
     def test_concrete_durable_journal_completes_and_reopens_exactly(self) -> None:
@@ -1676,8 +1684,6 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
         self.assertEqual(records[-1].record_sha256, receipt.journal_head_sha256)
 
     def test_public_entrypoint_rejects_synthetic_receipt_store(self) -> None:
-        factory = _JournalFactory()
-        operations = self._operations()
         with (
             patch.object(rollback_entrypoint, "AUTHORITY_STATE_PATH", self.state_path),
             patch.object(rollback_entrypoint, "GLOBAL_LOCK_PATH", self.lock_path),
@@ -1695,12 +1701,164 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
                     authority_state=self.state,
                     clock=_Clock(),
                     held_lock=self.lock.held_capability(),
-                    journal_factory=factory,
-                    operations=operations,
+                    resolved_store_spec={},
                     receipt_store=self.receipt_store,
                 )
-        self.assertIsNone(factory.journal)
-        self.assertEqual(operations.apply_count, {})
+
+    def test_public_entrypoint_exposes_no_factory_or_operation_injection_surface(
+        self,
+    ) -> None:
+        parameters = set(
+            inspect.signature(
+                run_authorized_empty_store_rollback
+            ).parameters
+        )
+        self.assertEqual(
+            parameters,
+            {
+                "verified_rollback_capability",
+                "verified_package_capability",
+                "verified_controller_runtime_capability",
+                "eligibility_receipt",
+                "resources",
+                "authority_state",
+                "clock",
+                "held_lock",
+                "resolved_store_spec",
+                "receipt_store",
+            },
+        )
+        self.assertTrue(
+            {
+                "journal_factory",
+                "operations",
+                "transport_factory",
+                "receipt_sink",
+                "audit_source",
+                "deletion_driver",
+            }.isdisjoint(parameters)
+        )
+
+    def test_public_entrypoint_assembles_bound_operations_after_durable_journal(
+        self,
+    ) -> None:
+        operations = self._operations()
+        captured: dict[str, dict[str, object]] = {}
+        selected_journals: list[DurableRollbackJournal] = []
+        journal_template = str(
+            Path(self.temporary.name)
+            / "executions"
+            / "{execution_id}"
+            / "rollback.jsonl"
+        )
+
+        def durable_factory(claimed: object) -> DurableRollbackJournal:
+            evidence = claimed_empty_rollback_evidence(claimed)
+            path = Path(evidence.journal_path)
+            path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+            os.chmod(path.parent, 0o700)
+            return DurableRollbackJournal(
+                path,
+                claimed_rollback=claimed,
+                authority_state=self.state,
+                held_lock=self.lock.held_capability(),
+                create=True,
+            )
+
+        class _BoundProductionFactory:
+            def __init__(inner_self, **kwargs: object) -> None:
+                captured["init"] = dict(kwargs)
+
+            def __call__(inner_self, **kwargs: object) -> object:
+                captured["call"] = dict(kwargs)
+                self.assertIsInstance(
+                    kwargs.get("rollback_journal"), DurableRollbackJournal
+                )
+                return operations
+
+        resolved_store_spec = {"verified": "ledger-bound"}
+        held_lock = self.lock.held_capability()
+
+        def production_journal(
+            claimed: object,
+            *,
+            authority_state: AuthorityState,
+            held_lock: object,
+        ) -> DurableRollbackJournal:
+            self.assertIs(authority_state, self.state)
+            self.assertIs(held_lock, selected_held_lock)
+            journal = durable_factory(claimed)
+            selected_journals.append(journal)
+            return journal
+
+        selected_held_lock = held_lock
+        with (
+            patch.object(rollback_entrypoint, "AUTHORITY_STATE_PATH", self.state_path),
+            patch.object(rollback_entrypoint, "GLOBAL_LOCK_PATH", self.lock_path),
+            patch.object(
+                rollback_entrypoint,
+                "ROLLBACK_JOURNAL_TEMPLATE",
+                journal_template,
+            ),
+            patch.object(
+                DurableReceiptStore,
+                "require_production_binding",
+                return_value=None,
+            ),
+            patch.object(
+                rollback_entrypoint,
+                "_production_rollback_journal",
+                side_effect=production_journal,
+            ) as selected_journal_factory,
+            patch.object(
+                rollback_live_adapter,
+                "ProductionLinuxEmptyRollbackOperationsFactory",
+                _BoundProductionFactory,
+            ),
+        ):
+            receipt = run_authorized_empty_store_rollback(
+                verified_rollback_capability=self.capability,
+                verified_package_capability=self.package_capability,
+                verified_controller_runtime_capability=self.runtime_capability,
+                eligibility_receipt=self.eligibility,
+                resources=self.resources,
+                authority_state=self.state,
+                clock=_Clock(),
+                held_lock=selected_held_lock,
+                resolved_store_spec=resolved_store_spec,
+                receipt_store=self.receipt_store,
+            )
+        self.assertEqual(receipt.outcome, "empty_store_rollback_complete")
+        self.assertEqual(
+            set(captured["init"]),
+            {
+                "held_lock",
+                "verified_controller_runtime_capability",
+                "authority_state",
+                "receipt_store",
+            },
+        )
+        self.assertEqual(
+            set(captured["call"]),
+            {
+                "claimed_rollback",
+                "verified_rollback_capability",
+                "signed_eligibility",
+                "resolved_store_spec",
+                "verified_artifacts",
+                "verified_resources",
+                "installation_receipt",
+                "rollback_journal",
+            },
+        )
+        self.assertIs(
+            captured["call"]["resolved_store_spec"], resolved_store_spec
+        )
+        self.assertEqual(selected_journal_factory.call_count, 1)
+        self.assertIs(
+            captured["call"]["rollback_journal"],
+            selected_journals[0],
+        )
 
     def test_durable_synthetic_path_rejects_volatile_duck_typed_journal(
         self,

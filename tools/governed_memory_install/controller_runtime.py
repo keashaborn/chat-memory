@@ -27,7 +27,7 @@ from .package_capability import PackageCapabilityError, _package_capability_part
 
 
 RUNTIME_RECEIPT_SCHEMA: Final = (
-    "governed-memory-controller-runtime-build-receipt-v3"
+    "governed-memory-controller-runtime-build-receipt-v4"
 )
 RUNTIME_RECEIPT_RESULT: Final = "isolated_controller_runtime_built_and_closed"
 RUNTIME_ROOT_PREFIX: PurePosixPath = PurePosixPath(
@@ -53,6 +53,9 @@ CONTROLLER_RUNTIME_CONTRACT_RELATIVE_PATH: Final = PurePosixPath(
 MAX_RECEIPT_BYTES: Final = 128 * 1024
 MAX_PROBE_BYTES: Final = 1024 * 1024
 _EXPECTED_UID: int = 0
+EXPECTED_POSTGRESQL_DRIVER_IDENTITY_SHA256: Final = (
+    "01807067729fbb8db7560ee937e7c729d8eb90e289c712a071450b0d808da457"
+)
 
 _HASH_RE: Final = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _VERSION_RE: Final = re.compile(r"3\.12\.[0-9]+\Z", re.ASCII)
@@ -80,6 +83,7 @@ _RECEIPT_KEYS: Final = frozenset(
         "interpreter_sha256",
         "installed_distribution_inventory_sha256",
         "interpreter_path_facts_sha256",
+        "postgresql_driver_identity_sha256",
         "supervisor_launcher_sha256",
         "launcher_help_probe_sha256",
         "pip_present",
@@ -123,6 +127,7 @@ class VerifiedControllerRuntimeEvidence:
     inventory_path: str
     installed_distribution_inventory_sha256: str
     interpreter_path_facts_sha256: str
+    postgresql_driver_identity_sha256: str
     supervisor_launcher_path: str
     supervisor_launcher_sha256: str
     launcher_help_probe_sha256: str
@@ -274,6 +279,7 @@ def _require_closed_receipt(receipt: Mapping[str, object]) -> None:
         "interpreter_sha256",
         "installed_distribution_inventory_sha256",
         "interpreter_path_facts_sha256",
+        "postgresql_driver_identity_sha256",
         "supervisor_launcher_sha256",
         "launcher_help_probe_sha256",
     ):
@@ -289,6 +295,8 @@ def _require_closed_receipt(receipt: Mapping[str, object]) -> None:
         or _VERSION_RE.fullmatch(str(receipt["python_version"])) is None
         or receipt.get("platform_os") != "linux"
         or receipt.get("platform_architecture") != "x86_64"
+        or receipt.get("postgresql_driver_identity_sha256")
+        != EXPECTED_POSTGRESQL_DRIVER_IDENTITY_SHA256
         or any(
             receipt.get(key) is not False
             for key in (
@@ -378,7 +386,9 @@ def _selected_runtime_input_identity(
         or cpython.get("archive_bytes_sha256_verified_locally") is not True
         or cpython.get("archive_member_types_verified") is not True
         or not _is_hash(cpython.get("specification_sha256"))
-        or not _is_hash(cpython.get("payload_tree_sha256"))
+        or not _is_hash(cpython.get("expanded_payload_tree_sha256"))
+        or cpython.get("archive_symlink_count") != 1048
+        or cpython.get("archive_symlink_normalization_verified") is not True
         or build_policy.get("approved_standalone_cpython_substrate_selected")
         is not True
         or build_policy.get("standalone_cpython_archive_staged") is not True
@@ -499,7 +509,7 @@ def _selected_runtime_input_identity(
         python_version=str(cpython["python_version"]),
         archive_sha256=str(cpython["archive_sha256"]),
         specification_sha256=str(cpython["specification_sha256"]),
-        payload_tree_sha256=str(cpython["payload_tree_sha256"]),
+        payload_tree_sha256=str(cpython["expanded_payload_tree_sha256"]),
         wheelhouse_tree_sha256=str(wheelhouse["canonical_tree_sha256"]),
     )
 
@@ -1198,6 +1208,16 @@ def relative_to_runtime(value):
     rendered = relative.as_posix()
     return rendered if rendered != "." else "."
 
+def hash_regular(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        while True:
+            block = source.read(1024 * 1024)
+            if not block:
+                break
+            digest.update(block)
+    return digest.hexdigest()
+
 if not sys.path or any(not isinstance(value, str) or not value for value in sys.path):
     raise SystemExit("controller_runtime_import_path_invalid")
 
@@ -1259,10 +1279,60 @@ for distribution in importlib.metadata.distributions():
         raise SystemExit("controller_runtime_distribution_duplicate")
     distributions[name] = distribution.version
 
+try:
+    import psycopg
+    from psycopg import pq
+except Exception as error:
+    raise SystemExit("controller_runtime_psycopg_import_failed") from error
+if psycopg.__version__ != distributions.get("psycopg") or pq.__impl__ != "binary":
+    raise SystemExit("controller_runtime_psycopg_identity_invalid")
+binary_distribution = importlib.metadata.distribution("psycopg-binary")
+site_root = Path(binary_distribution.locate_file("")).resolve(strict=True)
+relative_to_runtime(site_root)
+native_files = []
+for item in sorted(binary_distribution.files or (), key=lambda value: str(value)):
+    relative_name = str(item).replace("\\", "/")
+    if not (relative_name.endswith(".so") or ".so." in relative_name):
+        continue
+    path = Path(binary_distribution.locate_file(item)).resolve(strict=True)
+    relative_to_runtime(path)
+    try:
+        relative = path.relative_to(site_root).as_posix()
+    except ValueError as error:
+        raise SystemExit("controller_runtime_psycopg_native_path_escape") from error
+    if path.is_symlink() or not path.is_file() or path.stat().st_nlink != 1:
+        raise SystemExit("controller_runtime_psycopg_native_file_invalid")
+    native_files.append(
+        {
+            "path": relative,
+            "size": path.stat().st_size,
+            "sha256": hash_regular(path),
+        }
+    )
+if not native_files:
+    raise SystemExit("controller_runtime_psycopg_native_files_absent")
+postgresql_driver = {
+    "schema_version": "governed-memory-psycopg-runtime-probe-v1",
+    "python_version": platform.python_version(),
+    "psycopg_version": psycopg.__version__,
+    "pq_impl": pq.__impl__,
+    "libpq_version": pq.version(),
+    "native_files": native_files,
+}
+postgresql_driver_identity_sha256 = hashlib.sha256(
+    json.dumps(
+        postgresql_driver,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("ascii")
+).hexdigest()
+
 output = {
     "distributions": dict(sorted(distributions.items())),
     "interpreter_path_facts": path_facts,
     "interpreter_path_facts_sha256": path_facts_sha256,
+    "postgresql_driver_identity_sha256": postgresql_driver_identity_sha256,
     "pip_present": "pip" in distributions,
     "platform_architecture": platform.machine(),
     "platform_os": sys.platform,
@@ -1491,6 +1561,9 @@ def verify_controller_runtime_capability(
     }
     path_facts = inventory.get("interpreter_path_facts")
     path_facts_sha256 = inventory.get("interpreter_path_facts_sha256")
+    postgresql_driver_identity_sha256 = inventory.get(
+        "postgresql_driver_identity_sha256"
+    )
     distributions = inventory.get("distributions")
     if (
         type(path_facts) is not dict
@@ -1508,10 +1581,15 @@ def verify_controller_runtime_capability(
             "distributions",
             "interpreter_path_facts",
             "interpreter_path_facts_sha256",
+            "postgresql_driver_identity_sha256",
             *inventory_facts,
         }
         or canonical_json_bytes(inventory) + b"\n" != observed.inventory_bytes
         or any(receipt.get(key) != value for key, value in inventory_facts.items())
+        or postgresql_driver_identity_sha256
+        != EXPECTED_POSTGRESQL_DRIVER_IDENTITY_SHA256
+        or postgresql_driver_identity_sha256
+        != receipt["postgresql_driver_identity_sha256"]
     ):
         raise ControllerRuntimeCapabilityError(
             "controller_runtime_inventory_invalid"
@@ -1565,6 +1643,9 @@ def verify_controller_runtime_capability(
         interpreter_path_facts_sha256=str(
             receipt["interpreter_path_facts_sha256"]
         ),
+        postgresql_driver_identity_sha256=str(
+            receipt["postgresql_driver_identity_sha256"]
+        ),
         supervisor_launcher_path=str(launcher_path),
         supervisor_launcher_sha256=str(receipt["supervisor_launcher_sha256"]),
         launcher_help_probe_sha256=str(receipt["launcher_help_probe_sha256"]),
@@ -1580,6 +1661,7 @@ def verify_controller_runtime_capability(
 
 __all__ = [
     "ControllerRuntimeCapabilityError",
+    "EXPECTED_POSTGRESQL_DRIVER_IDENTITY_SHA256",
     "VerifiedControllerRuntimeEvidence",
     "verified_controller_runtime_evidence",
     "verify_controller_runtime_capability",

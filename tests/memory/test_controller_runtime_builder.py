@@ -7,6 +7,7 @@ from pathlib import Path
 import unittest
 
 from tools.governed_memory_install.controller_runtime import (
+    EXPECTED_POSTGRESQL_DRIVER_IDENTITY_SHA256,
     REQUIREMENTS_LOCK_RELATIVE_PATH,
     RUNTIME_RECEIPT_RESULT,
     RUNTIME_RECEIPT_SCHEMA,
@@ -47,6 +48,9 @@ _WHEELHOUSE_ARTIFACTS = {
         b"synthetic-psycopg-binary-wheel"
     ),
     "pycparser-3.0-py3-none-any.whl": b"synthetic-pycparser-wheel",
+    "typing_extensions-4.15.0-py3-none-any.whl": (
+        b"synthetic-typing-extensions-wheel"
+    ),
 }
 
 
@@ -59,7 +63,7 @@ def _canonical(value: object) -> bytes:
 def _substrate(**changes: object) -> bytes:
     document: dict[str, object] = {
         "schema_version": (
-            "governed-memory-controller-standalone-cpython-substrate-v1"
+            "governed-memory-controller-standalone-cpython-substrate-v2"
         ),
         "state": "externally-approved-exact-offline-substrate",
         "implementation": "CPython",
@@ -69,11 +73,24 @@ def _substrate(**changes: object) -> bytes:
         "distribution_kind": "standalone-cpython-install-only",
         "archive_name": SELECTED_CPYTHON_ARCHIVE_NAME,
         "archive_sha256": SELECTED_CPYTHON_ARCHIVE_SHA256,
-        "payload_tree_sha256": "b" * 64,
         "payload_root": "python",
         "interpreter_relative_path": "bin/python",
-        "archive_members_are_regular_files_or_directories_only": True,
-        "archive_contains_no_symlinks_hardlinks_or_special_files": True,
+        "archive_member_policy": (
+            "directories-regular-files-and-relative-in-payload-symlinks-only"
+        ),
+        "archive_hardlinks_or_special_files_present": False,
+        "archive_symlink_count": 1048,
+        "archive_symlinks_absolute_escape_dangling_or_cyclic": False,
+        "symlink_expansion_policy": (
+            "relative-in-payload-links-expanded-to-independent-regular-file-"
+            "or-directory-copies"
+        ),
+        "symlink_expansion_mapping_sha256": "a" * 64,
+        "expanded_payload_tree_schema": (
+            "governed-memory-standalone-cpython-expanded-payload-tree-v1"
+        ),
+        "expanded_payload_tree_sha256": "b" * 64,
+        "expanded_payload_is_symlink_hardlink_special_free": True,
         "runtime_is_not_venv": True,
         "network_calls": 0,
     }
@@ -100,6 +117,7 @@ def _synthetic_lock() -> bytes:
             "manylinux_2_17_x86_64.whl",
         ),
         ("pycparser", "pycparser-3.0-py3-none-any.whl"),
+        ("typing-extensions", "typing_extensions-4.15.0-py3-none-any.whl"),
     ):
         version = filename.split("-", 2)[1]
         digest = hashlib.sha256(_WHEELHOUSE_ARTIFACTS[filename]).hexdigest()
@@ -126,8 +144,10 @@ def _future_ready_contract() -> bytes:
     cpython["archive_staged"] = True
     cpython["archive_bytes_sha256_verified_locally"] = True
     cpython["archive_member_types_verified"] = True
+    cpython["archive_symlink_count"] = 1048
+    cpython["archive_symlink_normalization_verified"] = True
     cpython["specification_sha256"] = hashlib.sha256(_substrate()).hexdigest()
-    cpython["payload_tree_sha256"] = "b" * 64
+    cpython["expanded_payload_tree_sha256"] = "b" * 64
     selected_wheels = {
         "psycopg": "psycopg-3.3.4-py3-none-any.whl",
         "psycopg-binary": (
@@ -251,6 +271,9 @@ def _build_observation(plan) -> BuildObservation:
         interpreter_sha256="3" * 64,
         installed_distribution_inventory_sha256="4" * 64,
         interpreter_path_facts_sha256="5" * 64,
+        postgresql_driver_identity_sha256=(
+            EXPECTED_POSTGRESQL_DRIVER_IDENTITY_SHA256
+        ),
         supervisor_launcher_sha256=plan.supervisor_launcher_sha256,
         launcher_help_probe_sha256="7" * 64,
         pip_present=False,
@@ -416,7 +439,7 @@ class ControllerRuntimeBuilderTests(unittest.TestCase):
             + plan.wheelhouse.tree_sha256,
         )
         self.assertEqual(plan.wheelhouse.schema_version, WHEELHOUSE_TREE_SCHEMA)
-        self.assertEqual(plan.wheelhouse.member_count, 5)
+        self.assertEqual(plan.wheelhouse.member_count, 6)
         self.assertTrue(
             plan.final_release_root.startswith(
                 "/opt/governed-memory-controller/releases/"
@@ -437,6 +460,7 @@ class ControllerRuntimeBuilderTests(unittest.TestCase):
                 "psycopg": "3.3.4",
                 "psycopg-binary": "3.3.4",
                 "pycparser": "3.0",
+                "typing-extensions": "4.15.0",
             },
         )
 
@@ -481,6 +505,7 @@ class ControllerRuntimeBuilderTests(unittest.TestCase):
                 "psycopg",
                 "psycopg-binary",
                 "pycparser",
+                "typing-extensions",
             ),
         )
         self.assertEqual(
@@ -564,7 +589,7 @@ class ControllerRuntimeBuilderTests(unittest.TestCase):
                 controller_requirements_lock=ambiguous,
             )
 
-    def test_contract_records_selected_inputs_without_claiming_staging_or_proof(self):
+    def test_contract_records_exact_selected_staged_inputs_without_claiming_build(self):
         contract = json.loads(
             (
                 ROOT
@@ -580,10 +605,16 @@ class ControllerRuntimeBuilderTests(unittest.TestCase):
             cpython["archive_sha256"], SELECTED_CPYTHON_ARCHIVE_SHA256
         )
         self.assertEqual(cpython["payload_root"], "python")
-        self.assertFalse(cpython["archive_staged"])
-        self.assertFalse(cpython["archive_bytes_sha256_verified_locally"])
-        self.assertIsNone(cpython["specification_sha256"])
-        self.assertIsNone(cpython["payload_tree_sha256"])
+        self.assertTrue(cpython["archive_staged"])
+        self.assertTrue(cpython["archive_bytes_sha256_verified_locally"])
+        self.assertEqual(
+            cpython["specification_sha256"],
+            "883564be18c159544f8785ace4ad1b46abaa2989bb76ad9f03f7a8299d862a85",
+        )
+        self.assertEqual(
+            cpython["expanded_payload_tree_sha256"],
+            "9eb6554a9807d955e8f2902d058d81e6d57881a8409fb361884297f80e153db1",
+        )
 
         driver = selected["postgresql_driver"]
         self.assertEqual(driver["preferred_extra"], "binary")
@@ -597,10 +628,26 @@ class ControllerRuntimeBuilderTests(unittest.TestCase):
                 },
             ],
         )
-        self.assertEqual(driver["selected_wheels"], [])
+        self.assertEqual(
+            driver["selected_wheels"],
+            [
+                {
+                    "normalized_distribution": "psycopg",
+                    "selected_wheel_filename": "psycopg-3.3.4-py3-none-any.whl",
+                    "selected_wheel_sha256": "b6bbc25ccf05c8fad3b061d9db2ef0909a555171b84b07f29458a447253d679a",
+                    "version": "3.3.4",
+                },
+                {
+                    "normalized_distribution": "psycopg-binary",
+                    "selected_wheel_filename": "psycopg_binary-3.3.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+                    "selected_wheel_sha256": "e7510c37550f91a187e3660a8cc50d4b760f8c3b8b2f89ebc5698cd2c7f2c85d",
+                    "version": "3.3.4",
+                },
+            ],
+        )
         self.assertEqual(
             driver["selection_state"],
-            "preferred-family-and-version-only-not-selected-not-in-current-lock-not-staged-not-verified",
+            "exact-selected-wheels-staged-verified-and-locked",
         )
         self.assertEqual(
             {
@@ -616,34 +663,41 @@ class ControllerRuntimeBuilderTests(unittest.TestCase):
             "binary_native_library_closure_inspected",
             "selection_ready_for_runtime_build",
         ):
-            self.assertFalse(driver[key], key)
-        self.assertTrue(
-            driver["postgresql_source_closure_contract_packaged"]
-        )
+            self.assertTrue(driver[key], key)
         self.assertTrue(driver["driver_native_postgresql_stages_packaged"])
-        self.assertFalse(
+        self.assertTrue(
             driver["concrete_psycopg_postgresql_transport_packaged"]
         )
         build_policy = contract["build_policy"]
         self.assertTrue(
             build_policy["runtime_publication_policy_transport_packaged"]
         )
-        self.assertFalse(
+        self.assertTrue(
             build_policy["production_runtime_publication_primitives_packaged"]
         )
-        self.assertFalse(
+        self.assertTrue(
             build_policy[
                 "independent_standalone_cpython_payload_tree_proof_packaged"
             ]
         )
         wheelhouse = selected["wheelhouse"]
         self.assertFalse(wheelhouse["caller_supplied_opaque_tree_sha256_accepted"])
-        self.assertFalse(wheelhouse["wheelhouse_staged"])
-        self.assertIsNone(wheelhouse["canonical_tree_sha256"])
+        self.assertTrue(wheelhouse["wheelhouse_staged"])
+        self.assertEqual(
+            wheelhouse["canonical_tree_sha256"],
+            "d802e5000dab609a08d08438b37aace108cd07872246f48fcfe322cd9f028fb4",
+        )
+        self.assertEqual(wheelhouse["canonical_member_count"], 6)
+        self.assertEqual(wheelhouse["canonical_total_bytes"], 10_429_916)
+        self.assertFalse(build_policy["current_runtime_built"])
+        self.assertFalse(build_policy["current_runtime_installed"])
+        self.assertFalse(build_policy["current_release_staged"])
         current_lock = (
             ROOT / "ops/governed_memory/controller-requirements.lock"
         ).read_text(encoding="ascii")
-        self.assertNotIn("psycopg", current_lock)
+        self.assertIn("psycopg==3.3.4", current_lock)
+        self.assertIn("psycopg-binary==3.3.4", current_lock)
+        self.assertIn("typing-extensions==4.15.0", current_lock)
         self.assertNotIn("asyncpg", current_lock)
 
     def test_current_repository_runtime_inputs_are_refused(self):

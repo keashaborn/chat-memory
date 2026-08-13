@@ -19,11 +19,11 @@ from tools.governed_memory_install.package import (  # noqa: E402
 def generate() -> dict[str, object]:
     return {
         "schema_version": (
-            "governed-memory-dormant-store-install-inactive-execution-package-manifest-v3"
+            "governed-memory-dormant-store-install-inactive-execution-package-manifest-v4"
         ),
         "state": (
-            "repository-only-claim-bound-install-and-empty-rollback-"
-            "controllers-packaged-not-installed-not-activated"
+            "phase9j-install-ready-closed-runtime-and-store-transports-"
+            "packaged-not-installed-not-activated"
         ),
         "artifacts": {
             relative: artifact_sha256(relative)

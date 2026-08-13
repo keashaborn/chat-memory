@@ -13,6 +13,7 @@ from tools.governed_memory_install import authority
 from tools.governed_memory_install.controller_runtime import (
     CONTROLLER_RUNTIME_CONTRACT_RELATIVE_PATH,
     ControllerRuntimeCapabilityError,
+    EXPECTED_POSTGRESQL_DRIVER_IDENTITY_SHA256,
     LAUNCHER_RELATIVE_PATH,
     PACKAGE_MANIFEST_RELATIVE_PATH,
     REQUIREMENTS_LOCK_RELATIVE_PATH,
@@ -70,20 +71,18 @@ class RuntimeCapabilityTests(unittest.TestCase):
         if lock_bytes is None:
             lock_bytes = (ROOT / lock_path).read_bytes()
             if ready_contract:
-                synthetic_driver_lock = []
-                for distribution, (_, wheel_bytes) in (
-                    _SYNTHETIC_DRIVER_WHEELS.items()
-                ):
-                    synthetic_driver_lock.extend(
-                        (
-                            f"{distribution}==3.3.4 \\",
-                            "    --hash=sha256:"
-                            + hashlib.sha256(wheel_bytes).hexdigest(),
-                        )
+                for distribution, (_, wheel_bytes) in _SYNTHETIC_DRIVER_WHEELS.items():
+                    lines = lock_bytes.decode("ascii").splitlines()
+                    index = next(
+                        position
+                        for position, line in enumerate(lines)
+                        if line.startswith(f"{distribution}==3.3.4 ")
                     )
-                lock_bytes += (
-                    "\n".join(synthetic_driver_lock) + "\n"
-                ).encode("ascii")
+                    lines[index + 1] = (
+                        "    --hash=sha256:"
+                        + hashlib.sha256(wheel_bytes).hexdigest()
+                    )
+                    lock_bytes = ("\n".join(lines) + "\n").encode("ascii")
         artifacts[lock_path] = lock_bytes
         contract_path = str(CONTROLLER_RUNTIME_CONTRACT_RELATIVE_PATH)
         contract_raw = (ROOT / contract_path).read_bytes()
@@ -95,8 +94,10 @@ class RuntimeCapabilityTests(unittest.TestCase):
             cpython["archive_staged"] = True
             cpython["archive_bytes_sha256_verified_locally"] = True
             cpython["archive_member_types_verified"] = True
+            cpython["archive_symlink_count"] = 1048
+            cpython["archive_symlink_normalization_verified"] = True
             cpython["specification_sha256"] = "3" * 64
-            cpython["payload_tree_sha256"] = "4" * 64
+            cpython["expanded_payload_tree_sha256"] = "4" * 64
             driver = contract["selected_runtime_inputs"][
                 "postgresql_driver"
             ]
@@ -131,7 +132,7 @@ class RuntimeCapabilityTests(unittest.TestCase):
             ):
                 driver[key] = True
             wheelhouse = contract["selected_runtime_inputs"]["wheelhouse"]
-            wheelhouse["canonical_member_count"] = 5
+            wheelhouse["canonical_member_count"] = 6
             wheelhouse["canonical_total_bytes"] = 12345
             wheelhouse["canonical_tree_sha256"] = "5" * 64
             wheelhouse["wheelhouse_staged"] = True
@@ -146,6 +147,12 @@ class RuntimeCapabilityTests(unittest.TestCase):
             contract["dependency_policy"][
                 "current_lock_contains_preferred_postgresql_driver"
             ] = True
+            contract_raw = _canonical(contract)
+        else:
+            contract = json.loads(contract_raw)
+            contract["build_policy"][
+                "standalone_cpython_archive_staged"
+            ] = False
             contract_raw = _canonical(contract)
         artifacts[contract_path] = contract_raw
         return artifacts
@@ -206,12 +213,16 @@ class RuntimeCapabilityTests(unittest.TestCase):
                         "psycopg": "3.3.4",
                         "psycopg-binary": "3.3.4",
                         "pycparser": "3.0",
+                        "typing-extensions": "4.15.0",
                     }
                     if distributions is None
                     else distributions
                 ),
                 "interpreter_path_facts": path_facts,
                 "interpreter_path_facts_sha256": path_facts_sha,
+                "postgresql_driver_identity_sha256": (
+                    EXPECTED_POSTGRESQL_DRIVER_IDENTITY_SHA256
+                ),
                 "pip_present": False,
                 "platform_architecture": "x86_64",
                 "platform_os": "linux",
@@ -254,6 +265,9 @@ class RuntimeCapabilityTests(unittest.TestCase):
             "interpreter_sha256": observed.interpreter_sha256,
             "installed_distribution_inventory_sha256": observed.inventory_sha256,
             "interpreter_path_facts_sha256": path_facts_sha,
+            "postgresql_driver_identity_sha256": (
+                EXPECTED_POSTGRESQL_DRIVER_IDENTITY_SHA256
+            ),
             "supervisor_launcher_sha256": launcher_sha,
             "launcher_help_probe_sha256": process.launcher_help_probe_sha256,
             "pip_present": False,
@@ -751,7 +765,10 @@ class RuntimeCapabilityTests(unittest.TestCase):
             {
                 "cffi": "2.1.0",
                 "cryptography": "49.0.0",
+                "psycopg": "3.3.4",
+                "psycopg-binary": "3.3.4",
                 "pycparser": "3.0",
+                "typing-extensions": "4.15.0",
             },
         )
         malformed = (

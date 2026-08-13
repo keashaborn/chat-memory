@@ -18,11 +18,17 @@ import json
 import os
 import re
 import selectors
+import socket
 import stat
 import subprocess
 import time
 from types import MappingProxyType
 from typing import Final, Mapping, Protocol, Sequence
+
+from .execution_lock import (
+    HeldExecutionLockCapability,
+    validate_held_execution_lock,
+)
 
 from .linux_live_transports import (
     DOCKER_NETWORK,
@@ -52,6 +58,7 @@ from .linux_plan import (
     validate_store_spec,
 )
 from .linux_store_effects import (
+    BoundLinuxStoreTransports,
     BoundResourceSnapshot,
     BoundRetainedRootDirectorySnapshot,
     BoundSystemdSupervisorSnapshot,
@@ -60,10 +67,16 @@ from .linux_store_effects import (
     ExactSystemdSupervisor,
     FilesystemNodeKind,
     LinuxStoreEffectsError,
+    LivePreflightSnapshot,
     POSTGRES_STORE_SECRET_PATH,
     QDRANT_STORE_SECRET_PATH,
     SecretEnvironmentDocument,
     secret_environment_public_id,
+)
+from .psycopg_postgres_adapter import (
+    PostgreSQLStageReceiptSink,
+    PsycopgPostgreSQLAdapter,
+    verified_psycopg_runtime_capability,
 )
 from .linux_store_readiness import (
     PrebootstrapQdrantSnapshot,
@@ -831,7 +844,13 @@ class ClosedRootFileEffects:
         filesystem: DescriptorSafeRootFilesystem,
         execution_id: str,
         resolved_store_spec_sha256: str,
+        authority_execution_id: str | None = None,
     ) -> None:
+        authority_id = (
+            execution_id
+            if authority_execution_id is None
+            else authority_execution_id
+        )
         if (
             not all(
                 callable(getattr(filesystem, method, None))
@@ -845,15 +864,34 @@ class ClosedRootFileEffects:
                 )
             )
             or _EXECUTION_RE.fullmatch(execution_id) is None
+            or _EXECUTION_RE.fullmatch(authority_id) is None
             or _HASH_RE.fullmatch(resolved_store_spec_sha256) is None
         ):
             raise LinuxLiveAdapterError("closed_root_file_dependencies_invalid")
         self._filesystem = filesystem
         self._execution_id = execution_id
+        self._authority_execution_id = authority_id
         self._resolved_store_spec_sha256 = resolved_store_spec_sha256
 
     def _slot(self, slot: RootFileSlot) -> ResolvedRootSlot:
-        return ResolvedRootSlot(slot, self._execution_id)
+        execution_id = (
+            self._authority_execution_id
+            if slot in _ROLLBACK_RECORD_SLOTS
+            else self._execution_id
+        )
+        return ResolvedRootSlot(slot, execution_id)
+
+    def for_rollback_authority(
+        self, authority_execution_id: str
+    ) -> ClosedRootFileEffects:
+        """Rebind only rollback records, retaining install-file identity."""
+
+        return ClosedRootFileEffects(
+            filesystem=self._filesystem,
+            execution_id=self._execution_id,
+            resolved_store_spec_sha256=self._resolved_store_spec_sha256,
+            authority_execution_id=authority_execution_id,
+        )
 
     @staticmethod
     def _regular_exact(
@@ -1026,6 +1064,51 @@ class ClosedRootFileEffects:
     def observe_qdrant_secret(self) -> BoundResourceSnapshot:
         return self._observe_secret(RootFileSlot.QDRANT_SECRET)
 
+    def _read_fixed_secret(self, slot: RootFileSlot) -> bytes:
+        """Read one execution-bound secret through the descriptor-safe root.
+
+        This is deliberately narrower than an environment-file reader: the
+        caller cannot select a path, variable name, or execution identity.
+        The exact root-owned file shape is revalidated on every read and only
+        the single secret value crosses the adapter boundary.
+        """
+
+        observed = self._observe_regular(slot)
+        contract = ROOT_FILE_SLOTS[slot]
+        if (
+            not self._regular_exact(
+                observed,
+                mode=contract.required_mode,
+                max_bytes=contract.max_bytes,
+            )
+            or self._secret_resource_id(slot, observed.content) is None
+            or type(observed.content) is not bytes
+        ):
+            raise LinuxLiveAdapterError("store_secret_not_exact")
+        header = (
+            b"# governed-memory-execution-id="
+            + self._execution_id.encode("ascii")
+            + b"\n"
+        )
+        if slot is RootFileSlot.POSTGRES_SECRET:
+            prefix = header + b"POSTGRES_DB=postgres\nPOSTGRES_PASSWORD="
+            suffix = b"\nPOSTGRES_USER=governed_memory_bootstrap\n"
+        elif slot is RootFileSlot.QDRANT_SECRET:
+            prefix = header + b"QDRANT__SERVICE__API_KEY="
+            suffix = b"\n"
+        else:
+            raise LinuxLiveAdapterError("store_secret_slot_invalid")
+        value = observed.content[len(prefix) : -len(suffix)]
+        if _SECRET_RE.fullmatch(value) is None:
+            raise LinuxLiveAdapterError("store_secret_not_exact")
+        return value
+
+    def read_fixed_postgres_password(self) -> bytes:
+        return self._read_fixed_secret(RootFileSlot.POSTGRES_SECRET)
+
+    def read_qdrant_api_key(self) -> bytes:
+        return self._read_fixed_secret(RootFileSlot.QDRANT_SECRET)
+
     def create_resolved_store_spec(self, canonical_document: bytes) -> None:
         _require_canonical_json_document(
             canonical_document,
@@ -1185,7 +1268,7 @@ class ClosedRootFileEffects:
             document = json.loads(canonical_document.decode("ascii"))
         except (UnicodeDecodeError, json.JSONDecodeError):
             raise LinuxLiveAdapterError("execution_record_document_invalid") from None
-        if document.get("execution_id") != self._execution_id:
+        if document.get("execution_id") != self._authority_execution_id:
             raise LinuxLiveAdapterError("execution_record_execution_mismatch")
         observed = self._create_regular(slot, canonical_document)
         return self._identity(slot, observed)
@@ -1216,7 +1299,7 @@ class ClosedRootFileEffects:
         if (
             type(identity) is not RootRemovalIdentity
             or identity.slot not in _ROLLBACK_RECORD_SLOTS
-            or identity.execution_id != self._execution_id
+            or identity.execution_id != self._authority_execution_id
         ):
             raise LinuxLiveAdapterError("execution_record_identity_invalid")
         current = self.observe_execution_record(
@@ -2402,6 +2485,53 @@ class ClosedLinuxPlatformAdapters:
             raise LinuxLiveAdapterError("closed_linux_platform_adapters_invalid")
 
 
+class ClosedLinuxInvariantEffects:
+    """Lock-bound, content-free install preflight over the two fixed ports.
+
+    The port check is an administrative preflight, not a hostile-process
+    security boundary.  The held global execution lock excludes cooperating
+    installers; an administrator with equivalent host authority remains able
+    to race or replace host state and is intentionally outside this claim.
+    """
+
+    _PORTS: Final = (55432, 6343)
+
+    def __init__(self, held_lock: HeldExecutionLockCapability) -> None:
+        try:
+            validate_held_execution_lock(held_lock)
+        except Exception:
+            raise LinuxLiveAdapterError("closed_linux_execution_lock_invalid") from None
+        self._held_lock = held_lock
+
+    def global_execution_lock_held(self) -> bool:
+        try:
+            validate_held_execution_lock(self._held_lock)
+        except Exception:
+            raise LinuxLiveAdapterError("closed_linux_execution_lock_not_held") from None
+        return True
+
+    @staticmethod
+    def _loopback_port_free(port: int) -> bool:
+        candidate = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            candidate.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
+            candidate.bind(("127.0.0.1", port))
+            return True
+        except OSError:
+            return False
+        finally:
+            candidate.close()
+
+    def inspect_live_preflight(self) -> LivePreflightSnapshot:
+        self.global_execution_lock_held()
+        postgres_free, qdrant_free = tuple(
+            self._loopback_port_free(port) for port in self._PORTS
+        )
+        if not postgres_free or not qdrant_free:
+            raise LinuxLiveAdapterError("closed_linux_store_port_not_free")
+        return LivePreflightSnapshot(True, True, 0, 0)
+
+
 class ClosedLinuxPlatformAdapterFactory:
     """Bind all non-PostgreSQL adapters after claim consumption."""
 
@@ -2487,12 +2617,136 @@ class ClosedLinuxPlatformAdapterFactory:
         return ClosedLinuxPlatformAdapters(files, docker, qdrant, systemd)
 
 
+class ProductionLinuxStoreTransportFactory:
+    """Complete closed production factory for the dormant store controller.
+
+    Only opaque authority/runtime capabilities and the fixed PostgreSQL receipt
+    sink are accepted.  Filesystem, subprocess, fixed-port HTTP, secret
+    readers, invariant checks, and all effect adapters are selected here; a
+    caller cannot inject a path, command, endpoint, credential, SQL string, or
+    alternate effect implementation.
+    """
+
+    def __init__(
+        self,
+        *,
+        held_lock: HeldExecutionLockCapability,
+        verified_controller_runtime_capability: object,
+        postgres_receipt_sink: PostgreSQLStageReceiptSink,
+    ) -> None:
+        try:
+            validate_held_execution_lock(held_lock)
+            psycopg_runtime_capability = verified_psycopg_runtime_capability(
+                verified_controller_runtime_capability
+            )
+        except Exception:
+            raise LinuxLiveAdapterError(
+                "production_linux_transport_authority_invalid"
+            ) from None
+        if not all(
+            callable(getattr(postgres_receipt_sink, method, None))
+            for method in (
+                "persist_postgres_stage_receipt",
+                "postgres_controller_authority_marker_held",
+            )
+        ):
+            raise LinuxLiveAdapterError(
+                "production_linux_postgres_receipt_sink_invalid"
+            )
+        self._held_lock = held_lock
+        self._psycopg_runtime_capability = psycopg_runtime_capability
+        self._postgres_receipt_sink = postgres_receipt_sink
+
+    def __call__(
+        self,
+        *,
+        execution_id: str,
+        attempt_id: str,
+        execution_binding_sha256: str,
+        resolved_store_spec: Mapping[str, object],
+        artifacts: ExactInstallArtifacts,
+        prerequisites: object,
+    ) -> BoundLinuxStoreTransports:
+        try:
+            validate_held_execution_lock(self._held_lock)
+        except Exception:
+            raise LinuxLiveAdapterError(
+                "production_linux_execution_lock_not_held"
+            ) from None
+        spec = validate_store_spec(
+            resolved_store_spec, allow_placeholders=False
+        )
+        binding = spec["execution_binding"]
+        local_images = getattr(prerequisites, "local_images", None)
+        postgres_image = getattr(local_images, "postgres", None)
+        qdrant_image = getattr(local_images, "qdrant", None)
+        resolved_sha256 = _sha256(_canonical_bytes(spec))
+        if (
+            _EXECUTION_RE.fullmatch(execution_id) is None
+            or _ATTEMPT_RE.fullmatch(attempt_id) is None
+            or _HASH_RE.fullmatch(execution_binding_sha256) is None
+            or binding.get("execution_id") != execution_id
+            or binding.get("binding_sha256") != execution_binding_sha256
+            or type(artifacts) is not ExactInstallArtifacts
+            or postgres_image is None
+            or qdrant_image is None
+        ):
+            raise LinuxLiveAdapterError(
+                "production_linux_transport_binding_invalid"
+            )
+        files = bind_closed_root_files(
+            filesystem=PosixDescriptorSafeRootFilesystem(),
+            execution_id=execution_id,
+            resolved_store_spec_sha256=resolved_sha256,
+        )
+        runner = BoundedSubprocessFixedArgvRunner(spec)
+        images = (
+            FixedImageIdentity(
+                "postgres",
+                postgres_image.image_id,
+                postgres_image.reference,
+                postgres_image.repo_digest,
+            ),
+            FixedImageIdentity(
+                "qdrant",
+                qdrant_image.image_id,
+                qdrant_image.reference,
+                qdrant_image.repo_digest,
+            ),
+        )
+        docker = ClosedDockerEffects(
+            runner=runner,
+            resolved_store_spec=spec,
+            images=images,
+        )
+        postgres = PsycopgPostgreSQLAdapter(
+            secret_source=files,
+            receipt_sink=self._postgres_receipt_sink,
+            runtime_capability=self._psycopg_runtime_capability,
+        )
+        qdrant = ClosedQdrantEffects(
+            client=StdlibQdrantHttpClient(api_key_source=files),
+            artifacts=artifacts,
+        )
+        systemd = ClosedSystemdEffects(runner=runner, files=files)
+        invariants = ClosedLinuxInvariantEffects(self._held_lock)
+        return BoundLinuxStoreTransports(
+            invariants,
+            files,
+            docker,
+            postgres,
+            qdrant,
+            systemd,
+        )
+
+
 __all__ = [
     "BoundQdrantHttpClient",
     "BoundedSubprocessFixedArgvRunner",
     "ClosedDockerEffects",
     "ClosedLinuxPlatformAdapterFactory",
     "ClosedLinuxPlatformAdapters",
+    "ClosedLinuxInvariantEffects",
     "ClosedQdrantEffects",
     "ClosedRootFileEffects",
     "ClosedSystemdEffects",
@@ -2508,6 +2762,7 @@ __all__ = [
     "LinuxLiveAdapterError",
     "MAX_QDRANT_RESPONSE_BYTES",
     "PosixDescriptorSafeRootFilesystem",
+    "ProductionLinuxStoreTransportFactory",
     "QDRANT_HTTP_HOST",
     "QDRANT_HTTP_PORT",
     "QDRANT_HTTP_TIMEOUT_SECONDS",

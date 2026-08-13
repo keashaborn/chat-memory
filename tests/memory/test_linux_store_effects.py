@@ -61,6 +61,11 @@ from tools.governed_memory_install.store_readiness import (
     POSTGRES_SERVER_VERSION,
     QDRANT_SERVER_VERSION,
 )
+from tools.governed_memory_install.rollback_live_adapter import (
+    ClosedLinuxPhysicalRollbackDriver,
+    ExactPhysicalEmptyRollbackOperations,
+    LedgerBoundPhysicalTarget,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -635,6 +640,49 @@ class LinuxStoreEffectsTests(unittest.TestCase):
             readiness_probe=self.readiness,
             secret_source=_Secrets(),
         )
+
+    def test_closed_physical_driver_revalidates_revision_and_fixed_dispatch(self) -> None:
+        self.docker.create_network()
+        exact_supervisor = ExactSystemdSupervisor.from_rendered_unit(
+            self.artifacts.render_supervisor_unit(
+                execution_id=EXECUTION_ID,
+                runtime_receipt_sha256=RUNTIME_RECEIPT_SHA256,
+                package_manifest_sha256=PACKAGE_SHA256,
+            )
+        )
+        driver = ClosedLinuxPhysicalRollbackDriver(
+            transports=self.transports,
+            resolved_store_spec=self.spec,
+            exact_supervisor=exact_supervisor,
+        )
+        target = LedgerBoundPhysicalTarget(
+            resource_key="network",
+            resource_kind="network",
+            resource_name=self.spec["resources"]["network"]["name"],
+            resource_id="docker-network-0001",
+            ownership_sha256="a" * 64,
+            resource_identity_sha256="b" * 64,
+            resource_labels_sha256=canonical_labels_sha256(
+                self.spec["resources"]["network"]["labels"]
+            ),
+            image_id=None,
+            image_repo_digest=None,
+        )
+        observed = driver.observe(target)
+        self.assertEqual(observed.state, "present")
+        self.assertEqual(
+            canonical_labels_sha256(dict(observed.labels)),
+            target.resource_labels_sha256,
+        )
+        with self.assertRaisesRegex(
+            Exception, "revision_drift"
+        ):
+            driver.remove_network(target, "0" * 64)
+        driver.remove_network(
+            target,
+            ExactPhysicalEmptyRollbackOperations._revision(observed),
+        )
+        self.assertEqual(driver.observe(target).state, "absent")
 
     def _request(
         self, step_id: str, profile: HostOperationProfile

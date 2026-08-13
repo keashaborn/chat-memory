@@ -35,6 +35,7 @@ from tools.governed_memory_install.execution_capability import (
 )
 from tools.governed_memory_install.execution_lock import GlobalExecutionLock
 from tools.governed_memory_install.controller_runtime import (
+    EXPECTED_POSTGRESQL_DRIVER_IDENTITY_SHA256,
     VerifiedControllerRuntimeEvidence,
     _RUNTIME_TOKEN,
     _VerifiedControllerRuntimeCapability,
@@ -254,6 +255,9 @@ class _Fixture:
             inventory_path=runtime_root + "/controller-distributions.json",
             installed_distribution_inventory_sha256="5" * 64,
             interpreter_path_facts_sha256="6" * 64,
+            postgresql_driver_identity_sha256=(
+                EXPECTED_POSTGRESQL_DRIVER_IDENTITY_SHA256
+            ),
             supervisor_launcher_path=launcher_path,
             supervisor_launcher_sha256=hashlib.sha256(
                 self.supervisor_launcher_source

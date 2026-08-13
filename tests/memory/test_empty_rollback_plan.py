@@ -300,9 +300,13 @@ class EmptyRollbackPlanTests(unittest.TestCase):
         )
         self.assertEqual(
             plan.steps[4].step_id,
-            "R05_RECHECK_SEMANTIC_EMPTY_UNDER_CONTROLLER_AUTHORITY_MARKER",
+            "R05_DISABLE_AND_REMOVE_STORES_SUPERVISOR",
         )
-        self.assertEqual(plan.steps[5].resource_key, "stores_supervisor")
+        self.assertEqual(plan.steps[4].resource_key, "stores_supervisor")
+        self.assertEqual(
+            plan.steps[5].step_id,
+            "R06_ESTABLISH_ADMINISTRATIVE_WRITER_FENCE_AND_RECHECK_SEMANTIC_EMPTY",
+        )
         self.assertEqual(plan.steps[6].step_id, "R07_STOP_EXACT_STORES")
         self.assertEqual(plan.steps[14].resource_key, "resolved_store_spec")
         self.assertTrue(all(step.invariant_only for step in plan.steps[15:21]))

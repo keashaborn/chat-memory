@@ -2,13 +2,12 @@ from __future__ import annotations
 
 """Fail-closed planner for the immutable controller runtime and release.
 
-Phase 9H packages orchestration and the repository-only publication policy,
-including durable intent and exact terminal recovery.  This module never opens
-a socket, runs a process, extracts an archive, or writes a path; production
-filesystem primitives remain absent and require separate authorization and
-implementation.  The orchestrator keeps path derivation, exact release closure,
-receipt construction, create-only publication, and recovery/refusal policy
-inside reviewed controller code.
+The planner keeps path derivation, exact release closure, receipt construction,
+create-only publication, and recovery/refusal policy inside reviewed controller
+code. Effects remain in a separately constructed closed transport. The selected
+standalone archive may contain only safe relative in-payload links; those links
+are deterministically expanded and independently hashed before dependency
+installation.
 """
 
 from dataclasses import dataclass
@@ -21,6 +20,7 @@ from typing import Final, Mapping, Protocol
 
 from tools.governed_memory_install.authority import canonical_json_bytes
 from tools.governed_memory_install.controller_runtime import (
+    EXPECTED_POSTGRESQL_DRIVER_IDENTITY_SHA256,
     INTERPRETER_RELATIVE_PATH,
     INVENTORY_RELATIVE_PATH,
     LAUNCHER_RELATIVE_PATH,
@@ -35,7 +35,7 @@ from tools.governed_memory_install.controller_runtime import (
 
 
 SUBSTRATE_SCHEMA: Final = (
-    "governed-memory-controller-standalone-cpython-substrate-v1"
+    "governed-memory-controller-standalone-cpython-substrate-v2"
 )
 SUBSTRATE_STATE: Final = "externally-approved-exact-offline-substrate"
 BUILD_PLAN_SCHEMA: Final = "governed-memory-controller-runtime-build-plan-v1"
@@ -82,7 +82,7 @@ POSTGRESQL_DRIVER_DISTRIBUTIONS: Final = frozenset(
 _RUNTIME_BUILD_OPERATIONS: Final = (
     "B01_observe_or_recover_exact_owned_stage",
     "B02_create_stage_exclusive_mode_0700_and_fsync_parent",
-    "B03_extract_exact_standalone_cpython_without_links_or_special_files",
+    "B03_expand_safe_archive_links_to_exact_regular_payload",
     "B04_verify_substrate_payload_tree_and_non_venv_interpreter",
     "B05_recompute_canonical_wheelhouse_membership_and_install_exact_lock",
     "B06_remove_pip_setuptools_wheel_and_reject_inventory_drift",
@@ -112,11 +112,17 @@ _SUBSTRATE_KEYS: Final = frozenset(
         "distribution_kind",
         "archive_name",
         "archive_sha256",
-        "payload_tree_sha256",
         "payload_root",
         "interpreter_relative_path",
-        "archive_members_are_regular_files_or_directories_only",
-        "archive_contains_no_symlinks_hardlinks_or_special_files",
+        "archive_member_policy",
+        "archive_hardlinks_or_special_files_present",
+        "archive_symlink_count",
+        "archive_symlinks_absolute_escape_dangling_or_cyclic",
+        "symlink_expansion_policy",
+        "symlink_expansion_mapping_sha256",
+        "expanded_payload_tree_schema",
+        "expanded_payload_tree_sha256",
+        "expanded_payload_is_symlink_hardlink_special_free",
         "runtime_is_not_venv",
         "network_calls",
     }
@@ -142,6 +148,7 @@ _RECEIPT_KEYS: Final = frozenset(
         "interpreter_sha256",
         "installed_distribution_inventory_sha256",
         "interpreter_path_facts_sha256",
+        "postgresql_driver_identity_sha256",
         "supervisor_launcher_sha256",
         "launcher_help_probe_sha256",
         "pip_present",
@@ -248,6 +255,7 @@ class BuildObservation:
     interpreter_sha256: str
     installed_distribution_inventory_sha256: str
     interpreter_path_facts_sha256: str
+    postgresql_driver_identity_sha256: str
     supervisor_launcher_sha256: str
     launcher_help_probe_sha256: str
     pip_present: bool
@@ -453,17 +461,28 @@ def parse_standalone_cpython_substrate(
         or document.get("archive_name") != SELECTED_CPYTHON_ARCHIVE_NAME
         or document.get("archive_sha256")
         != SELECTED_CPYTHON_ARCHIVE_SHA256
-        or not _is_hash(document.get("payload_tree_sha256"))
         or document.get("payload_root") != "python"
         or document.get("interpreter_relative_path")
         != str(INTERPRETER_RELATIVE_PATH)
+        or document.get("archive_member_policy")
+        != "directories-regular-files-and-relative-in-payload-symlinks-only"
+        or document.get("archive_hardlinks_or_special_files_present") is not False
+        or type(document.get("archive_symlink_count")) is not int
+        or document.get("archive_symlink_count") != 1048
         or document.get(
-            "archive_members_are_regular_files_or_directories_only"
+            "archive_symlinks_absolute_escape_dangling_or_cyclic"
         )
-        is not True
-        or document.get(
-            "archive_contains_no_symlinks_hardlinks_or_special_files"
+        is not False
+        or document.get("symlink_expansion_policy")
+        != (
+            "relative-in-payload-links-expanded-to-independent-regular-file-"
+            "or-directory-copies"
         )
+        or not _is_hash(document.get("symlink_expansion_mapping_sha256"))
+        or document.get("expanded_payload_tree_schema")
+        != "governed-memory-standalone-cpython-expanded-payload-tree-v1"
+        or not _is_hash(document.get("expanded_payload_tree_sha256"))
+        or document.get("expanded_payload_is_symlink_hardlink_special_free")
         is not True
         or document.get("runtime_is_not_venv") is not True
         or type(document.get("network_calls")) is not int
@@ -477,7 +496,7 @@ def parse_standalone_cpython_substrate(
         python_version=str(document["python_version"]),
         archive_name=str(document["archive_name"]),
         archive_sha256=archive_sha256,
-        payload_tree_sha256=str(document["payload_tree_sha256"]),
+        payload_tree_sha256=str(document["expanded_payload_tree_sha256"]),
         archive_path=str(
             OFFLINE_SUBSTRATE_ROOT_PREFIX
             / archive_sha256
@@ -518,7 +537,10 @@ def _require_selected_substrate(
         or cpython.get("archive_member_types_verified") is not True
         or cpython.get("specification_sha256")
         != substrate.specification_sha256
-        or cpython.get("payload_tree_sha256") != substrate.payload_tree_sha256
+        or cpython.get("expanded_payload_tree_sha256")
+        != substrate.payload_tree_sha256
+        or cpython.get("archive_symlink_count") != 1048
+        or cpython.get("archive_symlink_normalization_verified") is not True
         or build_policy.get("approved_standalone_cpython_substrate_selected")
         is not True
         or build_policy.get("standalone_cpython_archive_staged") is not True
@@ -1385,6 +1407,7 @@ def _validate_build_observation(
         observation.interpreter_sha256,
         observation.installed_distribution_inventory_sha256,
         observation.interpreter_path_facts_sha256,
+        observation.postgresql_driver_identity_sha256,
         observation.supervisor_launcher_sha256,
         observation.launcher_help_probe_sha256,
     )
@@ -1408,6 +1431,8 @@ def _validate_build_observation(
         or observation.python_version != plan.substrate.python_version
         or observation.platform_os != "linux"
         or observation.platform_architecture != "x86_64"
+        or observation.postgresql_driver_identity_sha256
+        != EXPECTED_POSTGRESQL_DRIVER_IDENTITY_SHA256
         or not all(_is_hash(value) for value in hashes)
         or any(
             value is not False
@@ -1481,6 +1506,9 @@ def _runtime_receipt(
         ),
         "interpreter_path_facts_sha256": (
             observation.interpreter_path_facts_sha256
+        ),
+        "postgresql_driver_identity_sha256": (
+            observation.postgresql_driver_identity_sha256
         ),
         "supervisor_launcher_sha256": observation.supervisor_launcher_sha256,
         "launcher_help_probe_sha256": observation.launcher_help_probe_sha256,
@@ -1559,6 +1587,7 @@ def _require_completed_publication(
         "interpreter_sha256",
         "installed_distribution_inventory_sha256",
         "interpreter_path_facts_sha256",
+        "postgresql_driver_identity_sha256",
         "launcher_help_probe_sha256",
     )
     if (

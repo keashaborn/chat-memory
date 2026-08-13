@@ -3,13 +3,17 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from dataclasses import replace
 import json
+import os
 from pathlib import Path
+import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest import mock
 
 from tools.governed_memory_install.linux_live_adapters import (
     BoundedSubprocessFixedArgvRunner,
     ClosedDockerEffects,
+    ClosedLinuxInvariantEffects,
     ClosedLinuxPlatformAdapterFactory,
     ClosedQdrantEffects,
     ClosedSystemdEffects,
@@ -21,6 +25,7 @@ from tools.governed_memory_install.linux_live_adapters import (
     FixedImageIdentity,
     LinuxLiveAdapterError,
     PosixDescriptorSafeRootFilesystem,
+    ProductionLinuxStoreTransportFactory,
     QdrantHttpResponse,
     ROLLBACK_SEMANTIC_EMPTY_PROOF_PATH_TEMPLATE,
     ROLLBACK_CONTROLLER_AUTHORITY_MARKER_PATH_TEMPLATE,
@@ -43,6 +48,11 @@ from tools.governed_memory_install.linux_plan import (
     bind_store_spec,
     build_store_create_plan,
 )
+from tools.governed_memory_install.execution_lock import GlobalExecutionLock
+from tools.governed_memory_install.psycopg_postgres_adapter import (
+    PsycopgPostgreSQLAdapter,
+    _mint_synthetic_runtime_capability,
+)
 from tools.governed_memory_install.linux_store_readiness import (
     LinuxStoreReadinessError,
 )
@@ -50,6 +60,8 @@ from tools.governed_memory_install.linux_store_effects import (
     EffectPresence,
     ExactInstallArtifacts,
     ExactSystemdSupervisor,
+    FreshSecret,
+    SecretEnvironmentDocument,
 )
 
 
@@ -307,6 +319,30 @@ class RootFileAndMarkerTests(unittest.TestCase):
             self.fs.calls,
         )
 
+    def test_fixed_secret_readers_revalidate_execution_bound_root_files(self) -> None:
+        postgres = b"p" * 43
+        qdrant = b"q" * 43
+        self.files.create_postgres_secret(
+            SecretEnvironmentDocument(
+                "postgres", EXECUTION_ID, FreshSecret(postgres)
+            )
+        )
+        self.files.create_qdrant_secret(
+            SecretEnvironmentDocument(
+                "qdrant", EXECUTION_ID, FreshSecret(qdrant)
+            )
+        )
+        self.assertEqual(self.files.read_fixed_postgres_password(), postgres)
+        self.assertEqual(self.files.read_qdrant_api_key(), qdrant)
+
+        slot = ResolvedRootSlot(RootFileSlot.QDRANT_SECRET, EXECUTION_ID)
+        current = self.fs.nodes[slot.path]
+        self.fs.nodes[slot.path] = replace(current, mode=0o644)
+        with self.assertRaisesRegex(
+            LinuxLiveAdapterError, "store_secret_not_exact"
+        ):
+            self.files.read_qdrant_api_key()
+
     def test_marker_rejects_wrong_execution_and_changed_inode(self) -> None:
         wrong = json.dumps(
             {"execution_id": "a" * 64}, sort_keys=True, separators=(",", ":")
@@ -340,6 +376,31 @@ class RootFileAndMarkerTests(unittest.TestCase):
             LinuxLiveAdapterError, "identity_changed"
         ):
             self.files.remove_rollback_controller_authority_marker(identity)
+
+    def test_rollback_authority_rebind_does_not_change_install_secret_identity(self) -> None:
+        rollback_execution_id = "d" * 64
+        rebound = self.files.for_rollback_authority(rollback_execution_id)
+        self.assertEqual(
+            rebound.rollback_controller_authority_marker_path,
+            ROLLBACK_CONTROLLER_AUTHORITY_MARKER_PATH_TEMPLATE.replace(
+                "{execution_id}", rollback_execution_id
+            ),
+        )
+        rebound.create_postgres_secret(
+            SecretEnvironmentDocument(
+                "postgres", EXECUTION_ID, FreshSecret(b"p" * 43)
+            )
+        )
+        self.assertEqual(rebound.read_fixed_postgres_password(), b"p" * 43)
+        raw = json.dumps(
+            {
+                "execution_id": rollback_execution_id,
+                "schema_version": "governed-memory-test-marker-v1",
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("ascii") + b"\n"
+        rebound.create_rollback_controller_authority_marker(raw)
 
     def test_semantic_empty_proof_is_a_distinct_read_only_exact_record(self) -> None:
         document = {
@@ -851,6 +912,33 @@ class QdrantAdapterTests(unittest.TestCase):
 
 
 class FactoryBoundaryTests(unittest.TestCase):
+    def test_invariants_require_live_opaque_lock_and_both_fixed_ports(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            os.chmod(root, 0o700)
+            with GlobalExecutionLock(
+                root / "controller.lock", expected_uid=os.geteuid()
+            ) as lock:
+                adapter = ClosedLinuxInvariantEffects(lock.held_capability())
+                with mock.patch.object(
+                    ClosedLinuxInvariantEffects,
+                    "_loopback_port_free",
+                    side_effect=(True, True),
+                ) as probe:
+                    self.assertTrue(adapter.global_execution_lock_held())
+                    self.assertEqual(
+                        adapter.inspect_live_preflight().provider_call_count,
+                        0,
+                    )
+                    self.assertEqual(
+                        [call.args[0] for call in probe.call_args_list],
+                        [55432, 6343],
+                    )
+            with self.assertRaisesRegex(
+                LinuxLiveAdapterError, "execution_lock_not_held"
+            ):
+                adapter.global_execution_lock_held()
+
     def test_factory_binds_every_non_postgres_adapter_without_effects(self) -> None:
         spec = _bound_spec()
         artifacts = _artifacts()
@@ -887,6 +975,76 @@ class FactoryBoundaryTests(unittest.TestCase):
         self.assertEqual(fs.calls, [])
         self.assertEqual(qdrant.calls, [])
         self.assertEqual(adapters.qdrant.bind, "127.0.0.1:6343")
+
+    def test_production_factory_selects_complete_closed_transport_set(self) -> None:
+        class ReceiptSink:
+            def persist_postgres_stage_receipt(self, unused) -> None:
+                raise AssertionError("construction must be effect free")
+
+            def postgres_controller_authority_marker_held(self) -> bool:
+                return False
+
+        spec = _bound_spec()
+        artifacts = _artifacts()
+        images = _images(spec)
+        prerequisites = SimpleNamespace(
+            local_images=SimpleNamespace(
+                postgres=SimpleNamespace(
+                    image_id=images[0].image_id,
+                    reference=images[0].reference,
+                    repo_digest=images[0].repo_digest,
+                ),
+                qdrant=SimpleNamespace(
+                    image_id=images[1].image_id,
+                    reference=images[1].reference,
+                    repo_digest=images[1].repo_digest,
+                ),
+            )
+        )
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            os.chmod(root, 0o700)
+            with GlobalExecutionLock(
+                root / "controller.lock", expected_uid=os.geteuid()
+            ) as lock:
+                controller_runtime_capability = object()
+                synthetic_psycopg_capability = (
+                    _mint_synthetic_runtime_capability(
+                        runtime_receipt_sha256="a" * 64,
+                        native_closure_receipt_sha256="b" * 64,
+                    )
+                )
+                with mock.patch(
+                    "tools.governed_memory_install.linux_live_adapters."
+                    "verified_psycopg_runtime_capability",
+                    return_value=synthetic_psycopg_capability,
+                ) as derive:
+                    factory = ProductionLinuxStoreTransportFactory(
+                        held_lock=lock.held_capability(),
+                        verified_controller_runtime_capability=(
+                            controller_runtime_capability
+                        ),
+                        postgres_receipt_sink=ReceiptSink(),
+                    )
+                derive.assert_called_once_with(
+                    controller_runtime_capability
+                )
+                transports = factory(
+                    execution_id=EXECUTION_ID,
+                    attempt_id="attempt-1",
+                    execution_binding_sha256=BINDING_SHA256,
+                    resolved_store_spec=spec,
+                    artifacts=artifacts,
+                    prerequisites=prerequisites,
+                )
+                self.assertIsInstance(
+                    transports.invariants, ClosedLinuxInvariantEffects
+                )
+                self.assertIsInstance(
+                    transports.postgres, PsycopgPostgreSQLAdapter
+                )
+                self.assertEqual(transports.postgres.bind, "127.0.0.1:55432")
+                self.assertEqual(transports.qdrant.bind, "127.0.0.1:6343")
 
 
 if __name__ == "__main__":

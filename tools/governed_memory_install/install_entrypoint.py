@@ -3,11 +3,16 @@ from __future__ import annotations
 """Non-CLI, authorization-gated dormant-store install composition.
 
 Importing this module has no side effects.  The sole callable install surface
-requires both opaque verifier capabilities, the held global lock, durable
-authority state, a durable journal factory, and closed typed host operations.
+requires opaque verifier capabilities, the held global lock, durable authority
+state, verified prerequisites, and the canonical production receipt store.
+It selects the root-owned journal, resource ledger, PostgreSQL receipt sink,
+Linux transports, and closed host operations internally after authority claim.
 """
 
 import hashlib
+import os
+from pathlib import Path
+import stat
 from typing import Final, Mapping, Protocol
 import json
 
@@ -19,7 +24,10 @@ from .execution_capability import (
     _claimed_execution_binding_evidence,
     claim_dormant_store_install_execution_binding,
 )
-from .execution_lock import HeldExecutionLockCapability
+from .execution_lock import (
+    HeldExecutionLockCapability,
+    validate_held_execution_lock,
+)
 from .controller_runtime import (
     ControllerRuntimeCapabilityError,
     _controller_runtime_capability_evidence,
@@ -42,8 +50,11 @@ from .receipts import build_install_receipt, canonical_json_bytes
 from .durable_receipts import (
     DurableReceiptError,
     DurableReceiptStore,
+    PRODUCTION_EXECUTIONS_ROOT,
     ReceiptArtifact,
+    _open_directory_nofollow,
 )
+from .psycopg_postgres_adapter import PostgreSQLStageReceiptSink
 from .resource_identity import ResourceIdentityLedger
 from .rollback import (
     EmptyRollbackError,
@@ -52,6 +63,8 @@ from .rollback import (
 
 
 INACTIVE_REFUSAL_CODE: Final = "inactive_installation_package_not_authorized"
+_PRODUCTION_JOURNAL_NAME: Final = "journal.jsonl"
+_PRODUCTION_RESOURCE_LEDGER_NAME: Final = "resources.jsonl"
 
 
 class InstallEntrypointError(RuntimeError):
@@ -81,6 +94,298 @@ class ClaimBoundInstallDependenciesFactory(Protocol):
     ) -> ClaimBoundInstallDependencies: ...
 
 
+def production_install_postgres_stage_receipt_sink(
+    *,
+    receipt_store: DurableReceiptStore,
+    claimed_execution_binding: object,
+    held_lock: HeldExecutionLockCapability,
+) -> PostgreSQLStageReceiptSink:
+    """Return the exact install-mode PostgreSQL native-stage receipt sink.
+
+    The process-local rollback-marker state remains private.  Install receipts
+    cannot claim a rollback marker and the caller cannot select the sink mode,
+    implementation, filename, receipt artifact, or execution identifier.
+    """
+
+    try:
+        if type(receipt_store) is not DurableReceiptStore:
+            raise InstallEntrypointError(
+                "dormant_install_postgres_receipt_sink_invalid"
+            )
+        receipt_store.require_production_binding()
+        validate_held_execution_lock(held_lock)
+        evidence = _claimed_execution_binding_evidence(
+            claimed_execution_binding
+        )
+        execution_root = PRODUCTION_EXECUTIONS_ROOT / evidence.execution_id
+        if hashlib.sha256(
+            str(held_lock._owner.path).encode("utf-8")
+        ).hexdigest() != evidence.global_lock_path_sha256 or (
+            Path(evidence.execution_journal_path)
+            != execution_root / _PRODUCTION_JOURNAL_NAME
+        ) or (
+            Path(evidence.resource_identity_ledger_path)
+            != execution_root / _PRODUCTION_RESOURCE_LEDGER_NAME
+        ):
+            raise InstallEntrypointError(
+                "dormant_install_postgres_receipt_sink_invalid"
+            )
+        from .rollback_live_adapter import (
+            StoreBackedPostgreSQLStageReceiptSink,
+            _ProductionControllerAuthorityMarkerState,
+        )
+
+        return StoreBackedPostgreSQLStageReceiptSink(
+            receipt_store=receipt_store,
+            execution_id=evidence.execution_id,
+            marker_state=_ProductionControllerAuthorityMarkerState(
+                evidence.execution_id
+            ),
+            allowed_mode="install",
+        )
+    except Exception as error:
+        raise InstallEntrypointError(
+            "dormant_install_postgres_receipt_sink_invalid"
+        ) from error
+
+
+def _prepare_production_execution_directory(
+    claimed_execution_binding: object,
+    *,
+    held_lock: HeldExecutionLockCapability,
+) -> tuple[Path, bool, Path, bool]:
+    """Create/reverify only the claim-bound root-owned execution directory."""
+
+    try:
+        validate_held_execution_lock(held_lock)
+        evidence = _claimed_execution_binding_evidence(
+            claimed_execution_binding
+        )
+    except Exception as error:
+        raise InstallEntrypointError(
+            "dormant_install_production_execution_directory_invalid"
+        ) from error
+    execution_root = PRODUCTION_EXECUTIONS_ROOT / evidence.execution_id
+    journal_path = execution_root / _PRODUCTION_JOURNAL_NAME
+    ledger_path = execution_root / _PRODUCTION_RESOURCE_LEDGER_NAME
+    if (
+        Path(evidence.execution_journal_path) != journal_path
+        or Path(evidence.resource_identity_ledger_path) != ledger_path
+    ):
+        raise InstallEntrypointError(
+            "dormant_install_production_artifact_path_mismatch"
+        )
+    root_fd = execution_fd = -1
+    created = False
+    try:
+        root_fd = _open_directory_nofollow(
+            PRODUCTION_EXECUTIONS_ROOT,
+            expected_uid=0,
+        )
+        root = os.fstat(root_fd)
+        if (
+            not stat.S_ISDIR(root.st_mode)
+            or root.st_uid != 0
+            or root.st_gid != 0
+            or stat.S_IMODE(root.st_mode) != 0o700
+        ):
+            raise InstallEntrypointError(
+                "dormant_install_production_executions_root_invalid"
+            )
+        try:
+            os.mkdir(evidence.execution_id, 0o700, dir_fd=root_fd)
+            created = True
+        except FileExistsError:
+            pass
+        nofollow = getattr(os, "O_NOFOLLOW", 0)
+        if nofollow == 0:
+            raise InstallEntrypointError(
+                "dormant_install_production_nofollow_unavailable"
+            )
+        execution_fd = os.open(
+            evidence.execution_id,
+            os.O_RDONLY
+            | os.O_CLOEXEC
+            | nofollow
+            | getattr(os, "O_DIRECTORY", 0),
+            dir_fd=root_fd,
+        )
+        opened = os.fstat(execution_fd)
+        named = os.stat(
+            evidence.execution_id,
+            dir_fd=root_fd,
+            follow_symlinks=False,
+        )
+        if (
+            not stat.S_ISDIR(opened.st_mode)
+            or stat.S_IMODE(opened.st_mode) != 0o700
+            or opened.st_uid != 0
+            or opened.st_gid != 0
+            or named.st_uid != 0
+            or named.st_gid != 0
+            or (opened.st_dev, opened.st_ino)
+            != (named.st_dev, named.st_ino)
+        ):
+            raise InstallEntrypointError(
+                "dormant_install_production_execution_directory_invalid"
+            )
+        if created:
+            os.fsync(execution_fd)
+            os.fsync(root_fd)
+
+        existence: dict[str, bool] = {}
+        for name in (
+            _PRODUCTION_JOURNAL_NAME,
+            _PRODUCTION_RESOURCE_LEDGER_NAME,
+        ):
+            try:
+                observed = os.stat(
+                    name,
+                    dir_fd=execution_fd,
+                    follow_symlinks=False,
+                )
+            except FileNotFoundError:
+                existence[name] = False
+                continue
+            if (
+                not stat.S_ISREG(observed.st_mode)
+                or stat.S_IMODE(observed.st_mode) != 0o600
+                or observed.st_uid != 0
+                or observed.st_gid != 0
+                or observed.st_nlink != 1
+            ):
+                raise InstallEntrypointError(
+                    "dormant_install_production_artifact_file_invalid"
+                )
+            existence[name] = True
+        if (
+            existence[_PRODUCTION_RESOURCE_LEDGER_NAME]
+            and not existence[_PRODUCTION_JOURNAL_NAME]
+        ):
+            raise InstallEntrypointError(
+                "dormant_install_production_artifact_prefix_invalid"
+            )
+        validate_held_execution_lock(held_lock)
+        return (
+            journal_path,
+            existence[_PRODUCTION_JOURNAL_NAME],
+            ledger_path,
+            existence[_PRODUCTION_RESOURCE_LEDGER_NAME],
+        )
+    except InstallEntrypointError:
+        raise
+    except Exception as error:
+        raise InstallEntrypointError(
+            "dormant_install_production_execution_directory_invalid"
+        ) from error
+    finally:
+        if execution_fd >= 0:
+            os.close(execution_fd)
+        if root_fd >= 0:
+            os.close(root_fd)
+
+
+def _production_install_journal_and_ledger(
+    claimed_execution_binding: object,
+    *,
+    authority_state: AuthorityState,
+    held_lock: HeldExecutionLockCapability,
+) -> tuple[DurableJournal, ResourceIdentityLedger]:
+    journal_path, journal_exists, ledger_path, ledger_exists = (
+        _prepare_production_execution_directory(
+            claimed_execution_binding,
+            held_lock=held_lock,
+        )
+    )
+    journal: DurableJournal | None = None
+    try:
+        journal = DurableJournal(
+            journal_path,
+            claimed_execution_binding=claimed_execution_binding,
+            authority_state=authority_state,
+            held_lock=held_lock,
+            expected_uid=0,
+            create=not journal_exists,
+        )
+        ledger = ResourceIdentityLedger(
+            ledger_path,
+            claimed_execution_binding=claimed_execution_binding,
+            authority_state=authority_state,
+            held_lock=held_lock,
+            expected_uid=0,
+            create=not ledger_exists,
+        )
+        for path in (journal_path, ledger_path):
+            observed = path.stat(follow_symlinks=False)
+            if (
+                not stat.S_ISREG(observed.st_mode)
+                or stat.S_IMODE(observed.st_mode) != 0o600
+                or observed.st_uid != 0
+                or observed.st_gid != 0
+                or observed.st_nlink != 1
+            ):
+                raise InstallEntrypointError(
+                    "dormant_install_production_audit_artifact_invalid"
+                )
+        return journal, ledger
+    except Exception as error:
+        if journal is not None:
+            journal.close()
+        raise InstallEntrypointError(
+            "dormant_install_production_audit_artifact_invalid"
+        ) from error
+
+
+def _production_install_dependencies(
+    *,
+    claimed_execution_binding: object,
+    resolved_store_spec: Mapping[str, object],
+    verified_artifacts: Mapping[str, bytes],
+    verified_controller_runtime_capability: object,
+    prerequisites: InstallPrerequisites,
+    journal: DurableJournal,
+    resource_identity_ledger: ResourceIdentityLedger,
+    held_lock: HeldExecutionLockCapability,
+    receipt_store: DurableReceiptStore,
+) -> ClaimBoundInstallDependencies:
+    try:
+        from .linux_live_adapters import ProductionLinuxStoreTransportFactory
+        from .linux_store_effects import LinuxInstallDependenciesFactory
+        from .postgres_native_stages import APPROVED_TERMINAL_CATALOG_SHA256
+
+        receipt_sink = production_install_postgres_stage_receipt_sink(
+            receipt_store=receipt_store,
+            claimed_execution_binding=claimed_execution_binding,
+            held_lock=held_lock,
+        )
+        transport_factory = ProductionLinuxStoreTransportFactory(
+            held_lock=held_lock,
+            verified_controller_runtime_capability=(
+                verified_controller_runtime_capability
+            ),
+            postgres_receipt_sink=receipt_sink,
+        )
+        return LinuxInstallDependenciesFactory(
+            transport_factory=transport_factory,
+            expected_postgres_catalog_sha256=(
+                APPROVED_TERMINAL_CATALOG_SHA256
+            ),
+        )(
+            claimed_execution_binding=claimed_execution_binding,
+            resolved_store_spec=resolved_store_spec,
+            verified_artifacts=verified_artifacts,
+            prerequisites=prerequisites,
+            journal=journal,
+            resource_identity_ledger=resource_identity_ledger,
+        )
+    except InstallEntrypointError:
+        raise
+    except Exception as error:
+        raise InstallEntrypointError(
+            "dormant_install_production_dependencies_invalid"
+        ) from error
+
+
 def _run_authorized_dormant_store_install(
     *,
     verified_scope_capability: object,
@@ -89,10 +394,10 @@ def _run_authorized_dormant_store_install(
     authority_state: AuthorityState,
     clock: TrustedUtcClock,
     held_lock: HeldExecutionLockCapability,
-    journal_factory: JournalFactory,
-    dependencies_factory: ClaimBoundInstallDependenciesFactory,
+    journal_factory: JournalFactory | None,
+    dependencies_factory: ClaimBoundInstallDependenciesFactory | None,
     prerequisites: InstallPrerequisites,
-    resource_identity_ledger_factory: ResourceIdentityLedgerFactory,
+    resource_identity_ledger_factory: ResourceIdentityLedgerFactory | None,
     receipt_store: DurableReceiptStore,
     require_production_receipt_store: bool,
 ) -> Mapping[str, object]:
@@ -105,12 +410,31 @@ def _run_authorized_dormant_store_install(
     ):
         raise InstallEntrypointError(INACTIVE_REFUSAL_CODE)
     if (
-        not callable(journal_factory)
-        or type(prerequisites) is not InstallPrerequisites
-        or not callable(dependencies_factory)
-        or not callable(resource_identity_ledger_factory)
+        type(prerequisites) is not InstallPrerequisites
         or type(receipt_store) is not DurableReceiptStore
         or type(require_production_receipt_store) is not bool
+        or (
+            require_production_receipt_store
+            and any(
+                value is not None
+                for value in (
+                    journal_factory,
+                    dependencies_factory,
+                    resource_identity_ledger_factory,
+                )
+            )
+        )
+        or (
+            not require_production_receipt_store
+            and not all(
+                callable(value)
+                for value in (
+                    journal_factory,
+                    dependencies_factory,
+                    resource_identity_ledger_factory,
+                )
+            )
+        )
     ):
         raise InstallEntrypointError(
             "dormant_install_composition_dependency_invalid"
@@ -125,7 +449,7 @@ def _run_authorized_dormant_store_install(
             "dormant_install_composition_dependency_invalid"
         ) from error
     try:
-        package_evidence, unused_scope, artifacts = (
+        package_evidence, _unused_scope, artifacts = (
             _package_capability_parts(verified_package_capability)
         )
         runtime_evidence = _controller_runtime_capability_evidence(
@@ -228,13 +552,27 @@ def _run_authorized_dormant_store_install(
         raise InstallEntrypointError(
             "dormant_install_execution_authority_refused"
         ) from error
-    journal = journal_factory(claimed)
+    journal: DurableJournal | None = None
     try:
+        if require_production_receipt_store:
+            journal, resource_identity_ledger = (
+                _production_install_journal_and_ledger(
+                    claimed,
+                    authority_state=authority_state,
+                    held_lock=held_lock,
+                )
+            )
+        else:
+            assert journal_factory is not None
+            assert resource_identity_ledger_factory is not None
+            journal = journal_factory(claimed)
+            resource_identity_ledger = (
+                resource_identity_ledger_factory(claimed)
+            )
         if type(journal) is not DurableJournal:
             raise InstallEntrypointError(
                 "dormant_install_durable_journal_required"
             )
-        resource_identity_ledger = resource_identity_ledger_factory(claimed)
         if (
             type(resource_identity_ledger) is not ResourceIdentityLedger
             or not resource_identity_ledger.secure_execution_mode
@@ -242,14 +580,30 @@ def _run_authorized_dormant_store_install(
             raise InstallEntrypointError(
                 "dormant_install_secure_resource_ledger_required"
             )
-        dependencies = dependencies_factory(
-            claimed_execution_binding=claimed,
-            resolved_store_spec=resolved_store_spec,
-            verified_artifacts=artifacts,
-            prerequisites=prerequisites,
-            journal=journal,
-            resource_identity_ledger=resource_identity_ledger,
-        )
+        if require_production_receipt_store:
+            dependencies = _production_install_dependencies(
+                claimed_execution_binding=claimed,
+                resolved_store_spec=resolved_store_spec,
+                verified_artifacts=artifacts,
+                verified_controller_runtime_capability=(
+                    verified_controller_runtime_capability
+                ),
+                prerequisites=prerequisites,
+                journal=journal,
+                resource_identity_ledger=resource_identity_ledger,
+                held_lock=held_lock,
+                receipt_store=receipt_store,
+            )
+        else:
+            assert dependencies_factory is not None
+            dependencies = dependencies_factory(
+                claimed_execution_binding=claimed,
+                resolved_store_spec=resolved_store_spec,
+                verified_artifacts=artifacts,
+                prerequisites=prerequisites,
+                journal=journal,
+                resource_identity_ledger=resource_identity_ledger,
+            )
         if type(dependencies) is not ClaimBoundInstallDependencies:
             raise InstallEntrypointError(
                 "dormant_install_claim_bound_dependencies_invalid"
@@ -432,13 +786,16 @@ def run_authorized_dormant_store_install(
     authority_state: AuthorityState,
     clock: TrustedUtcClock,
     held_lock: HeldExecutionLockCapability,
-    journal_factory: JournalFactory,
-    dependencies_factory: ClaimBoundInstallDependenciesFactory,
     prerequisites: InstallPrerequisites,
-    resource_identity_ledger_factory: ResourceIdentityLedgerFactory,
     receipt_store: DurableReceiptStore,
 ) -> Mapping[str, object]:
-    """Claim and execute only with the canonical root-owned receipt store."""
+    """Execute through the fixed root-owned production Linux composition.
+
+    The caller supplies verified capabilities, immutable prerequisite evidence,
+    the held global lock, authority state, trusted time, and the canonical
+    receipt store.  It cannot select a journal, ledger, transport, secret
+    source, PostgreSQL receipt sink, readiness probe, or host operation.
+    """
 
     return _run_authorized_dormant_store_install(
         verified_scope_capability=verified_scope_capability,
@@ -449,10 +806,10 @@ def run_authorized_dormant_store_install(
         authority_state=authority_state,
         clock=clock,
         held_lock=held_lock,
-        journal_factory=journal_factory,
-        dependencies_factory=dependencies_factory,
+        journal_factory=None,
+        dependencies_factory=None,
         prerequisites=prerequisites,
-        resource_identity_ledger_factory=resource_identity_ledger_factory,
+        resource_identity_ledger_factory=None,
         receipt_store=receipt_store,
         require_production_receipt_store=True,
     )
@@ -463,5 +820,6 @@ __all__ = [
     "ClaimBoundInstallDependenciesFactory",
     "InstallEntrypointError",
     "ResourceIdentityLedgerFactory",
+    "production_install_postgres_stage_receipt_sink",
     "run_authorized_dormant_store_install",
 ]

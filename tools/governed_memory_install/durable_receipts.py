@@ -3,7 +3,7 @@ from __future__ import annotations
 """Create-once durable receipts at the controller's exact execution paths.
 
 The production surface accepts only an execution identifier and one of the
-three closed receipt kinds.  It has no caller-selected filename, command,
+closed receipt kinds.  It has no caller-selected filename, command,
 endpoint, environment, or secret surface.  Tests may use ``synthetic`` to
 exercise the same descriptor-level implementation below a temporary root.
 """
@@ -47,6 +47,14 @@ class ReceiptArtifact(str, Enum):
     INSTALL = "install_receipt"
     EMPTY_ROLLBACK_ELIGIBILITY = "empty_rollback_eligibility_receipt"
     EMPTY_ROLLBACK = "empty_rollback_receipt"
+    POSTGRES_INSTALL_I11 = "postgres_native_install_i11_receipt"
+    POSTGRES_INSTALL_I12 = "postgres_native_install_i12_receipt"
+    POSTGRES_INSTALL_I13 = "postgres_native_install_i13_receipt"
+    POSTGRES_INSTALL_I14 = "postgres_native_install_i14_receipt"
+    POSTGRES_ROLLBACK_I14 = "postgres_native_rollback_i14_receipt"
+    POSTGRES_ROLLBACK_I13 = "postgres_native_rollback_i13_receipt"
+    POSTGRES_ROLLBACK_I12 = "postgres_native_rollback_i12_receipt"
+    POSTGRES_ROLLBACK_I11 = "postgres_native_rollback_i11_receipt"
 
 
 _FILENAMES: Final = {
@@ -55,6 +63,58 @@ _FILENAMES: Final = {
         "empty-rollback-eligibility-receipt.json"
     ),
     ReceiptArtifact.EMPTY_ROLLBACK: "empty-rollback-receipt.json",
+    ReceiptArtifact.POSTGRES_INSTALL_I11: "postgres-native-install-i11-receipt.json",
+    ReceiptArtifact.POSTGRES_INSTALL_I12: "postgres-native-install-i12-receipt.json",
+    ReceiptArtifact.POSTGRES_INSTALL_I13: "postgres-native-install-i13-receipt.json",
+    ReceiptArtifact.POSTGRES_INSTALL_I14: "postgres-native-install-i14-receipt.json",
+    ReceiptArtifact.POSTGRES_ROLLBACK_I14: "postgres-native-rollback-i14-receipt.json",
+    ReceiptArtifact.POSTGRES_ROLLBACK_I13: "postgres-native-rollback-i13-receipt.json",
+    ReceiptArtifact.POSTGRES_ROLLBACK_I12: "postgres-native-rollback-i12-receipt.json",
+    ReceiptArtifact.POSTGRES_ROLLBACK_I11: "postgres-native-rollback-i11-receipt.json",
+}
+
+_POSTGRES_NATIVE_EXPECTATIONS: Final = {
+    ReceiptArtifact.POSTGRES_INSTALL_I11: (
+        "install",
+        "roles_privacy_preflight_complete",
+    ),
+    ReceiptArtifact.POSTGRES_INSTALL_I12: ("install", "foundation_0001_applied"),
+    ReceiptArtifact.POSTGRES_INSTALL_I13: (
+        "install",
+        "owner_claim_detail_0003_applied",
+    ),
+    ReceiptArtifact.POSTGRES_INSTALL_I14: (
+        "install",
+        "ready_for_terminal_catalog",
+    ),
+    ReceiptArtifact.POSTGRES_ROLLBACK_I14: (
+        "rollback",
+        "installed_0001_0003",
+    ),
+    ReceiptArtifact.POSTGRES_ROLLBACK_I13: ("rollback", "installed_0001"),
+    ReceiptArtifact.POSTGRES_ROLLBACK_I12: (
+        "rollback",
+        "exact_empty_canonical_database_prefix",
+    ),
+    ReceiptArtifact.POSTGRES_ROLLBACK_I11: ("rollback", "empty"),
+}
+_POSTGRES_NATIVE_WRAPPER_KEYS: Final = {
+    "schema_version",
+    "execution_id",
+    "native_receipt",
+    "receipt_sha256",
+}
+_POSTGRES_NATIVE_RECEIPT_KEYS: Final = {
+    "schema_version",
+    "mode",
+    "final_state",
+    "source_closure_sha256",
+    "runtime_receipt_sha256",
+    "driver_runtime_identity_sha256",
+    "terminal_catalog_sha256",
+    "rollback_empty_proof_sha256",
+    "operations",
+    "receipt_sha256",
 }
 
 _PRODUCTION_STORE_MODE: Final = object()
@@ -124,6 +184,72 @@ def _validate_receipt(
             return verify_empty_rollback_eligibility_receipt(value)
         if artifact is ReceiptArtifact.EMPTY_ROLLBACK:
             return verify_empty_rollback_receipt(value)
+        expected_native = _POSTGRES_NATIVE_EXPECTATIONS.get(artifact)
+        if expected_native is not None:
+            wrapper = dict(value)
+            native = wrapper.get("native_receipt")
+            if (
+                set(wrapper) != _POSTGRES_NATIVE_WRAPPER_KEYS
+                or wrapper.get("schema_version")
+                != "governed-memory-postgres-native-stage-durable-receipt-v1"
+                or _EXECUTION_RE.fullmatch(str(wrapper.get("execution_id")))
+                is None
+                or type(native) is not dict
+                or set(native) != _POSTGRES_NATIVE_RECEIPT_KEYS
+                or native.get("schema_version")
+                != "governed-memory-postgres-native-stage-receipt-v1"
+                or (native.get("mode"), native.get("final_state"))
+                != expected_native
+                or any(
+                    _EXECUTION_RE.fullmatch(str(native.get(key))) is None
+                    for key in (
+                        "source_closure_sha256",
+                        "runtime_receipt_sha256",
+                        "driver_runtime_identity_sha256",
+                    )
+                )
+                or type(native.get("operations")) is not list
+                or any(
+                    type(operation) is not str
+                    or not operation
+                    or len(operation) > 128
+                    or any(character in operation for character in "\x00\r\n")
+                    for operation in native.get("operations", [])
+                )
+            ):
+                raise DurableReceiptError(
+                    "durable_postgres_native_receipt_invalid"
+                )
+            terminal = native.get("terminal_catalog_sha256")
+            empty = native.get("rollback_empty_proof_sha256")
+            if expected_native[0] == "install":
+                terminal_valid = (
+                    terminal is None
+                    if expected_native[1] != "ready_for_terminal_catalog"
+                    else _EXECUTION_RE.fullmatch(str(terminal)) is not None
+                )
+                proof_valid = empty is None
+            else:
+                terminal_valid = terminal is None
+                proof_valid = _EXECUTION_RE.fullmatch(str(empty)) is not None
+            unsigned_native = {
+                key: native[key]
+                for key in native
+                if key != "receipt_sha256"
+            }
+            native_sha256 = hashlib.sha256(
+                canonical_json_bytes(unsigned_native)
+            ).hexdigest()
+            if (
+                terminal_valid is not True
+                or proof_valid is not True
+                or native.get("receipt_sha256") != native_sha256
+                or wrapper.get("receipt_sha256") != native_sha256
+            ):
+                raise DurableReceiptError(
+                    "durable_postgres_native_receipt_invalid"
+                )
+            return wrapper
     except (ReceiptError, EmptyRollbackError) as error:
         raise DurableReceiptError("durable_receipt_content_invalid") from error
     raise DurableReceiptError("durable_receipt_kind_invalid")
@@ -298,7 +424,7 @@ def _write_all(descriptor: int, value: bytes) -> None:
 
 
 class DurableReceiptStore:
-    """Secure reader/writer for the three exact per-execution receipts."""
+    """Secure reader/writer for the exact per-execution receipts."""
 
     __slots__ = ("_expected_uid", "_mode", "_root")
 
@@ -397,6 +523,11 @@ class DurableReceiptStore:
         if (
             artifact is ReceiptArtifact.EMPTY_ROLLBACK_ELIGIBILITY
             and receipt.get("installation_execution_id") != execution_id
+        ):
+            raise DurableReceiptError("durable_receipt_path_binding_mismatch")
+        if (
+            artifact in _POSTGRES_NATIVE_EXPECTATIONS
+            and receipt.get("execution_id") != execution_id
         ):
             raise DurableReceiptError("durable_receipt_path_binding_mismatch")
         return DurableReceiptEvidence(

@@ -1,9 +1,16 @@
 # dormant-store installation controller-only runtime lock for CPython 3.12 on Linux x86_64.
-# A later authorized build must install from an invocation-owned offline
-# wheelhouse with --require-hashes and produce a separate build receipt.
+# The exact offline wheelhouse is selected by the Phase 9 closure.  Installation
+# remains no-index, no-deps, and hash-required; publication produces a separate
+# controller-runtime receipt and does not create or activate stores.
 cffi==2.1.0 \
     --hash=sha256:1e9f50d192a3e525b15a75ab5114e442d83d657b7ec29182a991bc9a88fd3a66
 cryptography==49.0.0 \
     --hash=sha256:cbc77da8c523d5abd028635ba850a6966fcee2c82e2bf65a41d1d8afe0f98be9
+psycopg==3.3.4 \
+    --hash=sha256:b6bbc25ccf05c8fad3b061d9db2ef0909a555171b84b07f29458a447253d679a
+psycopg-binary==3.3.4 \
+    --hash=sha256:e7510c37550f91a187e3660a8cc50d4b760f8c3b8b2f89ebc5698cd2c7f2c85d
 pycparser==3.0 \
     --hash=sha256:b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992
+typing-extensions==4.15.0 \
+    --hash=sha256:f0fa19c6845758ab08074a0cfa8b7aecb71c999ca73d62883bc25cc018c4e548

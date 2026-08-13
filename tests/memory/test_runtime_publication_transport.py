@@ -8,6 +8,7 @@ import unittest
 
 from tools.governed_memory_install.authority import canonical_json_bytes
 from tools.governed_memory_install.controller_runtime import (
+    EXPECTED_POSTGRESQL_DRIVER_IDENTITY_SHA256,
     INTERPRETER_RELATIVE_PATH,
     INVENTORY_RELATIVE_PATH,
     LAUNCHER_RELATIVE_PATH,
@@ -209,6 +210,9 @@ def _receipt(
         "interpreter_sha256": "d" * 64,
         "installed_distribution_inventory_sha256": "e" * 64,
         "interpreter_path_facts_sha256": "f" * 64,
+        "postgresql_driver_identity_sha256": (
+            EXPECTED_POSTGRESQL_DRIVER_IDENTITY_SHA256
+        ),
         "supervisor_launcher_sha256": plan.supervisor_launcher_sha256,
         "launcher_help_probe_sha256": "b" * 64,
         "pip_present": False,
@@ -233,7 +237,11 @@ class _FakePrimitives:
         self.nodes: dict[str, NodeObservation] = {
             plan.substrate.archive_path: NodeObservation(
                 "file", 0o444, 0, 0, 100, plan.substrate.archive_sha256, 1
-            )
+            ),
+            str(PurePosixPath(plan.substrate.archive_path).parent): (
+                NodeObservation("directory", 0o555, 0, 0)
+            ),
+            plan.wheelhouse_root: NodeObservation("directory", 0o555, 0, 0),
         }
         self.files: dict[str, bytes] = {}
         self.calls: list[tuple[object, ...]] = []
@@ -365,9 +373,12 @@ class _FakePrimitives:
     def list_archive_members(self, archive_path):
         return self.archive_members
 
-    def extract_regular_member_no_follow(self, archive_path, member_path, destination_path, mode):
-        self.nodes[destination_path] = NodeObservation("file", mode, 0, 0, 20, "d" * 64, 1)
-        self.calls.append(("extract", archive_path, member_path, destination_path, mode))
+    def extract_regular_members_no_follow(self, archive_path, extractions):
+        for extraction in extractions:
+            self.nodes[extraction.destination_path] = NodeObservation(
+                "file", extraction.mode, 0, 0, 20, "d" * 64, 1
+            )
+        self.calls.append(("extract_batch", archive_path, extractions))
 
     def observe_tree_no_follow(self, root):
         if self.fail_terminal_tree_read and root.startswith(
@@ -390,6 +401,28 @@ class _FakePrimitives:
 
     def run_exact(self, argv, environment, cwd):
         self.calls.append(("run", argv, dict(environment), cwd))
+        if len(argv) >= 5 and argv[3] == "-c" and "standalone_cpython_path_escape" in argv[4]:
+            facts = {
+                "base_executable": "bin/python",
+                "executable": "bin/python",
+                "implementation": "CPython",
+                "import_paths": ["lib/python3.12", "lib/python3.12/site-packages"],
+                "platform_architecture": "x86_64",
+                "platform_os": "linux",
+                "prefixes": {
+                    "base_exec_prefix": ".",
+                    "base_prefix": ".",
+                    "exec_prefix": ".",
+                    "prefix": ".",
+                },
+                "python_version": self.plan.substrate.python_version,
+                "site_package_paths": ["lib/python3.12/site-packages"],
+                "stdlib_paths": {
+                    "platstdlib": "lib/python3.12",
+                    "stdlib": "lib/python3.12",
+                },
+            }
+            return ProcessResult(0, canonical_json_bytes(facts) + b"\n", b"")
         return ProcessResult(0, b"", b"")
 
     def rename_no_replace(self, source, destination):
@@ -519,11 +552,22 @@ class RuntimePublicationTransportTests(unittest.TestCase):
             "controller_runtime_publication_transport_refused",
         ):
             transport.materialize_standalone_substrate(plan)
-        self.assertFalse(any(call[0] == "extract" for call in primitives.calls))
+        self.assertFalse(
+            any(call[0] == "extract_batch" for call in primitives.calls)
+        )
 
     def test_offline_pip_argv_and_environment_are_closed(self):
         plan = _plan()
         lock = b"psycopg==3.2.9 --hash=sha256:" + b"0" * 64 + b"\n"
+        payload_tree = (
+            TreeMember("bin", "directory", 0o700, 0, 0, 0, None, 2),
+            TreeMember("bin/python", "file", 0o700, 0, 0, 20, "d" * 64, 1),
+        )
+        from tools.governed_memory_release.runtime_publication_transport import (
+            _expanded_archive_members,
+            _payload_proof,
+            _substrate_payload_tree_hash,
+        )
         plan = ControllerRuntimeBuildPlan(
             **{
                 **{field: getattr(plan, field) for field in plan.__dataclass_fields__},
@@ -533,10 +577,44 @@ class RuntimePublicationTransportTests(unittest.TestCase):
         primitives = _FakePrimitives(plan)
         transport = ClosedRuntimePublicationTransport(primitives)
         transport.create_stage(plan)
+        plan = ControllerRuntimeBuildPlan(
+            **{
+                **{field: getattr(plan, field) for field in plan.__dataclass_fields__},
+                "substrate": type(plan.substrate)(
+                    **{
+                        **{
+                            field: getattr(plan.substrate, field)
+                            for field in plan.substrate.__dataclass_fields__
+                        },
+                        "payload_tree_sha256": _substrate_payload_tree_hash(
+                            payload_tree
+                        ),
+                    }
+                ),
+            }
+        )
+        primitives.plan = plan
+        transport = ClosedRuntimePublicationTransport(primitives)
+        primitives.nodes[plan.staged_runtime_root] = NodeObservation(
+            "directory", 0o700, 0, 0
+        )
+        primitives.trees[plan.staged_runtime_root] = payload_tree
+        unused, mapping_sha = _expanded_archive_members(primitives.archive_members)
+        payload_proof = _payload_proof(plan, link_mapping_sha256=mapping_sha)
+        proof_path = plan.stage_root + "/.standalone-cpython-payload-proof.json"
+        primitives.files[proof_path] = payload_proof
+        primitives.nodes[proof_path] = NodeObservation(
+            "file", 0o400, 0, 0, len(payload_proof),
+            hashlib.sha256(payload_proof).hexdigest(), 1,
+        )
         transport.install_locked_offline_distributions(
             plan, controller_requirements_lock=lock
         )
-        run = next(call for call in primitives.calls if call[0] == "run")
+        run = next(
+            call
+            for call in primitives.calls
+            if call[0] == "run" and "--no-index" in call[1]
+        )
         argv, environment, cwd = run[1], run[2], run[3]
         self.assertEqual(argv[0], plan.staged_runtime_root + "/bin/python")
         self.assertIn("--no-index", argv)

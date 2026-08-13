@@ -14,8 +14,10 @@ from datetime import datetime, timezone
 from enum import Enum
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
+import stat
 from types import MappingProxyType
 from typing import Final, Mapping, Protocol
 
@@ -57,7 +59,9 @@ from .receipts import (
 from .durable_receipts import (
     DurableReceiptError,
     DurableReceiptStore,
+    PRODUCTION_EXECUTIONS_ROOT,
     ReceiptArtifact,
+    _open_directory_nofollow,
 )
 from .rollback_authority import (
     ROLLBACK_OPERATION,
@@ -66,7 +70,7 @@ from .rollback_authority import (
 )
 from .package_capability import (
     PackageCapabilityError,
-    verified_package_evidence,
+    _package_capability_parts,
 )
 
 
@@ -910,6 +914,166 @@ class RollbackJournalFactory(Protocol):
     def __call__(self, claimed_rollback: object) -> RollbackJournalAdapter: ...
 
 
+def _production_rollback_journal(
+    claimed_rollback: object,
+    *,
+    authority_state: AuthorityState,
+    held_lock: HeldExecutionLockCapability,
+) -> object:
+    """Open/create only the claim-derived root-owned rollback journal."""
+
+    try:
+        validate_held_execution_lock(held_lock)
+        claim = claimed_empty_rollback_evidence(claimed_rollback)
+    except Exception as error:
+        raise EmptyRollbackExecutionError(
+            "empty_rollback_production_journal_invalid"
+        ) from error
+    execution_root = PRODUCTION_EXECUTIONS_ROOT / claim.execution_id
+    journal_path = execution_root / "rollback.jsonl"
+    canonical_template = str(
+        PRODUCTION_EXECUTIONS_ROOT / "{execution_id}" / "rollback.jsonl"
+    )
+    if (
+        ROLLBACK_JOURNAL_TEMPLATE != canonical_template
+        or Path(claim.journal_path) != journal_path
+        or authority_state.path != AUTHORITY_STATE_PATH
+        or held_lock._owner.path != GLOBAL_LOCK_PATH
+    ):
+        raise EmptyRollbackExecutionError(
+            "empty_rollback_production_journal_binding_invalid"
+        )
+    root_fd = execution_fd = -1
+    exists = False
+    created = False
+    try:
+        root_fd = _open_directory_nofollow(
+            PRODUCTION_EXECUTIONS_ROOT,
+            expected_uid=0,
+        )
+        root = os.fstat(root_fd)
+        if (
+            not stat.S_ISDIR(root.st_mode)
+            or stat.S_IMODE(root.st_mode) != 0o700
+            or root.st_uid != 0
+            or root.st_gid != 0
+        ):
+            raise EmptyRollbackExecutionError(
+                "empty_rollback_production_executions_root_invalid"
+            )
+        try:
+            os.mkdir(claim.execution_id, 0o700, dir_fd=root_fd)
+            created = True
+        except FileExistsError:
+            pass
+        nofollow = getattr(os, "O_NOFOLLOW", 0)
+        if nofollow == 0:
+            raise EmptyRollbackExecutionError(
+                "empty_rollback_production_nofollow_unavailable"
+            )
+        execution_fd = os.open(
+            claim.execution_id,
+            os.O_RDONLY
+            | os.O_CLOEXEC
+            | nofollow
+            | getattr(os, "O_DIRECTORY", 0),
+            dir_fd=root_fd,
+        )
+        opened = os.fstat(execution_fd)
+        named = os.stat(
+            claim.execution_id,
+            dir_fd=root_fd,
+            follow_symlinks=False,
+        )
+        if (
+            not stat.S_ISDIR(opened.st_mode)
+            or stat.S_IMODE(opened.st_mode) != 0o700
+            or opened.st_uid != 0
+            or opened.st_gid != 0
+            or named.st_uid != 0
+            or named.st_gid != 0
+            or (opened.st_dev, opened.st_ino)
+            != (named.st_dev, named.st_ino)
+        ):
+            raise EmptyRollbackExecutionError(
+                "empty_rollback_production_execution_directory_invalid"
+            )
+        try:
+            observed = os.stat(
+                "rollback.jsonl",
+                dir_fd=execution_fd,
+                follow_symlinks=False,
+            )
+            exists = True
+        except FileNotFoundError:
+            observed = None
+        if observed is not None and (
+            not stat.S_ISREG(observed.st_mode)
+            or stat.S_IMODE(observed.st_mode) != 0o600
+            or observed.st_uid != 0
+            or observed.st_gid != 0
+            or observed.st_nlink != 1
+        ):
+            raise EmptyRollbackExecutionError(
+                "empty_rollback_production_journal_file_invalid"
+            )
+        if created:
+            os.fsync(execution_fd)
+            os.fsync(root_fd)
+        validate_held_execution_lock(held_lock)
+    except EmptyRollbackExecutionError:
+        raise
+    except Exception as error:
+        raise EmptyRollbackExecutionError(
+            "empty_rollback_production_journal_invalid"
+        ) from error
+    finally:
+        if execution_fd >= 0:
+            os.close(execution_fd)
+        if root_fd >= 0:
+            os.close(root_fd)
+
+    journal = None
+    try:
+        from .rollback_journal import DurableRollbackJournal
+
+        journal = DurableRollbackJournal(
+            journal_path,
+            claimed_rollback=claimed_rollback,
+            authority_state=authority_state,
+            held_lock=held_lock,
+            expected_uid=0,
+            create=not exists,
+        )
+        opened = os.fstat(journal._fd)
+        named = journal_path.stat(follow_symlinks=False)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or stat.S_IMODE(opened.st_mode) != 0o600
+            or opened.st_uid != 0
+            or opened.st_gid != 0
+            or opened.st_nlink != 1
+            or named.st_uid != 0
+            or named.st_gid != 0
+            or (opened.st_dev, opened.st_ino)
+            != (named.st_dev, named.st_ino)
+        ):
+            raise EmptyRollbackExecutionError(
+                "empty_rollback_production_journal_file_invalid"
+            )
+        return journal
+    except EmptyRollbackExecutionError:
+        if journal is not None:
+            journal.close()
+        raise
+    except Exception as error:
+        if journal is not None:
+            journal.close()
+        raise EmptyRollbackExecutionError(
+            "empty_rollback_production_journal_invalid"
+        ) from error
+
+
 @dataclass(frozen=True, slots=True)
 class EmptyRollbackExecutionReceipt:
     outcome: str
@@ -1473,8 +1637,10 @@ class _EmptyRollbackController:
         if step.step_id == "R04_ACQUIRE_ROLLBACK_CONTROLLER_AUTHORITY_MARKER":
             self._acquire_controller_authority_marker()
             return
-        if step.step_id == "R05_RECHECK_SEMANTIC_EMPTY_UNDER_CONTROLLER_AUTHORITY_MARKER":
-            self._reestablish_semantic_empty_under_controller_authority_marker()
+        if step.step_id == (
+            "R06_ESTABLISH_ADMINISTRATIVE_WRITER_FENCE_AND_RECHECK_SEMANTIC_EMPTY"
+        ):
+            self._establish_administrative_writer_fence_and_recheck_empty()
             return
         if step.operation == "verify_exact_absence_and_retain_audit":
             self._validate_controller_authority_marker()
@@ -1722,13 +1888,20 @@ class _EmptyRollbackController:
         )
         self._require_lock()
 
-    def _reestablish_semantic_empty_under_controller_authority_marker(
+    def _establish_administrative_writer_fence_and_recheck_empty(
         self,
     ) -> None:
-        """Recheck and durably bind semantic emptiness to the held marker."""
+        """Bind emptiness only after the exact store supervisor is absent.
+
+        This excludes cooperating and unprivileged runtime writers through the
+        held global lock, absent application services, zero live clients, and
+        root-controlled fresh credentials.  It is an administrative trust
+        boundary and does not claim to exclude an equivalently privileged root
+        administrator.
+        """
 
         self._validate_controller_authority_marker()
-        request = self._request(self.plan.steps[4])
+        request = self._request(self.plan.steps[5])
         observed = self.operations.observe_empty_eligibility(
             request,
             self.controller_authority_marker_capability,
@@ -1741,7 +1914,7 @@ class _EmptyRollbackController:
         records = self._records()
         if records and records[-1].event == RollbackEvent.COMPLETE.value:
             self._acquire_controller_authority_marker()
-            self._reestablish_semantic_empty_under_controller_authority_marker()
+            self._establish_administrative_writer_fence_and_recheck_empty()
             self._verify_terminal_state_and_evidence()
             return self._execution_receipt(
                 outcome="empty_store_rollback_already_complete",
@@ -1789,8 +1962,9 @@ def _run_authorized_empty_store_rollback(
     authority_state: AuthorityState,
     clock: TrustedUtcClock,
     held_lock: HeldExecutionLockCapability,
-    journal_factory: RollbackJournalFactory,
-    operations: EmptyRollbackOperations,
+    journal_factory: RollbackJournalFactory | None,
+    operations: EmptyRollbackOperations | None,
+    resolved_store_spec: Mapping[str, object] | None,
     receipt_store: DurableReceiptStore,
     require_durable_journal: bool,
     require_production_receipt_store: bool,
@@ -1798,8 +1972,8 @@ def _run_authorized_empty_store_rollback(
     """Shared composition; non-durable use is restricted to in-process tests."""
 
     try:
-        package_evidence = verified_package_evidence(
-            verified_package_capability
+        package_evidence, _unused_package_scope, package_artifacts = (
+            _package_capability_parts(verified_package_capability)
         )
         runtime_evidence = _controller_runtime_capability_evidence(
             verified_controller_runtime_capability
@@ -1869,12 +2043,30 @@ def _run_authorized_empty_store_rollback(
     ) as error:
         raise EmptyRollbackExecutionError("empty_rollback_plan_refused") from error
     if (
-        not callable(journal_factory)
-        or type(receipt_store) is not DurableReceiptStore
+        type(receipt_store) is not DurableReceiptStore
         or type(require_durable_journal) is not bool
         or type(require_production_receipt_store) is not bool
+        or (
+            require_production_receipt_store
+            and (
+                journal_factory is not None
+                or require_durable_journal is not True
+                or operations is not None
+                or not isinstance(resolved_store_spec, Mapping)
+            )
+        )
+        or (
+            not require_production_receipt_store
+            and (
+                not callable(journal_factory)
+                or operations is None
+                or resolved_store_spec is not None
+            )
+        )
     ):
-        raise EmptyRollbackExecutionError("empty_rollback_journal_factory_invalid")
+        raise EmptyRollbackExecutionError(
+            "empty_rollback_execution_dependency_invalid"
+        )
     try:
         if require_production_receipt_store:
             receipt_store.require_production_binding()
@@ -1930,8 +2122,17 @@ def _run_authorized_empty_store_rollback(
         raise EmptyRollbackExecutionError(
             "empty_rollback_eligibility_receipt_persistence_mismatch"
         )
-    journal = journal_factory(claimed)
+    journal = None
     try:
+        if require_production_receipt_store:
+            journal = _production_rollback_journal(
+                claimed,
+                authority_state=authority_state,
+                held_lock=held_lock,
+            )
+        else:
+            assert journal_factory is not None
+            journal = journal_factory(claimed)
         if require_durable_journal:
             # Imported lazily because rollback_journal imports the record types
             # above.  Exact type prevents a duck-typed or volatile journal from
@@ -1942,6 +2143,43 @@ def _run_authorized_empty_store_rollback(
                 raise EmptyRollbackExecutionError(
                     "empty_rollback_durable_journal_required"
                 )
+        if require_production_receipt_store:
+            # The public path accepts immutable evidence, never an effect
+            # implementation.  Select the exact closed Linux composition only
+            # after the authority claim, retained receipts, and durable journal
+            # have all been verified.
+            from .rollback_live_adapter import (
+                ProductionLinuxEmptyRollbackOperationsFactory,
+            )
+
+            try:
+                operations = ProductionLinuxEmptyRollbackOperationsFactory(
+                    held_lock=held_lock,
+                    verified_controller_runtime_capability=(
+                        verified_controller_runtime_capability
+                    ),
+                    authority_state=authority_state,
+                    receipt_store=receipt_store,
+                )(
+                    claimed_rollback=claimed,
+                    verified_rollback_capability=(
+                        verified_rollback_capability
+                    ),
+                    signed_eligibility=eligibility_receipt,
+                    resolved_store_spec=resolved_store_spec,
+                    verified_artifacts=package_artifacts,
+                    verified_resources=resources,
+                    installation_receipt=durable_install.canonical_receipt,
+                    rollback_journal=journal,
+                )
+            except Exception as error:
+                raise EmptyRollbackExecutionError(
+                    "empty_rollback_production_operations_binding_failed"
+                ) from error
+        if operations is None:
+            raise EmptyRollbackExecutionError(
+                "empty_rollback_execution_dependency_invalid"
+            )
         return _EmptyRollbackController(
             plan=plan,
             signed_eligibility=eligibility_receipt,
@@ -1987,6 +2225,7 @@ def _run_authorized_empty_store_rollback_synthetic(
         held_lock=held_lock,
         journal_factory=journal_factory,
         operations=operations,
+        resolved_store_spec=None,
         receipt_store=receipt_store,
         require_durable_journal=False,
         require_production_receipt_store=False,
@@ -2022,6 +2261,7 @@ def _run_authorized_empty_store_rollback_durable_synthetic(
         held_lock=held_lock,
         journal_factory=journal_factory,
         operations=operations,
+        resolved_store_spec=None,
         receipt_store=receipt_store,
         require_durable_journal=True,
         require_production_receipt_store=False,
@@ -2038,11 +2278,16 @@ def run_authorized_empty_store_rollback(
     authority_state: AuthorityState,
     clock: TrustedUtcClock,
     held_lock: HeldExecutionLockCapability,
-    journal_factory: RollbackJournalFactory,
-    operations: EmptyRollbackOperations,
+    resolved_store_spec: Mapping[str, object],
     receipt_store: DurableReceiptStore,
 ) -> EmptyRollbackExecutionReceipt:
-    """Claim and execute only with the exact durable rollback journal."""
+    """Execute through the fixed production Linux rollback composition.
+
+    The caller supplies verified capabilities, immutable store evidence, the
+    held controller lock, and the canonical durable receipt store.  It cannot
+    inject a journal, operation, transport, probe, receipt sink, audit source,
+    or physical deletion driver.
+    """
 
     return _run_authorized_empty_store_rollback(
         verified_rollback_capability=verified_rollback_capability,
@@ -2055,8 +2300,9 @@ def run_authorized_empty_store_rollback(
         authority_state=authority_state,
         clock=clock,
         held_lock=held_lock,
-        journal_factory=journal_factory,
-        operations=operations,
+        journal_factory=None,
+        operations=None,
+        resolved_store_spec=resolved_store_spec,
         receipt_store=receipt_store,
         require_durable_journal=True,
         require_production_receipt_store=True,
