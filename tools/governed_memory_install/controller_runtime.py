@@ -961,7 +961,7 @@ def _observe_filesystem(
                 unused_launcher, launcher_sha256, unused_mode = _read_regular(
                     launcher_parent,
                     LAUNCHER_RELATIVE_PATH.name,
-                    executable=False,
+                    executable=True,
                 )
             finally:
                 os.close(launcher_parent)

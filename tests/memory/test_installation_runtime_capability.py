@@ -21,6 +21,7 @@ from tools.governed_memory_install.controller_runtime import (
     RUNTIME_RECEIPT_SCHEMA,
     _ObservedRuntime,
     _ProcessProbeResult,
+    _read_regular,
     _observe_release_tree,
     _requirements_from_lock,
     _verify_launcher_module_closure,
@@ -688,6 +689,29 @@ class RuntimeCapabilityTests(unittest.TestCase):
             finally:
                 os.close(descriptor)
                 self._unseal_release_directories(root)
+
+    def test_sealed_supervisor_launcher_is_read_as_executable(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            launcher = root / "store_supervisor_launcher.py"
+            launcher.write_bytes(b"pass\n")
+            launcher.chmod(0o555)
+            descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                with patch(
+                    "tools.governed_memory_install.controller_runtime._EXPECTED_UID",
+                    os.getuid(),
+                ):
+                    raw, digest, mode = _read_regular(
+                        descriptor,
+                        launcher.name,
+                        executable=True,
+                    )
+            finally:
+                os.close(descriptor)
+            self.assertEqual(raw, b"pass\n")
+            self.assertEqual(digest, hashlib.sha256(raw).hexdigest())
+            self.assertEqual(mode, 0o555)
 
     def test_release_tree_rejects_extra_symlink_content_and_manifest_drift(self):
         artifacts = {

@@ -33,7 +33,7 @@
     "tools/governed_memory_install/authority.py": "4d0495ea636c3cbd09faf149df7f52f4d028c563dd9007d2972f6a7275e764fc",
     "tools/governed_memory_install/authority_state.py": "aacea1eb170d205be82faff4733e1f6efe7a2e344f15ca5fc709a2d8f8e0cc20",
     "tools/governed_memory_install/controller.py": "5a18628c85aab814360667341f685f809ac240b484a5fe6e10c727f54a752de5",
-    "tools/governed_memory_install/controller_runtime.py": "02fe14136e50fb271b6e2733de09d4e92109be77ff6a1a063aa50ad4734859ba",
+    "tools/governed_memory_install/controller_runtime.py": "aead8ae760a40764b1a3b06c07338a404564fa1c26a1a0e96c1e7f395ec1e752",
     "tools/governed_memory_install/disposable_proof_harness.py": "d6e6285e5b39b073a681351e4f3f8764f6f9bb316be0745c6895e67875c8c3bc",
     "tools/governed_memory_install/durable_receipts.py": "4a95af313e225acde4d962053de00df46b6253867ae0336bd57e0be10cfb7978",
     "tools/governed_memory_install/execution_authority.py": "de7860de4190d3dcdc66dec1556cff26e80dccd71e89d846dcd23adbce80f01b",
