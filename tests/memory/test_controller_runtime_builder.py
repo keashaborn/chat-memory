@@ -7,6 +7,7 @@ from pathlib import Path
 import unittest
 
 from tools.governed_memory_install.controller_runtime import (
+    REQUIREMENTS_LOCK_RELATIVE_PATH,
     RUNTIME_RECEIPT_RESULT,
     RUNTIME_RECEIPT_SCHEMA,
     _receipt_document,
@@ -20,6 +21,7 @@ from tools.governed_memory_release.controller_runtime_builder import (
     WHEELHOUSE_TREE_SCHEMA,
     BuildObservation,
     ControllerRuntimeBuildError,
+    ControllerRuntimeBuildResult,
     PublicationObservation,
     PublicationTargetObservation,
     StageObservation,
@@ -133,12 +135,22 @@ def _future_ready_contract() -> bytes:
             "manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
         ),
     }
+    driver["selected_wheels"] = []
     for item in driver["preferred_distributions"]:
         filename = selected_wheels[item["normalized_distribution"]]
-        item["selected_wheel_filename"] = filename
-        item["selected_wheel_sha256"] = hashlib.sha256(
-            _WHEELHOUSE_ARTIFACTS[filename]
-        ).hexdigest()
+        driver["selected_wheels"].append(
+            {
+                "normalized_distribution": item["normalized_distribution"],
+                "selected_wheel_filename": filename,
+                "selected_wheel_sha256": hashlib.sha256(
+                    _WHEELHOUSE_ARTIFACTS[filename]
+                ).hexdigest(),
+                "version": item["version"],
+            }
+        )
+    driver["selection_state"] = (
+        "exact-selected-wheels-staged-verified-and-locked"
+    )
     for key in (
         "binary_native_library_closure_inspected",
         "current_controller_lock_contains_selection",
@@ -274,10 +286,18 @@ class _FakeTransport:
         self.publication_changes: dict[str, object] = {}
         self.abandon_result = StageObservation("absent", None)
         self.calls: list[str] = []
+        self.controller_requirements_lock: bytes | None = None
+        self.completed_result: ControllerRuntimeBuildResult | None = None
 
     def observe_stage(self, plan):
         self.calls.append("observe_stage")
         return self.initial_stage
+
+    def recover_completed_publication(self, plan):
+        self.calls.append("recover_completed_publication")
+        if self.completed_result is None:
+            raise ControllerRuntimeBuildError("synthetic_completed_result_absent")
+        return self.completed_result
 
     def recover_owned_partial_stage(self, plan):
         self.calls.append("recover_owned_partial_stage")
@@ -299,8 +319,11 @@ class _FakeTransport:
     def materialize_standalone_substrate(self, plan):
         self.calls.append("materialize_standalone_substrate")
 
-    def install_locked_offline_distributions(self, plan):
+    def install_locked_offline_distributions(
+        self, plan, *, controller_requirements_lock
+    ):
         self.calls.append("install_locked_offline_distributions")
+        self.controller_requirements_lock = controller_requirements_lock
 
     def remove_bootstrap_packaging_tools(self, plan):
         self.calls.append("remove_bootstrap_packaging_tools")
@@ -347,6 +370,22 @@ class _FakeTransport:
             receipt_file_fsynced=True,
             receipt_parent_fsynced=True,
             stage_absent=True,
+            publication_intent_retained=True,
+            terminal_state_observed=True,
+            same_device_rename_preconditions_observed=True,
+        )
+        document = json.loads(runtime_build_receipt_json.decode("ascii"))
+        self.completed_result = ControllerRuntimeBuildResult(
+            build_plan_sha256=plan.build_plan_sha256,
+            runtime_build_receipt_json=runtime_build_receipt_json,
+            controller_runtime_receipt_sha256=hashlib.sha256(
+                runtime_build_receipt_json
+            ).hexdigest(),
+            runtime_root=runtime_root,
+            release_root=plan.final_release_root,
+            receipt_path=receipt_path,
+            runtime_tree_sha256=document["runtime_tree_sha256"],
+            release_tree_sha256=document["release_tree_sha256"],
         )
         return replace(value, **self.publication_changes)
 
@@ -387,7 +426,9 @@ class ControllerRuntimeBuilderTests(unittest.TestCase):
         self.assertNotIn("create_venv", rendered_operations)
         self.assertNotIn("python -m venv", rendered_operations)
         self.assertIn("non_venv_interpreter", rendered_operations)
-        self.assertIn("atomic_rename_each_root_no_replace", plan.operations[-2])
+        self.assertIn("atomic_rename_each_root_no_replace", plan.operations[-3])
+        self.assertIn("remove_only_empty_stage_root", plan.operations[-2])
+        self.assertIn("observe_exact_terminal_publication", plan.operations[-1])
         self.assertEqual(
             plan.required_distributions,
             {
@@ -547,37 +588,26 @@ class ControllerRuntimeBuilderTests(unittest.TestCase):
         driver = selected["postgresql_driver"]
         self.assertEqual(driver["preferred_extra"], "binary")
         self.assertEqual(
-            {
-                item["normalized_distribution"]: (
-                    item["version"], item["selected_wheel_sha256"]
-                )
-                for item in driver["preferred_distributions"]
-            },
-            {
-                "psycopg": (
-                    "3.3.4",
-                    "b6bbc25ccf05c8fad3b061d9db2ef0909a555171b84b07f29458a447253d679a",
-                ),
-                "psycopg-binary": (
-                    "3.3.4",
-                    "e7510c37550f91a187e3660a8cc50d4b760f8c3b8b2f89ebc5698cd2c7f2c85d",
-                ),
-            },
+            driver["preferred_distributions"],
+            [
+                {"normalized_distribution": "psycopg", "version": "3.3.4"},
+                {
+                    "normalized_distribution": "psycopg-binary",
+                    "version": "3.3.4",
+                },
+            ],
+        )
+        self.assertEqual(driver["selected_wheels"], [])
+        self.assertEqual(
+            driver["selection_state"],
+            "preferred-family-and-version-only-not-selected-not-in-current-lock-not-staged-not-verified",
         )
         self.assertEqual(
             {
-                item["normalized_distribution"]: item[
-                    "selected_wheel_filename"
-                ]
+                item["normalized_distribution"]
                 for item in driver["preferred_distributions"]
             },
-            {
-                "psycopg": "psycopg-3.3.4-py3-none-any.whl",
-                "psycopg-binary": (
-                    "psycopg_binary-3.3.4-cp312-cp312-"
-                    "manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
-                ),
-            },
+            {"psycopg", "psycopg-binary"},
         )
         for key in (
             "current_controller_lock_contains_selection",
@@ -590,7 +620,22 @@ class ControllerRuntimeBuilderTests(unittest.TestCase):
         self.assertTrue(
             driver["postgresql_source_closure_contract_packaged"]
         )
-        self.assertFalse(driver["driver_native_postgresql_stages_packaged"])
+        self.assertTrue(driver["driver_native_postgresql_stages_packaged"])
+        self.assertFalse(
+            driver["concrete_psycopg_postgresql_transport_packaged"]
+        )
+        build_policy = contract["build_policy"]
+        self.assertTrue(
+            build_policy["runtime_publication_policy_transport_packaged"]
+        )
+        self.assertFalse(
+            build_policy["production_runtime_publication_primitives_packaged"]
+        )
+        self.assertFalse(
+            build_policy[
+                "independent_standalone_cpython_payload_tree_proof_packaged"
+            ]
+        )
         wheelhouse = selected["wheelhouse"]
         self.assertFalse(wheelhouse["caller_supplied_opaque_tree_sha256_accepted"])
         self.assertFalse(wheelhouse["wheelhouse_staged"])
@@ -632,8 +677,25 @@ class ControllerRuntimeBuilderTests(unittest.TestCase):
         ] = False
         wrong_digest = json.loads(_future_ready_contract().decode("ascii"))
         wrong_digest["selected_runtime_inputs"]["postgresql_driver"][
-            "preferred_distributions"
+            "selected_wheels"
         ][0]["selected_wheel_sha256"] = "a" * 64
+        preference_contaminated = json.loads(
+            _future_ready_contract().decode("ascii")
+        )
+        contaminated_driver = preference_contaminated[
+            "selected_runtime_inputs"
+        ]["postgresql_driver"]
+        misplaced_selection = contaminated_driver["selected_wheels"].pop(0)
+        contaminated_driver["preferred_distributions"][0].update(
+            {
+                "selected_wheel_filename": misplaced_selection[
+                    "selected_wheel_filename"
+                ],
+                "selected_wheel_sha256": misplaced_selection[
+                    "selected_wheel_sha256"
+                ],
+            }
+        )
         wrong_tree = json.loads(_future_ready_contract().decode("ascii"))
         wrong_tree["selected_runtime_inputs"]["wheelhouse"][
             "canonical_tree_sha256"
@@ -641,6 +703,10 @@ class ControllerRuntimeBuilderTests(unittest.TestCase):
         for document, message in (
             (not_ready, "controller_runtime_postgresql_driver_not_ready"),
             (wrong_digest, "controller_runtime_postgresql_driver_not_ready"),
+            (
+                preference_contaminated,
+                "controller_runtime_postgresql_driver_not_ready",
+            ),
             (wrong_tree, "controller_runtime_wheelhouse_not_ready"),
         ):
             contract = _canonical(document)
@@ -729,6 +795,39 @@ class ControllerRuntimeBuilderTests(unittest.TestCase):
             + ".json",
         )
         self.assertEqual(transport.calls[-1], "publish_no_replace")
+
+    def test_completed_publication_replays_bound_result_without_rebuild(self):
+        plan, manifest, artifacts = _plan()
+        transport = _FakeTransport(plan)
+        first = execute_controller_runtime_build(
+            plan,
+            standalone_cpython_substrate_json=_substrate(),
+            package_manifest_json=manifest,
+            package_artifacts=artifacts,
+            transport=transport,
+        )
+        transport.initial_stage = StageObservation(
+            "publication_completed", plan.build_plan_sha256
+        )
+        before = len(transport.calls)
+
+        replay = execute_controller_runtime_build(
+            plan,
+            standalone_cpython_substrate_json=_substrate(),
+            package_manifest_json=manifest,
+            package_artifacts=artifacts,
+            transport=transport,
+        )
+
+        self.assertEqual(replay, first)
+        self.assertEqual(
+            transport.calls[before:],
+            ["observe_stage", "recover_completed_publication"],
+        )
+        self.assertEqual(
+            transport.controller_requirements_lock,
+            artifacts[str(REQUIREMENTS_LOCK_RELATIVE_PATH)],
+        )
         self.assertNotIn("abandon_owned_stage", transport.calls)
 
     def test_exact_owned_partial_stage_is_recovered_but_foreign_is_refused(self):
@@ -785,6 +884,45 @@ class ControllerRuntimeBuilderTests(unittest.TestCase):
                 transport=untrusted_marker,
             )
         self.assertEqual(untrusted_marker.calls, ["observe_stage"])
+
+    def test_durable_publication_intent_refuses_restart_without_recovery_or_abandon(self):
+        plan, manifest, artifacts = _plan()
+        transport = _FakeTransport(plan)
+        transport.initial_stage = StageObservation(
+            "publication_started", plan.build_plan_sha256
+        )
+        with self.assertRaisesRegex(
+            ControllerRuntimeBuildError,
+            "controller_build_partial_publication_requires_review",
+        ):
+            execute_controller_runtime_build(
+                plan,
+                standalone_cpython_substrate_json=_substrate(),
+                package_manifest_json=manifest,
+                package_artifacts=artifacts,
+                transport=transport,
+            )
+        self.assertEqual(transport.calls, ["observe_stage"])
+        self.assertNotIn("recover_owned_partial_stage", transport.calls)
+        self.assertNotIn("create_stage", transport.calls)
+        self.assertNotIn("abandon_owned_stage", transport.calls)
+
+        foreign = _FakeTransport(plan)
+        foreign.initial_stage = StageObservation(
+            "publication_started_foreign", None
+        )
+        with self.assertRaisesRegex(
+            ControllerRuntimeBuildError,
+            "controller_build_partial_publication_requires_review",
+        ):
+            execute_controller_runtime_build(
+                plan,
+                standalone_cpython_substrate_json=_substrate(),
+                package_manifest_json=manifest,
+                package_artifacts=artifacts,
+                transport=foreign,
+            )
+        self.assertEqual(foreign.calls, ["observe_stage"])
 
     def test_partial_stage_creation_or_recovery_requires_manual_review(self):
         plan, manifest, artifacts = _plan()

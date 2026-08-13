@@ -56,6 +56,9 @@ CONTROLLER_RUNTIME_CONTRACT_RELATIVE: Final = (
 POSTGRES_SOURCE_CLOSURE_RELATIVE: Final = (
     "ops/governed_memory/installation/current/postgres/source_closure_contract.json"
 )
+POSTGRES_NATIVE_STAGE_CONTRACT_RELATIVE: Final = (
+    "ops/governed_memory/installation/current/postgres/native_stage_contract.json"
+)
 PROOF_CONTRACT_RELATIVE: Final = (
     "ops/governed_memory/installation/current/disposable_proof_contract.json"
 )
@@ -70,10 +73,10 @@ EMPTY_ROLLBACK_RECEIPT_SCHEMA_RELATIVE: Final = (
 )
 
 EXPECTED_CONTRACT_CANONICAL_SHA256: Final = (
-    "e0a92a2838303c8ae2a62041e2d2c53addbf7ffc8dbf68b5b01bdd277db30e80"
+    "beb415b93d08221ab71917b6a2588c7d8ad3ac2d8db4dde3698ff13b0b8c5bed"
 )
 EXPECTED_PLAN_CANONICAL_SHA256: Final = (
-    "030761117be61eb343acc97307c6bfad43c1adc9c0ef3706ef25f165b273015e"
+    "d6846be50c1bab2657f831be699a4653defa933dbaee88e1976d9120e341de9e"
 )
 EXPECTED_CONTROLLER_SOURCE_SHA256: Final = (
     "5a18628c85aab814360667341f685f809ac240b484a5fe6e10c727f54a752de5"
@@ -82,13 +85,16 @@ EXPECTED_CONTROLLER_MODEL_SHA256: Final = (
     "d3701a21b827da66122906e1dcc2828ce69f06e1048164df1c4d0ca0321c3de8"
 )
 EXPECTED_EXECUTION_CONTRACT_CANONICAL_SHA256: Final = (
-    "62925ad49da1d35fb61dd2badf85cdc7b1697e30addb8b65a88cc1823a96efc9"
+    "1bd4642cc512367c02c2d9282a93397a2230a8770868dae80bab90519993a53f"
 )
 EXPECTED_CONTROLLER_RUNTIME_CONTRACT_CANONICAL_SHA256: Final = (
-    "0e9be6541e128f555de207a4d9a19506760844fe193db6627c750f951df80aae"
+    "c3496ae3baa613870937a542783bdd94b1fe95320c4c461a4a5815f83161c08f"
 )
 EXPECTED_POSTGRES_SOURCE_CLOSURE_CANONICAL_SHA256: Final = (
     "1d4429f46aecee0ddbc348c952d767b0dbe870ecb9bee8be51819de4e312b295"
+)
+EXPECTED_POSTGRES_NATIVE_STAGE_CONTRACT_CANONICAL_SHA256: Final = (
+    "7ed91be76c6296d8fbb15457f327e2de11c78957c1ba1abd68d9a978c4c4cdf3"
 )
 EXPECTED_PROOF_CONTRACT_CANONICAL_SHA256: Final = (
     "2722d7b274cdab2a4c8e352277b4d28c0c6f96432d4525d8f990b05e891b548a"
@@ -133,10 +139,10 @@ EXPECTED_EMPTY_ROLLBACK_STEP_IDS: Final = (
     "R01_REVERIFY_GLOBAL_LOCK",
     "R02_VERIFY_CLAIMED_ROLLBACK_AUTHORITY",
     "R03_VERIFY_INSTALL_RECEIPT_AND_LEDGER",
-    "R04_VERIFY_EMPTY_ELIGIBILITY",
-    "R05_DISABLE_AND_REMOVE_STORES_SUPERVISOR",
-    "R06_STOP_EXACT_STORES",
-    "R07_ACQUIRE_STOPPED_STORE_WRITER_FENCE",
+    "R04_ACQUIRE_ROLLBACK_CONTROLLER_AUTHORITY_MARKER",
+    "R05_RECHECK_SEMANTIC_EMPTY_UNDER_CONTROLLER_AUTHORITY_MARKER",
+    "R06_DISABLE_AND_REMOVE_STORES_SUPERVISOR",
+    "R07_STOP_EXACT_STORES",
     "R08_REMOVE_EXACT_QDRANT_CONTAINER",
     "R09_REMOVE_EXACT_POSTGRES_CONTAINER",
     "R10_REMOVE_EXACT_EMPTY_QDRANT_VOLUME",
@@ -153,11 +159,17 @@ EXPECTED_EMPTY_ROLLBACK_STEP_IDS: Final = (
     "R21_VERIFY_CANONICAL_DATABASE_AND_ROLES_PHYSICALLY_ABSENT",
     "R22_VERIFY_EXACT_ABSENCE_AND_RETAIN_AUDIT",
 )
-EXPECTED_POSTGRES_NATIVE_PHASE_IDS: Final = (
+EXPECTED_POSTGRES_SOURCE_PHASE_IDS: Final = (
     "F01_CANONICAL_CLUSTER_BOOTSTRAP_TRANSLATION",
     "F02_OWNER_ROLE_PREFLIGHT_AND_MIGRATIONS",
     "T01_INDEPENDENT_TERMINAL_CATALOG",
     "R01_EXACT_EMPTY_ROLLBACK_PREFIX_MACHINE",
+)
+EXPECTED_POSTGRES_NATIVE_STAGE_IDS: Final = (
+    "F01_PREBOOTSTRAP_AND_CREATE_DATABASE",
+    "F02_ROLES_PRIVACY_AND_MIGRATIONS",
+    "T01_TERMINAL_EXACT_CATALOG",
+    "R01_EMPTY_ROLLBACK_PREFIX_RESUME",
 )
 
 EXPECTED_CONTRACT_KEYS: Final = frozenset(
@@ -214,22 +226,27 @@ EXPECTED_LIVE_EXECUTION: Final = {
     "closed_live_transport_contracts_packaged": True,
     "complete_closed_live_transport_substrate_set_packaged": False,
     "postgresql_source_closure_contract_packaged": True,
-    "driver_native_postgresql_stage_contract_packaged": False,
-    "driver_native_postgresql_executable_stage_machine_packaged": False,
+    "driver_native_postgresql_stage_contract_packaged": True,
+    "driver_native_postgresql_executable_stage_machine_packaged": True,
+    "concrete_psycopg_postgresql_transport_packaged": False,
     "runtime_input_selection_contract_repaired": True,
     "runtime_build_receipt_provenance_v3_packaged": True,
     "complete_closed_live_transport_substrate_set_integrated_into_bound_factory": False,
     "approved_terminal_postgresql_catalog_manifest_selected": False,
     "exact_postgresql_16_14_and_qdrant_1_19_0_readiness_required": True,
-    "durable_live_empty_rollback_writer_fence_transport_packaged": False,
+    "durable_live_empty_rollback_controller_authority_marker_transport_packaged": True,
+    "external_direct_writer_exclusion_implemented": False,
     "stopped_store_semantic_empty_recheck_is_valid": False,
     "selected_live_platform_transports_packaged": False,
+    "selected_non_postgresql_live_platform_transport_factory_packaged": True,
     "pinned_postgresql_driver_selected": False,
     "durable_create_once_receipt_store_packaged": True,
     "public_entrypoints_require_canonical_root_owned_production_receipt_store": True,
     "synthetic_receipt_stores_are_private_test_only": True,
     "controller_runtime_release_builder_orchestration_packaged": True,
     "controller_runtime_build_transport_packaged": False,
+    "controller_runtime_publication_policy_transport_packaged": True,
+    "production_runtime_publication_primitives_packaged": False,
     "activation_entrypoint_packaged": False,
     "bounded_image_inspect_runner_primitive_packaged": True,
     "local_image_inspect_adapter_packaged": True,
@@ -237,7 +254,7 @@ EXPECTED_LIVE_EXECUTION: Final = {
     "full_controller_release_tree_verification_packaged": True,
     "exact_locked_controller_distribution_set_verification_packaged": True,
     "full_release_tree_sha256_bound_through_claim_journal_host_ownership_and_install_receipt": True,
-    "empty_rollback_full_runtime_and_release_identity_bound_through_authority_claim_journal_requests_observations_writer_fence_and_receipt": True,
+    "empty_rollback_full_runtime_and_release_identity_bound_through_authority_claim_journal_requests_observations_controller_authority_marker_and_receipt": True,
     "controller_release_and_runtime_require_separate_future_build_and_install_authority": True,
     "supervisor_launcher_source_packaged": True,
     "controller_runtime_built_or_installed": False,
@@ -286,6 +303,7 @@ EXPECTED_ARTIFACTS: Final = frozenset(
         "ops/governed_memory/installation/current/migration_manifest.json",
         "ops/governed_memory/installation/current/postgres/migration_bindings.json",
         POSTGRES_SOURCE_CLOSURE_RELATIVE,
+        POSTGRES_NATIVE_STAGE_CONTRACT_RELATIVE,
         "ops/governed_memory/installation/current/postgres/roles_preflight.pgsql",
         "ops/governed_memory/installation/postgres/canonical_cluster.pgsql.in",
         "ops/governed_memory/installation/postgres/canonical_cluster_rollback.pgsql.in",
@@ -311,10 +329,13 @@ EXPECTED_ARTIFACTS: Final = frozenset(
         "tools/governed_memory_install/install_entrypoint.py",
         "tools/governed_memory_install/linux_store_effects.py",
         "tools/governed_memory_install/linux_live_transports.py",
+        "tools/governed_memory_install/linux_live_adapters.py",
         "tools/governed_memory_install/linux_store_readiness.py",
         "tools/governed_memory_install/linux_plan.py",
         "tools/governed_memory_install/package.py",
         "tools/governed_memory_install/package_capability.py",
+        "tools/governed_memory_install/live_rollback_marker.py",
+        "tools/governed_memory_install/postgres_native_stages.py",
         "tools/governed_memory_install/postgres_source_closure.py",
         "tools/governed_memory_install/receipts.py",
         "tools/governed_memory_install/resource_identity.py",
@@ -330,6 +351,7 @@ EXPECTED_ARTIFACTS: Final = frozenset(
         "tools/governed_memory_install/synthetic_backend.py",
         "tools/governed_memory_release/__init__.py",
         "tools/governed_memory_release/controller_runtime_builder.py",
+        "tools/governed_memory_release/runtime_publication_transport.py",
         "tools/governed_memory_validation/generate_installation_package_manifest.py",
         "tools/governed_memory_validation/run_installation_synthetic_proof.py",
         "tools/governed_memory_validation/verify_store_migration_manifest.py",
@@ -600,7 +622,7 @@ def _verify_contract(contract: dict[str, object]) -> None:
         contract.get("schema_version")
         != "governed-memory-dormant-store-install-inactive-execution-contract-v4"
         or contract.get("state")
-        != "repository-only-contract-repaired-closed-adapters-and-runtime-builder-packaged-not-installed-not-activated"
+        != "phase9h-repository-only-bounded-transports-stage-machines-and-controller-marker-packaged-not-installed-not-activated"
         or contract.get("server") != "seebx"
     ):
         raise PackageError("dormant_store_install_contract_identity_invalid")
@@ -632,6 +654,8 @@ def _verify_contract(contract: dict[str, object]) -> None:
         or migration.get("postgresql_source_closure_contract_packaged")
         is not True
         or migration.get("driver_native_executable_stage_contract_packaged")
+        is not True
+        or migration.get("concrete_psycopg_postgresql_transport_packaged")
         is not False
         or migration.get("host_psql_direct_execution_allowed") is not False
         or migration.get("preferred_synchronous_driver_target")
@@ -719,10 +743,12 @@ def _verify_contract(contract: dict[str, object]) -> None:
         )
         is not True
         or recovery.get("driver_native_postgresql_stage_contract_packaged")
-        is not False
+        is not True
         or recovery.get(
             "driver_native_postgresql_executable_stage_machine_packaged"
         )
+        is not True
+        or recovery.get("concrete_psycopg_postgresql_transport_packaged")
         is not False
         or recovery.get("controller_runtime_input_selection_contract_repaired")
         is not True
@@ -738,24 +764,26 @@ def _verify_contract(contract: dict[str, object]) -> None:
             "approved_terminal_postgresql_catalog_manifest_selected"
         )
         is not False
-        or recovery.get("empty_rollback_stops_exact_stores_before_writer_fence")
-        is not False
-        or recovery.get("empty_rollback_writer_fence_held_from_r07_through_receipt")
-        is not False
         or recovery.get(
-            "fresh_offline_read_only_empty_recheck_required_at_r07_under_stopped_store_fence"
+            "empty_rollback_controller_authority_marker_held_from_r04_through_receipt"
         )
-        is not False
+        is not True
         or recovery.get(
-            "destructive_rollback_steps_apply_only_if_still_empty_under_fence"
+            "fresh_live_semantic_empty_recheck_required_at_r05_under_controller_authority_marker"
         )
-        is not False
+        is not True
+        or recovery.get(
+            "destructive_rollback_steps_require_held_controller_authority_marker_and_persisted_r05_empty_proof"
+        )
+        is not True
         or recovery.get("stopped_store_semantic_empty_recheck_is_valid")
         is not False
-        or recovery.get("durable_live_writer_fence_transport_packaged")
+        or recovery.get("durable_live_rollback_controller_authority_marker_transport_packaged")
+        is not True
+        or recovery.get("external_direct_writer_exclusion_implemented")
         is not False
         or recovery.get(
-            "required_future_order_is_live_writer_fence_empty_recheck_then_stop_then_physical_removal"
+            "controller_authority_marker_empty_recheck_then_stop_then_physical_removal_order_implemented"
         )
         is not True
         or recovery.get(
@@ -763,7 +791,13 @@ def _verify_contract(contract: dict[str, object]) -> None:
         )
         is not True
         or recovery.get(
-            "empty_rollback_claim_journal_requests_observations_writer_fence_and_receipt_bind_verified_runtime_and_full_release_tree"
+            "empty_rollback_claim_journal_requests_observations_controller_authority_marker_and_receipt_bind_verified_runtime_and_full_release_tree"
+        )
+        is not True
+        or recovery.get("selected_live_platform_transport_factory_packaged")
+        is not False
+        or recovery.get(
+            "selected_non_postgresql_live_platform_transport_factory_packaged"
         )
         is not True
         or type(identity) is not dict
@@ -827,11 +861,11 @@ def _verify_contract(contract: dict[str, object]) -> None:
         )
         is not True
         or receipts.get(
-            "empty_rollback_receipt_persisted_create_once_while_writer_fence_held"
+            "empty_rollback_receipt_persisted_create_once_while_controller_authority_marker_held"
         )
-        is not False
+        is not True
         or receipts.get(
-            "empty_rollback_receipt_persistence_create_once_while_live_writer_fence_held_required"
+            "empty_rollback_receipt_persistence_create_once_while_controller_authority_marker_held_required"
         )
         is not True
         or receipts.get("canonical_production_executions_root")
@@ -845,17 +879,13 @@ def _verify_contract(contract: dict[str, object]) -> None:
         )
         is not True
         or type(blockers) is not list
-        or "selected_live_linux_platform_transport_factory_not_packaged" not in blockers
         or "pinned_postgresql_driver_not_selected" not in blockers
-        or "complete_closed_live_transport_substrate_set_not_packaged"
+        or "concrete_psycopg_postgresql_transport_and_complete_bound_live_transport_factory_not_packaged"
         not in blockers
-        or (
-            "driver_native_postgresql_translation_catalog_and_rollback_prefix_machine_not_packaged"
-            not in blockers
-        )
+        or "production_runtime_publication_primitives_not_packaged" not in blockers
+        or "external_direct_writer_exclusion_not_implemented_controller_marker_only"
+        not in blockers
         or "approved_terminal_postgresql_catalog_manifest_not_selected"
-        not in blockers
-        or "durable_live_empty_rollback_writer_fence_transport_not_packaged"
         not in blockers
         or "canonical_install_receipt_emission_not_integrated" in blockers
     ):
@@ -871,7 +901,7 @@ def _verify_plan(plan: dict[str, object]) -> None:
         plan.get("schema_version")
         != "governed-memory-dormant-store-install-stores-controller-plan-v5"
         or plan.get("state")
-        != "repository-only-repaired-install-empty-rollback-and-closed-adapters-packaged-not-installed-not-authorized"
+        != "phase9h-repository-only-non-postgresql-live-transports-postgresql-stage-machine-runtime-publication-policy-and-rollback-marker-packaged-not-installed-not-authorized"
         or plan.get("server") != "seebx"
     ):
         raise PackageError("dormant_store_install_plan_identity_invalid")
@@ -933,9 +963,9 @@ def _verify_plan(plan: dict[str, object]) -> None:
         )
         is not True
         or invariants.get(
-            "fresh_offline_read_only_empty_recheck_required_at_r07_under_stopped_store_fence"
+            "fresh_live_semantic_empty_recheck_required_at_r05_under_controller_authority_marker"
         )
-        is not False
+        is not True
         or invariants.get("closed_live_transport_contracts_packaged") is not True
         or invariants.get("complete_closed_live_transport_substrate_set_packaged") is not False
         or invariants.get(
@@ -947,10 +977,12 @@ def _verify_plan(plan: dict[str, object]) -> None:
         )
         is not True
         or invariants.get("driver_native_postgresql_stage_contract_packaged")
-        is not False
+        is not True
         or invariants.get(
             "driver_native_postgresql_executable_stage_machine_packaged"
         )
+        is not True
+        or invariants.get("concrete_psycopg_postgresql_transport_packaged")
         is not False
         or invariants.get(
             "controller_runtime_build_receipt_provenance_v3_packaged"
@@ -960,8 +992,16 @@ def _verify_plan(plan: dict[str, object]) -> None:
             "approved_terminal_postgresql_catalog_manifest_selected"
         )
         is not False
-        or invariants.get("durable_live_writer_fence_transport_packaged")
+        or invariants.get("durable_live_rollback_controller_authority_marker_transport_packaged")
+        is not True
+        or invariants.get("external_direct_writer_exclusion_implemented")
         is not False
+        or invariants.get("selected_live_platform_transports_packaged")
+        is not False
+        or invariants.get(
+            "selected_non_postgresql_live_platform_transport_factory_packaged"
+        )
+        is not True
         or type(later_rollback) is not dict
         or later_rollback.get(
             "opaque_verified_install_receipt_and_ledger_capability_required"
@@ -980,21 +1020,29 @@ def _verify_plan(plan: dict[str, object]) -> None:
         )
         is not True
         or later_rollback.get(
-            "fresh_offline_read_only_empty_recheck_required_before_first_destructive_step"
+            "fresh_live_semantic_empty_recheck_required_before_first_destructive_step"
         )
-        is not False
+        is not True
         or later_rollback.get(
-            "writer_fence_held_through_terminal_absence_retained_audit_and_receipt"
+            "controller_authority_marker_held_through_terminal_absence_retained_audit_and_receipt"
         )
-        is not False
+        is not True
         or later_rollback.get(
-            "destructive_steps_atomically_recheck_empty_under_writer_fence"
+            "destructive_steps_require_held_controller_authority_marker_and_persisted_r05_empty_proof"
         )
-        is not False
+        is not True
         or later_rollback.get("stopped_store_semantic_empty_recheck_is_valid")
         is not False
-        or later_rollback.get("durable_live_writer_fence_transport_packaged")
+        or later_rollback.get("durable_live_rollback_controller_authority_marker_transport_packaged")
+        is not True
+        or later_rollback.get("external_direct_writer_exclusion_implemented")
         is not False
+        or later_rollback.get("selected_live_platform_driver_packaged")
+        is not False
+        or later_rollback.get(
+            "selected_non_postgresql_live_platform_transport_factory_packaged"
+        )
+        is not True
     ):
         raise PackageError("dormant_store_install_plan_replay_boundary_invalid")
 
@@ -1056,7 +1104,7 @@ def _verify_postgres_source_closure(contract: dict[str, object]) -> None:
             phase.get("phase_id") if type(phase) is dict else None
             for phase in phases
         )
-        != EXPECTED_POSTGRES_NATIVE_PHASE_IDS
+        != EXPECTED_POSTGRES_SOURCE_PHASE_IDS
         or any(
             type(phase) is not dict
             or phase.get("translation_complete") is not False
@@ -1068,6 +1116,125 @@ def _verify_postgres_source_closure(contract: dict[str, object]) -> None:
     supplied = unsigned.pop("contract_sha256", None)
     if supplied != _canonical_sha256(unsigned):
         raise PackageError("dormant_store_postgres_source_closure_digest_invalid")
+
+
+def _verify_postgres_native_stage_contract(contract: dict[str, object]) -> None:
+    if (
+        _canonical_sha256(contract)
+        != EXPECTED_POSTGRES_NATIVE_STAGE_CONTRACT_CANONICAL_SHA256
+        or contract.get("schema_version")
+        != "governed-memory-postgres-native-stage-contract-v2"
+        or contract.get("state")
+        != "repository-only-orchestration-and-fixed-catalog-query-contract-packaged-concrete-transport-runtime-and-approved-catalog-unready"
+        or contract.get("server_version") != "16.14"
+    ):
+        raise PackageError("dormant_store_postgres_native_stage_contract_invalid")
+    endpoint = contract.get("endpoint")
+    session = contract.get("session")
+    preferred_driver = contract.get("preferred_driver")
+    stages = contract.get("stages")
+    catalog = contract.get("terminal_catalog")
+    rollback_marker = contract.get("rollback_controller_marker")
+    gate = contract.get("execution_gate")
+    effects = contract.get("repository_phase_effect_counts")
+    coverage = (
+        catalog.get("security_sensitive_coverage")
+        if type(catalog) is dict
+        else None
+    )
+    if (
+        type(endpoint) is not dict
+        or endpoint.get("host") != "127.0.0.1"
+        or endpoint.get("port") != 55432
+        or endpoint.get("bootstrap_database") != "postgres"
+        or endpoint.get("target_database") != "governed_memory"
+        or endpoint.get("caller_dsn_host_port_database_role_or_path_allowed")
+        is not False
+        or type(session) is not dict
+        or session.get(
+            "session_lock_precedes_postgresql_endpoint_boundary_prefix_and_catalog_observations"
+        )
+        is not True
+        or session.get("migration_transactions_required_by_adapter_contract")
+        is not True
+        or session.get("migration_transactions_implemented_by_concrete_adapter")
+        is not False
+        or session.get("set_role_owner_and_current_user_verification_required")
+        is not True
+        or session.get("set_role_owner_and_current_user_verification_implemented")
+        is not False
+        or type(preferred_driver) is not dict
+        or preferred_driver.get("selection_state")
+        != "preferred-family-and-version-only-no-wheel-selected-or-verified"
+        or preferred_driver.get("python_version_target") != "3.12.13"
+        or preferred_driver.get("api_style") != "synchronous"
+        or preferred_driver.get("preferred_package") != "psycopg"
+        or preferred_driver.get("preferred_extra") != "binary"
+        or preferred_driver.get("preferred_version") != "3.3.4"
+        or preferred_driver.get("required_distributions")
+        != ["psycopg", "psycopg-binary"]
+        or preferred_driver.get("selected_wheels") != []
+        or preferred_driver.get("preference_contract_packaged") is not True
+        or preferred_driver.get("exact_driver_identity_contract_packaged")
+        is not False
+        or preferred_driver.get("exact_wheel_filenames_frozen") is not False
+        or preferred_driver.get("wheel_bytes_staged") is not False
+        or preferred_driver.get("wheel_bytes_verified") is not False
+        or preferred_driver.get("binary_native_library_closure_inspected")
+        is not False
+        or preferred_driver.get("runtime_receipt_selected") is not False
+        or preferred_driver.get("ready") is not False
+        or type(stages) is not list
+        or tuple(
+            stage.get("stage_id") if type(stage) is dict else None
+            for stage in stages
+        )
+        != EXPECTED_POSTGRES_NATIVE_STAGE_IDS
+        or type(catalog) is not dict
+        or catalog.get("caller_expected_catalog_allowed") is not False
+        or catalog.get("postgresql_parse_or_execution_proven") is not False
+        or catalog.get("approved_manifest_selected") is not False
+        or catalog.get("approved_normalized_catalog_sha256") is not None
+        or rollback_marker
+        != {
+            "controller_authority_marker_required_before_first_observation": True,
+            "semantic_empty_proof_required_before_first_destructive_operation": True,
+            "empty_proof_bound_across_database_absence_resume": True,
+            "controller_authority_marker_held_through_final_receipt_persistence": True,
+            "physical_database_writer_exclusion_claimed": False,
+            "external_direct_writer_exclusion_implemented": False,
+            "exact_prefix_only_resume": True,
+        }
+        or type(coverage) is not dict
+        or not coverage
+        or not all(value is True for value in coverage.values())
+        or type(gate) is not dict
+        or gate.get("fixed_orchestration_machine_packaged") is not True
+        or gate.get("fixed_catalog_query_contract_packaged") is not True
+        or gate.get("operation_to_sql_translation_packaged") is not False
+        or gate.get("concrete_psycopg_adapter_packaged") is not False
+        or gate.get("runtime_ready") is not False
+        or gate.get("driver_ready") is not False
+        or gate.get("catalog_ready") is not False
+        or gate.get("current_constructor_refuses_before_primitive_call") is not True
+        or gate.get(
+            "caller_sql_dsn_endpoint_database_role_path_or_expected_catalog_allowed"
+        )
+        is not False
+        or gate.get("live_execution_allowed") is not False
+        or effects
+        != {
+            "postgresql_calls": 0,
+            "provider_calls": 0,
+            "production_reads": 0,
+            "secret_reads_or_writes": 0,
+        }
+    ):
+        raise PackageError("dormant_store_postgres_native_stage_contract_invalid")
+    unsigned = dict(contract)
+    supplied = unsigned.pop("contract_sha256", None)
+    if supplied != _canonical_sha256(unsigned):
+        raise PackageError("dormant_store_postgres_native_stage_digest_invalid")
 
 
 def _verify_extension_contracts(observed: dict[str, str]) -> None:
@@ -1082,6 +1249,10 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
     postgres_source_closure = _load_verified_json(
         POSTGRES_SOURCE_CLOSURE_RELATIVE,
         observed[POSTGRES_SOURCE_CLOSURE_RELATIVE],
+    )
+    postgres_native_stage = _load_verified_json(
+        POSTGRES_NATIVE_STAGE_CONTRACT_RELATIVE,
+        observed[POSTGRES_NATIVE_STAGE_CONTRACT_RELATIVE],
     )
     proof = _load_verified_json(
         PROOF_CONTRACT_RELATIVE,
@@ -1106,6 +1277,10 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
             postgres_source_closure,
             EXPECTED_POSTGRES_SOURCE_CLOSURE_CANONICAL_SHA256,
         ),
+        (
+            postgres_native_stage,
+            EXPECTED_POSTGRES_NATIVE_STAGE_CONTRACT_CANONICAL_SHA256,
+        ),
         (proof, EXPECTED_PROOF_CONTRACT_CANONICAL_SHA256),
         (proof_schema, EXPECTED_PROOF_SCHEMA_CANONICAL_SHA256),
         (
@@ -1120,6 +1295,7 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
     if any(_canonical_sha256(value) != wanted for value, wanted in exact):
         raise PackageError("dormant_store_install_extension_contract_semantics_invalid")
     _verify_postgres_source_closure(postgres_source_closure)
+    _verify_postgres_native_stage_contract(postgres_native_stage)
 
     boundary = execution.get("execution_boundary")
     binding = execution.get("binding_policy")
@@ -1182,10 +1358,12 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
         )
         is not True
         or boundary.get("driver_native_postgresql_stage_contract_implemented")
-        is not False
+        is not True
         or boundary.get(
             "driver_native_postgresql_executable_stage_machine_implemented"
         )
+        is not True
+        or boundary.get("concrete_psycopg_postgresql_transport_implemented")
         is not False
         or boundary.get(
             "controller_runtime_input_selection_contract_repaired"
@@ -1205,12 +1383,22 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
         is not False
         or boundary.get("selected_live_linux_platform_transport_factory_implemented")
         is not False
+        or boundary.get(
+            "selected_non_postgresql_live_linux_platform_transport_factory_implemented"
+        )
+        is not True
         or boundary.get("pinned_postgresql_live_driver_selected") is not False
         or boundary.get(
             "controller_runtime_release_builder_orchestration_implemented"
         )
         is not True
         or boundary.get("controller_runtime_build_transport_implemented") is not False
+        or boundary.get(
+            "controller_runtime_publication_policy_transport_implemented"
+        )
+        is not True
+        or boundary.get("production_runtime_publication_primitives_implemented")
+        is not False
         or boundary.get("activation_executor_implemented") is not False
         or type(binding) is not dict
         or binding.get("opaque_verified_package_capability_required") is not True
@@ -1235,7 +1423,7 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
         )
         is not True
         or binding.get(
-            "empty_rollback_claim_journal_requests_observations_and_writer_fence_bind_verified_runtime_and_full_release_tree"
+            "empty_rollback_claim_journal_requests_observations_and_controller_authority_marker_bind_verified_runtime_and_full_release_tree"
         )
         is not True
         or binding.get("exact_controller_process_is_trusted") is not True
@@ -1264,24 +1452,26 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
             "completed_empty_rollback_replay_reproves_exact_resource_absence"
         )
         is not True
-        or durability.get("empty_rollback_stops_exact_stores_before_writer_fence")
-        is not False
-        or durability.get("empty_rollback_writer_fence_held_from_r07_through_receipt")
-        is not False
         or durability.get(
-            "fresh_offline_read_only_empty_recheck_required_at_r07_under_stopped_store_fence"
+            "empty_rollback_controller_authority_marker_held_from_r04_through_receipt"
         )
-        is not False
+        is not True
         or durability.get(
-            "destructive_rollback_steps_atomically_recheck_empty_under_fence"
+            "fresh_live_semantic_empty_recheck_required_at_r05_under_controller_authority_marker"
         )
-        is not False
+        is not True
+        or durability.get(
+            "destructive_rollback_steps_require_held_controller_authority_marker_and_persisted_r05_empty_proof"
+        )
+        is not True
         or durability.get("stopped_store_semantic_empty_recheck_is_valid")
         is not False
-        or durability.get("durable_live_writer_fence_transport_implemented")
+        or durability.get("durable_live_rollback_controller_authority_marker_transport_implemented")
+        is not True
+        or durability.get("external_direct_writer_exclusion_implemented")
         is not False
         or durability.get(
-            "required_future_order_is_live_writer_fence_empty_recheck_then_stop_then_physical_removal"
+            "controller_authority_marker_empty_recheck_then_stop_then_physical_removal_order_implemented"
         )
         is not True
         or durability.get(
@@ -1293,19 +1483,15 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
         )
         is not True
         or type(execution.get("remaining_blockers")) is not list
-        or "selected_live_linux_platform_transport_factory_not_packaged"
-        not in execution["remaining_blockers"]
         or "pinned_postgresql_driver_not_selected"
         not in execution["remaining_blockers"]
-        or "complete_closed_live_transport_substrate_set_not_packaged"
+        or "concrete_psycopg_postgresql_transport_and_complete_bound_live_transport_factory_not_packaged"
         not in execution["remaining_blockers"]
-        or (
-            "driver_native_postgresql_translation_catalog_and_rollback_prefix_machine_not_packaged"
-            not in execution["remaining_blockers"]
-        )
+        or "production_runtime_publication_primitives_not_packaged"
+        not in execution["remaining_blockers"]
+        or "external_direct_writer_exclusion_not_implemented_controller_marker_only"
+        not in execution["remaining_blockers"]
         or "approved_terminal_postgresql_catalog_manifest_not_selected"
-        not in execution["remaining_blockers"]
-        or "durable_live_empty_rollback_writer_fence_transport_not_packaged"
         not in execution["remaining_blockers"]
         or (
             "canonical_install_receipt_emission_not_integrated"
@@ -1343,10 +1529,12 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
         )
         is not True
         or host.get("driver_native_postgresql_stage_contract_packaged")
-        is not False
+        is not True
         or host.get(
             "driver_native_postgresql_executable_stage_machine_packaged"
         )
+        is not True
+        or host.get("concrete_psycopg_postgresql_transport_packaged")
         is not False
         or host.get(
             "exact_postgresql_16_14_and_qdrant_1_19_0_readiness_required"
@@ -1355,6 +1543,10 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
         or host.get("approved_terminal_postgresql_catalog_manifest_selected")
         is not False
         or host.get("selected_live_platform_transports_packaged") is not False
+        or host.get(
+            "selected_non_postgresql_live_platform_transport_factory_packaged"
+        )
+        is not True
         or type(receipt) is not dict
         or receipt.get(
             "install_receipt_binds_verified_runtime_and_full_release_tree_identity"
@@ -1378,10 +1570,12 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
             "synthetic_receipt_stores_accepted_only_by_private_in_process_test_wrappers"
         )
         is not True
-        or receipt.get("final_rollback_receipt_persisted_while_writer_fence_held")
-        is not False
         or receipt.get(
-            "final_rollback_receipt_persistence_while_live_writer_fence_held_required"
+            "final_rollback_receipt_persisted_while_controller_authority_marker_held"
+        )
+        is not True
+        or receipt.get(
+            "final_rollback_receipt_persistence_while_controller_authority_marker_held_required"
         )
         is not True
         or type(proof_boundary) is not dict
@@ -1407,42 +1601,35 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
         or type(selected_driver) is not dict
         or selected_driver.get("api_style") != "synchronous"
         or selected_driver.get("preferred_extra") != "binary"
+        or selected_driver.get("selection_state")
+        != "preferred-family-and-version-only-not-selected-not-in-current-lock-not-staged-not-verified"
         or selected_driver.get("preferred_distributions")
         != [
             {
                 "normalized_distribution": "psycopg",
                 "version": "3.3.4",
-                "selected_wheel_filename": (
-                    "psycopg-3.3.4-py3-none-any.whl"
-                ),
-                "selected_wheel_sha256": (
-                    "b6bbc25ccf05c8fad3b061d9db2ef0909a555171b84b07f29458a447253d679a"
-                ),
             },
             {
                 "normalized_distribution": "psycopg-binary",
                 "version": "3.3.4",
-                "selected_wheel_filename": (
-                    "psycopg_binary-3.3.4-cp312-cp312-"
-                    "manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
-                ),
-                "selected_wheel_sha256": (
-                    "e7510c37550f91a187e3660a8cc50d4b760f8c3b8b2f89ebc5698cd2c7f2c85d"
-                ),
             },
         ]
+        or selected_driver.get("selected_wheels") != []
         or any(
             selected_driver.get(key) is not False
             for key in (
                 "binary_native_library_closure_inspected",
                 "current_controller_lock_contains_selection",
-                "driver_native_postgresql_stages_packaged",
                 "exact_wheel_filenames_frozen",
                 "selection_ready_for_runtime_build",
                 "wheel_bytes_sha256_verified_locally",
                 "wheel_bytes_staged",
             )
         )
+        or selected_driver.get("driver_native_postgresql_stages_packaged")
+        is not True
+        or selected_driver.get("concrete_psycopg_postgresql_transport_packaged")
+        is not False
         or type(selected_wheelhouse) is not dict
         or selected_wheelhouse.get("canonical_tree_sha256") is not None
         or selected_wheelhouse.get("canonical_member_count") is not None
@@ -1465,10 +1652,31 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
         or build.get("builder_accepts_caller_supplied_opaque_wheelhouse_hash")
         is not False
         or build.get(
+            "builder_requires_same_device_rename_preconditions_before_publication_intent"
+        )
+        is not True
+        or build.get(
+            "builder_persists_exact_publication_intent_before_first_rename"
+        )
+        is not True
+        or build.get(
+            "builder_forbids_recursive_stage_cleanup_after_publication_intent"
+        )
+        is not True
+        or build.get(
+            "builder_replays_only_exact_terminal_publication_with_renewed_fsyncs"
+        )
+        is not True
+        or build.get(
             "repository_only_runtime_and_release_builder_orchestration_packaged"
         )
         is not True
         or build.get("concrete_runtime_build_transport_packaged") is not False
+        or build.get("runtime_publication_policy_transport_packaged") is not True
+        or build.get("production_runtime_publication_primitives_packaged")
+        is not False
+        or build.get("independent_standalone_cpython_payload_tree_proof_packaged")
+        is not False
         or build.get(
             "controller_runtime_and_release_are_separately_authorized_preinstall_substrate"
         )
@@ -1499,7 +1707,7 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
         )
         is not True
         or verification.get(
-            "empty_rollback_runtime_and_release_identity_propagates_through_signed_authority_claim_journal_requests_observations_writer_fence_and_receipt"
+            "empty_rollback_runtime_and_release_identity_propagates_through_signed_authority_claim_journal_requests_observations_controller_authority_marker_and_receipt"
         )
         is not True
         or verification.get(
@@ -1826,6 +2034,9 @@ def verify() -> dict[str, object]:
         "postgres_source_closure_contract_canonical_sha256": (
             EXPECTED_POSTGRES_SOURCE_CLOSURE_CANONICAL_SHA256
         ),
+        "postgres_native_stage_contract_canonical_sha256": (
+            EXPECTED_POSTGRES_NATIVE_STAGE_CONTRACT_CANONICAL_SHA256
+        ),
         "proof_contract_canonical_sha256": (
             EXPECTED_PROOF_CONTRACT_CANONICAL_SHA256
         ),
@@ -1851,7 +2062,7 @@ def verify() -> dict[str, object]:
         "full_controller_release_tree_verification_packaged": True,
         "exact_locked_controller_distribution_set_verification_packaged": True,
         "full_release_tree_sha256_bound_through_claim_journal_host_ownership_and_install_receipt": True,
-        "empty_rollback_full_runtime_and_release_identity_bound_through_authority_claim_journal_requests_observations_writer_fence_and_receipt": True,
+        "empty_rollback_full_runtime_and_release_identity_bound_through_authority_claim_journal_requests_observations_controller_authority_marker_and_receipt": True,
         "supervisor_launcher_source_packaged": True,
         "controller_runtime_built_or_installed": False,
         "controller_release_staged": False,
@@ -1859,19 +2070,23 @@ def verify() -> dict[str, object]:
         "stores_install_owns_or_removes_controller_substrate": False,
         "resolved_store_spec_and_exact_docker_labels_bound": True,
         "resource_identity_ledger_v2_packaged": True,
-        "empty_rollback_writer_fence_packaged": False,
-        "fresh_offline_read_only_empty_recheck_required_at_r07_under_stopped_store_fence": False,
+        "empty_rollback_controller_authority_marker_packaged": True,
+        "durable_live_empty_rollback_controller_authority_marker_transport_packaged": True,
+        "external_direct_writer_exclusion_implemented": False,
+        "empty_rollback_receipt_persisted_create_once_while_controller_authority_marker_held": True,
+        "fresh_live_semantic_empty_recheck_required_at_r05_under_controller_authority_marker": True,
+        "controller_authority_marker_empty_recheck_then_stop_then_physical_removal_order_implemented": True,
         "closed_live_transport_contracts_packaged": True,
         "complete_closed_live_transport_substrate_set_packaged": False,
         "complete_closed_live_transport_substrate_set_integrated_into_bound_factory": False,
         "postgresql_source_closure_contract_packaged": True,
-        "driver_native_postgresql_stage_contract_packaged": False,
-        "driver_native_postgresql_executable_stage_machine_packaged": False,
+        "driver_native_postgresql_stage_contract_packaged": True,
+        "driver_native_postgresql_executable_stage_machine_packaged": True,
+        "concrete_psycopg_postgresql_transport_packaged": False,
         "runtime_input_selection_contract_repaired": True,
         "runtime_build_receipt_provenance_v3_packaged": True,
         "exact_postgresql_16_14_and_qdrant_1_19_0_readiness_required": True,
         "approved_terminal_postgresql_catalog_manifest_selected": False,
-        "durable_live_empty_rollback_writer_fence_transport_packaged": False,
         "stopped_store_semantic_empty_recheck_is_valid": False,
         "retained_audit_artifact_hashes_bound": True,
         "public_entrypoints_require_canonical_root_owned_production_receipt_store": True,
@@ -1881,10 +2096,19 @@ def verify() -> dict[str, object]:
         "closed_install_store_effect_adapter_packaged": True,
         "closed_empty_rollback_store_effect_adapter_packaged": True,
         "selected_live_platform_transports_packaged": False,
+        "selected_non_postgresql_live_platform_transport_factory_packaged": True,
         "pinned_postgresql_driver_selected": False,
         "durable_create_once_receipt_store_packaged": True,
         "controller_runtime_release_builder_orchestration_packaged": True,
         "controller_runtime_build_transport_packaged": False,
+        "controller_runtime_publication_policy_transport_packaged": True,
+        "runtime_publication_durable_intent_before_first_rename_packaged": True,
+        "runtime_publication_post_intent_generic_cleanup_forbidden": True,
+        "runtime_publication_crash_prefix_manual_review_fence_packaged": True,
+        "runtime_publication_same_device_rename_precondition_packaged": True,
+        "runtime_publication_exact_terminal_replay_with_renewed_fsyncs_packaged": True,
+        "production_runtime_publication_primitives_packaged": False,
+        "independent_standalone_cpython_payload_tree_proof_packaged": False,
         "operation_specific_install_and_empty_rollback_receipts_packaged": True,
         "install_controller_emits_canonical_receipt": True,
         "empty_rollback_controller_emits_canonical_receipt": True,

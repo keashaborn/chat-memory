@@ -6,9 +6,11 @@ This module is the concrete step dispatcher.  It never accepts argv, shell
 text, SQL selected by a caller, URLs, host names, ports, HTTP paths, or raw
 credentials.  Low-level Docker, systemd, PostgreSQL, Qdrant, and root-file
 drivers are pre-bound to the exact validated store specification by an
-injected platform factory.  Phase 9F closes the request and source contracts
-but deliberately packages no live transport factory or executable PostgreSQL
-stage machine.
+injected platform factory.  Phase 9H packages the driver-native PostgreSQL
+stage machine and selected non-PostgreSQL live transports, while deliberately
+leaving the concrete Psycopg transport, selected driver wheels, approved
+terminal catalog, complete production factory, installation, and activation
+absent.
 """
 
 from dataclasses import dataclass
@@ -305,6 +307,7 @@ class BoundSystemdSupervisorSnapshot:
     enablement_path: str
     enablement_kind: FilesystemNodeKind
     enablement_target: str | None
+    daemon_reload_pending: bool = False
 
     def __post_init__(self) -> None:
         if (
@@ -312,6 +315,7 @@ class BoundSystemdSupervisorSnapshot:
             or self.enablement_path != SYSTEMD_ENABLEMENT_PATH
             or type(self.unit_kind) is not FilesystemNodeKind
             or type(self.enablement_kind) is not FilesystemNodeKind
+            or type(self.daemon_reload_pending) is not bool
         ):
             raise LinuxStoreEffectsError("systemd_supervisor_snapshot_invalid")
         if self.unit_kind is FilesystemNodeKind.REGULAR_FILE:
@@ -336,12 +340,13 @@ class BoundSystemdSupervisorSnapshot:
     @classmethod
     def absent(cls) -> "BoundSystemdSupervisorSnapshot":
         return cls(
-            SYSTEMD_UNIT_PATH,
-            FilesystemNodeKind.ABSENT,
-            None,
-            SYSTEMD_ENABLEMENT_PATH,
-            FilesystemNodeKind.ABSENT,
-            None,
+            unit_path=SYSTEMD_UNIT_PATH,
+            unit_kind=FilesystemNodeKind.ABSENT,
+            unit_sha256=None,
+            enablement_path=SYSTEMD_ENABLEMENT_PATH,
+            enablement_kind=FilesystemNodeKind.ABSENT,
+            enablement_target=None,
+            daemon_reload_pending=False,
         )
 
     def classify(
@@ -352,6 +357,7 @@ class BoundSystemdSupervisorSnapshot:
         if (
             self.unit_kind is FilesystemNodeKind.ABSENT
             and self.enablement_kind is FilesystemNodeKind.ABSENT
+            and self.daemon_reload_pending is False
         ):
             return BoundResourceSnapshot(EffectPresence.ABSENT)
         unit_exact = (
@@ -362,13 +368,26 @@ class BoundSystemdSupervisorSnapshot:
             self.enablement_kind is FilesystemNodeKind.SYMLINK
             and self.enablement_target == exact.enablement_target
         )
-        if unit_exact and enablement_exact:
+        if unit_exact and enablement_exact and not self.daemon_reload_pending:
             return BoundResourceSnapshot(
                 EffectPresence.EXACT, exact.composite_identity_sha256
             )
-        # There is no durable daemon-reload substep journal or exact prefix
-        # resume operation yet.  A one-sided unit/link prefix therefore needs
-        # manual review and is never a recoverable mutation state.
+        unit_absent = self.unit_kind is FilesystemNodeKind.ABSENT
+        enablement_absent = self.enablement_kind is FilesystemNodeKind.ABSENT
+        if (
+            (unit_exact and enablement_absent)
+            or (unit_absent and enablement_exact)
+            or (
+                self.daemon_reload_pending
+                and (
+                    (unit_exact and enablement_exact)
+                    or (unit_absent and enablement_absent)
+                )
+            )
+        ):
+            # The closed Linux adapter resumes either exact one-node prefix and
+            # daemon-reloads after every recovered create/remove mutation.
+            return BoundResourceSnapshot(EffectPresence.PARTIAL)
         return BoundResourceSnapshot(EffectPresence.DRIFT)
 
 
@@ -1204,7 +1223,7 @@ class LinuxStoreHostOperations:
         if not snapshots:
             raise LinuxStoreEffectsError("linux_store_observation_empty")
         presences = tuple(item.presence for item in snapshots)
-        if EffectPresence.DRIFT in presences or EffectPresence.PARTIAL in presences:
+        if EffectPresence.DRIFT in presences:
             return EffectPresence.DRIFT
         if all(item is EffectPresence.ABSENT for item in presences):
             return EffectPresence.ABSENT
@@ -1716,12 +1735,18 @@ class LinuxStoreHostOperations:
         elif profile is HostOperationProfile.CREATE_QDRANT_ALIAS:
             self._run_if_absent(t.qdrant.observe_alias, t.qdrant.create_alias)
         elif profile is HostOperationProfile.INSTALL_AND_ENABLE_STORES_SUPERVISOR:
-            self._run_if_absent(
-                lambda: t.systemd.observe_supervisor().classify(self._supervisor),
-                lambda: t.systemd.install_and_enable_supervisor(
-                    self._supervisor
-                ),
+            supervisor = t.systemd.observe_supervisor().classify(
+                self._supervisor
             )
+            if supervisor.presence in {
+                EffectPresence.ABSENT,
+                EffectPresence.PARTIAL,
+            }:
+                t.systemd.install_and_enable_supervisor(self._supervisor)
+            elif supervisor.presence is not EffectPresence.EXACT:
+                raise LinuxStoreEffectsError(
+                    "systemd_supervisor_not_recoverable"
+                )
         elif profile is HostOperationProfile.COLD_RESTART_AND_VERIFY_TERMINAL_POSTFLIGHT:
             self._apply_postflight(request)
         else:

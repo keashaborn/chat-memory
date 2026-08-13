@@ -1,0 +1,627 @@
+{
+  "schema_version": "governed-memory-postgres-native-stage-contract-v2",
+  "state": "repository-only-orchestration-and-fixed-catalog-query-contract-packaged-concrete-transport-runtime-and-approved-catalog-unready",
+  "endpoint": {
+    "host": "127.0.0.1",
+    "port": 55432,
+    "bootstrap_database": "postgres",
+    "target_database": "governed_memory",
+    "bootstrap_role": "governed_memory_bootstrap",
+    "owner_role": "governed_memory_owner",
+    "caller_dsn_host_port_database_role_or_path_allowed": false
+  },
+  "server_version": "16.14",
+  "session": {
+    "advisory_lock_key": 9054123493000001,
+    "connect_timeout_seconds": 5,
+    "lock_timeout_milliseconds": 1000,
+    "statement_timeout_milliseconds": 15000,
+    "session_lock_precedes_postgresql_endpoint_boundary_prefix_and_catalog_observations": true,
+    "session_lock_held_through_receipt_persistence": true,
+    "migration_transactions_required_by_adapter_contract": true,
+    "migration_transactions_implemented_by_concrete_adapter": false,
+    "set_role_owner_and_current_user_verification_required": true,
+    "set_role_owner_and_current_user_verification_implemented": false
+  },
+  "preferred_driver": {
+    "selection_state": "preferred-family-and-version-only-no-wheel-selected-or-verified",
+    "python_version_target": "3.12.13",
+    "api_style": "synchronous",
+    "preferred_package": "psycopg",
+    "preferred_extra": "binary",
+    "preferred_version": "3.3.4",
+    "required_distributions": [
+      "psycopg",
+      "psycopg-binary"
+    ],
+    "selected_wheels": [],
+    "preference_contract_packaged": true,
+    "exact_driver_identity_contract_packaged": false,
+    "exact_wheel_filenames_frozen": false,
+    "wheel_bytes_staged": false,
+    "wheel_bytes_verified": false,
+    "binary_native_library_closure_inspected": false,
+    "runtime_receipt_selected": false,
+    "ready": false
+  },
+  "source_closure": [
+    {
+      "path": "governed-memory-migrations/0001_foundation/forward.pgsql",
+      "sha256": "d67c94be3c4fa026334b87a4683a942cee930eeb1654e66f7b3f73b031927d91"
+    },
+    {
+      "path": "governed-memory-migrations/0001_foundation/rollback.pgsql",
+      "sha256": "7d0a1473357e737518bd7de4d6f2599dac8d48ca55254925398b8c5f81b0816e"
+    },
+    {
+      "path": "governed-memory-migrations/0003_owner_claim_detail/forward.pgsql",
+      "sha256": "a8f79613f766da18131f52d5f0c0008d3b20f120c76bc1cb3ff64d81712954d5"
+    },
+    {
+      "path": "governed-memory-migrations/0003_owner_claim_detail/rollback.pgsql",
+      "sha256": "6f50f6f70ac35ede0a7ae98fa98593f4404457717ca242c8f9fe0bfd57789b68"
+    },
+    {
+      "path": "governed-memory-migrations/0004_pilot_marker/forward.pgsql",
+      "sha256": "90b4d1aac35a538a24444d33273e516f484252a9e4a5ea67f495a04499f6ff58"
+    },
+    {
+      "path": "governed-memory-migrations/0004_pilot_marker/rollback.pgsql",
+      "sha256": "01da1e6bab14009fe05ce0f644af27bc8cae48988c629f0c0308654b87e31775"
+    },
+    {
+      "path": "ops/governed_memory/installation/current/postgres/roles_preflight.pgsql",
+      "sha256": "21994b66b3d1612180ab458ea6f83258598e963138f604b88ada57ad4f23229e"
+    },
+    {
+      "path": "ops/governed_memory/installation/postgres/canonical_cluster.pgsql.in",
+      "sha256": "5e3238856349ca9928d9a20d7658959effdaf6472a795d959ad0707fa9bbbae0"
+    },
+    {
+      "path": "ops/governed_memory/installation/postgres/canonical_cluster_rollback.pgsql.in",
+      "sha256": "5adec472f5b3277b5a2137fc5e7e8f1d50e587a54302246f6b87cef28442d277"
+    }
+  ],
+  "source_closure_sha256": "e23bfd3708afd5bce82fd76b980414c5b5df9420bd896a42c48676ef4c70d690",
+  "stages": [
+    {
+      "stage_id": "F01_PREBOOTSTRAP_AND_CREATE_DATABASE",
+      "sources": [
+        {
+          "path": "ops/governed_memory/installation/postgres/canonical_cluster.pgsql.in",
+          "sha256": "5e3238856349ca9928d9a20d7658959effdaf6472a795d959ad0707fa9bbbae0"
+        }
+      ],
+      "forward_operations": [
+        "f01_create_owner_role",
+        "f01_create_api_role",
+        "f01_create_worker_role",
+        "f01_create_ingest_role",
+        "f01_create_erasure_role",
+        "f01_create_database",
+        "f01_bind_database_acl",
+        "f01_grant_owner_membership",
+        "f01_create_pgcrypto_as_owner",
+        "f01_verify_exact_cluster_prefix"
+      ],
+      "rollback_operations": [],
+      "catalog_query_sha256": [],
+      "orchestration_plan_sha256": "023c1fae59f809cacc3ba29568c520e2512b64084d6e03769ad1b1d5eb8517fd"
+    },
+    {
+      "stage_id": "F02_ROLES_PRIVACY_AND_MIGRATIONS",
+      "sources": [
+        {
+          "path": "ops/governed_memory/installation/current/postgres/roles_preflight.pgsql",
+          "sha256": "21994b66b3d1612180ab458ea6f83258598e963138f604b88ada57ad4f23229e"
+        },
+        {
+          "path": "governed-memory-migrations/0001_foundation/forward.pgsql",
+          "sha256": "d67c94be3c4fa026334b87a4683a942cee930eeb1654e66f7b3f73b031927d91"
+        },
+        {
+          "path": "governed-memory-migrations/0003_owner_claim_detail/forward.pgsql",
+          "sha256": "a8f79613f766da18131f52d5f0c0008d3b20f120c76bc1cb3ff64d81712954d5"
+        },
+        {
+          "path": "governed-memory-migrations/0004_pilot_marker/forward.pgsql",
+          "sha256": "90b4d1aac35a538a24444d33273e516f484252a9e4a5ea67f495a04499f6ff58"
+        }
+      ],
+      "forward_operations": [
+        "f02_roles_privacy_preflight",
+        "f02_apply_foundation_0001",
+        "f02_apply_owner_claim_detail_0003",
+        "f02_apply_pilot_marker_0004",
+        "f02_verify_exact_migration_prefix"
+      ],
+      "rollback_operations": [],
+      "catalog_query_sha256": [],
+      "orchestration_plan_sha256": "1beaeefe8f8b39673b4f69894729fe8ce668d6b4e47f0a1722aca9e27692f449"
+    },
+    {
+      "stage_id": "T01_TERMINAL_EXACT_CATALOG",
+      "sources": [],
+      "forward_operations": [],
+      "rollback_operations": [],
+      "catalog_query_sha256": [
+        "da872d8c14af3cca753516dacee2464051a35cecb6a2e675480dd8f5cfa3dc36",
+        "2f56de7e41e1dde87fa17197976f8a88921dc07b4f0e8bc6aafa586f8b961351",
+        "0e5bebaf95def10fe2dcbe80ab489fd208d9a73b014826b81081b191e924aeb7",
+        "6578417f80f896cfbfafc024ff99d4b51d736b6c86e632a67a4187baf10be07b",
+        "940f394e5c70526ec2065c914addc060284e63949d04650744fb7c3149b71c74",
+        "02d47a05687b2cb28538e9fc823fa5569fa56c20703f106bc8c5998787d1693e",
+        "8d81b02a48ff1db80c5f113197fb31b2dc19f05f5cb40f2fb989ad4f347145be",
+        "fff6a48221d1317093c4c2fa8bc97f87cca2b67147527d89410adbde19b4f299",
+        "ec76c576d6031ef1d62182a58a85de3848d7b3d463abd687797dce369122f2e0",
+        "e00245e049976d4ae0ecffa1b9cc1f9fa3065ff0487842b2d95899a048efd7aa",
+        "ad914c029c637a76e7d2eca1864be58f9523316285b656697a98e3cc22a6dd64",
+        "7f41b6a685c3782988ca5c3d5996c0a3c1bb006ce159df5e7bfcaeb96d81e8a2",
+        "d8dca1f2950acffe65d8b44e6676ebf88bf4388c214d442f4d3975b44a45c598",
+        "18f96f9662dc80baa4743724744bf95c81f9d3fe60b32a499a3a8666b7fdef49",
+        "d327630c8107685806c4c09beacd7eca73b1726e0753b9a5d54cdfa2210863c8",
+        "ae936a042b2510983a97b9014d2450b2cb4a668e7af6ed163beb3adff80e135b"
+      ],
+      "orchestration_plan_sha256": "3f9211a79a484ec83a2044983bd0e7ac65c576fa2786f1a0018b5805135b08ee"
+    },
+    {
+      "stage_id": "R01_EMPTY_ROLLBACK_PREFIX_RESUME",
+      "sources": [
+        {
+          "path": "governed-memory-migrations/0004_pilot_marker/rollback.pgsql",
+          "sha256": "01da1e6bab14009fe05ce0f644af27bc8cae48988c629f0c0308654b87e31775"
+        },
+        {
+          "path": "governed-memory-migrations/0003_owner_claim_detail/rollback.pgsql",
+          "sha256": "6f50f6f70ac35ede0a7ae98fa98593f4404457717ca242c8f9fe0bfd57789b68"
+        },
+        {
+          "path": "governed-memory-migrations/0001_foundation/rollback.pgsql",
+          "sha256": "7d0a1473357e737518bd7de4d6f2599dac8d48ca55254925398b8c5f81b0816e"
+        },
+        {
+          "path": "ops/governed_memory/installation/postgres/canonical_cluster_rollback.pgsql.in",
+          "sha256": "5adec472f5b3277b5a2137fc5e7e8f1d50e587a54302246f6b87cef28442d277"
+        }
+      ],
+      "forward_operations": [],
+      "rollback_operations": [
+        "r01_rollback_pilot_marker_0004",
+        "r01_rollback_owner_claim_detail_0003",
+        "r01_rollback_foundation_0001",
+        "r01_drop_exact_database_prefix",
+        "r01_drop_exact_role_prefix_transaction"
+      ],
+      "catalog_query_sha256": [],
+      "orchestration_plan_sha256": "49786efbe1931d2d9b2f611f5167a302910ca9ea9b4bd57b8ae15e507aed9098"
+    }
+  ],
+  "forward_resume_machine": [
+    {
+      "from": "empty",
+      "operation": "f01_create_owner_role",
+      "to": "owner_role"
+    },
+    {
+      "from": "owner_role",
+      "operation": "f01_create_api_role",
+      "to": "owner_api_roles"
+    },
+    {
+      "from": "owner_api_roles",
+      "operation": "f01_create_worker_role",
+      "to": "owner_api_worker_roles"
+    },
+    {
+      "from": "owner_api_worker_roles",
+      "operation": "f01_create_ingest_role",
+      "to": "owner_api_worker_ingest_roles"
+    },
+    {
+      "from": "owner_api_worker_ingest_roles",
+      "operation": "f01_create_erasure_role",
+      "to": "all_five_roles"
+    },
+    {
+      "from": "all_five_roles",
+      "operation": "f01_create_database",
+      "to": "database_created"
+    },
+    {
+      "from": "database_created",
+      "operation": "f01_bind_database_acl",
+      "to": "database_acl_bound"
+    },
+    {
+      "from": "database_acl_bound",
+      "operation": "f01_grant_owner_membership",
+      "to": "owner_membership_granted"
+    },
+    {
+      "from": "owner_membership_granted",
+      "operation": "f01_create_pgcrypto_as_owner",
+      "to": "pgcrypto_created"
+    },
+    {
+      "from": "pgcrypto_created",
+      "operation": "f01_verify_exact_cluster_prefix",
+      "to": "f01_complete"
+    },
+    {
+      "from": "f01_complete",
+      "operation": "f02_roles_privacy_preflight",
+      "to": "roles_privacy_preflight_complete"
+    },
+    {
+      "from": "roles_privacy_preflight_complete",
+      "operation": "f02_apply_foundation_0001",
+      "to": "foundation_0001_applied"
+    },
+    {
+      "from": "foundation_0001_applied",
+      "operation": "f02_apply_owner_claim_detail_0003",
+      "to": "owner_claim_detail_0003_applied"
+    },
+    {
+      "from": "owner_claim_detail_0003_applied",
+      "operation": "f02_apply_pilot_marker_0004",
+      "to": "pilot_marker_0004_applied"
+    },
+    {
+      "from": "pilot_marker_0004_applied",
+      "operation": "f02_verify_exact_migration_prefix",
+      "to": "ready_for_terminal_catalog"
+    }
+  ],
+  "rollback_resume_machine": [
+    {
+      "from": "installed_0001_0003_0004",
+      "operation": "r01_rollback_pilot_marker_0004",
+      "to": "installed_0001_0003"
+    },
+    {
+      "from": "installed_0001_0003",
+      "operation": "r01_rollback_owner_claim_detail_0003",
+      "to": "installed_0001"
+    },
+    {
+      "from": "installed_0001",
+      "operation": "r01_rollback_foundation_0001",
+      "to": "exact_empty_canonical_database_prefix"
+    },
+    {
+      "from": "exact_empty_canonical_database_prefix",
+      "operation": "r01_drop_exact_database_prefix",
+      "to": "roles_only_creation_prefix_5"
+    },
+    {
+      "from": "roles_only_creation_prefix_5",
+      "operation": "r01_drop_exact_role_prefix_transaction",
+      "to": "empty"
+    },
+    {
+      "from": "roles_only_creation_prefix_4",
+      "operation": "r01_drop_exact_role_prefix_transaction",
+      "to": "empty"
+    },
+    {
+      "from": "roles_only_creation_prefix_3",
+      "operation": "r01_drop_exact_role_prefix_transaction",
+      "to": "empty"
+    },
+    {
+      "from": "roles_only_creation_prefix_2",
+      "operation": "r01_drop_exact_role_prefix_transaction",
+      "to": "empty"
+    },
+    {
+      "from": "roles_only_creation_prefix_1",
+      "operation": "r01_drop_exact_role_prefix_transaction",
+      "to": "empty"
+    }
+  ],
+  "terminal_catalog": {
+    "queries": [
+      {
+        "query_id": "t01_session",
+        "database": "governed_memory",
+        "role": "governed_memory_bootstrap",
+        "columns": [
+          "database",
+          "current_user",
+          "session_user",
+          "server_version_num",
+          "server_encoding",
+          "log_statement",
+          "log_duration",
+          "log_min_duration_statement",
+          "log_parameter_max_length",
+          "timezone"
+        ],
+        "sql_sha256": "da872d8c14af3cca753516dacee2464051a35cecb6a2e675480dd8f5cfa3dc36"
+      },
+      {
+        "query_id": "t01_roles",
+        "database": "postgres",
+        "role": "governed_memory_bootstrap",
+        "columns": [
+          "role_name",
+          "can_login",
+          "inherit",
+          "superuser",
+          "create_database",
+          "create_role",
+          "replication",
+          "bypass_rls",
+          "connection_limit",
+          "valid_until",
+          "configuration_text"
+        ],
+        "sql_sha256": "2f56de7e41e1dde87fa17197976f8a88921dc07b4f0e8bc6aafa586f8b961351"
+      },
+      {
+        "query_id": "t01_memberships",
+        "database": "postgres",
+        "role": "governed_memory_bootstrap",
+        "columns": [
+          "granted_role",
+          "member_role",
+          "grantor_role",
+          "admin_option",
+          "inherit_option",
+          "set_option"
+        ],
+        "sql_sha256": "0e5bebaf95def10fe2dcbe80ab489fd208d9a73b014826b81081b191e924aeb7"
+      },
+      {
+        "query_id": "t01_database",
+        "database": "postgres",
+        "role": "governed_memory_bootstrap",
+        "columns": [
+          "database_name",
+          "owner",
+          "encoding",
+          "allow_connections",
+          "is_template",
+          "connection_limit",
+          "acl_text"
+        ],
+        "sql_sha256": "6578417f80f896cfbfafc024ff99d4b51d736b6c86e632a67a4187baf10be07b"
+      },
+      {
+        "query_id": "t01_database_role_settings",
+        "database": "postgres",
+        "role": "governed_memory_bootstrap",
+        "columns": [
+          "database_name",
+          "role_name",
+          "configuration_text"
+        ],
+        "sql_sha256": "940f394e5c70526ec2065c914addc060284e63949d04650744fb7c3149b71c74"
+      },
+      {
+        "query_id": "t01_extensions",
+        "database": "governed_memory",
+        "role": "governed_memory_owner",
+        "columns": [
+          "extension_name",
+          "extension_version",
+          "owner",
+          "schema_name",
+          "member_count"
+        ],
+        "sql_sha256": "02d47a05687b2cb28538e9fc823fa5569fa56c20703f106bc8c5998787d1693e"
+      },
+      {
+        "query_id": "t01_schemas",
+        "database": "governed_memory",
+        "role": "governed_memory_owner",
+        "columns": [
+          "namespace",
+          "owner",
+          "acl_text"
+        ],
+        "sql_sha256": "8d81b02a48ff1db80c5f113197fb31b2dc19f05f5cb40f2fb989ad4f347145be"
+      },
+      {
+        "query_id": "t01_namespaces_relations",
+        "database": "governed_memory",
+        "role": "governed_memory_owner",
+        "columns": [
+          "namespace",
+          "relation",
+          "relation_kind",
+          "owner",
+          "row_security",
+          "force_row_security",
+          "persistence",
+          "replica_identity",
+          "options_text",
+          "acl_text"
+        ],
+        "sql_sha256": "fff6a48221d1317093c4c2fa8bc97f87cca2b67147527d89410adbde19b4f299"
+      },
+      {
+        "query_id": "t01_columns",
+        "database": "governed_memory",
+        "role": "governed_memory_owner",
+        "columns": [
+          "namespace",
+          "relation",
+          "column_position",
+          "column_name",
+          "type_identity",
+          "not_null",
+          "has_default",
+          "default_expression",
+          "identity_kind",
+          "generated_kind",
+          "collation_identity",
+          "acl_text"
+        ],
+        "sql_sha256": "ec76c576d6031ef1d62182a58a85de3848d7b3d463abd687797dce369122f2e0"
+      },
+      {
+        "query_id": "t01_sequences",
+        "database": "governed_memory",
+        "role": "governed_memory_owner",
+        "columns": [
+          "namespace",
+          "sequence_name",
+          "owner",
+          "data_type",
+          "start_value",
+          "increment_by",
+          "minimum_value",
+          "maximum_value",
+          "cache_size",
+          "cycle"
+        ],
+        "sql_sha256": "e00245e049976d4ae0ecffa1b9cc1f9fa3065ff0487842b2d95899a048efd7aa"
+      },
+      {
+        "query_id": "t01_indexes",
+        "database": "governed_memory",
+        "role": "governed_memory_owner",
+        "columns": [
+          "namespace",
+          "relation",
+          "index_name",
+          "owner",
+          "unique",
+          "primary",
+          "exclusion",
+          "immediate",
+          "clustered",
+          "replica_identity",
+          "valid",
+          "ready",
+          "live",
+          "predicate",
+          "definition"
+        ],
+        "sql_sha256": "ad914c029c637a76e7d2eca1864be58f9523316285b656697a98e3cc22a6dd64"
+      },
+      {
+        "query_id": "t01_routines",
+        "database": "governed_memory",
+        "role": "governed_memory_owner",
+        "columns": [
+          "namespace",
+          "routine",
+          "identity_arguments",
+          "owner",
+          "language",
+          "volatility",
+          "security_definer",
+          "configuration_text",
+          "acl_text",
+          "definition_sha256"
+        ],
+        "sql_sha256": "7f41b6a685c3782988ca5c3d5996c0a3c1bb006ce159df5e7bfcaeb96d81e8a2"
+      },
+      {
+        "query_id": "t01_constraints",
+        "database": "governed_memory",
+        "role": "governed_memory_owner",
+        "columns": [
+          "namespace",
+          "relation",
+          "constraint_name",
+          "constraint_type",
+          "validated",
+          "deferrable",
+          "initially_deferred",
+          "definition"
+        ],
+        "sql_sha256": "d8dca1f2950acffe65d8b44e6676ebf88bf4388c214d442f4d3975b44a45c598"
+      },
+      {
+        "query_id": "t01_policies",
+        "database": "governed_memory",
+        "role": "governed_memory_owner",
+        "columns": [
+          "namespace",
+          "relation",
+          "policy_name",
+          "permissive",
+          "command",
+          "roles_text",
+          "using_expression",
+          "check_expression"
+        ],
+        "sql_sha256": "18f96f9662dc80baa4743724744bf95c81f9d3fe60b32a499a3a8666b7fdef49"
+      },
+      {
+        "query_id": "t01_triggers",
+        "database": "governed_memory",
+        "role": "governed_memory_owner",
+        "columns": [
+          "namespace",
+          "relation",
+          "trigger_name",
+          "enabled_state",
+          "definition"
+        ],
+        "sql_sha256": "d327630c8107685806c4c09beacd7eca73b1726e0753b9a5d54cdfa2210863c8"
+      },
+      {
+        "query_id": "t01_default_acls",
+        "database": "governed_memory",
+        "role": "governed_memory_owner",
+        "columns": [
+          "grantor_role",
+          "namespace",
+          "object_type",
+          "acl_text"
+        ],
+        "sql_sha256": "ae936a042b2510983a97b9014d2450b2cb4a668e7af6ed163beb3adff80e135b"
+      }
+    ],
+    "normalizer": "ascii-scalars-strict-width-deduplicate-sort-rows-by-canonical-json-sort-queries-by-fixed-enum-canonical-json-v1",
+    "security_sensitive_coverage": {
+      "target_and_public_schema_owner_and_acl": true,
+      "database_and_role_configuration": true,
+      "relation_owner_acl_and_row_security": true,
+      "column_type_default_identity_generation_collation_and_acl": true,
+      "sequence_definition": true,
+      "index_definition_predicate_and_state": true,
+      "constraint_definition_and_validation_state": true,
+      "policy_permissive_command_roles_using_and_check": true,
+      "trigger_enabled_state_and_definition": true,
+      "default_acl_grantor_namespace_object_type_and_acl": true
+    },
+    "caller_expected_catalog_allowed": false,
+    "postgresql_parse_or_execution_proven": false,
+    "approved_manifest_selected": false,
+    "approved_normalized_catalog_sha256": null
+  },
+  "rollback_controller_marker": {
+    "controller_authority_marker_required_before_first_observation": true,
+    "semantic_empty_proof_required_before_first_destructive_operation": true,
+    "empty_proof_bound_across_database_absence_resume": true,
+    "controller_authority_marker_held_through_final_receipt_persistence": true,
+    "physical_database_writer_exclusion_claimed": false,
+    "external_direct_writer_exclusion_implemented": false,
+    "exact_prefix_only_resume": true
+  },
+  "execution_gate": {
+    "fixed_orchestration_machine_packaged": true,
+    "fixed_catalog_query_contract_packaged": true,
+    "operation_to_sql_translation_packaged": false,
+    "concrete_psycopg_adapter_packaged": false,
+    "runtime_ready": false,
+    "driver_ready": false,
+    "catalog_ready": false,
+    "current_constructor_refuses_before_primitive_call": true,
+    "caller_sql_dsn_endpoint_database_role_path_or_expected_catalog_allowed": false,
+    "live_execution_allowed": false
+  },
+  "repository_phase_effect_counts": {
+    "postgresql_calls": 0,
+    "provider_calls": 0,
+    "production_reads": 0,
+    "secret_reads_or_writes": 0
+  },
+  "contract_sha256": "51c5497e8e73cd77a45d4404a8132aee76a2533976dda7e616c9a395ac8f4549"
+}

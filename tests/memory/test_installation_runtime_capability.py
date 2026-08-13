@@ -36,6 +36,17 @@ from tools.governed_memory_install.package_capability import (
 
 ROOT = Path(__file__).resolve().parents[2]
 
+_SYNTHETIC_DRIVER_WHEELS = {
+    "psycopg": (
+        "psycopg-3.3.4-py3-none-any.whl",
+        b"synthetic-runtime-capability-psycopg-wheel",
+    ),
+    "psycopg-binary": (
+        "psycopg_binary-3.3.4-cp312-cp312-manylinux_2_17_x86_64.whl",
+        b"synthetic-runtime-capability-psycopg-binary-wheel",
+    ),
+}
+
 
 def _canonical(value: object) -> bytes:
     return json.dumps(
@@ -59,13 +70,19 @@ class RuntimeCapabilityTests(unittest.TestCase):
         if lock_bytes is None:
             lock_bytes = (ROOT / lock_path).read_bytes()
             if ready_contract:
+                synthetic_driver_lock = []
+                for distribution, (_, wheel_bytes) in (
+                    _SYNTHETIC_DRIVER_WHEELS.items()
+                ):
+                    synthetic_driver_lock.extend(
+                        (
+                            f"{distribution}==3.3.4 \\",
+                            "    --hash=sha256:"
+                            + hashlib.sha256(wheel_bytes).hexdigest(),
+                        )
+                    )
                 lock_bytes += (
-                    "psycopg==3.3.4 \\\n"
-                    "    --hash=sha256:"
-                    "b6bbc25ccf05c8fad3b061d9db2ef0909a555171b84b07f29458a447253d679a\n"
-                    "psycopg-binary==3.3.4 \\\n"
-                    "    --hash=sha256:"
-                    "e7510c37550f91a187e3660a8cc50d4b760f8c3b8b2f89ebc5698cd2c7f2c85d\n"
+                    "\n".join(synthetic_driver_lock) + "\n"
                 ).encode("ascii")
         artifacts[lock_path] = lock_bytes
         contract_path = str(CONTROLLER_RUNTIME_CONTRACT_RELATIVE_PATH)
@@ -82,6 +99,26 @@ class RuntimeCapabilityTests(unittest.TestCase):
             cpython["payload_tree_sha256"] = "4" * 64
             driver = contract["selected_runtime_inputs"][
                 "postgresql_driver"
+            ]
+            driver["selection_state"] = (
+                "exact-selected-wheels-staged-verified-and-locked"
+            )
+            driver["selected_wheels"] = [
+                {
+                    "normalized_distribution": item[
+                        "normalized_distribution"
+                    ],
+                    "selected_wheel_filename": _SYNTHETIC_DRIVER_WHEELS[
+                        item["normalized_distribution"]
+                    ][0],
+                    "selected_wheel_sha256": hashlib.sha256(
+                        _SYNTHETIC_DRIVER_WHEELS[
+                            item["normalized_distribution"]
+                        ][1]
+                    ).hexdigest(),
+                    "version": item["version"],
+                }
+                for item in driver["preferred_distributions"]
             ]
             for key in (
                 "binary_native_library_closure_inspected",
@@ -366,6 +403,50 @@ class RuntimeCapabilityTests(unittest.TestCase):
         ):
             verify_controller_runtime_capability(
                 capability, runtime_build_receipt_json=raw
+            )
+        probe.assert_not_called()
+
+    def test_preference_metadata_cannot_substitute_for_selected_wheels(self):
+        capability, raw, unused_receipt, unused_observed, unused_process = (
+            self._fixture()
+        )
+        artifacts = dict(capability._artifacts)
+        contract_path = str(CONTROLLER_RUNTIME_CONTRACT_RELATIVE_PATH)
+        contract = json.loads(artifacts[contract_path].decode("ascii"))
+        driver = contract["selected_runtime_inputs"]["postgresql_driver"]
+        misplaced_selection = driver["selected_wheels"].pop(0)
+        driver["preferred_distributions"][0].update(
+            {
+                "selected_wheel_filename": misplaced_selection[
+                    "selected_wheel_filename"
+                ],
+                "selected_wheel_sha256": misplaced_selection[
+                    "selected_wheel_sha256"
+                ],
+            }
+        )
+        contract_raw = _canonical(contract)
+        artifacts[contract_path] = contract_raw
+        contaminated = _VerifiedPackageCapability(
+            replace(
+                capability._evidence,
+                controller_runtime_contract_sha256=hashlib.sha256(
+                    contract_raw
+                ).hexdigest(),
+            ),
+            {},
+            artifacts,
+            _PACKAGE_TOKEN,
+        )
+        with patch(
+            "tools.governed_memory_install.controller_runtime."
+            "_observe_filesystem"
+        ) as probe, self.assertRaisesRegex(
+            ControllerRuntimeCapabilityError,
+            "controller_runtime_input_contract_not_ready",
+        ):
+            verify_controller_runtime_capability(
+                contaminated, runtime_build_receipt_json=raw
             )
         probe.assert_not_called()
 

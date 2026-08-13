@@ -299,9 +299,13 @@ class QdrantCollectionConfiguration:
 
     def __post_init__(self) -> None:
         if (
-            self.vector_size != 3072
+            type(self.vector_size) is not int
+            or self.vector_size != 3072
+            or type(self.distance) is not str
             or self.distance != "Dot"
+            or type(self.on_disk_payload) is not bool
             or self.on_disk_payload is not True
+            or type(self.replication_factor) is not int
             or self.replication_factor != 1
         ):
             raise LinuxStoreReadinessError(

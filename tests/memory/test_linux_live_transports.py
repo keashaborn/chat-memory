@@ -343,6 +343,20 @@ class QdrantRequestContractTests(unittest.TestCase):
             b'{"on_disk_payload":true,"replication_factor":1,'
             b'"vectors":{"distance":"Dot","size":3072}}',
         )
+        self.assertEqual(
+            QDRANT_REQUESTS[QdrantRequestId.OBSERVE_ALIAS].target,
+            (
+                b"/collections/"
+                b"governed_memory_9a54cf123493_000001/aliases"
+            ),
+        )
+        self.assertNotIn(
+            b"/aliases/governed_memory_active",
+            {
+                request.target
+                for request in QDRANT_REQUESTS.values()
+            },
+        )
         with self.assertRaises(TypeError):
             QDRANT_REQUESTS[QdrantRequestId.OBSERVE_ROOT] = create  # type: ignore[index]
 

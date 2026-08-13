@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-"""Fail-closed PostgreSQL driver-native source-closure contract.
+"""Fail-closed PostgreSQL source-closure requirements contract.
 
-Phase 9F deliberately packages no executable PostgreSQL transport.  The
-checked-in SQL remains the sole semantic authority, but it contains psql
-metacommands and therefore cannot be passed to Psycopg.  This module closes
-the exact source set and the requirements for a later native translation.  It
+The checked-in SQL remains the sole semantic authority, but it contains psql
+metacommands and therefore cannot be passed directly to Psycopg.  This module
+closes the exact source set and requirements that the separate Phase 9H native
+stage machine must satisfy.  It is not a second constructor or runtime path and
 has no socket, driver import, subprocess, filesystem-discovery, SQL execution,
 DSN, password, or caller-supplied catalog surface.
 """
@@ -258,14 +258,6 @@ def contract_document(
     return document
 
 
-def construct_executable_transport() -> None:
-    """The only executable-construction surface; always closed in Phase 9F."""
-
-    raise PostgreSQLSourceClosureError(
-        "postgres_source_closure_execution_not_ready"
-    )
-
-
 __all__ = [
     "ADVISORY_LOCK_KEY",
     "BOOTSTRAP_DATABASE",
@@ -280,6 +272,5 @@ __all__ = [
     "STATEMENT_TIMEOUT_MILLISECONDS",
     "TARGET_DATABASE",
     "VerifiedSqlSource",
-    "construct_executable_transport",
     "contract_document",
 ]

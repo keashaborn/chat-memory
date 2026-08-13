@@ -1,6 +1,6 @@
 {
   "schema_version": "governed-memory-dormant-store-install-inactive-execution-contract-v4",
-  "state": "repository-only-contract-repaired-closed-adapters-and-runtime-builder-packaged-not-installed-not-activated",
+  "state": "phase9h-repository-only-bounded-transports-stage-machines-and-controller-marker-packaged-not-installed-not-activated",
   "server": "seebx",
   "candidate_id": "governed_memory_9a54cf123493_000001",
   "scope": {
@@ -88,19 +88,90 @@
     "resolved_store_spec": "/etc/governed-memory-controller/store_spec.json"
   },
   "filesystem_policy": {
-    "trust_anchor": {"owner": "root:root", "mode": "0400", "symlink_allowed": false},
-    "postgres_store_secret": {"owner": "root:root", "mode": "0600", "symlink_allowed": false},
-    "qdrant_store_secret": {"owner": "root:root", "mode": "0600", "symlink_allowed": false},
-    "controller_state": {"owner": "root:root", "mode": "0700", "symlink_allowed": false},
-    "execution_state": {"owner": "root:root", "mode": "0700", "symlink_allowed": false},
-    "execution_journal": {"owner": "root:root", "mode": "0600", "parent_mode": "0700", "hard_link_allowed": false, "symlink_allowed": false},
-    "rollback_journal": {"owner": "root:root", "mode": "0600", "parent_mode": "0700", "hard_link_allowed": false, "symlink_allowed": false},
-    "resource_identity_ledger": {"owner": "root:root", "mode": "0600", "parent_mode": "0700", "hard_link_allowed": false, "symlink_allowed": false},
-    "terminal_postflight_receipt": {"owner": "root:root", "mode": "0600", "parent_mode": "0700", "hard_link_allowed": false, "symlink_allowed": false, "create_once": true},
-    "install_receipt": {"owner": "root:root", "mode": "0600", "parent_mode": "0700", "hard_link_allowed": false, "symlink_allowed": false, "create_once": true},
-    "empty_rollback_eligibility_receipt": {"owner": "root:root", "mode": "0600", "parent_mode": "0700", "hard_link_allowed": false, "symlink_allowed": false, "create_once": true},
-    "empty_rollback_receipt": {"owner": "root:root", "mode": "0600", "parent_mode": "0700", "hard_link_allowed": false, "symlink_allowed": false, "create_once": true},
-    "resolved_store_spec": {"owner": "root:root", "mode": "0600", "parent_mode": "0700", "symlink_allowed": false},
+    "trust_anchor": {
+      "owner": "root:root",
+      "mode": "0400",
+      "symlink_allowed": false
+    },
+    "postgres_store_secret": {
+      "owner": "root:root",
+      "mode": "0600",
+      "symlink_allowed": false
+    },
+    "qdrant_store_secret": {
+      "owner": "root:root",
+      "mode": "0600",
+      "symlink_allowed": false
+    },
+    "controller_state": {
+      "owner": "root:root",
+      "mode": "0700",
+      "symlink_allowed": false
+    },
+    "execution_state": {
+      "owner": "root:root",
+      "mode": "0700",
+      "symlink_allowed": false
+    },
+    "execution_journal": {
+      "owner": "root:root",
+      "mode": "0600",
+      "parent_mode": "0700",
+      "hard_link_allowed": false,
+      "symlink_allowed": false
+    },
+    "rollback_journal": {
+      "owner": "root:root",
+      "mode": "0600",
+      "parent_mode": "0700",
+      "hard_link_allowed": false,
+      "symlink_allowed": false
+    },
+    "resource_identity_ledger": {
+      "owner": "root:root",
+      "mode": "0600",
+      "parent_mode": "0700",
+      "hard_link_allowed": false,
+      "symlink_allowed": false
+    },
+    "terminal_postflight_receipt": {
+      "owner": "root:root",
+      "mode": "0600",
+      "parent_mode": "0700",
+      "hard_link_allowed": false,
+      "symlink_allowed": false,
+      "create_once": true
+    },
+    "install_receipt": {
+      "owner": "root:root",
+      "mode": "0600",
+      "parent_mode": "0700",
+      "hard_link_allowed": false,
+      "symlink_allowed": false,
+      "create_once": true
+    },
+    "empty_rollback_eligibility_receipt": {
+      "owner": "root:root",
+      "mode": "0600",
+      "parent_mode": "0700",
+      "hard_link_allowed": false,
+      "symlink_allowed": false,
+      "create_once": true
+    },
+    "empty_rollback_receipt": {
+      "owner": "root:root",
+      "mode": "0600",
+      "parent_mode": "0700",
+      "hard_link_allowed": false,
+      "symlink_allowed": false,
+      "create_once": true
+    },
+    "resolved_store_spec": {
+      "owner": "root:root",
+      "mode": "0600",
+      "parent_mode": "0700",
+      "symlink_allowed": false
+    },
     "controller_config_directory_is_retained_preinstalled_substrate": true,
     "store_secret_directory_is_retained_preinstalled_substrate": true,
     "authority_substrate_must_preexist_execution": true,
@@ -121,11 +192,26 @@
   },
   "secret_policy": {
     "future_execution_generates_fresh_store_secrets": true,
-    "postgres_environment_file_required_keys": ["POSTGRES_DB", "POSTGRES_PASSWORD", "POSTGRES_USER"],
-    "postgres_environment_file_fixed_values": {"POSTGRES_DB": "postgres", "POSTGRES_USER": "governed_memory_bootstrap"},
-    "postgres_environment_file_forbidden_keys": ["QDRANT__SERVICE__API_KEY"],
-    "qdrant_environment_file_required_keys": ["QDRANT__SERVICE__API_KEY"],
-    "qdrant_environment_file_forbidden_keys": ["POSTGRES_DB", "POSTGRES_PASSWORD", "POSTGRES_USER"],
+    "postgres_environment_file_required_keys": [
+      "POSTGRES_DB",
+      "POSTGRES_PASSWORD",
+      "POSTGRES_USER"
+    ],
+    "postgres_environment_file_fixed_values": {
+      "POSTGRES_DB": "postgres",
+      "POSTGRES_USER": "governed_memory_bootstrap"
+    },
+    "postgres_environment_file_forbidden_keys": [
+      "QDRANT__SERVICE__API_KEY"
+    ],
+    "qdrant_environment_file_required_keys": [
+      "QDRANT__SERVICE__API_KEY"
+    ],
+    "qdrant_environment_file_forbidden_keys": [
+      "POSTGRES_DB",
+      "POSTGRES_PASSWORD",
+      "POSTGRES_USER"
+    ],
     "cross_store_secret_exposure_allowed": false,
     "legacy_values_reused": false,
     "provider_credentials_in_scope": false,
@@ -142,13 +228,20 @@
     "roles_preflight": "ops/governed_memory/installation/current/postgres/roles_preflight.pgsql",
     "postgresql_source_closure_contract": "ops/governed_memory/installation/current/postgres/source_closure_contract.json",
     "postgresql_source_closure_contract_packaged": true,
-    "driver_native_executable_stage_contract_packaged": false,
+    "driver_native_executable_stage_contract_packaged": true,
+    "concrete_psycopg_postgresql_transport_packaged": false,
     "host_psql_direct_execution_allowed": false,
     "preferred_synchronous_driver_target": "psycopg[binary]==3.3.4",
     "preferred_synchronous_driver_locked_staged_and_verified": false,
     "approved_terminal_catalog_manifest_selected": false,
-    "included_migrations": ["0001_foundation", "0003_owner_claim_detail", "0004_pilot_marker"],
-    "excluded_migrations": ["0002_conversation_bridge"],
+    "included_migrations": [
+      "0001_foundation",
+      "0003_owner_claim_detail",
+      "0004_pilot_marker"
+    ],
+    "excluded_migrations": [
+      "0002_conversation_bridge"
+    ],
     "pilot_marker_inserted_during_install": false,
     "source_postgresql_connections": 0,
     "source_postgresql_reads": 0,
@@ -199,27 +292,29 @@
     "complete_closed_live_transport_substrate_set_packaged": false,
     "complete_closed_live_transport_substrate_set_integrated_into_bound_factory": false,
     "postgresql_source_closure_contract_packaged": true,
-    "driver_native_postgresql_stage_contract_packaged": false,
-    "driver_native_postgresql_executable_stage_machine_packaged": false,
+    "driver_native_postgresql_stage_contract_packaged": true,
+    "driver_native_postgresql_executable_stage_machine_packaged": true,
+    "concrete_psycopg_postgresql_transport_packaged": false,
     "controller_runtime_input_selection_contract_repaired": true,
     "controller_runtime_build_receipt_provenance_v3_packaged": true,
     "exact_postgresql_16_14_and_qdrant_1_19_0_readiness_required": true,
     "approved_terminal_postgresql_catalog_manifest_selected": false,
     "selected_live_platform_transport_factory_packaged": false,
+    "selected_non_postgresql_live_platform_transport_factory_packaged": true,
     "pinned_postgresql_driver_selected": false,
     "install_receipt_replay_requires_fresh_terminal_store_readiness_probe": true,
     "empty_rollback_resume_revalidates_install_receipt_and_resource_ledger": true,
     "completed_empty_rollback_replay_reproves_exact_resource_absence": true,
-    "empty_rollback_stops_exact_stores_before_writer_fence": false,
-    "empty_rollback_writer_fence_held_from_r07_through_receipt": false,
-    "fresh_offline_read_only_empty_recheck_required_at_r07_under_stopped_store_fence": false,
-    "destructive_rollback_steps_apply_only_if_still_empty_under_fence": false,
+    "empty_rollback_controller_authority_marker_held_from_r04_through_receipt": true,
+    "fresh_live_semantic_empty_recheck_required_at_r05_under_controller_authority_marker": true,
+    "destructive_rollback_steps_require_held_controller_authority_marker_and_persisted_r05_empty_proof": true,
     "stopped_store_semantic_empty_recheck_is_valid": false,
-    "durable_live_writer_fence_transport_packaged": false,
-    "required_future_order_is_live_writer_fence_empty_recheck_then_stop_then_physical_removal": true,
+    "durable_live_rollback_controller_authority_marker_transport_packaged": true,
+    "external_direct_writer_exclusion_implemented": false,
+    "controller_authority_marker_empty_recheck_then_stop_then_physical_removal_order_implemented": true,
     "retained_audit_artifact_hashes_bound_to_rollback_receipt": true,
     "claimed_execution_journal_and_host_ownership_bind_full_release_tree_sha256": true,
-    "empty_rollback_claim_journal_requests_observations_writer_fence_and_receipt_bind_verified_runtime_and_full_release_tree": true,
+    "empty_rollback_claim_journal_requests_observations_controller_authority_marker_and_receipt_bind_verified_runtime_and_full_release_tree": true,
     "end_to_end_live_process_crash_recovery_claimed": false,
     "postflight_empty_rollback_requires_separate_signed_authority": true
   },
@@ -279,8 +374,8 @@
     "empty_rollback_receipt_binds_verified_runtime_and_full_release_tree_identity": true,
     "install_receipt_persisted_create_once_before_return": true,
     "empty_rollback_authority_claim_precedes_durable_receipt_reads_and_eligibility_persistence": true,
-    "empty_rollback_receipt_persisted_create_once_while_writer_fence_held": false,
-    "empty_rollback_receipt_persistence_create_once_while_live_writer_fence_held_required": true,
+    "empty_rollback_receipt_persisted_create_once_while_controller_authority_marker_held": true,
+    "empty_rollback_receipt_persistence_create_once_while_controller_authority_marker_held_required": true,
     "durable_receipt_paths_are_execution_identity_derived": true,
     "canonical_production_executions_root": "/var/lib/governed-memory-controller/executions",
     "public_install_and_rollback_entrypoints_require_root_owned_production_receipt_store": true,
@@ -289,9 +384,10 @@
     "secrets_or_production_content_recorded": false
   },
   "excluded_components": [
-    "selected_live_linux_platform_transport_factory",
+    "concrete_psycopg_postgresql_transport",
+    "production_runtime_publication_primitives",
+    "external_direct_writer_exclusion",
     "pinned_postgresql_driver",
-    "controller_runtime_build_transport",
     "approved_standalone_cpython_and_offline_wheelhouse",
     "application_service_account",
     "application_runtime_or_wheelhouse",
@@ -307,15 +403,12 @@
   ],
   "remaining_blockers": [
     "controller_runtime_and_release_substrate_not_separately_built_installed_or_receipted",
-    "complete_closed_live_transport_substrate_set_not_packaged",
-    "driver_native_postgresql_translation_catalog_and_rollback_prefix_machine_not_packaged",
+    "concrete_psycopg_postgresql_transport_and_complete_bound_live_transport_factory_not_packaged",
+    "production_runtime_publication_primitives_not_packaged",
+    "external_direct_writer_exclusion_not_implemented_controller_marker_only",
     "preferred_psycopg_wheels_not_locked_staged_or_native_closure_verified",
     "approved_terminal_postgresql_catalog_manifest_not_selected",
-    "durable_live_empty_rollback_writer_fence_transport_not_packaged",
-    "stopped_store_semantic_empty_recheck_contract_rejected_pending_live_fence_repair",
-    "selected_live_linux_platform_transport_factory_not_packaged",
     "pinned_postgresql_driver_not_selected",
-    "controller_runtime_build_transport_not_packaged",
     "approved_standalone_cpython_and_offline_wheelhouse_not_staged",
     "live_linux_disposable_install_process_crash_cold_restart_and_empty_rollback_proof_absent",
     "fixed_loopback_store_readiness_adapter_packaged_but_live_driver_and_compatibility_unproved",

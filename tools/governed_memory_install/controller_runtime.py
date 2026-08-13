@@ -393,6 +393,8 @@ def _selected_runtime_input_identity(
         is not True
         or driver.get("api_style") != "synchronous"
         or driver.get("preferred_extra") != "binary"
+        or driver.get("selection_state")
+        != "exact-selected-wheels-staged-verified-and-locked"
         or driver.get("asyncpg_is_controller_driver") is not False
         or driver.get("current_controller_lock_contains_selection") is not True
         or driver.get("exact_wheel_filenames_frozen") is not True
@@ -412,13 +414,42 @@ def _selected_runtime_input_identity(
             "controller_runtime_input_contract_not_ready"
         )
     lock_bindings = _requirements_lock_bindings(requirements_lock)
-    distributions = driver.get("preferred_distributions")
-    if type(distributions) is not list or len(distributions) != 2:
+    preferences = driver.get("preferred_distributions")
+    selected_wheels = driver.get("selected_wheels")
+    if (
+        type(preferences) is not list
+        or len(preferences) != 2
+        or type(selected_wheels) is not list
+        or len(selected_wheels) != 2
+    ):
+        raise ControllerRuntimeCapabilityError(
+            "controller_runtime_input_contract_not_ready"
+        )
+    preferred_versions: dict[str, str] = {}
+    for item in preferences:
+        if (
+            type(item) is not dict
+            or set(item) != {"normalized_distribution", "version"}
+            or type(item.get("normalized_distribution")) is not str
+            or type(item.get("version")) is not str
+            or not item["version"]
+            or item["normalized_distribution"] in preferred_versions
+        ):
+            raise ControllerRuntimeCapabilityError(
+                "controller_runtime_input_contract_not_ready"
+            )
+        preferred_versions[str(item["normalized_distribution"])] = str(
+            item["version"]
+        )
+    if preferred_versions != {
+        "psycopg": "3.3.4",
+        "psycopg-binary": "3.3.4",
+    }:
         raise ControllerRuntimeCapabilityError(
             "controller_runtime_input_contract_not_ready"
         )
     selected_driver: set[str] = set()
-    for item in distributions:
+    for item in selected_wheels:
         if (
             type(item) is not dict
             or set(item)
@@ -430,6 +461,8 @@ def _selected_runtime_input_identity(
             }
             or type(item.get("normalized_distribution")) is not str
             or type(item.get("version")) is not str
+            or preferred_versions.get(str(item["normalized_distribution"]))
+            != item["version"]
             or type(item.get("selected_wheel_filename")) is not str
             or _WHEEL_FILENAME_RE.fullmatch(
                 str(item["selected_wheel_filename"])

@@ -14,7 +14,6 @@ from tools.governed_memory_install.postgres_source_closure import (
     PREFERRED_DRIVER,
     PostgreSQLSourceClosureError,
     VerifiedSqlSource,
-    construct_executable_transport,
     contract_document,
 )
 
@@ -132,11 +131,7 @@ class PostgreSQLSourceClosureTests(unittest.TestCase):
         self.assertFalse(
             gate["caller_supplied_sql_stage_tuple_or_expected_catalog_allowed"]
         )
-        with self.assertRaisesRegex(
-            PostgreSQLSourceClosureError,
-            "postgres_source_closure_execution_not_ready",
-        ):
-            construct_executable_transport()
+        self.assertFalse(hasattr(subject, "construct_executable_transport"))
 
     def test_checked_in_contract_is_deterministic_and_zero_effect(self) -> None:
         document = contract_document(_sources())

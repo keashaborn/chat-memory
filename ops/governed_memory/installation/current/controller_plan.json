@@ -1,6 +1,6 @@
 {
   "schema_version": "governed-memory-dormant-store-install-stores-controller-plan-v5",
-  "state": "repository-only-repaired-install-empty-rollback-and-closed-adapters-packaged-not-installed-not-authorized",
+  "state": "phase9h-repository-only-non-postgresql-live-transports-postgresql-stage-machine-runtime-publication-policy-and-rollback-marker-packaged-not-installed-not-authorized",
   "server": "seebx",
   "candidate_id": "governed_memory_9a54cf123493_000001",
   "contract": "ops/governed_memory/installation/current/contract.json",
@@ -34,22 +34,24 @@
     "complete_closed_live_transport_substrate_set_packaged": false,
     "complete_closed_live_transport_substrate_set_integrated_into_bound_factory": false,
     "postgresql_source_closure_contract_packaged": true,
-    "driver_native_postgresql_stage_contract_packaged": false,
-    "driver_native_postgresql_executable_stage_machine_packaged": false,
+    "driver_native_postgresql_stage_contract_packaged": true,
+    "driver_native_postgresql_executable_stage_machine_packaged": true,
+    "concrete_psycopg_postgresql_transport_packaged": false,
     "controller_runtime_input_selection_contract_repaired": true,
     "controller_runtime_build_receipt_provenance_v3_packaged": true,
     "exact_postgresql_16_14_and_qdrant_1_19_0_readiness_required": true,
     "approved_terminal_postgresql_catalog_manifest_selected": false,
     "selected_live_platform_transports_packaged": false,
+    "selected_non_postgresql_live_platform_transport_factory_packaged": true,
     "pinned_postgresql_driver_selected": false,
     "exact_postcondition_before_completion": true,
     "prebootstrap_fresh_empty_readiness_probe_required": true,
     "fresh_terminal_canonical_store_readiness_probe_required_for_install_receipt_and_replay": true,
-    "empty_rollback_stops_exact_stores_before_writer_fence": false,
-    "empty_rollback_writer_fence_required_from_r07_through_receipt": false,
-    "fresh_offline_read_only_empty_recheck_required_at_r07_under_stopped_store_fence": false,
-    "durable_live_writer_fence_transport_packaged": false,
-    "required_future_order_is_live_writer_fence_empty_recheck_then_stop_then_physical_removal": true,
+    "empty_rollback_controller_authority_marker_required_from_r04_through_receipt": true,
+    "fresh_live_semantic_empty_recheck_required_at_r05_under_controller_authority_marker": true,
+    "durable_live_rollback_controller_authority_marker_transport_packaged": true,
+    "external_direct_writer_exclusion_implemented": false,
+    "controller_authority_marker_empty_recheck_then_stop_then_physical_removal_order_implemented": true,
     "unknown_state_or_drift_refuses": true,
     "source_postgresql_calls_in_this_repository_phase": 0,
     "provider_calls_in_this_repository_phase": 0,
@@ -57,25 +59,101 @@
     "initial_qdrant_points_required": 0
   },
   "install_steps": [
-    {"id": "I01_REVERIFY_PRECLAIMED_EXECUTION_LOCK", "effect": "reverify_preclaimed_execution_lock", "rollback": "none"},
-    {"id": "I02_VERIFY_CLAIMED_EXECUTION_BINDING", "effect": "verify_claimed_execution_binding", "rollback": "retain_single_use_nonce_claim"},
-    {"id": "I03_VERIFY_LIVE_PREFLIGHT", "effect": "verify_live_preflight", "rollback": "none"},
-    {"id": "I04_WRITE_RESOLVED_STORE_SPEC_AND_GENERATE_FRESH_STORE_SECRETS", "effect": "write_resolved_store_spec_and_generate_fresh_store_secrets", "rollback": "remove_resolved_store_spec_and_fresh_store_secrets"},
-    {"id": "I05_CREATE_EXACT_NETWORK", "effect": "create_exact_network", "rollback": "remove_exact_unused_network"},
-    {"id": "I06_CREATE_EXACT_POSTGRES_VOLUME", "effect": "create_exact_postgres_volume", "rollback": "remove_exact_empty_postgres_volume"},
-    {"id": "I07_CREATE_EXACT_QDRANT_VOLUME", "effect": "create_exact_qdrant_volume", "rollback": "remove_exact_empty_qdrant_volume"},
-    {"id": "I08_CREATE_EXACT_POSTGRES_CONTAINER", "effect": "create_exact_postgres_container", "rollback": "remove_exact_postgres_container"},
-    {"id": "I09_CREATE_EXACT_QDRANT_CONTAINER", "effect": "create_exact_qdrant_container", "rollback": "remove_exact_qdrant_container"},
-    {"id": "I10_START_AND_VERIFY_EMPTY_STORES", "effect": "start_and_verify_empty_stores", "rollback": "stop_exact_stores"},
-    {"id": "I11_BOOTSTRAP_CANONICAL_DATABASE", "effect": "bootstrap_canonical_database", "rollback": "drop_empty_canonical_database_and_roles"},
-    {"id": "I12_APPLY_FOUNDATION_0001", "effect": "apply_foundation_0001", "rollback": "rollback_empty_foundation_0001"},
-    {"id": "I13_APPLY_OWNER_CLAIM_DETAIL_0003", "effect": "apply_owner_claim_detail_0003", "rollback": "rollback_owner_claim_detail_0003"},
-    {"id": "I14_APPLY_PILOT_MARKER_0004", "effect": "apply_pilot_marker_0004_without_marker", "rollback": "rollback_empty_pilot_marker_0004"},
-    {"id": "I15_CREATE_EMPTY_QDRANT_COLLECTION", "effect": "create_empty_qdrant_collection", "rollback": "remove_exact_empty_qdrant_collection"},
-    {"id": "I16_CREATE_QDRANT_ALIAS", "effect": "create_qdrant_alias", "rollback": "remove_exact_qdrant_alias"},
-    {"id": "I17_VERIFY_PRE_SUPERVISOR_RESOURCE_IDENTITIES", "effect": "verify_pre_supervisor_resource_identities", "rollback": "retain_attempt_resource_identity_ledger"},
-    {"id": "I18_INSTALL_AND_ENABLE_STORES_SUPERVISOR", "effect": "install_and_enable_stores_supervisor", "rollback": "disable_and_remove_stores_supervisor"},
-    {"id": "I19_COLD_RESTART_AND_VERIFY_TERMINAL_POSTFLIGHT", "effect": "cold_restart_and_verify_terminal_postflight", "rollback": "requires_separate_signed_rollback_after_terminal_postflight"}
+    {
+      "id": "I01_REVERIFY_PRECLAIMED_EXECUTION_LOCK",
+      "effect": "reverify_preclaimed_execution_lock",
+      "rollback": "none"
+    },
+    {
+      "id": "I02_VERIFY_CLAIMED_EXECUTION_BINDING",
+      "effect": "verify_claimed_execution_binding",
+      "rollback": "retain_single_use_nonce_claim"
+    },
+    {
+      "id": "I03_VERIFY_LIVE_PREFLIGHT",
+      "effect": "verify_live_preflight",
+      "rollback": "none"
+    },
+    {
+      "id": "I04_WRITE_RESOLVED_STORE_SPEC_AND_GENERATE_FRESH_STORE_SECRETS",
+      "effect": "write_resolved_store_spec_and_generate_fresh_store_secrets",
+      "rollback": "remove_resolved_store_spec_and_fresh_store_secrets"
+    },
+    {
+      "id": "I05_CREATE_EXACT_NETWORK",
+      "effect": "create_exact_network",
+      "rollback": "remove_exact_unused_network"
+    },
+    {
+      "id": "I06_CREATE_EXACT_POSTGRES_VOLUME",
+      "effect": "create_exact_postgres_volume",
+      "rollback": "remove_exact_empty_postgres_volume"
+    },
+    {
+      "id": "I07_CREATE_EXACT_QDRANT_VOLUME",
+      "effect": "create_exact_qdrant_volume",
+      "rollback": "remove_exact_empty_qdrant_volume"
+    },
+    {
+      "id": "I08_CREATE_EXACT_POSTGRES_CONTAINER",
+      "effect": "create_exact_postgres_container",
+      "rollback": "remove_exact_postgres_container"
+    },
+    {
+      "id": "I09_CREATE_EXACT_QDRANT_CONTAINER",
+      "effect": "create_exact_qdrant_container",
+      "rollback": "remove_exact_qdrant_container"
+    },
+    {
+      "id": "I10_START_AND_VERIFY_EMPTY_STORES",
+      "effect": "start_and_verify_empty_stores",
+      "rollback": "stop_exact_stores"
+    },
+    {
+      "id": "I11_BOOTSTRAP_CANONICAL_DATABASE",
+      "effect": "bootstrap_canonical_database",
+      "rollback": "drop_empty_canonical_database_and_roles"
+    },
+    {
+      "id": "I12_APPLY_FOUNDATION_0001",
+      "effect": "apply_foundation_0001",
+      "rollback": "rollback_empty_foundation_0001"
+    },
+    {
+      "id": "I13_APPLY_OWNER_CLAIM_DETAIL_0003",
+      "effect": "apply_owner_claim_detail_0003",
+      "rollback": "rollback_owner_claim_detail_0003"
+    },
+    {
+      "id": "I14_APPLY_PILOT_MARKER_0004",
+      "effect": "apply_pilot_marker_0004_without_marker",
+      "rollback": "rollback_empty_pilot_marker_0004"
+    },
+    {
+      "id": "I15_CREATE_EMPTY_QDRANT_COLLECTION",
+      "effect": "create_empty_qdrant_collection",
+      "rollback": "remove_exact_empty_qdrant_collection"
+    },
+    {
+      "id": "I16_CREATE_QDRANT_ALIAS",
+      "effect": "create_qdrant_alias",
+      "rollback": "remove_exact_qdrant_alias"
+    },
+    {
+      "id": "I17_VERIFY_PRE_SUPERVISOR_RESOURCE_IDENTITIES",
+      "effect": "verify_pre_supervisor_resource_identities",
+      "rollback": "retain_attempt_resource_identity_ledger"
+    },
+    {
+      "id": "I18_INSTALL_AND_ENABLE_STORES_SUPERVISOR",
+      "effect": "install_and_enable_stores_supervisor",
+      "rollback": "disable_and_remove_stores_supervisor"
+    },
+    {
+      "id": "I19_COLD_RESTART_AND_VERIFY_TERMINAL_POSTFLIGHT",
+      "effect": "cold_restart_and_verify_terminal_postflight",
+      "rollback": "requires_separate_signed_rollback_after_terminal_postflight"
+    }
   ],
   "same_attempt_compensation_order": [
     "I18_INSTALL_AND_ENABLE_STORES_SUPERVISOR",
@@ -94,28 +172,138 @@
     "I04_WRITE_RESOLVED_STORE_SPEC_AND_GENERATE_FRESH_STORE_SECRETS"
   ],
   "empty_rollback_steps": [
-    {"id": "R01_REVERIFY_GLOBAL_LOCK", "operation": "reverify_global_lock", "resource_key": null, "invariant_only": false},
-    {"id": "R02_VERIFY_CLAIMED_ROLLBACK_AUTHORITY", "operation": "verify_claimed_rollback_authority", "resource_key": null, "invariant_only": false},
-    {"id": "R03_VERIFY_INSTALL_RECEIPT_AND_LEDGER", "operation": "verify_install_receipt_and_ledger", "resource_key": null, "invariant_only": false},
-    {"id": "R04_VERIFY_EMPTY_ELIGIBILITY", "operation": "verify_empty_eligibility", "resource_key": null, "invariant_only": false},
-    {"id": "R05_DISABLE_AND_REMOVE_STORES_SUPERVISOR", "operation": "disable_and_remove_stores_supervisor", "resource_key": "stores_supervisor", "invariant_only": false},
-    {"id": "R06_STOP_EXACT_STORES", "operation": "stop_exact_stores", "resource_key": null, "invariant_only": false},
-    {"id": "R07_ACQUIRE_STOPPED_STORE_WRITER_FENCE", "operation": "acquire_stopped_store_writer_fence", "resource_key": null, "invariant_only": false},
-    {"id": "R08_REMOVE_EXACT_QDRANT_CONTAINER", "operation": "remove_exact_qdrant_container", "resource_key": "qdrant_container", "invariant_only": false},
-    {"id": "R09_REMOVE_EXACT_POSTGRES_CONTAINER", "operation": "remove_exact_postgres_container", "resource_key": "postgres_container", "invariant_only": false},
-    {"id": "R10_REMOVE_EXACT_EMPTY_QDRANT_VOLUME", "operation": "remove_exact_empty_qdrant_volume", "resource_key": "qdrant_volume", "invariant_only": false},
-    {"id": "R11_REMOVE_EXACT_EMPTY_POSTGRES_VOLUME", "operation": "remove_exact_empty_postgres_volume", "resource_key": "postgres_volume", "invariant_only": false},
-    {"id": "R12_REMOVE_EXACT_UNUSED_NETWORK", "operation": "remove_exact_unused_network", "resource_key": "network", "invariant_only": false},
-    {"id": "R13_REMOVE_FRESH_QDRANT_STORE_SECRET", "operation": "remove_fresh_qdrant_store_secret", "resource_key": "qdrant_store_secret", "invariant_only": false},
-    {"id": "R14_REMOVE_FRESH_POSTGRES_STORE_SECRET", "operation": "remove_fresh_postgres_store_secret", "resource_key": "postgres_store_secret", "invariant_only": false},
-    {"id": "R15_REMOVE_RESOLVED_STORE_SPEC", "operation": "remove_resolved_store_spec", "resource_key": "resolved_store_spec", "invariant_only": false},
-    {"id": "R16_VERIFY_QDRANT_ALIAS_PHYSICALLY_ABSENT", "operation": "verify_qdrant_alias_physically_absent", "resource_key": "qdrant_alias", "invariant_only": true},
-    {"id": "R17_VERIFY_QDRANT_COLLECTION_PHYSICALLY_ABSENT", "operation": "verify_qdrant_collection_physically_absent", "resource_key": "qdrant_collection", "invariant_only": true},
-    {"id": "R18_VERIFY_PILOT_MARKER_0004_PHYSICALLY_ABSENT", "operation": "verify_pilot_marker_0004_physically_absent", "resource_key": "migration_0004", "invariant_only": true},
-    {"id": "R19_VERIFY_OWNER_CLAIM_DETAIL_0003_PHYSICALLY_ABSENT", "operation": "verify_owner_claim_detail_0003_physically_absent", "resource_key": "migration_0003", "invariant_only": true},
-    {"id": "R20_VERIFY_FOUNDATION_0001_PHYSICALLY_ABSENT", "operation": "verify_foundation_0001_physically_absent", "resource_key": "migration_0001", "invariant_only": true},
-    {"id": "R21_VERIFY_CANONICAL_DATABASE_AND_ROLES_PHYSICALLY_ABSENT", "operation": "verify_canonical_database_and_roles_physically_absent", "resource_key": "canonical_database_and_roles", "invariant_only": true},
-    {"id": "R22_VERIFY_EXACT_ABSENCE_AND_RETAIN_AUDIT", "operation": "verify_exact_absence_and_retain_audit", "resource_key": null, "invariant_only": false}
+    {
+      "id": "R01_REVERIFY_GLOBAL_LOCK",
+      "operation": "reverify_global_lock",
+      "resource_key": null,
+      "invariant_only": false
+    },
+    {
+      "id": "R02_VERIFY_CLAIMED_ROLLBACK_AUTHORITY",
+      "operation": "verify_claimed_rollback_authority",
+      "resource_key": null,
+      "invariant_only": false
+    },
+    {
+      "id": "R03_VERIFY_INSTALL_RECEIPT_AND_LEDGER",
+      "operation": "verify_install_receipt_and_ledger",
+      "resource_key": null,
+      "invariant_only": false
+    },
+    {
+      "id": "R04_ACQUIRE_ROLLBACK_CONTROLLER_AUTHORITY_MARKER",
+      "operation": "acquire_rollback_controller_authority_marker",
+      "resource_key": null,
+      "invariant_only": false
+    },
+    {
+      "id": "R05_RECHECK_SEMANTIC_EMPTY_UNDER_CONTROLLER_AUTHORITY_MARKER",
+      "operation": "recheck_semantic_empty_under_controller_authority_marker",
+      "resource_key": null,
+      "invariant_only": false
+    },
+    {
+      "id": "R06_DISABLE_AND_REMOVE_STORES_SUPERVISOR",
+      "operation": "disable_and_remove_stores_supervisor",
+      "resource_key": "stores_supervisor",
+      "invariant_only": false
+    },
+    {
+      "id": "R07_STOP_EXACT_STORES",
+      "operation": "stop_exact_stores",
+      "resource_key": null,
+      "invariant_only": false
+    },
+    {
+      "id": "R08_REMOVE_EXACT_QDRANT_CONTAINER",
+      "operation": "remove_exact_qdrant_container",
+      "resource_key": "qdrant_container",
+      "invariant_only": false
+    },
+    {
+      "id": "R09_REMOVE_EXACT_POSTGRES_CONTAINER",
+      "operation": "remove_exact_postgres_container",
+      "resource_key": "postgres_container",
+      "invariant_only": false
+    },
+    {
+      "id": "R10_REMOVE_EXACT_EMPTY_QDRANT_VOLUME",
+      "operation": "remove_exact_empty_qdrant_volume",
+      "resource_key": "qdrant_volume",
+      "invariant_only": false
+    },
+    {
+      "id": "R11_REMOVE_EXACT_EMPTY_POSTGRES_VOLUME",
+      "operation": "remove_exact_empty_postgres_volume",
+      "resource_key": "postgres_volume",
+      "invariant_only": false
+    },
+    {
+      "id": "R12_REMOVE_EXACT_UNUSED_NETWORK",
+      "operation": "remove_exact_unused_network",
+      "resource_key": "network",
+      "invariant_only": false
+    },
+    {
+      "id": "R13_REMOVE_FRESH_QDRANT_STORE_SECRET",
+      "operation": "remove_fresh_qdrant_store_secret",
+      "resource_key": "qdrant_store_secret",
+      "invariant_only": false
+    },
+    {
+      "id": "R14_REMOVE_FRESH_POSTGRES_STORE_SECRET",
+      "operation": "remove_fresh_postgres_store_secret",
+      "resource_key": "postgres_store_secret",
+      "invariant_only": false
+    },
+    {
+      "id": "R15_REMOVE_RESOLVED_STORE_SPEC",
+      "operation": "remove_resolved_store_spec",
+      "resource_key": "resolved_store_spec",
+      "invariant_only": false
+    },
+    {
+      "id": "R16_VERIFY_QDRANT_ALIAS_PHYSICALLY_ABSENT",
+      "operation": "verify_qdrant_alias_physically_absent",
+      "resource_key": "qdrant_alias",
+      "invariant_only": true
+    },
+    {
+      "id": "R17_VERIFY_QDRANT_COLLECTION_PHYSICALLY_ABSENT",
+      "operation": "verify_qdrant_collection_physically_absent",
+      "resource_key": "qdrant_collection",
+      "invariant_only": true
+    },
+    {
+      "id": "R18_VERIFY_PILOT_MARKER_0004_PHYSICALLY_ABSENT",
+      "operation": "verify_pilot_marker_0004_physically_absent",
+      "resource_key": "migration_0004",
+      "invariant_only": true
+    },
+    {
+      "id": "R19_VERIFY_OWNER_CLAIM_DETAIL_0003_PHYSICALLY_ABSENT",
+      "operation": "verify_owner_claim_detail_0003_physically_absent",
+      "resource_key": "migration_0003",
+      "invariant_only": true
+    },
+    {
+      "id": "R20_VERIFY_FOUNDATION_0001_PHYSICALLY_ABSENT",
+      "operation": "verify_foundation_0001_physically_absent",
+      "resource_key": "migration_0001",
+      "invariant_only": true
+    },
+    {
+      "id": "R21_VERIFY_CANONICAL_DATABASE_AND_ROLES_PHYSICALLY_ABSENT",
+      "operation": "verify_canonical_database_and_roles_physically_absent",
+      "resource_key": "canonical_database_and_roles",
+      "invariant_only": true
+    },
+    {
+      "id": "R22_VERIFY_EXACT_ABSENCE_AND_RETAIN_AUDIT",
+      "operation": "verify_exact_absence_and_retain_audit",
+      "resource_key": null,
+      "invariant_only": false
+    }
   ],
   "later_rollback": {
     "eligibility_verifier_packaged": true,
@@ -135,17 +323,19 @@
     "opaque_verified_install_receipt_and_ledger_capability_required": true,
     "resume_revalidates_verified_install_receipt_and_ledger": true,
     "completed_replay_reproves_exact_resource_absence": true,
-    "writer_fence_held_through_terminal_absence_retained_audit_and_receipt": false,
-    "fresh_offline_read_only_empty_recheck_required_before_first_destructive_step": false,
-    "destructive_steps_atomically_recheck_empty_under_writer_fence": false,
+    "controller_authority_marker_held_through_terminal_absence_retained_audit_and_receipt": true,
+    "fresh_live_semantic_empty_recheck_required_before_first_destructive_step": true,
+    "destructive_steps_require_held_controller_authority_marker_and_persisted_r05_empty_proof": true,
     "stopped_store_semantic_empty_recheck_is_valid": false,
-    "durable_live_writer_fence_transport_packaged": false,
+    "durable_live_rollback_controller_authority_marker_transport_packaged": true,
+    "external_direct_writer_exclusion_implemented": false,
     "retained_audit_artifact_hashes_bound_to_receipt": true,
     "remove_only_ledger_bound_resources": true,
     "controller_release_and_runtime_retained_as_separate_substrate": true,
     "retain_nonce_journal_anchor_ledger_and_receipts": true,
     "closed_ledger_bound_physical_adapter_packaged": true,
-    "selected_live_platform_driver_packaged": false
+    "selected_live_platform_driver_packaged": false,
+    "selected_non_postgresql_live_platform_transport_factory_packaged": true
   },
   "live_execution": {
     "claim_bound_install_controller_composition_packaged": true,
@@ -162,22 +352,27 @@
     "closed_live_transport_contracts_packaged": true,
     "complete_closed_live_transport_substrate_set_packaged": false,
     "postgresql_source_closure_contract_packaged": true,
-    "driver_native_postgresql_stage_contract_packaged": false,
-    "driver_native_postgresql_executable_stage_machine_packaged": false,
+    "driver_native_postgresql_stage_contract_packaged": true,
+    "driver_native_postgresql_executable_stage_machine_packaged": true,
+    "concrete_psycopg_postgresql_transport_packaged": false,
     "runtime_input_selection_contract_repaired": true,
     "runtime_build_receipt_provenance_v3_packaged": true,
     "complete_closed_live_transport_substrate_set_integrated_into_bound_factory": false,
     "approved_terminal_postgresql_catalog_manifest_selected": false,
     "exact_postgresql_16_14_and_qdrant_1_19_0_readiness_required": true,
-    "durable_live_empty_rollback_writer_fence_transport_packaged": false,
+    "durable_live_empty_rollback_controller_authority_marker_transport_packaged": true,
+    "external_direct_writer_exclusion_implemented": false,
     "stopped_store_semantic_empty_recheck_is_valid": false,
     "selected_live_platform_transports_packaged": false,
+    "selected_non_postgresql_live_platform_transport_factory_packaged": true,
     "pinned_postgresql_driver_selected": false,
     "durable_create_once_receipt_store_packaged": true,
     "public_entrypoints_require_canonical_root_owned_production_receipt_store": true,
     "synthetic_receipt_stores_are_private_test_only": true,
     "controller_runtime_release_builder_orchestration_packaged": true,
     "controller_runtime_build_transport_packaged": false,
+    "controller_runtime_publication_policy_transport_packaged": true,
+    "production_runtime_publication_primitives_packaged": false,
     "activation_entrypoint_packaged": false,
     "bounded_image_inspect_runner_primitive_packaged": true,
     "local_image_inspect_adapter_packaged": true,
@@ -185,7 +380,7 @@
     "full_controller_release_tree_verification_packaged": true,
     "exact_locked_controller_distribution_set_verification_packaged": true,
     "full_release_tree_sha256_bound_through_claim_journal_host_ownership_and_install_receipt": true,
-    "empty_rollback_full_runtime_and_release_identity_bound_through_authority_claim_journal_requests_observations_writer_fence_and_receipt": true,
+    "empty_rollback_full_runtime_and_release_identity_bound_through_authority_claim_journal_requests_observations_controller_authority_marker_and_receipt": true,
     "controller_release_and_runtime_require_separate_future_build_and_install_authority": true,
     "supervisor_launcher_source_packaged": true,
     "controller_runtime_built_or_installed": false,

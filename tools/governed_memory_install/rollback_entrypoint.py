@@ -91,6 +91,9 @@ _TIMESTAMP_RE = re.compile(
     r"T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z\Z",
     re.ASCII,
 )
+_LIVE_ROLLBACK_CONTROLLER_AUTHORITY_MARKER_DOMAIN: Final = (
+    b"governed-memory-live-rollback-controller-authority-marker-v1\x00"
+)
 _EXECUTION_DOMAIN: Final = b"governed-memory-empty-rollback-execution-v3\x00"
 _ATTEMPT_DOMAIN: Final = b"governed-memory-empty-rollback-attempt-v3\x00"
 _JOURNAL_DOMAIN: Final = b"governed-memory-empty-rollback-journal-v3\x00"
@@ -418,17 +421,64 @@ class RollbackObservation:
             )
 
 
+def canonical_live_rollback_controller_authority_marker_sha256(
+    request: RollbackOperationRequest,
+    *,
+    marker_bound_postgres_identity_sha256: str,
+    marker_bound_qdrant_identity_sha256: str,
+) -> str:
+    if (
+        type(request) is not RollbackOperationRequest
+        or _HASH_RE.fullmatch(
+            marker_bound_postgres_identity_sha256
+        ) is None
+        or _HASH_RE.fullmatch(
+            marker_bound_qdrant_identity_sha256
+        ) is None
+    ):
+        raise EmptyRollbackExecutionError(
+            "empty_rollback_controller_authority_marker_identity_invalid"
+        )
+    return hashlib.sha256(
+        _LIVE_ROLLBACK_CONTROLLER_AUTHORITY_MARKER_DOMAIN
+        + canonical_json_bytes(
+            {
+                "schema_version": "governed-memory-live-rollback-controller-authority-marker-v1",
+                "execution_id": request.execution_id,
+                "attempt_id": request.attempt_id,
+                "plan_sha256": request.plan_sha256,
+                "eligibility_receipt_sha256": (
+                    request.eligibility_receipt_sha256
+                ),
+                "exact_targets_sha256": request.exact_targets_sha256,
+                "controller_runtime_tree_sha256": (
+                    request.controller_runtime_tree_sha256
+                ),
+                "controller_release_tree_sha256": (
+                    request.controller_release_tree_sha256
+                ),
+                "marker_bound_postgres_identity_sha256": (
+                    marker_bound_postgres_identity_sha256
+                ),
+                "marker_bound_qdrant_identity_sha256": (
+                    marker_bound_qdrant_identity_sha256
+                ),
+            }
+        )
+    ).hexdigest()
+
+
 @dataclass(frozen=True, slots=True)
-class EmptyRollbackWriterFenceAcquisition:
+class EmptyRollbackControllerAuthorityMarkerAcquisition:
     execution_id: str
     attempt_id: str
     plan_sha256: str
     exact_targets_sha256: str
     controller_runtime_tree_sha256: str
     controller_release_tree_sha256: str
-    nonwritable_postgres_identity_sha256: str
-    nonwritable_qdrant_identity_sha256: str
-    fence_sha256: str
+    marker_bound_postgres_identity_sha256: str
+    marker_bound_qdrant_identity_sha256: str
+    controller_authority_marker_sha256: str
 
     def __post_init__(self) -> None:
         if (
@@ -438,17 +488,21 @@ class EmptyRollbackWriterFenceAcquisition:
             or _HASH_RE.fullmatch(self.exact_targets_sha256) is None
             or _HASH_RE.fullmatch(self.controller_runtime_tree_sha256) is None
             or _HASH_RE.fullmatch(self.controller_release_tree_sha256) is None
-            or _HASH_RE.fullmatch(self.nonwritable_postgres_identity_sha256) is None
-            or _HASH_RE.fullmatch(self.nonwritable_qdrant_identity_sha256) is None
-            or _HASH_RE.fullmatch(self.fence_sha256) is None
+            or _HASH_RE.fullmatch(
+                self.marker_bound_postgres_identity_sha256
+            ) is None
+            or _HASH_RE.fullmatch(
+                self.marker_bound_qdrant_identity_sha256
+            ) is None
+            or _HASH_RE.fullmatch(self.controller_authority_marker_sha256) is None
         ):
             raise EmptyRollbackExecutionError(
-                "empty_rollback_writer_fence_acquisition_invalid"
+                "empty_rollback_controller_authority_marker_acquisition_invalid"
             )
 
 
 @dataclass(frozen=True, slots=True)
-class EmptyRollbackWriterFenceEvidence:
+class EmptyRollbackControllerAuthorityMarkerEvidence:
     execution_id: str
     attempt_id: str
     plan_sha256: str
@@ -456,29 +510,29 @@ class EmptyRollbackWriterFenceEvidence:
     exact_targets_sha256: str
     controller_runtime_tree_sha256: str
     controller_release_tree_sha256: str
-    nonwritable_postgres_identity_sha256: str
-    nonwritable_qdrant_identity_sha256: str
-    fence_sha256: str
+    marker_bound_postgres_identity_sha256: str
+    marker_bound_qdrant_identity_sha256: str
+    controller_authority_marker_sha256: str
 
 
-_WRITER_FENCE_TOKEN = object()
+_CONTROLLER_AUTHORITY_MARKER_TOKEN = object()
 
 
-class _EmptyRollbackWriterFenceCapability:
+class _EmptyRollbackControllerAuthorityMarkerCapability:
     __slots__ = ("_evidence", "_token")
 
     def __init__(
-        self, evidence: EmptyRollbackWriterFenceEvidence, token: object
+        self, evidence: EmptyRollbackControllerAuthorityMarkerEvidence, token: object
     ) -> None:
-        if token is not _WRITER_FENCE_TOKEN:
+        if token is not _CONTROLLER_AUTHORITY_MARKER_TOKEN:
             raise EmptyRollbackExecutionError(
-                "empty_rollback_writer_fence_capability_invalid"
+                "empty_rollback_controller_authority_marker_capability_invalid"
             )
         self._evidence = evidence
         self._token = token
 
     def __repr__(self) -> str:
-        return "EmptyRollbackWriterFenceCapability(<content-redacted>)"
+        return "EmptyRollbackControllerAuthorityMarkerCapability(<content-redacted>)"
 
 
 @dataclass(frozen=True, slots=True)
@@ -727,7 +781,7 @@ def validate_install_receipt_ledger_capability(
     return evidence
 
 
-def validate_empty_rollback_writer_fence_capability(
+def validate_empty_rollback_controller_authority_marker_capability(
     value: object,
     *,
     expected_execution_id: str,
@@ -737,19 +791,19 @@ def validate_empty_rollback_writer_fence_capability(
     expected_exact_targets_sha256: str,
     expected_controller_runtime_tree_sha256: str,
     expected_controller_release_tree_sha256: str,
-    expected_nonwritable_postgres_identity_sha256: str | None = None,
-    expected_nonwritable_qdrant_identity_sha256: str | None = None,
-    expected_fence_sha256: str | None = None,
-) -> EmptyRollbackWriterFenceEvidence:
-    """Validate the one writer fence held across every destructive boundary."""
+    expected_marker_bound_postgres_identity_sha256: str | None = None,
+    expected_marker_bound_qdrant_identity_sha256: str | None = None,
+    expected_controller_authority_marker_sha256: str | None = None,
+) -> EmptyRollbackControllerAuthorityMarkerEvidence:
+    """Validate the one controller-authority marker held across every destructive boundary."""
 
     if (
-        type(value) is not _EmptyRollbackWriterFenceCapability
-        or value._token is not _WRITER_FENCE_TOKEN
-        or type(value._evidence) is not EmptyRollbackWriterFenceEvidence
+        type(value) is not _EmptyRollbackControllerAuthorityMarkerCapability
+        or value._token is not _CONTROLLER_AUTHORITY_MARKER_TOKEN
+        or type(value._evidence) is not EmptyRollbackControllerAuthorityMarkerEvidence
     ):
         raise EmptyRollbackExecutionError(
-            "empty_rollback_writer_fence_capability_invalid"
+            "empty_rollback_controller_authority_marker_capability_invalid"
         )
     evidence = value._evidence
     if (
@@ -763,26 +817,30 @@ def validate_empty_rollback_writer_fence_capability(
         != expected_controller_runtime_tree_sha256
         or evidence.controller_release_tree_sha256
         != expected_controller_release_tree_sha256
-        or _HASH_RE.fullmatch(evidence.nonwritable_postgres_identity_sha256) is None
-        or _HASH_RE.fullmatch(evidence.nonwritable_qdrant_identity_sha256) is None
+        or _HASH_RE.fullmatch(
+            evidence.marker_bound_postgres_identity_sha256
+        ) is None
+        or _HASH_RE.fullmatch(
+            evidence.marker_bound_qdrant_identity_sha256
+        ) is None
         or (
-            expected_nonwritable_postgres_identity_sha256 is not None
-            and evidence.nonwritable_postgres_identity_sha256
-            != expected_nonwritable_postgres_identity_sha256
+            expected_marker_bound_postgres_identity_sha256 is not None
+            and evidence.marker_bound_postgres_identity_sha256
+            != expected_marker_bound_postgres_identity_sha256
         )
         or (
-            expected_nonwritable_qdrant_identity_sha256 is not None
-            and evidence.nonwritable_qdrant_identity_sha256
-            != expected_nonwritable_qdrant_identity_sha256
+            expected_marker_bound_qdrant_identity_sha256 is not None
+            and evidence.marker_bound_qdrant_identity_sha256
+            != expected_marker_bound_qdrant_identity_sha256
         )
-        or _HASH_RE.fullmatch(evidence.fence_sha256) is None
+        or _HASH_RE.fullmatch(evidence.controller_authority_marker_sha256) is None
         or (
-            expected_fence_sha256 is not None
-            and evidence.fence_sha256 != expected_fence_sha256
+            expected_controller_authority_marker_sha256 is not None
+            and evidence.controller_authority_marker_sha256 != expected_controller_authority_marker_sha256
         )
     ):
         raise EmptyRollbackExecutionError(
-            "empty_rollback_writer_fence_binding_mismatch"
+            "empty_rollback_controller_authority_marker_binding_mismatch"
         )
     return evidence
 
@@ -809,33 +867,27 @@ class EmptyRollbackOperations(Protocol):
     def observe_empty_eligibility(
         self,
         request: RollbackOperationRequest,
-        writer_fence_capability: object | None,
+        controller_authority_marker_capability: object | None,
     ) -> Mapping[str, object]: ...
 
-    def acquire_empty_writer_fence(
+    def acquire_empty_rollback_controller_authority_marker(
         self,
         request: RollbackOperationRequest,
-    ) -> EmptyRollbackWriterFenceAcquisition: ...
+    ) -> EmptyRollbackControllerAuthorityMarkerAcquisition: ...
 
-    def release_empty_writer_fence(
+    def release_empty_rollback_controller_authority_marker(
         self,
         request: RollbackOperationRequest,
-        writer_fence_capability: object,
+        controller_authority_marker_capability: object,
     ) -> None: ...
 
     def observe(self, request: RollbackOperationRequest) -> RollbackObservation: ...
-
-    def apply(
-        self,
-        request: RollbackOperationRequest,
-        expected: RollbackObservation,
-    ) -> None: ...
 
     def apply_if_still_empty(
         self,
         request: RollbackOperationRequest,
         expected: RollbackObservation,
-        writer_fence_capability: object,
+        controller_authority_marker_capability: object,
         signed_eligibility: Mapping[str, object],
     ) -> None: ...
 
@@ -843,14 +895,14 @@ class EmptyRollbackOperations(Protocol):
         self,
         request: RollbackOperationRequest,
         resources: tuple[ExactRollbackResource, ...],
-        writer_fence_capability: object,
+        controller_authority_marker_capability: object,
     ) -> bool: ...
 
     def observe_retained_audit_set(
         self,
         request: RollbackOperationRequest,
         retained_audit_keys: tuple[str, ...],
-        writer_fence_capability: object,
+        controller_authority_marker_capability: object,
     ) -> Mapping[str, str]: ...
 
 
@@ -1106,10 +1158,9 @@ class _EmptyRollbackController:
                 for name in (
                     "verify_install_receipt_and_ledger",
                     "observe_empty_eligibility",
-                    "acquire_empty_writer_fence",
-                    "release_empty_writer_fence",
+                    "acquire_empty_rollback_controller_authority_marker",
+                    "release_empty_rollback_controller_authority_marker",
                     "observe",
-                    "apply",
                     "apply_if_still_empty",
                     "exact_resources_absent",
                     "observe_retained_audit_set",
@@ -1131,7 +1182,7 @@ class _EmptyRollbackController:
         self.install_ledger_evidence: (
             VerifiedInstallReceiptLedgerEvidence | None
         ) = None
-        self.writer_fence_capability: object | None = None
+        self.controller_authority_marker_capability: object | None = None
         self.retained_audit_set_sha256: str | None = None
         self.resource_by_key = {
             item.resource_key: item for item in self.resources
@@ -1238,9 +1289,9 @@ class _EmptyRollbackController:
             exact_targets_sha256=self.plan.exact_targets_sha256,
         )
 
-    def _validate_writer_fence(self) -> EmptyRollbackWriterFenceEvidence:
-        return validate_empty_rollback_writer_fence_capability(
-            self.writer_fence_capability,
+    def _validate_controller_authority_marker(self) -> EmptyRollbackControllerAuthorityMarkerEvidence:
+        return validate_empty_rollback_controller_authority_marker_capability(
+            self.controller_authority_marker_capability,
             expected_execution_id=self.claim.execution_id,
             expected_attempt_id=self.claim.attempt_id,
             expected_plan_sha256=self.plan.plan_sha256,
@@ -1256,15 +1307,15 @@ class _EmptyRollbackController:
             ),
         )
 
-    def _acquire_and_reverify_writer_fence(self) -> None:
-        if self.writer_fence_capability is not None:
+    def _acquire_controller_authority_marker(self) -> None:
+        if self.controller_authority_marker_capability is not None:
             raise EmptyRollbackExecutionError(
-                "empty_rollback_writer_fence_already_held"
+                "empty_rollback_controller_authority_marker_already_held"
             )
-        request = self._request(self.plan.steps[6])
-        acquisition = self.operations.acquire_empty_writer_fence(request)
+        request = self._request(self.plan.steps[3])
+        acquisition = self.operations.acquire_empty_rollback_controller_authority_marker(request)
         if (
-            type(acquisition) is not EmptyRollbackWriterFenceAcquisition
+            type(acquisition) is not EmptyRollbackControllerAuthorityMarkerAcquisition
             or acquisition.execution_id != self.claim.execution_id
             or acquisition.attempt_id != self.claim.attempt_id
             or acquisition.plan_sha256 != self.plan.plan_sha256
@@ -1275,10 +1326,10 @@ class _EmptyRollbackController:
             != self.claim.controller_release_tree_sha256
         ):
             raise EmptyRollbackExecutionError(
-                "empty_rollback_writer_fence_acquisition_invalid"
+                "empty_rollback_controller_authority_marker_acquisition_invalid"
             )
-        self.writer_fence_capability = _EmptyRollbackWriterFenceCapability(
-            EmptyRollbackWriterFenceEvidence(
+        self.controller_authority_marker_capability = _EmptyRollbackControllerAuthorityMarkerCapability(
+            EmptyRollbackControllerAuthorityMarkerEvidence(
                 execution_id=self.claim.execution_id,
                 attempt_id=self.claim.attempt_id,
                 plan_sha256=self.plan.plan_sha256,
@@ -1292,39 +1343,34 @@ class _EmptyRollbackController:
                 controller_release_tree_sha256=(
                     self.claim.controller_release_tree_sha256
                 ),
-                nonwritable_postgres_identity_sha256=(
-                    acquisition.nonwritable_postgres_identity_sha256
+                marker_bound_postgres_identity_sha256=(
+                    acquisition.marker_bound_postgres_identity_sha256
                 ),
-                nonwritable_qdrant_identity_sha256=(
-                    acquisition.nonwritable_qdrant_identity_sha256
+                marker_bound_qdrant_identity_sha256=(
+                    acquisition.marker_bound_qdrant_identity_sha256
                 ),
-                fence_sha256=acquisition.fence_sha256,
+                controller_authority_marker_sha256=acquisition.controller_authority_marker_sha256,
             ),
-            _WRITER_FENCE_TOKEN,
+            _CONTROLLER_AUTHORITY_MARKER_TOKEN,
         )
-        self._validate_writer_fence()
-        observed = self.operations.observe_empty_eligibility(
-            request,
-            self.writer_fence_capability,
-        )
-        _equivalent_empty_state(self.signed_eligibility, observed)
+        self._validate_controller_authority_marker()
 
-    def _release_writer_fence(self) -> None:
-        if self.writer_fence_capability is None:
+    def _release_controller_authority_marker(self) -> None:
+        if self.controller_authority_marker_capability is None:
             return
         self._require_lock()
-        self._validate_writer_fence()
-        request = self._request(self.plan.steps[6])
+        self._validate_controller_authority_marker()
+        request = self._request(self.plan.steps[3])
         try:
-            self.operations.release_empty_writer_fence(
+            self.operations.release_empty_rollback_controller_authority_marker(
                 request,
-                self.writer_fence_capability,
+                self.controller_authority_marker_capability,
             )
         except Exception as error:
             raise EmptyRollbackExecutionError(
-                "empty_rollback_writer_fence_release_failed"
+                "empty_rollback_controller_authority_marker_release_failed"
             ) from error
-        self.writer_fence_capability = None
+        self.controller_authority_marker_capability = None
         self._require_lock()
 
     @staticmethod
@@ -1424,25 +1470,18 @@ class _EmptyRollbackController:
                 )
             )
             return
-        if step.step_id in {
-            "R04_VERIFY_EMPTY_ELIGIBILITY",
-            "R07_ACQUIRE_STOPPED_STORE_WRITER_FENCE",
-        }:
-            if step.step_id == "R07_ACQUIRE_STOPPED_STORE_WRITER_FENCE":
-                self._acquire_and_reverify_writer_fence()
-            else:
-                observed = self.operations.observe_empty_eligibility(
-                    request,
-                    None,
-                )
-                _equivalent_empty_state(self.signed_eligibility, observed)
+        if step.step_id == "R04_ACQUIRE_ROLLBACK_CONTROLLER_AUTHORITY_MARKER":
+            self._acquire_controller_authority_marker()
+            return
+        if step.step_id == "R05_RECHECK_SEMANTIC_EMPTY_UNDER_CONTROLLER_AUTHORITY_MARKER":
+            self._reestablish_semantic_empty_under_controller_authority_marker()
             return
         if step.operation == "verify_exact_absence_and_retain_audit":
-            self._validate_writer_fence()
+            self._validate_controller_authority_marker()
             if self.operations.exact_resources_absent(
                 request,
                 self.resources,
-                self.writer_fence_capability,
+                self.controller_authority_marker_capability,
             ) is not True:
                 raise EmptyRollbackExecutionError(
                     "empty_rollback_resource_absence_unproved"
@@ -1469,26 +1508,22 @@ class _EmptyRollbackController:
             )
         if observed.state == "after":
             if step.invariant_only:
-                self._validate_writer_fence()
+                self._validate_controller_authority_marker()
                 self.operations.apply_if_still_empty(
                     request,
                     observed,
-                    self.writer_fence_capability,
+                    self.controller_authority_marker_capability,
                     self.signed_eligibility,
                 )
                 return
             if recovering:
-                if step.step_id not in {
-                    "R05_DISABLE_AND_REMOVE_STORES_SUPERVISOR",
-                    "R06_STOP_EXACT_STORES",
-                }:
-                    self._validate_writer_fence()
-                    self.operations.apply_if_still_empty(
-                        request,
-                        observed,
-                        self.writer_fence_capability,
-                        self.signed_eligibility,
-                    )
+                self._validate_controller_authority_marker()
+                self.operations.apply_if_still_empty(
+                    request,
+                    observed,
+                    self.controller_authority_marker_capability,
+                    self.signed_eligibility,
+                )
                 return
             raise EmptyRollbackExecutionError(
                 "empty_rollback_unowned_prior_effect"
@@ -1499,19 +1534,13 @@ class _EmptyRollbackController:
             )
         try:
             self._require_lock()
-            if step.step_id in {
-                "R05_DISABLE_AND_REMOVE_STORES_SUPERVISOR",
-                "R06_STOP_EXACT_STORES",
-            }:
-                self.operations.apply(request, observed)
-            else:
-                self._validate_writer_fence()
-                self.operations.apply_if_still_empty(
-                    request,
-                    observed,
-                    self.writer_fence_capability,
-                    self.signed_eligibility,
-                )
+            self._validate_controller_authority_marker()
+            self.operations.apply_if_still_empty(
+                request,
+                observed,
+                self.controller_authority_marker_capability,
+                self.signed_eligibility,
+            )
             self._require_lock()
         except Exception as error:
             raise EmptyRollbackExecutionError(
@@ -1635,14 +1664,14 @@ class _EmptyRollbackController:
         )
 
     def _verify_terminal_state_and_evidence(self) -> None:
-        """Reverify all terminal evidence after COMPLETE while fenced."""
+        """Reverify all terminal evidence after COMPLETE while the controller-authority marker is held."""
 
-        self._validate_writer_fence()
+        self._validate_controller_authority_marker()
         final_request = self._request(self.plan.steps[-1])
         if self.operations.exact_resources_absent(
             final_request,
             self.resources,
-            self.writer_fence_capability,
+            self.controller_authority_marker_capability,
         ) is not True:
             raise EmptyRollbackExecutionError(
                 "empty_rollback_completed_state_drift"
@@ -1657,7 +1686,7 @@ class _EmptyRollbackController:
             observed = self.operations.observe_retained_audit_set(
                 final_request,
                 self.plan.retained_audit_keys,
-                self.writer_fence_capability,
+                self.controller_authority_marker_capability,
             )
         except Exception as error:
             raise EmptyRollbackExecutionError(
@@ -1693,10 +1722,26 @@ class _EmptyRollbackController:
         )
         self._require_lock()
 
-    def _run_while_managing_writer_fence(self) -> EmptyRollbackExecutionReceipt:
+    def _reestablish_semantic_empty_under_controller_authority_marker(
+        self,
+    ) -> None:
+        """Recheck and durably bind semantic emptiness to the held marker."""
+
+        self._validate_controller_authority_marker()
+        request = self._request(self.plan.steps[4])
+        observed = self.operations.observe_empty_eligibility(
+            request,
+            self.controller_authority_marker_capability,
+        )
+        _equivalent_empty_state(self.signed_eligibility, observed)
+
+    def _run_while_managing_controller_authority_marker(
+        self,
+    ) -> EmptyRollbackExecutionReceipt:
         records = self._records()
         if records and records[-1].event == RollbackEvent.COMPLETE.value:
-            self._acquire_and_reverify_writer_fence()
+            self._acquire_controller_authority_marker()
+            self._reestablish_semantic_empty_under_controller_authority_marker()
             self._verify_terminal_state_and_evidence()
             return self._execution_receipt(
                 outcome="empty_store_rollback_already_complete",
@@ -1708,8 +1753,8 @@ class _EmptyRollbackController:
         if applied_count >= 3:
             self._require_current_install_binding()
         open_intent = bool(records and records[-1].event == RollbackEvent.INTENT.value)
-        if 7 <= applied_count < len(self.plan.steps):
-            self._acquire_and_reverify_writer_fence()
+        if 4 <= applied_count < len(self.plan.steps):
+            self._acquire_controller_authority_marker()
         for index, step in enumerate(self.plan.steps):
             if index < applied_count:
                 continue
@@ -1729,10 +1774,9 @@ class _EmptyRollbackController:
         )
 
     def run(self) -> EmptyRollbackExecutionReceipt:
-        try:
-            return self._run_while_managing_writer_fence()
-        finally:
-            self._release_writer_fence()
+        receipt = self._run_while_managing_controller_authority_marker()
+        self._release_controller_authority_marker()
+        return receipt
 
 
 def _run_authorized_empty_store_rollback(
@@ -2024,8 +2068,8 @@ __all__ = [
     "ClaimedEmptyRollbackEvidence",
     "EmptyRollbackExecutionError",
     "EmptyRollbackExecutionReceipt",
-    "EmptyRollbackWriterFenceAcquisition",
-    "EmptyRollbackWriterFenceEvidence",
+    "EmptyRollbackControllerAuthorityMarkerAcquisition",
+    "EmptyRollbackControllerAuthorityMarkerEvidence",
     "EmptyRollbackOperations",
     "GLOBAL_LOCK_PATH",
     "MAX_RETAINED_INSTALL_RECEIPT_BYTES",
@@ -2036,9 +2080,10 @@ __all__ = [
     "RollbackObservation",
     "RollbackOperationRequest",
     "VerifiedInstallReceiptLedgerEvidence",
+    "canonical_live_rollback_controller_authority_marker_sha256",
     "claimed_empty_rollback_evidence",
     "run_authorized_empty_store_rollback",
-    "validate_empty_rollback_writer_fence_capability",
+    "validate_empty_rollback_controller_authority_marker_capability",
     "validate_install_receipt_ledger_capability",
     "validate_rollback_records",
     "verify_retained_install_receipt_and_ledger",

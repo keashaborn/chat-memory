@@ -2,11 +2,13 @@ from __future__ import annotations
 
 """Fail-closed planner for the immutable controller runtime and release.
 
-Phase 9F packages orchestration only.  The module never opens a socket, runs a
-process, extracts an archive, or writes a path.  A later, separately authorized
-Linux transport must implement the typed operations below.  The orchestrator
-keeps path derivation, exact release closure, receipt construction, create-only
-publication, and recovery/refusal policy inside reviewed controller code.
+Phase 9H packages orchestration and the repository-only publication policy,
+including durable intent and exact terminal recovery.  This module never opens
+a socket, runs a process, extracts an archive, or writes a path; production
+filesystem primitives remain absent and require separate authorization and
+implementation.  The orchestrator keeps path derivation, exact release closure,
+receipt construction, create-only publication, and recovery/refusal policy
+inside reviewed controller code.
 """
 
 from dataclasses import dataclass
@@ -88,8 +90,11 @@ _RUNTIME_BUILD_OPERATIONS: Final = (
     "B08_probe_and_seal_roots_root_owned_mode_0555",
     "B09_construct_canonical_runtime_build_receipt",
     "B10_refuse_any_existing_final_or_receipt_path",
-    "B11_atomic_rename_each_root_no_replace_and_fsync_parents",
-    "B12_create_receipt_no_replace_mode_0400_and_fsync",
+    "B11_verify_exact_cleanup_targets_and_same_device_rename_preconditions",
+    "B12_create_exact_publication_intent_no_replace_and_fsync",
+    "B13_atomic_rename_each_root_no_replace_and_fsync_parents",
+    "B14_unlink_exact_stage_metadata_and_remove_only_empty_stage_root",
+    "B15_create_receipt_fsync_and_observe_exact_terminal_publication",
 )
 
 _HASH_RE: Final = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
@@ -293,6 +298,9 @@ class PublicationObservation:
     receipt_file_fsynced: bool
     receipt_parent_fsynced: bool
     stage_absent: bool
+    publication_intent_retained: bool
+    terminal_state_observed: bool
+    same_device_rename_preconditions_observed: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -308,9 +316,14 @@ class ControllerRuntimeBuildResult:
 
 
 class ControllerRuntimeBuildTransport(Protocol):
-    """Privileged effects required later; no implementation ships in Phase 9F."""
+    """Closed effects required by a separately authorized execution."""
 
     def observe_stage(self, plan: ControllerRuntimeBuildPlan) -> StageObservation:
+        ...
+
+    def recover_completed_publication(
+        self, plan: ControllerRuntimeBuildPlan
+    ) -> ControllerRuntimeBuildResult:
         ...
 
     def recover_owned_partial_stage(
@@ -327,7 +340,10 @@ class ControllerRuntimeBuildTransport(Protocol):
         ...
 
     def install_locked_offline_distributions(
-        self, plan: ControllerRuntimeBuildPlan
+        self,
+        plan: ControllerRuntimeBuildPlan,
+        *,
+        controller_requirements_lock: bytes,
     ) -> None:
         ...
 
@@ -520,7 +536,7 @@ def _selected_postgresql_driver(
     """Return the exact ready driver selection closed by the contract.
 
     A preferred-but-not-yet-locked selection is audit metadata, not a runtime
-    build input.  In particular, the repository's current Phase 9F contract
+    build input.  In particular, the repository's current Phase 9H contract
     must remain unbuildable until a later authorized artifact-staging phase
     closes both selected wheels and their native-library evidence.
     """
@@ -537,15 +553,20 @@ def _selected_postgresql_driver(
             "controller_runtime_postgresql_driver_not_ready"
         )
     driver = selected.get("postgresql_driver")
-    distributions = (
+    preferences = (
         driver.get("preferred_distributions")
         if type(driver) is dict
         else None
+    )
+    selected_wheels = (
+        driver.get("selected_wheels") if type(driver) is dict else None
     )
     if (
         type(driver) is not dict
         or driver.get("api_style") != "synchronous"
         or driver.get("preferred_extra") != "binary"
+        or driver.get("selection_state")
+        != "exact-selected-wheels-staged-verified-and-locked"
         or driver.get("asyncpg_is_controller_driver") is not False
         or driver.get("current_controller_lock_contains_selection") is not True
         or driver.get("wheel_bytes_staged") is not True
@@ -565,15 +586,45 @@ def _selected_postgresql_driver(
             "preferred_postgresql_driver_must_be_locked_before_runtime_build"
         )
         is not True
-        or type(distributions) is not list
-        or len(distributions) != len(POSTGRESQL_DRIVER_DISTRIBUTIONS)
+        or type(preferences) is not list
+        or len(preferences) != len(POSTGRESQL_DRIVER_DISTRIBUTIONS)
+        or type(selected_wheels) is not list
+        or len(selected_wheels) != len(POSTGRESQL_DRIVER_DISTRIBUTIONS)
+    ):
+        raise ControllerRuntimeBuildError(
+            "controller_runtime_postgresql_driver_not_ready"
+        )
+
+    preferred_versions: dict[str, str] = {}
+    for item in preferences:
+        if (
+            type(item) is not dict
+            or set(item) != {"normalized_distribution", "version"}
+            or type(item.get("normalized_distribution")) is not str
+            or _normalized_distribution_name(
+                str(item["normalized_distribution"])
+            )
+            != item["normalized_distribution"]
+            or type(item.get("version")) is not str
+            or not item["version"]
+            or item["normalized_distribution"] in preferred_versions
+        ):
+            raise ControllerRuntimeBuildError(
+                "controller_runtime_postgresql_driver_not_ready"
+            )
+        preferred_versions[str(item["normalized_distribution"])] = str(
+            item["version"]
+        )
+    if (
+        preferred_versions
+        != {"psycopg": "3.3.4", "psycopg-binary": "3.3.4"}
     ):
         raise ControllerRuntimeBuildError(
             "controller_runtime_postgresql_driver_not_ready"
         )
 
     result: dict[str, tuple[str, str, str]] = {}
-    for item in distributions:
+    for item in selected_wheels:
         if (
             type(item) is not dict
             or set(item)
@@ -590,6 +641,8 @@ def _selected_postgresql_driver(
             != item["normalized_distribution"]
             or type(item.get("version")) is not str
             or not item["version"]
+            or preferred_versions.get(str(item["normalized_distribution"]))
+            != item["version"]
             or type(item.get("selected_wheel_filename")) is not str
             or _WHEEL_FILENAME_RE.fullmatch(
                 str(item["selected_wheel_filename"])
@@ -1448,6 +1501,92 @@ def _runtime_receipt(
     return canonical_json_bytes(receipt)
 
 
+def _require_completed_publication(
+    plan: ControllerRuntimeBuildPlan,
+    result: ControllerRuntimeBuildResult,
+) -> ControllerRuntimeBuildResult:
+    if type(result) is not ControllerRuntimeBuildResult:
+        raise ControllerRuntimeBuildError(
+            "controller_build_completed_publication_invalid"
+        )
+    raw = result.runtime_build_receipt_json
+    document = _json_document(
+        raw, maximum_bytes=MAX_DOCUMENT_BYTES, canonical=True
+    )
+    receipt_sha256 = hashlib.sha256(raw).hexdigest()
+    expected_runtime_root = str(RUNTIME_ROOT_PREFIX / receipt_sha256)
+    expected_receipt_path = str(
+        RUNTIME_RECEIPT_ROOT_PREFIX / f"{receipt_sha256}.json"
+    )
+    exact = {
+        "schema_version": RUNTIME_RECEIPT_SCHEMA,
+        "result": RUNTIME_RECEIPT_RESULT,
+        "package_manifest_sha256": plan.package_manifest_sha256,
+        "controller_runtime_contract_sha256": (
+            plan.controller_runtime_contract_sha256
+        ),
+        "controller_requirements_lock_sha256": (
+            plan.controller_requirements_lock_sha256
+        ),
+        "build_plan_sha256": plan.build_plan_sha256,
+        "standalone_cpython_specification_sha256": (
+            plan.substrate.specification_sha256
+        ),
+        "standalone_cpython_archive_sha256": plan.substrate.archive_sha256,
+        "standalone_cpython_payload_tree_sha256": (
+            plan.substrate.payload_tree_sha256
+        ),
+        "wheelhouse_tree_sha256": plan.wheelhouse.tree_sha256,
+        "python_implementation": "CPython",
+        "python_version": plan.substrate.python_version,
+        "platform_os": "linux",
+        "platform_architecture": "x86_64",
+        "supervisor_launcher_sha256": plan.supervisor_launcher_sha256,
+    }
+    false_keys = (
+        "pip_present",
+        "setuptools_present",
+        "wheel_present",
+        "user_site_enabled",
+        "system_site_packages_enabled",
+        "production_data_read",
+        "active_production_state_changed",
+        "persistent_store_resources_created",
+    )
+    hash_keys = (
+        "runtime_tree_sha256",
+        "release_tree_sha256",
+        "interpreter_sha256",
+        "installed_distribution_inventory_sha256",
+        "interpreter_path_facts_sha256",
+        "launcher_help_probe_sha256",
+    )
+    if (
+        set(document) != _RECEIPT_KEYS
+        or any(document.get(key) != value for key, value in exact.items())
+        or any(document.get(key) is not False for key in false_keys)
+        or document.get("persistent_controller_substrate_created") is not True
+        or any(
+            type(document.get(key)) is not int or document[key] != 0
+            for key in ("network_calls", "provider_calls")
+        )
+        or any(not _is_hash(document.get(key)) for key in hash_keys)
+        or result.build_plan_sha256 != plan.build_plan_sha256
+        or result.controller_runtime_receipt_sha256 != receipt_sha256
+        or result.runtime_root != expected_runtime_root
+        or result.release_root != plan.final_release_root
+        or result.receipt_path != expected_receipt_path
+        or not _is_hash(result.runtime_tree_sha256)
+        or not _is_hash(result.release_tree_sha256)
+        or document.get("runtime_tree_sha256") != result.runtime_tree_sha256
+        or document.get("release_tree_sha256") != result.release_tree_sha256
+    ):
+        raise ControllerRuntimeBuildError(
+            "controller_build_completed_publication_invalid"
+        )
+    return result
+
+
 def _abandon_stage_or_refuse(
     transport: ControllerRuntimeBuildTransport,
     plan: ControllerRuntimeBuildPlan,
@@ -1486,6 +1625,32 @@ def execute_controller_runtime_build(
         stage = transport.observe_stage(plan)
         if (
             type(stage) is StageObservation
+            and stage.state == "publication_completed"
+            and stage.build_plan_sha256 == plan.build_plan_sha256
+        ):
+            publication_started = True
+            return _require_completed_publication(
+                plan, transport.recover_completed_publication(plan)
+            )
+        if (
+            type(stage) is StageObservation
+            and (
+                (
+                    stage.state == "publication_started"
+                    and stage.build_plan_sha256 == plan.build_plan_sha256
+                )
+                or (
+                    stage.state == "publication_started_foreign"
+                    and stage.build_plan_sha256 is None
+                )
+            )
+        ):
+            publication_started = True
+            raise ControllerRuntimeBuildError(
+                "controller_build_partial_publication_requires_review"
+            )
+        if (
+            type(stage) is StageObservation
             and stage.state == "owned_partial"
             and stage.build_plan_sha256 == plan.build_plan_sha256
         ):
@@ -1514,7 +1679,12 @@ def execute_controller_runtime_build(
         stage_created = True
         uncertain_stage_mutation = None
         transport.materialize_standalone_substrate(plan)
-        transport.install_locked_offline_distributions(plan)
+        transport.install_locked_offline_distributions(
+            plan,
+            controller_requirements_lock=artifact_snapshot[
+                str(REQUIREMENTS_LOCK_RELATIVE_PATH)
+            ],
+        )
         transport.remove_bootstrap_packaging_tools(plan)
         transport.stage_exact_release(
             plan,
@@ -1570,6 +1740,9 @@ def execute_controller_runtime_build(
             or publication.receipt_file_fsynced is not True
             or publication.receipt_parent_fsynced is not True
             or publication.stage_absent is not True
+            or publication.publication_intent_retained is not True
+            or publication.terminal_state_observed is not True
+            or publication.same_device_rename_preconditions_observed is not True
         ):
             raise ControllerRuntimeBuildError(
                 "controller_build_publication_invalid"

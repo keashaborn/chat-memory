@@ -27,6 +27,7 @@ from tools.governed_memory_install.controller import (
     validate_plan,
 )
 from tools.governed_memory_install.execution_lock import GlobalExecutionLock
+from tools.governed_memory_install.package import EXPECTED_LIVE_EXECUTION
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -198,59 +199,7 @@ class DormantStoreInstallControllerTests(unittest.TestCase):
         )
         self.assertEqual(
             plan_document["live_execution"],
-            {
-                "claim_bound_install_controller_composition_packaged": True,
-                "non_cli_install_entrypoint_packaged": True,
-                "claim_bound_empty_rollback_controller_composition_packaged": True,
-                "non_cli_empty_rollback_entrypoint_packaged": True,
-                "operation_specific_install_and_empty_rollback_receipts_packaged": True,
-                "install_controller_emits_canonical_receipt": True,
-                "empty_rollback_controller_emits_canonical_receipt": True,
-                "typed_operation_specific_boundary_packaged": True,
-                "generic_store_mutation_argv_surface_packaged": False,
-                "closed_install_store_effect_adapter_packaged": True,
-                "closed_empty_rollback_store_effect_adapter_packaged": True,
-                "closed_live_transport_contracts_packaged": True,
-                "complete_closed_live_transport_substrate_set_packaged": False,
-                "postgresql_source_closure_contract_packaged": True,
-                "driver_native_postgresql_stage_contract_packaged": False,
-                "driver_native_postgresql_executable_stage_machine_packaged": False,
-                "runtime_input_selection_contract_repaired": True,
-                "runtime_build_receipt_provenance_v3_packaged": True,
-                "complete_closed_live_transport_substrate_set_integrated_into_bound_factory": False,
-                "approved_terminal_postgresql_catalog_manifest_selected": False,
-                "exact_postgresql_16_14_and_qdrant_1_19_0_readiness_required": True,
-                "durable_live_empty_rollback_writer_fence_transport_packaged": False,
-                "stopped_store_semantic_empty_recheck_is_valid": False,
-                "selected_live_platform_transports_packaged": False,
-                "pinned_postgresql_driver_selected": False,
-                "durable_create_once_receipt_store_packaged": True,
-                "public_entrypoints_require_canonical_root_owned_production_receipt_store": True,
-                "synthetic_receipt_stores_are_private_test_only": True,
-                "controller_runtime_release_builder_orchestration_packaged": True,
-                "controller_runtime_build_transport_packaged": False,
-                "activation_entrypoint_packaged": False,
-                "bounded_image_inspect_runner_primitive_packaged": True,
-                "local_image_inspect_adapter_packaged": True,
-                "controller_runtime_verification_capability_packaged": True,
-                "full_controller_release_tree_verification_packaged": True,
-                "exact_locked_controller_distribution_set_verification_packaged": True,
-                "full_release_tree_sha256_bound_through_claim_journal_host_ownership_and_install_receipt": True,
-                "empty_rollback_full_runtime_and_release_identity_bound_through_authority_claim_journal_requests_observations_writer_fence_and_receipt": True,
-                "controller_release_and_runtime_require_separate_future_build_and_install_authority": True,
-                "supervisor_launcher_source_packaged": True,
-                "controller_runtime_built_or_installed": False,
-                "controller_release_staged": False,
-                "stores_install_owns_or_removes_controller_substrate": False,
-                "stores_supervisor_cli_packaged": True,
-                "stores_supervisor_cli_docker_surface": [
-                    "container_inspect",
-                    "container_start",
-                    "container_stop",
-                ],
-                "stores_supervisor_is_installer_or_rollback_adapter": False,
-                "stores_supervisor_requires_preexisting_exact_ledger_container_ids": True,
-            },
+            EXPECTED_LIVE_EXECUTION,
         )
 
         source = (

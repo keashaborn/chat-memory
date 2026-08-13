@@ -1,6 +1,6 @@
 {
   "schema_version": "governed-memory-dormant-store-install-controller-runtime-contract-v2",
-  "state": "runtime-inputs-selected-contract-repaired-not-staged-not-built-not-installed-not-authorized",
+  "state": "phase9h-runtime-inputs-selected-publication-policy-packaged-production-primitives-absent-not-staged-not-built-not-installed-not-authorized",
   "platform": {
     "implementation": "CPython",
     "python_version": "3.12",
@@ -27,23 +27,20 @@
       "payload_tree_sha256": null
     },
     "postgresql_driver": {
-      "selection_state": "preferred-exact-target-not-in-current-lock-not-staged-not-verified",
+      "selection_state": "preferred-family-and-version-only-not-selected-not-in-current-lock-not-staged-not-verified",
       "api_style": "synchronous",
       "preferred_extra": "binary",
       "preferred_distributions": [
         {
           "normalized_distribution": "psycopg",
-          "version": "3.3.4",
-          "selected_wheel_filename": "psycopg-3.3.4-py3-none-any.whl",
-          "selected_wheel_sha256": "b6bbc25ccf05c8fad3b061d9db2ef0909a555171b84b07f29458a447253d679a"
+          "version": "3.3.4"
         },
         {
           "normalized_distribution": "psycopg-binary",
-          "version": "3.3.4",
-          "selected_wheel_filename": "psycopg_binary-3.3.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
-          "selected_wheel_sha256": "e7510c37550f91a187e3660a8cc50d4b760f8c3b8b2f89ebc5698cd2c7f2c85d"
+          "version": "3.3.4"
         }
       ],
+      "selected_wheels": [],
       "asyncpg_is_controller_driver": false,
       "current_controller_lock_contains_selection": false,
       "exact_wheel_filenames_frozen": false,
@@ -51,7 +48,8 @@
       "wheel_bytes_sha256_verified_locally": false,
       "binary_native_library_closure_inspected": false,
       "postgresql_source_closure_contract_packaged": true,
-      "driver_native_postgresql_stages_packaged": false,
+      "driver_native_postgresql_stages_packaged": true,
+      "concrete_psycopg_postgresql_transport_packaged": false,
       "selection_ready_for_runtime_build": false
     },
     "wheelhouse": {
@@ -112,9 +110,16 @@
     "builder_derives_wheelhouse_tree_from_exact_member_bytes": true,
     "builder_accepts_caller_supplied_opaque_wheelhouse_hash": false,
     "builder_requires_no_replace_publication_and_fsynced_parents": true,
+    "builder_requires_same_device_rename_preconditions_before_publication_intent": true,
+    "builder_persists_exact_publication_intent_before_first_rename": true,
     "builder_recovers_only_exact_owned_partial_stage": true,
     "builder_refuses_partial_publication_for_manual_review": true,
+    "builder_forbids_recursive_stage_cleanup_after_publication_intent": true,
+    "builder_replays_only_exact_terminal_publication_with_renewed_fsyncs": true,
     "concrete_runtime_build_transport_packaged": false,
+    "runtime_publication_policy_transport_packaged": true,
+    "production_runtime_publication_primitives_packaged": false,
+    "independent_standalone_cpython_payload_tree_proof_packaged": false,
     "approved_standalone_cpython_substrate_selected": true,
     "standalone_cpython_archive_staged": false,
     "standalone_cpython_archive_content_verified": false,
@@ -149,7 +154,7 @@
     "static_launcher_local_module_closure_verification_required": true,
     "controller_runtime_receipt_binds_full_release_tree_sha256": true,
     "release_tree_sha256_propagates_through_claim_journal_host_ownership_and_install_receipt": true,
-    "empty_rollback_runtime_and_release_identity_propagates_through_signed_authority_claim_journal_requests_observations_writer_fence_and_receipt": true,
+    "empty_rollback_runtime_and_release_identity_propagates_through_signed_authority_claim_journal_requests_observations_controller_authority_marker_and_receipt": true,
     "interpreter_prefix_import_stdlib_and_site_paths_confined_to_runtime_root": true,
     "interpreter_path_facts_sha256_required": true,
     "controller_runtime_verifier_executed_in_current_phase": false,

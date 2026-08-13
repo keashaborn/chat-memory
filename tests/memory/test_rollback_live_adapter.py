@@ -25,10 +25,11 @@ from tools.governed_memory_install.rollback import (
 )
 from tools.governed_memory_install import rollback_entrypoint
 from tools.governed_memory_install.rollback_entrypoint import (
-    EmptyRollbackWriterFenceEvidence,
+    EmptyRollbackControllerAuthorityMarkerEvidence,
     RollbackOperationRequest,
 )
 from tools.governed_memory_install.rollback_live_adapter import (
+    DurableLiveRollbackMarkerObservation,
     ExactPhysicalEmptyRollbackOperations,
     LedgerBoundPhysicalTarget,
     PhysicalResourceObservation,
@@ -62,8 +63,6 @@ class _Driver:
             for item in targets
         }
         self.calls: list[tuple[str, str]] = []
-        self.offline_eligibility: dict[str, object] | None = None
-        self.offline_observation_calls = 0
 
     def observe(self, target: LedgerBoundPhysicalTarget) -> PhysicalResourceObservation:
         state = self.states[target.resource_key]
@@ -112,77 +111,11 @@ class _Driver:
         self.calls.append(("remove_regular_file", target.resource_key))
         self.states[target.resource_key] = "absent"
 
-    def observe_empty_stores_offline(
-        self,
-        request,
-        postgres_container,
-        qdrant_container,
-        postgres_volume,
-        qdrant_volume,
-    ):
-        self.offline_observation_calls += 1
-        if self.offline_eligibility is None:
-            raise RuntimeError("offline eligibility unavailable")
-        for target in (postgres_container, qdrant_container):
-            if self.states[target.resource_key] not in {"stopped", "absent"}:
-                raise RuntimeError("store is writable")
-        for target in (postgres_volume, qdrant_volume):
-            if self.states[target.resource_key] != "present":
-                raise RuntimeError("volume unavailable")
-        return build_empty_rollback_eligibility_receipt(
-            candidate_git_commit=str(
-                self.offline_eligibility["candidate_git_commit"]
-            ),
-            candidate_git_tree=str(
-                self.offline_eligibility["candidate_git_tree"]
-            ),
-            package_manifest_sha256=str(
-                self.offline_eligibility["package_manifest_sha256"]
-            ),
-            installation_execution_id=str(
-                self.offline_eligibility["installation_execution_id"]
-            ),
-            installation_receipt_sha256=str(
-                self.offline_eligibility["installation_receipt_sha256"]
-            ),
-            exact_targets_sha256=str(
-                self.offline_eligibility["exact_targets_sha256"]
-            ),
-            resource_ledger_head_sha256=str(
-                self.offline_eligibility["resource_ledger_head_sha256"]
-            ),
-            observation_set_sha256=hashlib.sha256(
-                f"offline:{self.offline_observation_calls}".encode("ascii")
-            ).hexdigest(),
-            pilot_ever_started=bool(
-                self.offline_eligibility["pilot_ever_started"]
-            ),
-            postgresql_user_rows=int(
-                self.offline_eligibility["postgresql_user_rows"]
-            ),
-            projection_queue_rows=int(
-                self.offline_eligibility["projection_queue_rows"]
-            ),
-            qdrant_points=int(self.offline_eligibility["qdrant_points"]),
-            active_clients=int(self.offline_eligibility["active_clients"]),
-            legacy_imports=int(self.offline_eligibility["legacy_imports"]),
-            application_services_installed=bool(
-                self.offline_eligibility["application_services_installed"]
-            ),
-            source_postgres_read_count=int(
-                self.offline_eligibility["source_postgres_read_count"]
-            ),
-            production_data_read=bool(
-                self.offline_eligibility["production_data_read"]
-            ),
-            provider_calls=int(self.offline_eligibility["provider_calls"]),
-        )
-
-
 class _Probe:
     def __init__(self, eligibility: dict[str, object]) -> None:
         self.eligibility = eligibility
         self.calls = 0
+        self.qdrant_points = 0
 
     def observe(self, request: RollbackOperationRequest):
         self.calls += 1
@@ -208,7 +141,7 @@ class _Probe:
             pilot_ever_started=False,
             postgresql_user_rows=0,
             projection_queue_rows=0,
-            qdrant_points=0,
+            qdrant_points=self.qdrant_points,
             active_clients=0,
             legacy_imports=0,
             application_services_installed=False,
@@ -216,6 +149,78 @@ class _Probe:
             production_data_read=False,
             provider_calls=0,
         )
+
+
+class _MarkerTransport:
+    def __init__(self) -> None:
+        self.held: DurableLiveRollbackMarkerObservation | None = None
+        self.assertion_valid = True
+        self.releases = 0
+
+    def acquire_or_recover(
+        self,
+        request,
+        *,
+        marker_bound_postgres_identity_sha256,
+        marker_bound_qdrant_identity_sha256,
+        expected_semantic_empty_state_sha256,
+    ):
+        controller_authority_marker_sha256 = (
+            rollback_entrypoint.canonical_live_rollback_controller_authority_marker_sha256(
+                request,
+                marker_bound_postgres_identity_sha256=(
+                    marker_bound_postgres_identity_sha256
+                ),
+                marker_bound_qdrant_identity_sha256=(
+                    marker_bound_qdrant_identity_sha256
+                ),
+            )
+        )
+        if self.held is None:
+            self.held = DurableLiveRollbackMarkerObservation(
+                controller_authority_marker_sha256=controller_authority_marker_sha256,
+                marker_bound_postgres_identity_sha256=(
+                    marker_bound_postgres_identity_sha256
+                ),
+                marker_bound_qdrant_identity_sha256=(
+                    marker_bound_qdrant_identity_sha256
+                ),
+                semantic_empty_state_sha256=None,
+                durable_root_file_regular_no_follow=True,
+                durable_root_file_mode=0o400,
+                durable_root_file_uid=0,
+                durable_root_file_gid=0,
+                durable_root_file_fsynced=True,
+                durable_parent_fsynced=True,
+            )
+        return self.held
+
+    def persist_semantic_empty_observation(
+        self,
+        request,
+        held,
+        semantic_empty_state_sha256,
+    ):
+        if held != self.held:
+            raise RuntimeError("marker mismatch")
+        self.held = replace(
+            held,
+            semantic_empty_state_sha256=(
+                semantic_empty_state_sha256
+            ),
+        )
+        return self.held
+
+    def assert_held(self, request, held):
+        if not self.assertion_valid or held != self.held:
+            raise RuntimeError("marker is not held")
+        return self.held
+
+    def release_after_receipt(self, request, held):
+        if held != self.held:
+            raise RuntimeError("marker mismatch")
+        self.held = None
+        self.releases += 1
 
 
 class _Audit:
@@ -361,7 +366,6 @@ class ExactPhysicalRollbackOperationsTests(unittest.TestCase):
             production_data_read=False,
             provider_calls=0,
         )
-        self.driver.offline_eligibility = self.eligibility
         executions = root / "executions"
         execution_root = executions / EXECUTION_ID
         execution_root.mkdir(parents=True, mode=0o700)
@@ -377,11 +381,13 @@ class ExactPhysicalRollbackOperationsTests(unittest.TestCase):
             self.eligibility,
         )
         self.probe = _Probe(self.eligibility)
+        self.marker_transport = _MarkerTransport()
         self.adapter = ExactPhysicalEmptyRollbackOperations(
             bindings=self.bindings,
             verified_resources=self.verified_resources,
             driver=self.driver,
             eligibility_probe=self.probe,
+            controller_authority_marker_transport=self.marker_transport,
             retained_audit_source=_Audit(),
             receipt_store=self.receipts,
         )
@@ -451,8 +457,8 @@ class ExactPhysicalRollbackOperationsTests(unittest.TestCase):
 
     @staticmethod
     def _capability(request, acquisition):
-        return rollback_entrypoint._EmptyRollbackWriterFenceCapability(
-            EmptyRollbackWriterFenceEvidence(
+        return rollback_entrypoint._EmptyRollbackControllerAuthorityMarkerCapability(
+            EmptyRollbackControllerAuthorityMarkerEvidence(
                 execution_id=request.execution_id,
                 attempt_id=request.attempt_id,
                 plan_sha256=request.plan_sha256,
@@ -466,35 +472,58 @@ class ExactPhysicalRollbackOperationsTests(unittest.TestCase):
                 controller_release_tree_sha256=(
                     request.controller_release_tree_sha256
                 ),
-                nonwritable_postgres_identity_sha256=(
-                    acquisition.nonwritable_postgres_identity_sha256
+                marker_bound_postgres_identity_sha256=(
+                    acquisition.marker_bound_postgres_identity_sha256
                 ),
-                nonwritable_qdrant_identity_sha256=(
-                    acquisition.nonwritable_qdrant_identity_sha256
+                marker_bound_qdrant_identity_sha256=(
+                    acquisition.marker_bound_qdrant_identity_sha256
                 ),
-                fence_sha256=acquisition.fence_sha256,
+                controller_authority_marker_sha256=acquisition.controller_authority_marker_sha256,
             ),
-            rollback_entrypoint._WRITER_FENCE_TOKEN,
+            rollback_entrypoint._CONTROLLER_AUTHORITY_MARKER_TOKEN,
         )
 
     def _remove_supervisor_and_acquire(self):
-        supervisor_request = self._request(4)
-        before = self.adapter.observe(supervisor_request)
-        self.adapter.apply(supervisor_request, before)
-        stop_request = self._request(5)
-        self.adapter.apply(stop_request, self.adapter.observe(stop_request))
-        fence_request = self._request(6)
-        acquisition = self.adapter.acquire_empty_writer_fence(fence_request)
-        capability = self._capability(fence_request, acquisition)
-        self.adapter.observe_empty_eligibility(fence_request, capability)
+        marker_request = self._request(3)
+        acquisition = self.adapter.acquire_empty_rollback_controller_authority_marker(marker_request)
+        capability = self._capability(marker_request, acquisition)
+        semantic_request = self._request(4)
+        self.adapter.observe_empty_eligibility(semantic_request, capability)
+        for step_index in (5, 6):
+            request = self._request(step_index)
+            self.adapter.apply_if_still_empty(
+                request,
+                self.adapter.observe(request),
+                capability,
+                self.eligibility,
+            )
         return (
-            fence_request,
+            marker_request,
             capability,
             acquisition,
         )
 
-    def test_fence_is_bound_to_two_independently_observed_stopped_stores(self) -> None:
-        request, capability, acquisition = self._remove_supervisor_and_acquire()
+    def test_marker_precedes_live_recheck_supervisor_removal_and_stop(self) -> None:
+        marker_request = self._request(3)
+        acquisition = self.adapter.acquire_empty_rollback_controller_authority_marker(marker_request)
+        capability = self._capability(marker_request, acquisition)
+        self.assertEqual(self.driver.calls, [])
+        self.assertEqual(self.driver.states["qdrant_container"], "running")
+        self.assertEqual(self.driver.states["postgres_container"], "running")
+        observed = self.adapter.observe_empty_eligibility(
+            self._request(4),
+            capability,
+        )
+        self.assertEqual(observed["postgresql_user_rows"], 0)
+        self.assertEqual(self.probe.calls, 1)
+        for step_index in (5, 6):
+            request = self._request(step_index)
+            self.adapter.apply_if_still_empty(
+                request,
+                self.adapter.observe(request),
+                capability,
+                self.eligibility,
+            )
         self.assertEqual(
             self.driver.calls[:3],
             [
@@ -506,53 +535,42 @@ class ExactPhysicalRollbackOperationsTests(unittest.TestCase):
         self.assertEqual(self.driver.states["qdrant_container"], "stopped")
         self.assertEqual(self.driver.states["postgres_container"], "stopped")
         self.assertRegex(
-            acquisition.nonwritable_postgres_identity_sha256,
+            acquisition.marker_bound_postgres_identity_sha256,
             r"^[0-9a-f]{64}$",
         )
         self.assertRegex(
-            acquisition.nonwritable_qdrant_identity_sha256,
+            acquisition.marker_bound_qdrant_identity_sha256,
             r"^[0-9a-f]{64}$",
         )
         self.assertNotEqual(
-            acquisition.nonwritable_postgres_identity_sha256,
-            acquisition.nonwritable_qdrant_identity_sha256,
+            acquisition.marker_bound_postgres_identity_sha256,
+            acquisition.marker_bound_qdrant_identity_sha256,
         )
-        observed = self.adapter.observe_empty_eligibility(request, capability)
-        self.assertEqual(observed["postgresql_user_rows"], 0)
-        self.assertEqual(
-            observed["observation_set_sha256"],
-            hashlib.sha256(b"offline:2").hexdigest(),
-        )
-        self.assertEqual(self.driver.offline_observation_calls, 2)
-        self.assertEqual(self.probe.calls, 0)
-        # Releasing an incomplete attempt never restarts the physical stores.
-        self.adapter.release_empty_writer_fence(request, capability)
-        self.assertEqual(self.driver.states["qdrant_container"], "stopped")
-        self.assertEqual(self.driver.states["postgres_container"], "stopped")
 
-    def test_offline_nonempty_recheck_refuses_before_any_store_deletion(
+    def test_live_nonempty_recheck_refuses_before_any_destructive_effect(
         self,
     ) -> None:
-        request, capability, unused = self._remove_supervisor_and_acquire()
-        assert self.driver.offline_eligibility is not None
-        self.driver.offline_eligibility = dict(self.driver.offline_eligibility)
-        self.driver.offline_eligibility["qdrant_points"] = 1
+        request = self._request(3)
+        acquisition = self.adapter.acquire_empty_rollback_controller_authority_marker(request)
+        capability = self._capability(request, acquisition)
+        self.probe.qdrant_points = 1
         with self.assertRaisesRegex(
             PhysicalRollbackAdapterError,
-            "offline_empty_observation_failed",
+            "live_empty_observation_failed",
         ):
-            self.adapter.observe_empty_eligibility(request, capability)
-        self.assertNotIn(
-            "remove_container", {operation for operation, unused in self.driver.calls}
-        )
+            self.adapter.observe_empty_eligibility(
+                self._request(4),
+                capability,
+            )
+        self.assertEqual(self.driver.calls, [])
 
-    def test_store_restart_after_fence_is_refused_before_deletion(self) -> None:
+    def test_durable_marker_loss_is_refused_before_deletion(self) -> None:
         unused, capability, acquisition = self._remove_supervisor_and_acquire()
-        self.driver.states["qdrant_container"] = "running"
+        self.marker_transport.assertion_valid = False
         request = self._request(7)
         with self.assertRaisesRegex(
             PhysicalRollbackAdapterError,
-            "store_became_writable",
+            "live_rollback_controller_authority_marker_not_held",
         ):
             self.adapter.apply_if_still_empty(
                 request,
@@ -564,33 +582,8 @@ class ExactPhysicalRollbackOperationsTests(unittest.TestCase):
             "remove_container", {operation for operation, unused in self.driver.calls}
         )
 
-    def test_recovery_fence_hashes_actual_absent_container_state(self) -> None:
-        request, capability, stopped = self._remove_supervisor_and_acquire()
-        for step_index in (7, 8):
-            removal = self._request(step_index)
-            self.adapter.apply_if_still_empty(
-                removal,
-                self.adapter.observe(removal),
-                capability,
-                self.eligibility,
-            )
-        self.adapter.release_empty_writer_fence(request, capability)
-        recovered = self.adapter.acquire_empty_writer_fence(request)
-        self.assertNotEqual(
-            recovered.nonwritable_postgres_identity_sha256,
-            stopped.nonwritable_postgres_identity_sha256,
-        )
-        self.assertNotEqual(
-            recovered.nonwritable_qdrant_identity_sha256,
-            stopped.nonwritable_qdrant_identity_sha256,
-        )
-        recovered_capability = self._capability(request, recovered)
-        self.adapter.release_empty_writer_fence(
-            request, recovered_capability
-        )
-
     def test_physical_teardown_order_and_terminal_absence(self) -> None:
-        fence_request, capability, unused = self._remove_supervisor_and_acquire()
+        marker_request, capability, unused = self._remove_supervisor_and_acquire()
 
         volume_request = self._request(9)
         with self.assertRaisesRegex(
@@ -635,7 +628,7 @@ class ExactPhysicalRollbackOperationsTests(unittest.TestCase):
                 ReceiptArtifact.INSTALL, EXECUTION_ID
             ).canonical_file_sha256,
         )
-        self.adapter.release_empty_writer_fence(fence_request, capability)
+        self.adapter.release_empty_rollback_controller_authority_marker(marker_request, capability)
         self.assertNotIn(
             "remove_exact_qdrant_alias", {operation for operation, key in self.driver.calls}
         )
@@ -658,30 +651,38 @@ class ExactPhysicalRollbackOperationsTests(unittest.TestCase):
         )
 
     def test_driver_label_drift_is_rejected_before_container_stop(self) -> None:
-        supervisor_request = self._request(4)
-        self.adapter.apply(
-            supervisor_request,
-            self.adapter.observe(supervisor_request),
-        )
+        marker_request = self._request(3)
+        acquisition = self.adapter.acquire_empty_rollback_controller_authority_marker(marker_request)
+        capability = self._capability(marker_request, acquisition)
+        self.adapter.observe_empty_eligibility(self._request(4), capability)
         self.driver.labels["qdrant_container"] = (("unexpected", "label"),)
         with self.assertRaisesRegex(
             PhysicalRollbackAdapterError, "identity_drift"
         ):
-            self.adapter.observe(self._request(5))
+            self.adapter.observe(self._request(6))
         self.assertNotIn(
             ("stop_container", "qdrant_container"), self.driver.calls
         )
 
     def test_partial_supervisor_removal_is_exactly_recoverable(self) -> None:
         self.driver.states["stores_supervisor"] = "recoverable"
-        request = self._request(4)
+        marker_request = self._request(3)
+        acquisition = self.adapter.acquire_empty_rollback_controller_authority_marker(marker_request)
+        capability = self._capability(marker_request, acquisition)
+        self.adapter.observe_empty_eligibility(self._request(4), capability)
+        request = self._request(5)
         observed = self.adapter.observe(request)
         self.assertEqual(observed.state, "recoverable")
-        self.adapter.apply(request, observed)
+        self.adapter.apply_if_still_empty(
+            request,
+            observed,
+            capability,
+            self.eligibility,
+        )
         self.assertEqual(self.driver.states["stores_supervisor"], "absent")
 
     def test_observation_ownership_matches_controller_contract(self) -> None:
-        request = self._request(4)
+        request = self._request(5)
         observed = self.adapter.observe(request)
         self.assertEqual(
             observed.ownership_sha256,

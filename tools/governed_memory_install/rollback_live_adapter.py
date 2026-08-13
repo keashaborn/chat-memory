@@ -3,11 +3,14 @@ from __future__ import annotations
 """Exact physical empty-store rollback adapter.
 
 The adapter deliberately has no subprocess, argv, URL, SQL, Qdrant request,
-environment, or secret-value surface.  A separately reviewed Linux driver
-implements the narrow typed operations below.  This layer binds those effects
-to the verified install ledger, independently hashes observations, stops both
-store containers before minting the cross-store writer fence, and removes the
-empty stores physically rather than reopening writable store endpoints.
+environment, or secret-value surface.  Separately reviewed Linux transports
+implement the narrow typed operations below.  This layer binds those effects
+to the verified install ledger, acquires a durable controller-authority marker,
+rechecks semantic emptiness while both stores remain queryable, and holds that
+marker through stop, physical removal, and receipt persistence.  The marker is not a database or Qdrant locking primitive: exclusion depends on the independently
+verified install state (no application services, zero active clients, and
+fresh root-controlled credentials).  Privileged direct host writers remain
+outside this controller trust boundary.
 
 Until the controller plan classifies the logical alias/collection/migration/
 database steps as verification-only after physical erasure, this adapter fails
@@ -36,10 +39,11 @@ from .rollback import (
 )
 from .rollback_entrypoint import (
     EmptyRollbackExecutionError,
-    EmptyRollbackWriterFenceAcquisition,
+    EmptyRollbackControllerAuthorityMarkerAcquisition,
     RollbackObservation,
     RollbackOperationRequest,
-    validate_empty_rollback_writer_fence_capability,
+    canonical_live_rollback_controller_authority_marker_sha256,
+    validate_empty_rollback_controller_authority_marker_capability,
     verify_retained_install_receipt_and_ledger,
 )
 
@@ -54,8 +58,10 @@ _IMAGE_ID_RE = re.compile(r"sha256:[0-9a-f]{64}\Z", re.ASCII)
 _SAFE_ID_RE = re.compile(
     r"/?[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,511}\Z", re.ASCII
 )
-_FENCE_DOMAIN: Final = b"governed-memory-physical-empty-store-fence-v1\x00"
 _OBSERVATION_DOMAIN: Final = b"governed-memory-physical-observation-v1\x00"
+_SEMANTIC_EMPTY_STATE_DOMAIN: Final = (
+    b"governed-memory-semantic-empty-state-v1\x00"
+)
 
 PHYSICAL_RESOURCE_KEYS: Final = (
     "stores_supervisor",
@@ -92,7 +98,7 @@ def _sha(value: object, *, domain: bytes = b"") -> str:
     return hashlib.sha256(domain + canonical_json_bytes(value)).hexdigest()
 
 
-def _nonwritable_container_identity_sha256(
+def _marker_bound_container_identity_sha256(
     target: LedgerBoundPhysicalTarget,
     observation: PhysicalResourceObservation,
 ) -> str:
@@ -101,15 +107,15 @@ def _nonwritable_container_identity_sha256(
         or observation.resource_key != target.resource_key
         or observation.resource_kind != target.resource_kind
         or observation.resource_name != target.resource_name
-        or observation.state not in {"stopped", "absent"}
+        or observation.state not in {"running", "stopped", "absent"}
     ):
         raise PhysicalRollbackAdapterError(
-            "physical_rollback_nonwritable_identity_target_invalid"
+            "physical_rollback_marker_bound_identity_target_invalid"
         )
     return _sha(
         {
             "schema_version": (
-                "governed-memory-nonwritable-container-identity-v1"
+                "governed-memory-marker-bound-container-identity-v1"
             ),
             "resource_key": target.resource_key,
             "resource_kind": target.resource_kind,
@@ -120,13 +126,6 @@ def _nonwritable_container_identity_sha256(
             "resource_labels_sha256": target.resource_labels_sha256,
             "image_id": target.image_id,
             "image_repo_digest": target.image_repo_digest,
-            "observed_state": observation.state,
-            "observed_resource_id": observation.resource_id,
-            "observed_labels": dict(observation.labels),
-            "observed_image_id": observation.image_id,
-            "observed_image_repo_digest": (
-                observation.image_repo_digest
-            ),
         },
         domain=_OBSERVATION_DOMAIN,
     )
@@ -441,20 +440,82 @@ class PhysicalRollbackDriver(Protocol):
         expected_revision_sha256: str,
     ) -> None: ...
 
-    def observe_empty_stores_offline(
-        self,
-        request: RollbackOperationRequest,
-        postgres_container: LedgerBoundPhysicalTarget,
-        qdrant_container: LedgerBoundPhysicalTarget,
-        postgres_volume: LedgerBoundPhysicalTarget,
-        qdrant_volume: LedgerBoundPhysicalTarget,
-    ) -> Mapping[str, object]: ...
-
-
 class EmptyEligibilityProbe(Protocol):
     def observe(
         self, request: RollbackOperationRequest
     ) -> Mapping[str, object]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class DurableLiveRollbackMarkerObservation:
+    controller_authority_marker_sha256: str
+    marker_bound_postgres_identity_sha256: str
+    marker_bound_qdrant_identity_sha256: str
+    semantic_empty_state_sha256: str | None
+    durable_root_file_regular_no_follow: bool
+    durable_root_file_mode: int
+    durable_root_file_uid: int
+    durable_root_file_gid: int
+    durable_root_file_fsynced: bool
+    durable_parent_fsynced: bool
+
+    def __post_init__(self) -> None:
+        if (
+            _HASH_RE.fullmatch(self.controller_authority_marker_sha256) is None
+            or _HASH_RE.fullmatch(
+                self.marker_bound_postgres_identity_sha256
+            ) is None
+            or _HASH_RE.fullmatch(
+                self.marker_bound_qdrant_identity_sha256
+            ) is None
+            or (
+                self.semantic_empty_state_sha256 is not None
+                and _HASH_RE.fullmatch(
+                    self.semantic_empty_state_sha256
+                ) is None
+            )
+            or self.durable_root_file_regular_no_follow is not True
+            or self.durable_root_file_mode != 0o400
+            or self.durable_root_file_uid != 0
+            or self.durable_root_file_gid != 0
+            or self.durable_root_file_fsynced is not True
+            or self.durable_parent_fsynced is not True
+        ):
+            raise PhysicalRollbackAdapterError(
+                "physical_rollback_live_rollback_controller_authority_marker_observation_invalid"
+            )
+
+
+class DurableLiveRollbackMarkerTransport(Protocol):
+    """Durable controller-authority marker over ledger-bound live stores."""
+
+    def acquire_or_recover(
+        self,
+        request: RollbackOperationRequest,
+        *,
+        marker_bound_postgres_identity_sha256: str,
+        marker_bound_qdrant_identity_sha256: str,
+        expected_semantic_empty_state_sha256: str,
+    ) -> DurableLiveRollbackMarkerObservation: ...
+
+    def persist_semantic_empty_observation(
+        self,
+        request: RollbackOperationRequest,
+        held: DurableLiveRollbackMarkerObservation,
+        semantic_empty_state_sha256: str,
+    ) -> DurableLiveRollbackMarkerObservation: ...
+
+    def assert_held(
+        self,
+        request: RollbackOperationRequest,
+        held: DurableLiveRollbackMarkerObservation,
+    ) -> DurableLiveRollbackMarkerObservation: ...
+
+    def release_after_receipt(
+        self,
+        request: RollbackOperationRequest,
+        held: DurableLiveRollbackMarkerObservation,
+    ) -> None: ...
 
 
 class RetainedAuditSource(Protocol):
@@ -484,13 +545,12 @@ class RetainedAuditSource(Protocol):
 
 
 @dataclass(slots=True)
-class _HeldPhysicalFence:
-    fence_sha256: str
+class _HeldPhysicalControllerAuthorityMarker:
+    observation: DurableLiveRollbackMarkerObservation
     eligibility: dict[str, object]
-    nonwritable_observations: tuple[
+    marker_bound_observations: tuple[
         PhysicalResourceObservation, PhysicalResourceObservation
     ]
-    offline_empty_observation_sha256: str | None = None
 
 
 def _equivalent_empty_state(
@@ -506,6 +566,20 @@ def _equivalent_empty_state(
     }
 
 
+def _semantic_empty_state_sha256(
+    receipt: Mapping[str, object],
+) -> str:
+    verified = verify_empty_rollback_eligibility_receipt(receipt)
+    return _sha(
+        {
+            key: verified[key]
+            for key in sorted(verified)
+            if key not in {"observation_set_sha256", "receipt_sha256"}
+        },
+        domain=_SEMANTIC_EMPTY_STATE_DOMAIN,
+    )
+
+
 class ExactPhysicalEmptyRollbackOperations:
     """Concrete ``EmptyRollbackOperations`` over a narrow trusted driver."""
 
@@ -516,6 +590,7 @@ class ExactPhysicalEmptyRollbackOperations:
         verified_resources: object,
         driver: PhysicalRollbackDriver,
         eligibility_probe: EmptyEligibilityProbe,
+        controller_authority_marker_transport: DurableLiveRollbackMarkerTransport,
         retained_audit_source: RetainedAuditSource,
         receipt_store: DurableReceiptStore,
     ) -> None:
@@ -539,7 +614,6 @@ class ExactPhysicalEmptyRollbackOperations:
                 callable(getattr(driver, name, None))
                 for name in (
                     "observe",
-                    "observe_empty_stores_offline",
                     "disable_and_remove_stores_supervisor",
                     "stop_container",
                     "remove_container",
@@ -549,6 +623,15 @@ class ExactPhysicalEmptyRollbackOperations:
                 )
             )
             or not callable(getattr(eligibility_probe, "observe", None))
+            or not all(
+                callable(getattr(controller_authority_marker_transport, name, None))
+                for name in (
+                    "acquire_or_recover",
+                    "persist_semantic_empty_observation",
+                    "assert_held",
+                    "release_after_receipt",
+                )
+            )
             or not all(
                 callable(getattr(retained_audit_source, name, None))
                 for name in (
@@ -603,9 +686,10 @@ class ExactPhysicalEmptyRollbackOperations:
         self._resources = resources
         self._driver = driver
         self._eligibility_probe = eligibility_probe
+        self._controller_authority_marker_transport = controller_authority_marker_transport
         self._audit = retained_audit_source
         self._receipts = receipt_store
-        self._fence: _HeldPhysicalFence | None = None
+        self._controller_authority_marker: _HeldPhysicalControllerAuthorityMarker | None = None
         self._installation_execution_id: str | None = None
 
     @staticmethod
@@ -822,77 +906,86 @@ class ExactPhysicalEmptyRollbackOperations:
     def observe_empty_eligibility(
         self,
         request: RollbackOperationRequest,
-        writer_fence_capability: object | None,
+        controller_authority_marker_capability: object | None,
     ) -> Mapping[str, object]:
         self._validate_request(request)
-        if writer_fence_capability is None:
-            return dict(self._eligibility_probe.observe(request))
-        self._require_fence(request, writer_fence_capability)
-        if self._fence is None:
+        if controller_authority_marker_capability is None:
             raise PhysicalRollbackAdapterError(
-                "physical_rollback_fence_not_held"
+                "physical_rollback_controller_authority_marker_missing_for_semantic_probe"
+            )
+        self._require_controller_authority_marker(request, controller_authority_marker_capability)
+        if self._controller_authority_marker is None:
+            raise PhysicalRollbackAdapterError(
+                "physical_rollback_controller_authority_marker_not_held"
             )
         try:
-            observed = self._driver.observe_empty_stores_offline(
-                request,
-                self._bindings.target("postgres_container"),
-                self._bindings.target("qdrant_container"),
-                self._bindings.target("postgres_volume"),
-                self._bindings.target("qdrant_volume"),
-            )
+            observed = self._eligibility_probe.observe(request)
         except Exception:
             raise PhysicalRollbackAdapterError(
-                "physical_rollback_offline_empty_observation_failed"
+                "physical_rollback_live_empty_observation_failed"
             ) from None
         try:
             verified = verify_empty_rollback_eligibility_receipt(observed)
         except Exception as error:
             raise PhysicalRollbackAdapterError(
-                "physical_rollback_offline_empty_observation_invalid"
+                "physical_rollback_live_empty_observation_invalid"
             ) from error
-        if not _equivalent_empty_state(self._fence.eligibility, verified):
+        if not _equivalent_empty_state(self._controller_authority_marker.eligibility, verified):
             raise PhysicalRollbackAdapterError(
-                "physical_rollback_offline_empty_state_drift"
+                "physical_rollback_live_empty_state_drift"
             )
-        self._fence.eligibility = dict(verified)
-        self._fence.offline_empty_observation_sha256 = str(
-            verified["receipt_sha256"]
-        )
+        semantic_sha256 = _semantic_empty_state_sha256(verified)
+        try:
+            persisted = (
+                self._controller_authority_marker_transport.persist_semantic_empty_observation(
+                    request,
+                    self._controller_authority_marker.observation,
+                    semantic_sha256,
+                )
+            )
+        except Exception:
+            raise PhysicalRollbackAdapterError(
+                "physical_rollback_live_empty_controller_authority_marker_persistence_failed"
+            ) from None
+        if (
+            type(persisted) is not DurableLiveRollbackMarkerObservation
+            or persisted.controller_authority_marker_sha256
+            != self._controller_authority_marker.observation.controller_authority_marker_sha256
+            or persisted.marker_bound_postgres_identity_sha256
+            != self._controller_authority_marker.observation.marker_bound_postgres_identity_sha256
+            or persisted.marker_bound_qdrant_identity_sha256
+            != self._controller_authority_marker.observation.marker_bound_qdrant_identity_sha256
+            or persisted.semantic_empty_state_sha256 != semantic_sha256
+        ):
+            raise PhysicalRollbackAdapterError(
+                "physical_rollback_live_empty_controller_authority_marker_persistence_invalid"
+            )
+        self._controller_authority_marker.observation = persisted
+        self._controller_authority_marker.eligibility = dict(verified)
         return dict(verified)
 
-    def acquire_empty_writer_fence(
+    def acquire_empty_rollback_controller_authority_marker(
         self,
         request: RollbackOperationRequest,
-    ) -> EmptyRollbackWriterFenceAcquisition:
+    ) -> EmptyRollbackControllerAuthorityMarkerAcquisition:
         self._validate_request(request)
-        if self._fence is not None:
+        if self._controller_authority_marker is not None:
             raise PhysicalRollbackAdapterError(
-                "physical_rollback_fence_already_held"
+                "physical_rollback_controller_authority_marker_already_held"
             )
-        if (
-            request.step.step_id != "R07_ACQUIRE_STOPPED_STORE_WRITER_FENCE"
-            or self._observe_exact(
-                self._bindings.target("stores_supervisor")
-            ).state
-            != "absent"
-        ):
+        if request.step.step_id != "R04_ACQUIRE_ROLLBACK_CONTROLLER_AUTHORITY_MARKER":
             raise PhysicalRollbackAdapterError(
-                "physical_rollback_fence_precondition_invalid"
+                "physical_rollback_controller_authority_marker_precondition_invalid"
             )
-        before_states = tuple(
+        exact_observations = tuple(
             self._observe_exact(self._bindings.target(key))
-            for key in ("qdrant_container", "postgres_container")
+            for key in ("postgres_container", "qdrant_container")
         )
-        if not all(
-            item.state in {"stopped", "absent"} for item in before_states
-        ):
+        states = {item.state for item in exact_observations}
+        if not (states <= {"running", "stopped", "absent"}):
             raise PhysicalRollbackAdapterError(
-                "physical_rollback_stopped_fence_precondition_invalid"
+                "physical_rollback_live_controller_authority_marker_store_state_invalid"
             )
-        # R04 persists the initial signed observation. R07 binds it to the
-        # exact stopped store identities; the controller immediately requests
-        # a fresh driver-supplied offline/read-only observation while this
-        # physical writer fence is held. No writable endpoint is reopened.
         durable = self._receipts.read(
             ReceiptArtifact.EMPTY_ROLLBACK_ELIGIBILITY,
             request.installation_execution_id,
@@ -911,64 +1004,67 @@ class ExactPhysicalEmptyRollbackOperations:
             raise PhysicalRollbackAdapterError(
                 "physical_rollback_eligibility_execution_mismatch"
             )
-        nonwritable: list[PhysicalResourceObservation] = []
-        # Observe both independently after the R06 stop effect.  The fence
-        # binds exact identities and state, not driver assertions.
-        for key in ("qdrant_container", "postgres_container"):
-            observed = self._observe_exact(self._bindings.target(key))
-            if observed.state not in {"stopped", "absent"}:
-                raise PhysicalRollbackAdapterError(
-                    "physical_rollback_container_not_stopped"
-                )
-            nonwritable.append(observed)
         observed_by_key = {
-            item.resource_key: item for item in nonwritable
+            item.resource_key: item for item in exact_observations
         }
-        nonwritable_postgres_identity_sha256 = (
-            _nonwritable_container_identity_sha256(
+        marker_bound_postgres_identity_sha256 = (
+            _marker_bound_container_identity_sha256(
                 self._bindings.target("postgres_container"),
                 observed_by_key["postgres_container"],
             )
         )
-        nonwritable_qdrant_identity_sha256 = (
-            _nonwritable_container_identity_sha256(
+        marker_bound_qdrant_identity_sha256 = (
+            _marker_bound_container_identity_sha256(
                 self._bindings.target("qdrant_container"),
                 observed_by_key["qdrant_container"],
             )
         )
-        fence_sha256 = _sha(
-            {
-                "execution_id": request.execution_id,
-                "attempt_id": request.attempt_id,
-                "plan_sha256": request.plan_sha256,
-                "eligibility_receipt_sha256": (
-                    request.eligibility_receipt_sha256
-                ),
-                "exact_targets_sha256": request.exact_targets_sha256,
-                "controller_runtime_tree_sha256": (
-                    request.controller_runtime_tree_sha256
-                ),
-                "controller_release_tree_sha256": (
-                    request.controller_release_tree_sha256
-                ),
-                "nonwritable_store_observations": [
-                    item.as_dict() for item in nonwritable
-                ],
-                "nonwritable_postgres_identity_sha256": (
-                    nonwritable_postgres_identity_sha256
-                ),
-                "nonwritable_qdrant_identity_sha256": (
-                    nonwritable_qdrant_identity_sha256
-                ),
-            },
-            domain=_FENCE_DOMAIN,
+        expected_controller_authority_marker_sha256 = canonical_live_rollback_controller_authority_marker_sha256(
+            request,
+            marker_bound_postgres_identity_sha256=(
+                marker_bound_postgres_identity_sha256
+            ),
+            marker_bound_qdrant_identity_sha256=(
+                marker_bound_qdrant_identity_sha256
+            ),
         )
-        self._fence = _HeldPhysicalFence(
-            fence_sha256=fence_sha256,
+        try:
+            marker = self._controller_authority_marker_transport.acquire_or_recover(
+                request,
+                marker_bound_postgres_identity_sha256=(
+                    marker_bound_postgres_identity_sha256
+                ),
+                marker_bound_qdrant_identity_sha256=(
+                    marker_bound_qdrant_identity_sha256
+                ),
+                expected_semantic_empty_state_sha256=(
+                    _semantic_empty_state_sha256(eligibility)
+                ),
+            )
+        except Exception:
+            raise PhysicalRollbackAdapterError(
+                "physical_rollback_live_rollback_controller_authority_marker_acquisition_failed"
+            ) from None
+        if (
+            type(marker) is not DurableLiveRollbackMarkerObservation
+            or marker.controller_authority_marker_sha256 != expected_controller_authority_marker_sha256
+            or marker.marker_bound_postgres_identity_sha256
+            != marker_bound_postgres_identity_sha256
+            or marker.marker_bound_qdrant_identity_sha256
+            != marker_bound_qdrant_identity_sha256
+        ):
+            raise PhysicalRollbackAdapterError(
+                "physical_rollback_live_rollback_controller_authority_marker_binding_invalid"
+            )
+        self._controller_authority_marker = _HeldPhysicalControllerAuthorityMarker(
+            observation=marker,
             eligibility=dict(eligibility),
-            nonwritable_observations=(nonwritable[0], nonwritable[1]),
+            marker_bound_observations=(
+                exact_observations[0],
+                exact_observations[1],
+            ),
         )
-        return EmptyRollbackWriterFenceAcquisition(
+        return EmptyRollbackControllerAuthorityMarkerAcquisition(
             execution_id=request.execution_id,
             attempt_id=request.attempt_id,
             plan_sha256=request.plan_sha256,
@@ -979,26 +1075,26 @@ class ExactPhysicalEmptyRollbackOperations:
             controller_release_tree_sha256=(
                 request.controller_release_tree_sha256
             ),
-            nonwritable_postgres_identity_sha256=(
-                nonwritable_postgres_identity_sha256
+            marker_bound_postgres_identity_sha256=(
+                marker_bound_postgres_identity_sha256
             ),
-            nonwritable_qdrant_identity_sha256=(
-                nonwritable_qdrant_identity_sha256
+            marker_bound_qdrant_identity_sha256=(
+                marker_bound_qdrant_identity_sha256
             ),
-            fence_sha256=fence_sha256,
+            controller_authority_marker_sha256=expected_controller_authority_marker_sha256,
         )
 
-    def _require_fence(
+    def _require_controller_authority_marker(
         self,
         request: RollbackOperationRequest,
-        writer_fence_capability: object,
+        controller_authority_marker_capability: object,
     ) -> None:
-        if self._fence is None:
+        if self._controller_authority_marker is None:
             raise PhysicalRollbackAdapterError(
-                "physical_rollback_fence_not_held"
+                "physical_rollback_controller_authority_marker_not_held"
             )
-        validate_empty_rollback_writer_fence_capability(
-            writer_fence_capability,
+        validate_empty_rollback_controller_authority_marker_capability(
+            controller_authority_marker_capability,
             expected_execution_id=request.execution_id,
             expected_attempt_id=request.attempt_id,
             expected_plan_sha256=request.plan_sha256,
@@ -1012,53 +1108,52 @@ class ExactPhysicalEmptyRollbackOperations:
             expected_controller_release_tree_sha256=(
                 request.controller_release_tree_sha256
             ),
-            expected_nonwritable_postgres_identity_sha256=(
-                _nonwritable_container_identity_sha256(
-                    self._bindings.target("postgres_container"),
-                    next(
-                        item
-                        for item in self._fence.nonwritable_observations
-                        if item.resource_key == "postgres_container"
-                    ),
-                )
+            expected_marker_bound_postgres_identity_sha256=(
+                self._controller_authority_marker.observation
+                .marker_bound_postgres_identity_sha256
             ),
-            expected_nonwritable_qdrant_identity_sha256=(
-                _nonwritable_container_identity_sha256(
-                    self._bindings.target("qdrant_container"),
-                    next(
-                        item
-                        for item in self._fence.nonwritable_observations
-                        if item.resource_key == "qdrant_container"
-                    ),
-                )
+            expected_marker_bound_qdrant_identity_sha256=(
+                self._controller_authority_marker.observation
+                .marker_bound_qdrant_identity_sha256
             ),
-            expected_fence_sha256=self._fence.fence_sha256,
+            expected_controller_authority_marker_sha256=self._controller_authority_marker.observation.controller_authority_marker_sha256,
         )
-        for key in ("qdrant_container", "postgres_container"):
-            if self._observe_exact(
-                self._bindings.target(key)
-            ).state not in {"stopped", "absent"}:
-                raise PhysicalRollbackAdapterError(
-                    "physical_rollback_store_became_writable"
-                )
+        try:
+            observed = self._controller_authority_marker_transport.assert_held(
+                request,
+                self._controller_authority_marker.observation,
+            )
+        except Exception:
+            raise PhysicalRollbackAdapterError(
+                "physical_rollback_live_rollback_controller_authority_marker_not_held"
+            ) from None
+        if observed != self._controller_authority_marker.observation:
+            raise PhysicalRollbackAdapterError(
+                "physical_rollback_live_rollback_controller_authority_marker_drift"
+            )
 
-    def release_empty_writer_fence(
+    def release_empty_rollback_controller_authority_marker(
         self,
         request: RollbackOperationRequest,
-        writer_fence_capability: object,
+        controller_authority_marker_capability: object,
     ) -> None:
         self._validate_request(request)
-        self._require_fence(request, writer_fence_capability)
-        for key in ("qdrant_container", "postgres_container"):
-            if self._observe_exact(
-                self._bindings.target(key)
-            ).state not in {"stopped", "absent"}:
+        self._require_controller_authority_marker(request, controller_authority_marker_capability)
+        for target in self._bindings.targets:
+            if self._observe_exact(target).state != "absent":
                 raise PhysicalRollbackAdapterError(
-                    "physical_rollback_fence_release_with_writable_store"
+                    "physical_rollback_controller_authority_marker_release_before_exact_absence"
                 )
-        # Clearing the in-process token never restarts a store.  After a failed
-        # attempt the stopped-container state remains the physical fence.
-        self._fence = None
+        try:
+            self._controller_authority_marker_transport.release_after_receipt(
+                request,
+                self._controller_authority_marker.observation,
+            )
+        except Exception:
+            raise PhysicalRollbackAdapterError(
+                "physical_rollback_live_rollback_controller_authority_marker_release_failed"
+            ) from None
+        self._controller_authority_marker = None
 
     def observe(
         self,
@@ -1107,24 +1202,82 @@ class ExactPhysicalEmptyRollbackOperations:
             ),
         )
 
-    def apply(
+    def apply_if_still_empty(
         self,
         request: RollbackOperationRequest,
         expected: RollbackObservation,
+        controller_authority_marker_capability: object,
+        signed_eligibility: Mapping[str, object],
     ) -> None:
         self._validate_request(request)
-        if request.step.operation == "stop_exact_stores":
+        self._require_controller_authority_marker(request, controller_authority_marker_capability)
+        eligibility = verify_empty_rollback_eligibility_receipt(
+            signed_eligibility
+        )
+        if (
+            eligibility["receipt_sha256"]
+            != request.eligibility_receipt_sha256
+            or self._controller_authority_marker is None
+            or self._controller_authority_marker.observation.semantic_empty_state_sha256
+            is None
+            or not _equivalent_empty_state(
+                eligibility, self._controller_authority_marker.eligibility
+            )
+        ):
+            raise PhysicalRollbackAdapterError(
+                "physical_rollback_empty_state_drift"
+            )
+        operation = request.step.operation
+        if operation == "disable_and_remove_stores_supervisor":
+            target = self._bindings.target("stores_supervisor")
+            before = self._observe_exact(target)
+            canonical = self._rollback_observation(
+                request,
+                (before,),
+                "after" if before.state == "absent" else "before",
+            )
+            if expected.revision_sha256 != canonical.revision_sha256:
+                raise PhysicalRollbackAdapterError(
+                    "physical_rollback_expected_observation_drift"
+                )
+            if before.state == "absent" and expected.state == "after":
+                return
+            if expected.state not in {"before", "recoverable"}:
+                raise PhysicalRollbackAdapterError(
+                    "physical_rollback_expected_observation_drift"
+                )
+            self._driver.disable_and_remove_stores_supervisor(
+                target,
+                self._revision(before),
+            )
+            if self._observe_exact(target).state != "absent":
+                raise PhysicalRollbackAdapterError(
+                    "physical_rollback_supervisor_removal_unproved"
+                )
+            return
+        if operation == "stop_exact_stores":
             containers = tuple(
                 self._observe_exact(self._bindings.target(item))
                 for item in ("qdrant_container", "postgres_container")
             )
-            canonical_before = self._rollback_observation(
-                request, containers, "before"
+            state = (
+                "after"
+                if all(item.state == "stopped" for item in containers)
+                else "before"
             )
+            canonical = self._rollback_observation(
+                request,
+                containers,
+                state,
+            )
+            if expected.revision_sha256 != canonical.revision_sha256:
+                raise PhysicalRollbackAdapterError(
+                    "physical_rollback_store_stop_observation_drift"
+                )
+            if state == "after" and expected.state == "after":
+                return
             if (
                 expected.state not in {"before", "recoverable"}
-                or expected.revision_sha256
-                != canonical_before.revision_sha256
                 or any(
                     item.state not in {"running", "stopped"}
                     for item in containers
@@ -1134,11 +1287,13 @@ class ExactPhysicalEmptyRollbackOperations:
                     "physical_rollback_store_stop_observation_drift"
                 )
             for key, before in zip(
-                ("qdrant_container", "postgres_container"), containers
+                ("qdrant_container", "postgres_container"),
+                containers,
             ):
                 if before.state == "running":
                     self._driver.stop_container(
-                        self._bindings.target(key), self._revision(before)
+                        self._bindings.target(key),
+                        self._revision(before),
                     )
             for key in ("qdrant_container", "postgres_container"):
                 if self._observe_exact(
@@ -1148,53 +1303,6 @@ class ExactPhysicalEmptyRollbackOperations:
                         "physical_rollback_container_not_stopped"
                     )
             return
-        if request.step.operation != "disable_and_remove_stores_supervisor":
-            raise PhysicalRollbackAdapterError(
-                "physical_rollback_unfenced_effect_refused"
-            )
-        target = self._bindings.target("stores_supervisor")
-        before = self._observe_exact(target)
-        if (
-            expected.state not in {"before", "recoverable"}
-            or expected.revision_sha256
-            != self._rollback_observation(request, (before,), "before").revision_sha256
-        ):
-            raise PhysicalRollbackAdapterError(
-                "physical_rollback_expected_observation_drift"
-            )
-        self._driver.disable_and_remove_stores_supervisor(
-            target, self._revision(before)
-        )
-        if self._observe_exact(target).state != "absent":
-            raise PhysicalRollbackAdapterError(
-                "physical_rollback_supervisor_removal_unproved"
-            )
-
-    def apply_if_still_empty(
-        self,
-        request: RollbackOperationRequest,
-        expected: RollbackObservation,
-        writer_fence_capability: object,
-        signed_eligibility: Mapping[str, object],
-    ) -> None:
-        self._validate_request(request)
-        self._require_fence(request, writer_fence_capability)
-        eligibility = verify_empty_rollback_eligibility_receipt(
-            signed_eligibility
-        )
-        if (
-            eligibility["receipt_sha256"]
-            != request.eligibility_receipt_sha256
-            or self._fence is None
-            or self._fence.offline_empty_observation_sha256 is None
-            or not _equivalent_empty_state(
-                eligibility, self._fence.eligibility
-            )
-        ):
-            raise PhysicalRollbackAdapterError(
-                "physical_rollback_empty_state_drift"
-            )
-        operation = request.step.operation
         if operation in {
             "verify_qdrant_alias_physically_absent",
             "verify_qdrant_collection_physically_absent",
@@ -1298,10 +1406,10 @@ class ExactPhysicalEmptyRollbackOperations:
         self,
         request: RollbackOperationRequest,
         resources: tuple[ExactRollbackResource, ...],
-        writer_fence_capability: object,
+        controller_authority_marker_capability: object,
     ) -> bool:
         self._validate_request(request)
-        self._require_fence(request, writer_fence_capability)
+        self._require_controller_authority_marker(request, controller_authority_marker_capability)
         if resources != self._resources:
             raise PhysicalRollbackAdapterError(
                 "physical_rollback_exact_resource_set_mismatch"
@@ -1325,10 +1433,10 @@ class ExactPhysicalEmptyRollbackOperations:
         self,
         request: RollbackOperationRequest,
         retained_audit_keys: tuple[str, ...],
-        writer_fence_capability: object,
+        controller_authority_marker_capability: object,
     ) -> Mapping[str, str]:
         self._validate_request(request)
-        self._require_fence(request, writer_fence_capability)
+        self._require_controller_authority_marker(request, controller_authority_marker_capability)
         if retained_audit_keys != RETAINED_AUDIT_KEYS:
             raise PhysicalRollbackAdapterError(
                 "physical_rollback_retained_audit_keys_invalid"
@@ -1384,6 +1492,8 @@ class ExactPhysicalEmptyRollbackOperations:
 
 
 __all__ = [
+    "DurableLiveRollbackMarkerObservation",
+    "DurableLiveRollbackMarkerTransport",
     "EmptyEligibilityProbe",
     "ExactPhysicalEmptyRollbackOperations",
     "LOGICAL_CHILD_KEYS",

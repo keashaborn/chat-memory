@@ -7,7 +7,7 @@ source-bound runtime and passed its isolated disposable application, store, and
 chat-deletion proof. It has not installed or activated a functioning live
 memory service.
 
-Phase 9F packages claim-bound non-CLI install and empty-rollback controller
+Phase 9H packages claim-bound non-CLI install and empty-rollback controller
 compositions, durable journals, exact resource-ledger provenance, canonical
 receipts, and a create-once durable receipt store. It also packages a secure
 production receipt-store binding: public install and rollback entrypoints
@@ -16,37 +16,45 @@ remain private test-only inputs. A secure controller-runtime verifier closes
 the complete manifest-defined release
 tree with no extras and requires the exact locked distribution set; an exact
 release-path supervisor launcher; resolved-spec Docker-label binding; and a
-logical empty-rollback fence contract and retained audit-hash verification.
-There is no durable live writer-exclusion transport and a stopped store cannot
-provide a semantic emptiness recheck. A future implementation must acquire a
-live writer fence, semantically recheck emptiness, stop exact stores, remove
-exact resources, and persist the final receipt while holding the fence. Receipt
+durable empty-rollback controller marker and retained audit-hash verification.
+R04/R05 acquire the marker and semantically recheck live empty stores before
+stop, exact removal, and final receipt persistence. The marker is not physical
+PostgreSQL/Qdrant writer exclusion; privileged or direct external writers are
+not excluded and remain an activation blocker. Receipt
 replay is fail-closed on fresh terminal readiness or exact rollback
 receipt/ledger/absence drift. The full release-tree hash is bound through the
 install claim, journal, host ownership, and install receipt. Empty rollback
 independently requires the exact verified controller runtime and release
 identity in its signed scope, claim, journal, operation requests and
-observations, writer fence, retained install receipt, and final rollback
+observations, controller marker, retained install receipt, and final rollback
 receipt.
 That authority claim validates trusted time and the exact global lock before
 any durable receipt read or eligibility-receipt persistence.
 
-Phase 9F also packages a closed post-claim Linux install adapter and dependency
+Phase 9H also packages a closed post-claim Linux install adapter and dependency
 factory, fixed loopback readiness DTO adapter, physical ledger-bound
 empty-rollback adapter, and controller runtime/release builder orchestration.
 They accept typed exact operation models and do not expose caller-selected
 commands, endpoints, SQL, or resource names. Immutable Docker, systemd,
 root-file, and Qdrant request/observation contracts are packaged. Narrow
 selected-field image inspection and exact-ledger-container supervisor
-inspect/start/stop primitives are retained and repaired, but no complete live
-transport set or bound resource lifecycle factory is present. The PostgreSQL source-closure contract
-records the exact semantic requirements but packages no executable native
-stage or rollback-prefix machine; construction refuses. The preferred exact
-Psycopg 3.3.4 wheels are `psycopg-3.3.4-py3-none-any.whl` and
-`psycopg_binary-3.3.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl`;
-they are not locked, staged, verified, or native-closure inspected. The selected CPython
+inspect/start/stop primitives are retained and repaired. Non-PostgreSQL Linux
+transports are concrete; the complete factory remains blocked on PostgreSQL.
+The PostgreSQL source contract records exact semantics, and Phase 9H packages a
+fixed orchestration/resume machine plus 16 fixed catalog queries with the
+session lock acquired before observation. It still has no operation-to-SQL
+translation, concrete Psycopg adapter, or approved terminal catalog, so live
+construction refuses. Psycopg with its binary extra, version 3.3.4, is only
+the preferred synchronous driver family and version; no exact wheel filenames
+or hashes are selected, locked, staged, verified, or native-closure inspected.
+The selected CPython
 3.12.13 archive is not staged or payload-verified; no wheelhouse tree or
-approved terminal PostgreSQL catalog exists, and the runtime builder refuses
+approved terminal PostgreSQL catalog exists. Runtime publication validates and
+destination-binds canonical receipts, persists exact intent before the first
+rename after same-device checks, and replays exact terminal state with renewed
+fsyncs. Ambiguous post-intent restarts are fenced for manual review without
+generic cleanup, but production filesystem/archive primitives and independent
+substrate payload-tree proof are absent; the runtime builder therefore refuses
 the current incomplete driver lock; the runtime capability verifier also
 rejects the incomplete selection. No controller runtime was built,
 staged, or
@@ -82,13 +90,16 @@ reading or reusing legacy or provider credentials.
 The live transport and deployment layer must close these implementation gaps
 before authorization:
 
-- lock and verify Psycopg; translate every canonical bootstrap, role,
+- lock and verify Psycopg; implement the concrete adapter and translate every canonical bootstrap, role,
   privacy, catalog, migration, and rollback-prefix predicate into fixed native
   stages without caller-selected SQL or connection targets;
 - implement the reviewed live transports behind the immutable contracts,
   including non-secret observations, exact absence classification, safe
-  root-file identity, journaled systemd recovery, and the durable live rollback
-  writer fence;
+  root-file identity and journaled systemd recovery; add a real exclusion
+  mechanism for every authorized writer path rather than treating the durable
+  rollback marker as a lock;
+- implement the production runtime-publication primitives and independently
+  prove the selected standalone CPython payload tree;
 - select the exact terminal PostgreSQL catalog and stage the approved CPython
   and canonical wheelhouse inputs;
 - complete image-baseline, hardening, external-readiness, and boot-recovery

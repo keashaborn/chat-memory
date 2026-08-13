@@ -172,6 +172,7 @@ _NETWORK_FIELDS: Final = (
     ".Driver",
     ".Internal",
     ".Attachable",
+    "(len .Labels)",
 ) + _label_fields(".Labels")
 _VOLUME_FIELDS: Final = (
     ".Name",
@@ -179,6 +180,7 @@ _VOLUME_FIELDS: Final = (
     ".Mountpoint",
     ".Scope",
     "(len .Options)",
+    "(len .Labels)",
 ) + _label_fields(".Labels")
 def _container_fields(port_key: str, unrelated_port_key: str) -> tuple[str, ...]:
     return (
@@ -323,6 +325,9 @@ class RootFileSlot(str, Enum):
     POSTGRES_SECRET = "postgres_secret"
     QDRANT_SECRET = "qdrant_secret"
     TERMINAL_POSTFLIGHT_RECEIPT = "terminal_postflight_receipt"
+    ROLLBACK_CONTROLLER_AUTHORITY_MARKER = "rollback_controller_authority_marker"
+    ROLLBACK_SEMANTIC_EMPTY_PROOF = "rollback_semantic_empty_proof"
+    SYSTEMD_DAEMON_RELOAD_PENDING = "systemd_daemon_reload_pending"
     SYSTEMD_UNIT = "systemd_unit"
     SYSTEMD_ENABLEMENT = "systemd_enablement"
 
@@ -373,8 +378,24 @@ class RootFileSlotContract:
         ):
             raise LiveTransportContractError("root_file_slot_contract_invalid")
         if self.node_kind is RootNodeKind.REGULAR_FILE:
-            if self.required_mode not in {0o600, 0o644} or self.symlink_target is not None:
+            if self.required_mode not in {0o400, 0o600, 0o644} or self.symlink_target is not None:
                 raise LiveTransportContractError("root_regular_file_contract_invalid")
+            expected_mode = (
+                0o400
+                if self.slot
+                in {
+                    RootFileSlot.ROLLBACK_CONTROLLER_AUTHORITY_MARKER,
+                    RootFileSlot.ROLLBACK_SEMANTIC_EMPTY_PROOF,
+                    RootFileSlot.SYSTEMD_DAEMON_RELOAD_PENDING,
+                }
+                else 0o644
+                if self.slot is RootFileSlot.SYSTEMD_UNIT
+                else 0o600
+            )
+            if self.required_mode != expected_mode:
+                raise LiveTransportContractError(
+                    "root_regular_file_mode_invalid"
+                )
         elif (
             self.required_mode is not None
             or self.max_bytes != 0
@@ -439,6 +460,66 @@ ROOT_FILE_SLOTS: Final[Mapping[RootFileSlot, RootFileSlotContract]] = MappingPro
             "/var/lib/governed-memory-controller/executions/{execution_id}/terminal-postflight-receipt.json",
             RootNodeKind.REGULAR_FILE,
             0o600,
+            64 * 1024,
+            (
+                SafeAncestorContract("/", frozenset({0o755})),
+                SafeAncestorContract("/var", frozenset({0o755})),
+                SafeAncestorContract("/var/lib", frozenset({0o755})),
+                SafeAncestorContract("/var/lib/governed-memory-controller", frozenset({0o700})),
+                SafeAncestorContract(
+                    "/var/lib/governed-memory-controller/executions", frozenset({0o700})
+                ),
+                SafeAncestorContract(
+                    "/var/lib/governed-memory-controller/executions/{execution_id}",
+                    frozenset({0o700}),
+                ),
+            ),
+        ),
+        RootFileSlot.ROLLBACK_CONTROLLER_AUTHORITY_MARKER: RootFileSlotContract(
+            RootFileSlot.ROLLBACK_CONTROLLER_AUTHORITY_MARKER,
+            "/var/lib/governed-memory-controller/executions/{execution_id}/empty-rollback-controller-authority-marker.json",
+            RootNodeKind.REGULAR_FILE,
+            0o400,
+            64 * 1024,
+            (
+                SafeAncestorContract("/", frozenset({0o755})),
+                SafeAncestorContract("/var", frozenset({0o755})),
+                SafeAncestorContract("/var/lib", frozenset({0o755})),
+                SafeAncestorContract("/var/lib/governed-memory-controller", frozenset({0o700})),
+                SafeAncestorContract(
+                    "/var/lib/governed-memory-controller/executions", frozenset({0o700})
+                ),
+                SafeAncestorContract(
+                    "/var/lib/governed-memory-controller/executions/{execution_id}",
+                    frozenset({0o700}),
+                ),
+            ),
+        ),
+        RootFileSlot.ROLLBACK_SEMANTIC_EMPTY_PROOF: RootFileSlotContract(
+            RootFileSlot.ROLLBACK_SEMANTIC_EMPTY_PROOF,
+            "/var/lib/governed-memory-controller/executions/{execution_id}/empty-rollback-semantic-empty-proof.json",
+            RootNodeKind.REGULAR_FILE,
+            0o400,
+            64 * 1024,
+            (
+                SafeAncestorContract("/", frozenset({0o755})),
+                SafeAncestorContract("/var", frozenset({0o755})),
+                SafeAncestorContract("/var/lib", frozenset({0o755})),
+                SafeAncestorContract("/var/lib/governed-memory-controller", frozenset({0o700})),
+                SafeAncestorContract(
+                    "/var/lib/governed-memory-controller/executions", frozenset({0o700})
+                ),
+                SafeAncestorContract(
+                    "/var/lib/governed-memory-controller/executions/{execution_id}",
+                    frozenset({0o700}),
+                ),
+            ),
+        ),
+        RootFileSlot.SYSTEMD_DAEMON_RELOAD_PENDING: RootFileSlotContract(
+            RootFileSlot.SYSTEMD_DAEMON_RELOAD_PENDING,
+            "/var/lib/governed-memory-controller/executions/{execution_id}/systemd-daemon-reload-pending.json",
+            RootNodeKind.REGULAR_FILE,
+            0o400,
             64 * 1024,
             (
                 SafeAncestorContract("/", frozenset({0o755})),
@@ -551,6 +632,7 @@ class SystemdPrefixObservation:
 
 class QdrantRequestId(str, Enum):
     OBSERVE_ROOT = "observe_root"
+    OBSERVE_COLLECTIONS = "observe_collections"
     OBSERVE_COLLECTION = "observe_collection"
     OBSERVE_ALIAS = "observe_alias"
     CREATE_COLLECTION = "create_collection"
@@ -594,7 +676,9 @@ class QdrantRequestBytes:
 
 
 _COLLECTION_TARGET: Final = f"/collections/{QDRANT_COLLECTION}".encode("ascii")
-_ALIAS_TARGET: Final = f"/aliases/{QDRANT_ALIAS}".encode("ascii")
+_ALIAS_TARGET: Final = (
+    f"/collections/{QDRANT_COLLECTION}/aliases".encode("ascii")
+)
 _CREATE_COLLECTION_BODY: Final = (
     b'{"on_disk_payload":true,"replication_factor":1,'
     b'"vectors":{"distance":"Dot","size":3072}}'
@@ -612,6 +696,13 @@ QDRANT_REQUESTS: Final[Mapping[QdrantRequestId, QdrantRequestBytes]] = MappingPr
     {
         QdrantRequestId.OBSERVE_ROOT: QdrantRequestBytes(
             QdrantRequestId.OBSERVE_ROOT, b"GET", b"/", None, frozenset({200})
+        ),
+        QdrantRequestId.OBSERVE_COLLECTIONS: QdrantRequestBytes(
+            QdrantRequestId.OBSERVE_COLLECTIONS,
+            b"GET",
+            b"/collections",
+            None,
+            frozenset({200}),
         ),
         QdrantRequestId.OBSERVE_COLLECTION: QdrantRequestBytes(
             QdrantRequestId.OBSERVE_COLLECTION,

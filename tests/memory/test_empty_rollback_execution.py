@@ -16,6 +16,13 @@ from tools.governed_memory_install.durable_receipts import (
     DurableReceiptStore,
     ReceiptArtifact,
 )
+from tools.governed_memory_install.live_rollback_marker import (
+    ACQUISITION_FILENAME,
+    SEMANTIC_EMPTY_FILENAME,
+    DurableRootLiveRollbackMarkerTransport,
+    LiveRollbackMarkerTransportError,
+    RootControllerAuthorityMarkerFileObservation,
+)
 from tools.governed_memory_install.rollback import (
     RETAINED_AUDIT_KEYS,
     ROLLBACK_RESOURCE_KEYS,
@@ -55,7 +62,7 @@ from tools.governed_memory_install.rollback_journal import (
 from tools.governed_memory_install.rollback_entrypoint import (
     ClaimedEmptyRollbackEvidence,
     EmptyRollbackExecutionError,
-    EmptyRollbackWriterFenceAcquisition,
+    EmptyRollbackControllerAuthorityMarkerAcquisition,
     RollbackEvent,
     RollbackJournalRecord,
     RollbackObservation,
@@ -167,15 +174,15 @@ class _Operations:
         self.inject_writer_after_store_stop = False
         self.live_qdrant_points = 0
         self.return_unverified_sequence = False
-        self.active_fence_sha256: str | None = None
-        self.nonwritable_postgres_identity_sha256 = hashlib.sha256(
-            b"stopped:postgres"
+        self.active_controller_authority_marker_sha256: str | None = None
+        self.marker_bound_postgres_identity_sha256 = hashlib.sha256(
+            b"marker-bound:postgres"
         ).hexdigest()
-        self.nonwritable_qdrant_identity_sha256 = hashlib.sha256(
-            b"stopped:qdrant"
+        self.marker_bound_qdrant_identity_sha256 = hashlib.sha256(
+            b"marker-bound:qdrant"
         ).hexdigest()
-        self.fence_acquisitions = 0
-        self.fence_releases = 0
+        self.marker_acquisitions = 0
+        self.marker_releases = 0
         self.tampered_install_receipt_after_r03: bytes | None = None
         self.remove_install_receipt_after_r03 = False
         self.remove_retained_audit_key_after_r03: str | None = None
@@ -219,9 +226,9 @@ class _Operations:
             self.verified_resources,
         )
 
-    def _validate_fence(self, request, capability: object) -> None:
+    def _validate_marker(self, request, capability: object) -> None:
         evidence = (
-            rollback_entrypoint.validate_empty_rollback_writer_fence_capability(
+            rollback_entrypoint.validate_empty_rollback_controller_authority_marker_capability(
                 capability,
                 expected_execution_id=request.execution_id,
                 expected_attempt_id=request.attempt_id,
@@ -236,62 +243,56 @@ class _Operations:
                 expected_controller_release_tree_sha256=(
                     request.controller_release_tree_sha256
                 ),
-                expected_nonwritable_postgres_identity_sha256=(
-                    self.nonwritable_postgres_identity_sha256
+                expected_marker_bound_postgres_identity_sha256=(
+                    self.marker_bound_postgres_identity_sha256
                 ),
-                expected_nonwritable_qdrant_identity_sha256=(
-                    self.nonwritable_qdrant_identity_sha256
+                expected_marker_bound_qdrant_identity_sha256=(
+                    self.marker_bound_qdrant_identity_sha256
                 ),
-                expected_fence_sha256=self.active_fence_sha256,
+                expected_controller_authority_marker_sha256=self.active_controller_authority_marker_sha256,
             )
         )
-        if evidence.fence_sha256 != self.active_fence_sha256:
-            raise RuntimeError("writer fence is not held")
+        if evidence.controller_authority_marker_sha256 != self.active_controller_authority_marker_sha256:
+            raise RuntimeError("controller-authority marker is not held")
 
-    def acquire_empty_writer_fence(
+    def acquire_empty_rollback_controller_authority_marker(
         self,
         request,
-    ) -> EmptyRollbackWriterFenceAcquisition:
-        if self.active_fence_sha256 is not None:
-            raise RuntimeError("writer fence already held")
-        self.fence_acquisitions += 1
-        self.active_fence_sha256 = hashlib.sha256(
-            (
-                request.execution_id
-                + request.attempt_id
-                + str(self.fence_acquisitions)
-            ).encode("ascii")
-        ).hexdigest()
-        return EmptyRollbackWriterFenceAcquisition(
+    ) -> EmptyRollbackControllerAuthorityMarkerAcquisition:
+        if self.active_controller_authority_marker_sha256 is None:
+            self.marker_acquisitions += 1
+            self.active_controller_authority_marker_sha256 = hashlib.sha256(
+                (request.execution_id + request.attempt_id).encode("ascii")
+            ).hexdigest()
+        return EmptyRollbackControllerAuthorityMarkerAcquisition(
             execution_id=request.execution_id,
             attempt_id=request.attempt_id,
             plan_sha256=request.plan_sha256,
             exact_targets_sha256=request.exact_targets_sha256,
             controller_runtime_tree_sha256=request.controller_runtime_tree_sha256,
             controller_release_tree_sha256=request.controller_release_tree_sha256,
-            nonwritable_postgres_identity_sha256=(
-                self.nonwritable_postgres_identity_sha256
+            marker_bound_postgres_identity_sha256=(
+                self.marker_bound_postgres_identity_sha256
             ),
-            nonwritable_qdrant_identity_sha256=(
-                self.nonwritable_qdrant_identity_sha256
+            marker_bound_qdrant_identity_sha256=(
+                self.marker_bound_qdrant_identity_sha256
             ),
-            fence_sha256=self.active_fence_sha256,
+            controller_authority_marker_sha256=self.active_controller_authority_marker_sha256,
         )
 
-    def release_empty_writer_fence(self, request, capability: object) -> None:
-        self._validate_fence(request, capability)
-        self.active_fence_sha256 = None
-        self.fence_releases += 1
+    def release_empty_rollback_controller_authority_marker(self, request, capability: object) -> None:
+        self._validate_marker(request, capability)
+        self.active_controller_authority_marker_sha256 = None
+        self.marker_releases += 1
 
     def observe_empty_eligibility(
         self,
         request,
-        writer_fence_capability: object | None,
+        controller_authority_marker_capability: object | None,
     ) -> dict[str, object]:
-        if request.step.step_id == "R07_ACQUIRE_STOPPED_STORE_WRITER_FENCE":
-            self._validate_fence(request, writer_fence_capability)
-        elif writer_fence_capability is not None:
-            self._validate_fence(request, writer_fence_capability)
+        if request.step.step_id != "R05_RECHECK_SEMANTIC_EMPTY_UNDER_CONTROLLER_AUTHORITY_MARKER":
+            raise RuntimeError("unexpected semantic-empty step")
+        self._validate_marker(request, controller_authority_marker_capability)
         self.eligibility_checks += 1
         observed = copy.deepcopy(self.eligibility)
         observed["observation_set_sha256"] = hashlib.sha256(
@@ -300,7 +301,7 @@ class _Operations:
         observed["qdrant_points"] = self.live_qdrant_points
         observed["receipt_sha256"] = eligibility_receipt_sha256(observed)
         if (
-            request.step.step_id == "R07_ACQUIRE_STOPPED_STORE_WRITER_FENCE"
+            request.step.step_id == "R05_RECHECK_SEMANTIC_EMPTY_UNDER_CONTROLLER_AUTHORITY_MARKER"
             and self.inject_writer_after_store_stop
         ):
             self.live_qdrant_points = 1
@@ -334,31 +335,16 @@ class _Operations:
             request.controller_release_tree_sha256,
         )
 
-    def apply(
-        self,
-        request,
-        expected: RollbackObservation,
-    ) -> None:
-        if request.step.step_id not in {
-            "R05_DISABLE_AND_REMOVE_STORES_SUPERVISOR",
-            "R06_STOP_EXACT_STORES",
-        }:
-            raise RuntimeError("unfenced destructive operation")
-        self.states[request.step.step_id] = "after"
-        self.apply_count[request.step.step_id] = (
-            self.apply_count.get(request.step.step_id, 0) + 1
-        )
-
     def apply_if_still_empty(
         self,
         request,
         expected: RollbackObservation,
-        writer_fence_capability: object,
+        controller_authority_marker_capability: object,
         signed_eligibility,
     ) -> None:
-        self._validate_fence(request, writer_fence_capability)
+        self._validate_marker(request, controller_authority_marker_capability)
         if self.observe(request) != expected:
-            raise RuntimeError("resource changed inside writer fence")
+            raise RuntimeError("resource changed inside controller-authority marker")
         observed_empty = copy.deepcopy(self.eligibility)
         observed_empty["observation_set_sha256"] = hashlib.sha256(
             ("atomic:" + request.step.step_id).encode("ascii")
@@ -382,9 +368,9 @@ class _Operations:
         self,
         request,
         resources,
-        writer_fence_capability: object,
+        controller_authority_marker_capability: object,
     ) -> bool:
-        self._validate_fence(request, writer_fence_capability)
+        self._validate_marker(request, controller_authority_marker_capability)
         return all(
             self.states.get(
                 step.step_id,
@@ -399,9 +385,9 @@ class _Operations:
         self,
         request,
         retained_audit_keys,
-        writer_fence_capability: object,
+        controller_authority_marker_capability: object,
     ) -> dict[str, str]:
-        self._validate_fence(request, writer_fence_capability)
+        self._validate_marker(request, controller_authority_marker_capability)
         result = {
             key: self.retained_audit_hashes[key]
             for key in retained_audit_keys
@@ -409,6 +395,160 @@ class _Operations:
         if self.remove_retained_audit_key_after_r03 is not None:
             result.pop(self.remove_retained_audit_key_after_r03, None)
         return result
+
+
+class _MemoryControllerAuthorityMarkerStore:
+    def __init__(self) -> None:
+        self.files: dict[tuple[str, str], bytes] = {}
+
+    @staticmethod
+    def _observation(
+        content: bytes,
+    ) -> RootControllerAuthorityMarkerFileObservation:
+        return RootControllerAuthorityMarkerFileObservation(
+            content=content,
+            regular_no_follow=True,
+            mode=0o400,
+            uid=0,
+            gid=0,
+            file_fsynced=True,
+            parent_fsynced=True,
+        )
+
+    def create_or_read_exact(self, execution_id, filename, expected):
+        key = (execution_id, filename)
+        existing = self.files.setdefault(key, expected)
+        if existing != expected:
+            raise LiveRollbackMarkerTransportError("synthetic_marker_drift")
+        return self._observation(existing)
+
+    def read_optional_exact(self, execution_id, filename, expected):
+        existing = self.files.get((execution_id, filename))
+        if existing is None:
+            return None
+        if existing != expected:
+            raise LiveRollbackMarkerTransportError("synthetic_marker_drift")
+        return self._observation(existing)
+
+    def remove_exact_execution(
+        self,
+        execution_id,
+        acquisition,
+        semantic_empty,
+    ) -> None:
+        expected = {
+            ACQUISITION_FILENAME: acquisition,
+            SEMANTIC_EMPTY_FILENAME: semantic_empty,
+        }
+        for filename, raw in expected.items():
+            if self.files.get((execution_id, filename)) != raw:
+                raise LiveRollbackMarkerTransportError(
+                    "synthetic_marker_release_drift"
+                )
+        for filename in expected:
+            del self.files[(execution_id, filename)]
+
+
+class _RealMarkerOperations(_Operations):
+    """Use the real create-once marker transport with synthetic effects."""
+
+    def __init__(
+        self,
+        eligibility: dict[str, object],
+        canonical_install_receipt: bytes,
+        verified_resources: object,
+    ) -> None:
+        super().__init__(
+            eligibility,
+            canonical_install_receipt,
+            verified_resources,
+        )
+        self.marker_store = _MemoryControllerAuthorityMarkerStore()
+        self.marker_transport = DurableRootLiveRollbackMarkerTransport(
+            self.marker_store
+        )
+        self.held_marker = None
+        self.semantic_empty_state_sha256 = hashlib.sha256(
+            b"synthetic-semantic-empty-state"
+        ).hexdigest()
+
+    def acquire_empty_rollback_controller_authority_marker(
+        self,
+        request,
+    ) -> EmptyRollbackControllerAuthorityMarkerAcquisition:
+        self.held_marker = self.marker_transport.acquire_or_recover(
+            request,
+            marker_bound_postgres_identity_sha256=(
+                self.marker_bound_postgres_identity_sha256
+            ),
+            marker_bound_qdrant_identity_sha256=(
+                self.marker_bound_qdrant_identity_sha256
+            ),
+            expected_semantic_empty_state_sha256=(
+                self.semantic_empty_state_sha256
+            ),
+        )
+        self.active_controller_authority_marker_sha256 = (
+            self.held_marker.controller_authority_marker_sha256
+        )
+        self.marker_acquisitions += 1
+        return EmptyRollbackControllerAuthorityMarkerAcquisition(
+            execution_id=request.execution_id,
+            attempt_id=request.attempt_id,
+            plan_sha256=request.plan_sha256,
+            exact_targets_sha256=request.exact_targets_sha256,
+            controller_runtime_tree_sha256=(
+                request.controller_runtime_tree_sha256
+            ),
+            controller_release_tree_sha256=(
+                request.controller_release_tree_sha256
+            ),
+            marker_bound_postgres_identity_sha256=(
+                self.marker_bound_postgres_identity_sha256
+            ),
+            marker_bound_qdrant_identity_sha256=(
+                self.marker_bound_qdrant_identity_sha256
+            ),
+            controller_authority_marker_sha256=(
+                self.active_controller_authority_marker_sha256
+            ),
+        )
+
+    def observe_empty_eligibility(
+        self,
+        request,
+        controller_authority_marker_capability,
+    ) -> dict[str, object]:
+        observed = super().observe_empty_eligibility(
+            request,
+            controller_authority_marker_capability,
+        )
+        if self.held_marker is None:
+            raise RuntimeError("controller-authority marker is not held")
+        self.held_marker = (
+            self.marker_transport.persist_semantic_empty_observation(
+                request,
+                self.held_marker,
+                self.semantic_empty_state_sha256,
+            )
+        )
+        return observed
+
+    def release_empty_rollback_controller_authority_marker(
+        self,
+        request,
+        capability: object,
+    ) -> None:
+        self._validate_marker(request, capability)
+        if self.held_marker is None:
+            raise RuntimeError("controller-authority marker is not held")
+        self.marker_transport.release_after_receipt(
+            request,
+            self.held_marker,
+        )
+        self.held_marker = None
+        self.active_controller_authority_marker_sha256 = None
+        self.marker_releases += 1
 
 
 
@@ -878,9 +1018,9 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
         self.assertEqual(receipt.outcome, "empty_store_rollback_complete")
         self.assertEqual(len(receipt.applied_step_ids), 22)
         self.assertEqual(operations.install_binding_checks, 2)
-        self.assertEqual(operations.eligibility_checks, 2)
-        self.assertEqual(operations.fence_acquisitions, 1)
-        self.assertEqual(operations.fence_releases, 1)
+        self.assertEqual(operations.eligibility_checks, 1)
+        self.assertEqual(operations.marker_acquisitions, 1)
+        self.assertEqual(operations.marker_releases, 1)
         self.assertEqual(sum(operations.apply_count.values()), 10)
         self.assertGreater(len(factory.journal.reserve_calls), 0)  # type: ignore[union-attr]
         canonical = verify_empty_rollback_receipt(receipt.canonical_receipt)
@@ -915,8 +1055,33 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
         self.assertEqual(dict(resumed.canonical_receipt), canonical)
         self.assertEqual(sum(operations.apply_count.values()), 10)
         self.assertEqual(operations.install_binding_checks, 3)
-        self.assertEqual(operations.fence_acquisitions, 2)
-        self.assertEqual(operations.fence_releases, 2)
+        self.assertEqual(operations.eligibility_checks, 2)
+        self.assertEqual(operations.marker_acquisitions, 2)
+        self.assertEqual(operations.marker_releases, 2)
+
+    def test_completed_replay_reestablishes_real_marker_semantic_proof(
+        self,
+    ) -> None:
+        factory = _JournalFactory()
+        operations = _RealMarkerOperations(
+            self.eligibility,
+            self.install_receipt_bytes,
+            self.resources,
+        )
+
+        first = self._run(factory, operations)
+        self.assertEqual(first.outcome, "empty_store_rollback_complete")
+        self.assertEqual(operations.marker_store.files, {})
+
+        replay = self._run(factory, operations)
+        self.assertEqual(
+            replay.outcome,
+            "empty_store_rollback_already_complete",
+        )
+        self.assertEqual(operations.eligibility_checks, 2)
+        self.assertEqual(operations.marker_acquisitions, 2)
+        self.assertEqual(operations.marker_releases, 2)
+        self.assertEqual(operations.marker_store.files, {})
 
     def test_expired_authority_cannot_persist_eligibility_receipt(self) -> None:
         eligibility_path = (
@@ -1078,7 +1243,7 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
         factory = _JournalFactory()
         operations = self._operations()
         operations.tamper_runtime_tree_step = (
-            "R05_DISABLE_AND_REMOVE_STORES_SUPERVISOR"
+            "R06_DISABLE_AND_REMOVE_STORES_SUPERVISOR"
         )
         with self.assertRaisesRegex(
             EmptyRollbackExecutionError,
@@ -1220,8 +1385,8 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
             factory.journal.records()[-1].event,  # type: ignore[union-attr]
             RollbackEvent.COMPLETE.value,
         )
-        self.assertEqual(operations.fence_releases, 1)
-        self.assertIsNone(operations.active_fence_sha256)
+        self.assertEqual(operations.marker_releases, 0)
+        self.assertIsNotNone(operations.active_controller_authority_marker_sha256)
 
     def test_first_completion_rejects_retained_artifact_removed_after_r03(
         self,
@@ -1240,7 +1405,7 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
             factory.journal.records()[-1].event,  # type: ignore[union-attr]
             RollbackEvent.COMPLETE.value,
         )
-        self.assertEqual(operations.fence_releases, 1)
+        self.assertEqual(operations.marker_releases, 0)
 
     def test_effect_before_applied_record_recovers_without_repeating(self) -> None:
         factory = _JournalFactory()
@@ -1322,42 +1487,36 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
             1,
         )
 
-    def test_nonempty_under_stopped_store_fence_stops_before_store_deletion(
+    def test_nonempty_under_live_marker_stops_before_any_destructive_step(
         self,
     ) -> None:
         factory = _JournalFactory()
 
-        class _NonemptyUnderStoppedStoreFence(_Operations):
+        class _NonemptyUnderLiveStoreMarker(_Operations):
             def observe_empty_eligibility(
                 self,
                 request,
-                writer_fence_capability,
+                controller_authority_marker_capability,
             ):
                 receipt = super().observe_empty_eligibility(
                     request,
-                    writer_fence_capability,
+                    controller_authority_marker_capability,
                 )
                 if request.step.step_id == (
-                    "R07_ACQUIRE_STOPPED_STORE_WRITER_FENCE"
+                    "R05_RECHECK_SEMANTIC_EMPTY_UNDER_CONTROLLER_AUTHORITY_MARKER"
                 ):
                     receipt["qdrant_points"] = 1
                     receipt["receipt_sha256"] = eligibility_receipt_sha256(receipt)
                 return receipt
 
-        operations = _NonemptyUnderStoppedStoreFence(
+        operations = _NonemptyUnderLiveStoreMarker(
             self.eligibility,
             self.install_receipt_bytes,
             self.resources,
         )
         with self.assertRaises(Exception):
             self._run(factory, operations)
-        self.assertEqual(
-            operations.apply_count,
-            {
-                "R05_DISABLE_AND_REMOVE_STORES_SUPERVISOR": 1,
-                "R06_STOP_EXACT_STORES": 1,
-            },
-        )
+        self.assertEqual(operations.apply_count, {})
 
     def test_new_writer_after_store_stop_is_refused_inside_delete_boundary(
         self,
@@ -1369,18 +1528,12 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
             EmptyRollbackExecutionError, "empty_rollback_effect_failed"
         ):
             self._run(factory, operations)
-        self.assertEqual(
-            operations.apply_count,
-            {
-                "R05_DISABLE_AND_REMOVE_STORES_SUPERVISOR": 1,
-                "R06_STOP_EXACT_STORES": 1,
-            },
-        )
+        self.assertEqual(operations.apply_count, {})
         self.assertNotIn(
             "R08_REMOVE_EXACT_QDRANT_CONTAINER", operations.states
         )
-        self.assertEqual(operations.fence_releases, 1)
-        self.assertIsNone(operations.active_fence_sha256)
+        self.assertEqual(operations.marker_releases, 0)
+        self.assertIsNotNone(operations.active_controller_authority_marker_sha256)
 
     def test_unowned_effect_and_observation_tamper_fail_closed(self) -> None:
         factory = _JournalFactory()

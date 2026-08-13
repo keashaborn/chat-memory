@@ -546,6 +546,16 @@ class _Systemd:
 
 
 class LinuxStoreEffectsTests(unittest.TestCase):
+    def test_absent_systemd_snapshot_is_valid_and_classifies_absent(self) -> None:
+        snapshot = BoundSystemdSupervisorSnapshot.absent()
+        self.assertIs(snapshot.unit_kind, FilesystemNodeKind.ABSENT)
+        self.assertIs(snapshot.enablement_kind, FilesystemNodeKind.ABSENT)
+        self.assertFalse(snapshot.daemon_reload_pending)
+        exact = ExactSystemdSupervisor.from_rendered_unit(
+            b"[Unit]\nDescription=absent snapshot regression\n"
+        )
+        self.assertIs(snapshot.classify(exact).presence, EffectPresence.ABSENT)
+
     def setUp(self) -> None:
         self.spec = _resolved_spec()
         self.spec_sha256 = _canonical_sha(self.spec)
@@ -759,7 +769,7 @@ class LinuxStoreEffectsTests(unittest.TestCase):
         self.operations.compensate(remove, observed)
         self.assertEqual(self.operations.observe(remove).state, "before")
 
-    def test_supervisor_binds_unit_and_enablement_and_refuses_partial_or_drift(
+    def test_supervisor_recovers_exact_partial_prefix_and_refuses_drift(
         self,
     ) -> None:
         step = next(
@@ -774,13 +784,10 @@ class LinuxStoreEffectsTests(unittest.TestCase):
         self.systemd.unit_kind = FilesystemNodeKind.REGULAR_FILE
         self.systemd.unit_sha256 = exact.unit_sha256
         partial = self.operations.observe(install)
-        self.assertEqual(partial.state, "drift")
-        with self.assertRaisesRegex(
-            LinuxStoreEffectsError, "linux_store_apply_state_invalid"
-        ):
-            self.operations.apply(install, partial)
+        self.assertEqual(partial.state, "recoverable")
+        self.operations.apply(install, partial)
+        self.assertEqual(self.operations.observe(install).state, "after")
 
-        self.systemd.enablement_kind = FilesystemNodeKind.SYMLINK
         self.systemd.enablement_target = "/etc/systemd/system/wrong.service"
         drift = self.operations.observe(install)
         self.assertEqual(drift.state, "drift")

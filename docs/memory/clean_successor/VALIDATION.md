@@ -16,7 +16,7 @@ resources only; it is not installation or live-production evidence.
 ## Canonical repository checks
 
 Run on **seebx** from the isolated Phase 8D candidate carrying the current
-Phase 9F repository-only patch:
+Phase 9H repository-only patch:
 
 ```bash
 python3 -I -B tools/governed_memory_install/package.py verify-package
@@ -60,11 +60,11 @@ not rewritten merely to make filenames shorter.
   store whose public entrypoints require the canonical root-owned executions
   path, fresh terminal-readiness replay checks, opaque rollback receipt/ledger
   binding, a secure runtime verifier, an exact release-path launcher,
-  resolved-spec Docker-label binding, logical in-process rollback-fence
-  machinery, and retained audit hashes are packaged. No durable live writer
-  fence or stopped-store semantic emptiness recheck exists. The required future
-  order is live writer fence plus semantic recheck, then stop, removal, and
-  receipt persistence while holding the fence. The verifier closes the
+  resolved-spec Docker-label binding, a durable controller rollback marker,
+  and retained audit hashes are packaged. R04/R05 place a live semantic-empty
+  check before stop and physical removal and keep the marker through receipt
+  persistence. The marker is not physical writer exclusion; direct external
+  writers remain a blocker. The verifier closes the
   complete manifest-defined release tree with no extras and requires exact
   equality between the locked and installed normalized distribution sets. The
   rollback authority claim validates trusted time and the exact global lock
@@ -72,25 +72,35 @@ not rewritten merely to make filenames shorter.
   release-tree hash is bound through the claim, journal, host ownership, and
   install receipt. Empty rollback separately requires the verified runtime
   capability and binds the exact runtime/release identity through signed
-  authority, claim, journal, operation requests and observations, writer fence,
+  authority, claim, journal, operation requests and observations, controller marker,
   retained install receipt, and rollback receipt.
 
-  Phase 9F additionally packages closed post-claim Linux install and dependency
+  Phase 9H additionally packages closed post-claim Linux install and dependency
   factory code, a fixed loopback readiness DTO adapter, a physical ledger-bound
   empty-rollback adapter, and controller runtime/release builder orchestration.
   These reviewed layers expose typed operation models. Immutable Docker,
   systemd, root-file, and Qdrant request/observation contracts are packaged.
   Narrow selected-field image inspection and exact-ledger-container supervisor
-  inspect/start/stop primitives are retained and repaired, but no complete live
-  transport set or bound platform factory exists. The PostgreSQL contract closes exact
+  inspect/start/stop primitives are retained and repaired. Non-PostgreSQL Linux
+  transports are concrete, but no complete bound factory exists until the
+  concrete Psycopg adapter exists. The PostgreSQL contract closes exact
   source identities and all required native-translation, session-role,
-  privacy, catalog, and rollback-prefix conditions; executable native stages
-  are absent and construction refuses. The selected exact Psycopg wheel names
-  are `psycopg-3.3.4-py3-none-any.whl` and
-  `psycopg_binary-3.3.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl`;
-  neither is locked or verified;
+  privacy, catalog, and rollback-prefix conditions. A fixed orchestration,
+  resume, and 16-query catalog machine is packaged and locks before every
+  observation, but operation-to-SQL translation, the concrete Psycopg adapter,
+  and an approved terminal catalog are absent, so construction refuses.
+  Psycopg with its binary extra, version 3.3.4, is only the preferred
+  synchronous driver family and version; no exact wheel filenames or hashes
+  are selected, locked, or verified;
   CPython and wheelhouse bytes are not staged; no approved terminal PostgreSQL
-  catalog exists. The runtime builder deterministically refuses these current
+  catalog exists. Runtime publication rejects noncanonical or duplicate JSON,
+  binds its receipt to the immutable destination, rechecks staged identities,
+  checks same-device rename preconditions, and persists exact intent before the
+  first rename. Exact terminal state replays with renewed fsyncs; ambiguous
+  post-intent restarts are fenced for manual review without generic cleanup.
+  Concrete production publication
+  primitives and independent substrate payload-tree proof remain absent. The
+  runtime builder deterministically refuses these current
   inputs, and the runtime capability verifier rejects incomplete selected
   inputs before any filesystem or process probe. The runtime verifier was not executed,
   no controller runtime was built, staged, or installed, no release was
@@ -139,7 +149,7 @@ only invocation-owned PostgreSQL/Qdrant resources with pinned local image
 digests, synthetic inputs, no persistent mounts, zero provider calls, and zero
 production reads or endpoint calls. Independent postflight checks found no
 owned resources or listeners and confirmed unchanged live repository, service,
-and Docker identities. Phase 9F added repository code and exercised only
+and Docker identities. Phase 9H added repository code and exercised only
 synthetic in-process tests; it did not run Docker, access secrets, read
 production data, call a provider, build or install the controller runtime, or
 change a service, PostgreSQL, or Qdrant. Source preparation, installation, and

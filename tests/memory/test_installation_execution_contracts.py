@@ -67,20 +67,34 @@ class DormantStoreInstallExecutionContractTests(unittest.TestCase):
                 "postgresql_source_closure_contract_implemented"
             ]
         )
-        self.assertFalse(
+        self.assertTrue(
             boundary["driver_native_postgresql_stage_contract_implemented"]
         )
-        self.assertFalse(
+        self.assertTrue(
             boundary["driver_native_postgresql_executable_stage_machine_implemented"]
         )
         self.assertFalse(
+            boundary["concrete_psycopg_postgresql_transport_implemented"]
+        )
+        self.assertFalse(
             boundary["selected_live_linux_platform_transport_factory_implemented"]
+        )
+        self.assertTrue(
+            boundary[
+                "selected_non_postgresql_live_linux_platform_transport_factory_implemented"
+            ]
         )
         self.assertFalse(boundary["pinned_postgresql_live_driver_selected"])
         self.assertTrue(
             boundary["controller_runtime_release_builder_orchestration_implemented"]
         )
         self.assertFalse(boundary["controller_runtime_build_transport_implemented"])
+        self.assertTrue(
+            boundary["controller_runtime_publication_policy_transport_implemented"]
+        )
+        self.assertFalse(
+            boundary["production_runtime_publication_primitives_implemented"]
+        )
         self.assertFalse(boundary["activation_executor_implemented"])
         for key, value in boundary.items():
             if key.endswith("_in_this_repository_phase"):
@@ -116,17 +130,15 @@ class DormantStoreInstallExecutionContractTests(unittest.TestCase):
             "compensation_effect_before_receipt_resume_supported",
             "terminal_postflight_effect_present_blocks_compensation_and_exact_resume_completes",
             "composite_step_recoverable_state_protocol_implemented",
-            "required_future_order_is_live_writer_fence_empty_recheck_then_stop_then_physical_removal",
+            "fresh_live_semantic_empty_recheck_required_at_r05_under_controller_authority_marker",
+            "destructive_rollback_steps_require_held_controller_authority_marker_and_persisted_r05_empty_proof",
+            "controller_authority_marker_empty_recheck_then_stop_then_physical_removal_order_implemented",
             "retained_audit_artifact_hashes_bound_to_rollback_receipt",
         ):
             self.assertTrue(durability[key], key)
         for key in (
-            "empty_rollback_stops_exact_stores_before_writer_fence",
-            "empty_rollback_writer_fence_held_from_r07_through_receipt",
-            "fresh_offline_read_only_empty_recheck_required_at_r07_under_stopped_store_fence",
-            "destructive_rollback_steps_atomically_recheck_empty_under_fence",
             "stopped_store_semantic_empty_recheck_is_valid",
-            "durable_live_writer_fence_transport_implemented",
+            "external_direct_writer_exclusion_implemented",
             "end_to_end_live_process_crash_recovery_claimed",
         ):
             self.assertFalse(durability[key], key)
@@ -142,10 +154,11 @@ class DormantStoreInstallExecutionContractTests(unittest.TestCase):
         self.assertTrue(
             host["postgresql_source_closure_contract_packaged"]
         )
-        self.assertFalse(host["driver_native_postgresql_stage_contract_packaged"])
-        self.assertFalse(
+        self.assertTrue(host["driver_native_postgresql_stage_contract_packaged"])
+        self.assertTrue(
             host["driver_native_postgresql_executable_stage_machine_packaged"]
         )
+        self.assertFalse(host["concrete_psycopg_postgresql_transport_packaged"])
         self.assertTrue(host["bounded_image_inspection_command_primitive_packaged"])
         self.assertTrue(
             host[
@@ -156,6 +169,9 @@ class DormantStoreInstallExecutionContractTests(unittest.TestCase):
             host["store_supervisor_observations_use_narrow_nonsecret_fields_only"]
         )
         self.assertFalse(host["selected_live_platform_transports_packaged"])
+        self.assertTrue(
+            host["selected_non_postgresql_live_platform_transport_factory_packaged"]
+        )
         self.assertTrue(host["controller_runtime_secure_verifier_packaged"])
         self.assertTrue(host["exact_release_path_supervisor_launcher_packaged"])
         receipts = contract["receipt_policy"]
@@ -163,12 +179,14 @@ class DormantStoreInstallExecutionContractTests(unittest.TestCase):
         self.assertTrue(receipts["closed_content_free_builders_and_verifiers_packaged"])
         self.assertTrue(receipts["empty_rollback_controller_emits_canonical_receipt"])
         self.assertTrue(receipts["install_controller_emits_canonical_receipt"])
-        self.assertFalse(
-            receipts["final_rollback_receipt_persisted_while_writer_fence_held"]
+        self.assertTrue(
+            receipts[
+                "final_rollback_receipt_persisted_while_controller_authority_marker_held"
+            ]
         )
         self.assertTrue(
             receipts[
-                "final_rollback_receipt_persistence_while_live_writer_fence_held_required"
+                "final_rollback_receipt_persistence_while_controller_authority_marker_held_required"
             ]
         )
         self.assertNotIn(
@@ -211,6 +229,11 @@ class DormantStoreInstallExecutionContractTests(unittest.TestCase):
         self.assertFalse(build["current_runtime_built"])
         self.assertFalse(build["current_runtime_installed"])
         self.assertFalse(build["runtime_build_or_install_performed_by_repository_phase"])
+        self.assertTrue(build["runtime_publication_policy_transport_packaged"])
+        self.assertFalse(build["production_runtime_publication_primitives_packaged"])
+        self.assertFalse(
+            build["independent_standalone_cpython_payload_tree_proof_packaged"]
+        )
         for key in (
             "secure_receipt_bound_no_follow_verifier_packaged",
             "runtime_and_release_tree_hash_verification_required",
