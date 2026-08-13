@@ -247,6 +247,8 @@ def build_verified_controller_runtime(package_capability: object) -> object:
         python_version="3.12.11",
         platform_os="linux",
         platform_architecture="x86_64",
+        persistent_controller_substrate_created=True,
+        persistent_store_resources_created=False,
     )
     return _VerifiedControllerRuntimeCapability(evidence, _RUNTIME_TOKEN)
 
@@ -281,6 +283,7 @@ def build_verified_rollback_capability(
         "controller_runtime_receipt_sha256": (
             bindings.controller_runtime_receipt_sha256
         ),
+        "installation_execution_id": bindings.installation_execution_id,
         "installation_receipt_sha256": bindings.installation_receipt_sha256,
         "rollback_plan_sha256": bindings.rollback_plan_sha256,
         "exact_targets_sha256": bindings.exact_targets_sha256,
@@ -382,6 +385,7 @@ class EmptyRollbackAuthorityTests(unittest.TestCase):
             controller_runtime_receipt_sha256=(
                 package.controller_runtime_receipt_sha256
             ),
+            installation_execution_id="6" * 64,
             installation_receipt_sha256="d" * 64,
             rollback_plan_sha256="e" * 64,
             exact_targets_sha256="f" * 64,
@@ -399,6 +403,9 @@ class EmptyRollbackAuthorityTests(unittest.TestCase):
             "package_manifest_sha256": self.bindings.package_manifest_sha256,
             "controller_runtime_receipt_sha256": (
                 self.bindings.controller_runtime_receipt_sha256
+            ),
+            "installation_execution_id": (
+                self.bindings.installation_execution_id
             ),
             "installation_receipt_sha256": (
                 self.bindings.installation_receipt_sha256
@@ -541,6 +548,7 @@ class EmptyRollbackAuthorityTests(unittest.TestCase):
             "candidate_git_tree",
             "package_manifest_sha256",
             "controller_runtime_receipt_sha256",
+            "installation_execution_id",
             "installation_receipt_sha256",
             "rollback_plan_sha256",
             "exact_targets_sha256",

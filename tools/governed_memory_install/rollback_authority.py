@@ -30,12 +30,12 @@ from .controller_runtime import (
 )
 
 
-SCOPE_SCHEMA_VERSION: Final = "governed-memory-empty-store-rollback-scope-v2"
+SCOPE_SCHEMA_VERSION: Final = "governed-memory-empty-store-rollback-scope-v3"
 AUTHORIZATION_SCHEMA_VERSION: Final = (
     "governed-memory-external-authorization-envelope-v1"
 )
 AUTHORIZATION_PAYLOAD_SCHEMA_VERSION: Final = (
-    "governed-memory-empty-store-rollback-authorization-v2"
+    "governed-memory-empty-store-rollback-authorization-v3"
 )
 TRUST_BUNDLE_SCHEMA_VERSION: Final = (
     "governed-memory-ed25519-public-key-trust-bundle-v1"
@@ -64,6 +64,7 @@ _SCOPE_KEYS = {
     "candidate_git_tree",
     "package_manifest_sha256",
     "controller_runtime_receipt_sha256",
+    "installation_execution_id",
     "installation_receipt_sha256",
     "rollback_plan_sha256",
     "exact_targets_sha256",
@@ -118,6 +119,7 @@ class EmptyRollbackExpectedBindings:
     candidate_git_tree: str
     package_manifest_sha256: str
     controller_runtime_receipt_sha256: str
+    installation_execution_id: str
     installation_receipt_sha256: str
     rollback_plan_sha256: str
     exact_targets_sha256: str
@@ -133,6 +135,7 @@ class EmptyRollbackExpectedBindings:
                 for value in (
                     self.package_manifest_sha256,
                     self.controller_runtime_receipt_sha256,
+                    self.installation_execution_id,
                     self.installation_receipt_sha256,
                     self.rollback_plan_sha256,
                     self.exact_targets_sha256,
@@ -172,6 +175,7 @@ class EmptyRollbackAuthorityEvidence:
     controller_requirements_lock_sha256: str
     supervisor_launcher_path: str
     supervisor_launcher_sha256: str
+    installation_execution_id: str
     installation_receipt_sha256: str
     rollback_plan_sha256: str
     exact_targets_sha256: str
@@ -368,6 +372,7 @@ def verify_empty_rollback_execution_capability(
             "controller_runtime_receipt_sha256",
             runtime_evidence.controller_runtime_receipt_sha256,
         ),
+        ("installation_execution_id", expected_bindings.installation_execution_id),
         ("installation_receipt_sha256", expected_bindings.installation_receipt_sha256),
         ("rollback_plan_sha256", expected_bindings.rollback_plan_sha256),
         ("exact_targets_sha256", expected_bindings.exact_targets_sha256),
@@ -500,6 +505,7 @@ def verify_empty_rollback_execution_capability(
         ),
         supervisor_launcher_path=runtime_evidence.supervisor_launcher_path,
         supervisor_launcher_sha256=runtime_evidence.supervisor_launcher_sha256,
+        installation_execution_id=expected_bindings.installation_execution_id,
         installation_receipt_sha256=expected_bindings.installation_receipt_sha256,
         rollback_plan_sha256=expected_bindings.rollback_plan_sha256,
         exact_targets_sha256=expected_bindings.exact_targets_sha256,

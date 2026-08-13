@@ -24,10 +24,27 @@
     "package_manifest_sha256_binding_required": true,
     "full_release_tree_sha256_required": true,
     "controller_runtime_and_release_are_separately_authorized_preinstall_substrate": true,
+    "repository_only_runtime_and_release_builder_orchestration_packaged": true,
+    "builder_requires_exact_externally_approved_standalone_cpython_substrate": true,
+    "builder_requires_exact_offline_wheelhouse_tree": true,
+    "builder_requires_no_replace_publication_and_fsynced_parents": true,
+    "builder_recovers_only_exact_owned_partial_stage": true,
+    "builder_refuses_partial_publication_for_manual_review": true,
+    "concrete_runtime_build_transport_packaged": false,
+    "approved_standalone_cpython_substrate_selected": false,
+    "offline_wheelhouse_staged": false,
     "current_runtime_built": false,
     "current_runtime_installed": false,
     "current_release_staged": false,
     "runtime_build_or_install_performed_by_repository_phase": false
+  },
+  "runtime_build_receipt_policy": {
+    "schema_version": "governed-memory-controller-runtime-build-receipt-v2",
+    "persistent_controller_substrate_created_after_successful_publication": true,
+    "persistent_store_resources_created_after_successful_publication": false,
+    "active_production_state_changed_after_successful_publication": false,
+    "controller_substrate_means_only_the_immutable_runtime_release_and_receipt_roots": true,
+    "store_resources_include_postgres_qdrant_docker_systemd_and_store_secrets": true
   },
   "verification_policy": {
     "secure_receipt_bound_no_follow_verifier_packaged": true,

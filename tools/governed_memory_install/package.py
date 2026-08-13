@@ -67,25 +67,25 @@ EMPTY_ROLLBACK_RECEIPT_SCHEMA_RELATIVE: Final = (
 )
 
 EXPECTED_CONTRACT_CANONICAL_SHA256: Final = (
-    "684dba3b7953f3d62143529e0c7ad507cc4f373be688328dcbb493c8c197b822"
+    "c4655d072521a59afeaa72af3c10cc070c1f3877258f77663564df949666c014"
 )
 EXPECTED_PLAN_CANONICAL_SHA256: Final = (
-    "e2ece3b54477a63eb0ecc42f6aab0f4ae99c18f669bd23ea32576d109207de86"
+    "24f69efadead828fa036f1ff463d9a5427512bf83462d4545b39f3d7597e9ca8"
 )
 EXPECTED_CONTROLLER_SOURCE_SHA256: Final = (
-    "e3f5f1e121f8ac5365d785abb25458da2050c96263e9d4c7f4ad4e316e2f0254"
+    "5a18628c85aab814360667341f685f809ac240b484a5fe6e10c727f54a752de5"
 )
 EXPECTED_CONTROLLER_MODEL_SHA256: Final = (
     "d3701a21b827da66122906e1dcc2828ce69f06e1048164df1c4d0ca0321c3de8"
 )
 EXPECTED_EXECUTION_CONTRACT_CANONICAL_SHA256: Final = (
-    "e0cd2c6eda4909ef2b09f104223687650507eb4a4ecd30e75963f7a4d48e9216"
+    "10ebf445fcbd8a009508640ef82d787b591e8bc32e503ea2ee43233698c8fb6e"
 )
 EXPECTED_CONTROLLER_RUNTIME_CONTRACT_CANONICAL_SHA256: Final = (
-    "ecf8fc1276dbf19c8ed8c3f259eac14660ce82885e9f8c00f6c4e7213e16fd2d"
+    "a757475f0bfea4ab28b28ecb0435d6b712c4d5a3ae0c9b28d9d26337c43ad385"
 )
 EXPECTED_PROOF_CONTRACT_CANONICAL_SHA256: Final = (
-    "147bb8fe4893ea5492d3298c1f48029c174c02aade04ccb36b7468c5c832292a"
+    "2722d7b274cdab2a4c8e352277b4d28c0c6f96432d4525d8f990b05e891b548a"
 )
 EXPECTED_PROOF_SCHEMA_CANONICAL_SHA256: Final = (
     "5fa4b98974b7c1652c931abd7b630bbca11fd92fde15ee4d099ae6132f3dfe1d"
@@ -94,7 +94,7 @@ EXPECTED_INSTALL_RECEIPT_SCHEMA_CANONICAL_SHA256: Final = (
     "6a76bcf802ba72257bb5fa524010de5182f85c6dbee2b490d46f92faf159a395"
 )
 EXPECTED_EMPTY_ROLLBACK_RECEIPT_SCHEMA_CANONICAL_SHA256: Final = (
-    "fd245777b1d45b944aa2ac19fcdb2284faf66aa99a2d045698bb7098ce1ddcd6"
+    "add4d34411204c87ea321dfecb0c405c7223e1c01155090b56ea207347188aa6"
 )
 EXPECTED_MIGRATION_VERIFIER_SOURCE_SHA256: Final = (
     "6cc1b361363b0ef2299310b236bd4cef62a792ff211b43349cfa41fbd59ddd9b"
@@ -129,22 +129,22 @@ EXPECTED_EMPTY_ROLLBACK_STEP_IDS: Final = (
     "R03_VERIFY_INSTALL_RECEIPT_AND_LEDGER",
     "R04_VERIFY_EMPTY_ELIGIBILITY",
     "R05_DISABLE_AND_REMOVE_STORES_SUPERVISOR",
-    "R06_REVERIFY_EMPTY_AFTER_QUIESCENCE",
-    "R07_REMOVE_EXACT_QDRANT_ALIAS",
-    "R08_REMOVE_EXACT_EMPTY_QDRANT_COLLECTION",
-    "R09_ROLLBACK_EMPTY_PILOT_MARKER_0004",
-    "R10_ROLLBACK_OWNER_CLAIM_DETAIL_0003",
-    "R11_ROLLBACK_EMPTY_FOUNDATION_0001",
-    "R12_DROP_EMPTY_CANONICAL_DATABASE_AND_ROLES",
-    "R13_STOP_EXACT_STORES",
-    "R14_REMOVE_EXACT_QDRANT_CONTAINER",
-    "R15_REMOVE_EXACT_POSTGRES_CONTAINER",
-    "R16_REMOVE_EXACT_EMPTY_QDRANT_VOLUME",
-    "R17_REMOVE_EXACT_EMPTY_POSTGRES_VOLUME",
-    "R18_REMOVE_EXACT_UNUSED_NETWORK",
-    "R19_REMOVE_FRESH_QDRANT_STORE_SECRET",
-    "R20_REMOVE_FRESH_POSTGRES_STORE_SECRET",
-    "R21_REMOVE_RESOLVED_STORE_SPEC",
+    "R06_STOP_EXACT_STORES",
+    "R07_ACQUIRE_STOPPED_STORE_WRITER_FENCE",
+    "R08_REMOVE_EXACT_QDRANT_CONTAINER",
+    "R09_REMOVE_EXACT_POSTGRES_CONTAINER",
+    "R10_REMOVE_EXACT_EMPTY_QDRANT_VOLUME",
+    "R11_REMOVE_EXACT_EMPTY_POSTGRES_VOLUME",
+    "R12_REMOVE_EXACT_UNUSED_NETWORK",
+    "R13_REMOVE_FRESH_QDRANT_STORE_SECRET",
+    "R14_REMOVE_FRESH_POSTGRES_STORE_SECRET",
+    "R15_REMOVE_RESOLVED_STORE_SPEC",
+    "R16_VERIFY_QDRANT_ALIAS_PHYSICALLY_ABSENT",
+    "R17_VERIFY_QDRANT_COLLECTION_PHYSICALLY_ABSENT",
+    "R18_VERIFY_PILOT_MARKER_0004_PHYSICALLY_ABSENT",
+    "R19_VERIFY_OWNER_CLAIM_DETAIL_0003_PHYSICALLY_ABSENT",
+    "R20_VERIFY_FOUNDATION_0001_PHYSICALLY_ABSENT",
+    "R21_VERIFY_CANONICAL_DATABASE_AND_ROLES_PHYSICALLY_ABSENT",
     "R22_VERIFY_EXACT_ABSENCE_AND_RETAIN_AUDIT",
 )
 
@@ -197,8 +197,15 @@ EXPECTED_LIVE_EXECUTION: Final = {
     "empty_rollback_controller_emits_canonical_receipt": True,
     "typed_operation_specific_boundary_packaged": True,
     "generic_store_mutation_argv_surface_packaged": False,
-    "concrete_install_store_effect_adapters_packaged": False,
-    "concrete_empty_rollback_store_effect_adapters_packaged": False,
+    "closed_install_store_effect_adapter_packaged": True,
+    "closed_empty_rollback_store_effect_adapter_packaged": True,
+    "selected_live_platform_transports_packaged": False,
+    "pinned_postgresql_driver_selected": False,
+    "durable_create_once_receipt_store_packaged": True,
+    "public_entrypoints_require_canonical_root_owned_production_receipt_store": True,
+    "synthetic_receipt_stores_are_private_test_only": True,
+    "controller_runtime_release_builder_orchestration_packaged": True,
+    "controller_runtime_build_transport_packaged": False,
     "activation_entrypoint_packaged": False,
     "bounded_image_inspect_runner_primitive_packaged": True,
     "local_image_inspect_adapter_packaged": True,
@@ -267,6 +274,7 @@ EXPECTED_ARTIFACTS: Final = frozenset(
         "tools/governed_memory_install/authority_state.py",
         "tools/governed_memory_install/controller.py",
         "tools/governed_memory_install/controller_runtime.py",
+        "tools/governed_memory_install/durable_receipts.py",
         "tools/governed_memory_install/disposable_proof_harness.py",
         "tools/governed_memory_install/journal.py",
         "tools/governed_memory_install/execution_authority.py",
@@ -276,6 +284,8 @@ EXPECTED_ARTIFACTS: Final = frozenset(
         "tools/governed_memory_install/image_preflight.py",
         "tools/governed_memory_install/install_backend.py",
         "tools/governed_memory_install/install_entrypoint.py",
+        "tools/governed_memory_install/linux_store_effects.py",
+        "tools/governed_memory_install/linux_store_readiness.py",
         "tools/governed_memory_install/linux_plan.py",
         "tools/governed_memory_install/package.py",
         "tools/governed_memory_install/package_capability.py",
@@ -285,11 +295,14 @@ EXPECTED_ARTIFACTS: Final = frozenset(
         "tools/governed_memory_install/rollback_authority.py",
         "tools/governed_memory_install/rollback_entrypoint.py",
         "tools/governed_memory_install/rollback_journal.py",
+        "tools/governed_memory_install/rollback_live_adapter.py",
         "tools/governed_memory_install/secure_file.py",
         "tools/governed_memory_install/store_supervisor.py",
         "tools/governed_memory_install/store_readiness.py",
         "tools/governed_memory_install/store_supervisor_launcher.py",
         "tools/governed_memory_install/synthetic_backend.py",
+        "tools/governed_memory_release/__init__.py",
+        "tools/governed_memory_release/controller_runtime_builder.py",
         "tools/governed_memory_validation/generate_installation_package_manifest.py",
         "tools/governed_memory_validation/run_installation_synthetic_proof.py",
         "tools/governed_memory_validation/verify_store_migration_manifest.py",
@@ -319,7 +332,6 @@ FORBIDDEN_ARTIFACT_MARKERS: Final = (
     "pilot.env",
     "governed-memory-http.service",
     "governed-memory-worker.service",
-    "runtime_build",
     "runtime-requirements",
     "supabase",
     "phase8a_disposable_proof",
@@ -559,9 +571,9 @@ def _verify_contract(contract: dict[str, object]) -> None:
         raise PackageError("dormant_store_install_contract_semantics_invalid")
     if (
         contract.get("schema_version")
-        != "governed-memory-dormant-store-install-inactive-execution-contract-v3"
+        != "governed-memory-dormant-store-install-inactive-execution-contract-v4"
         or contract.get("state")
-        != "repository-only-dormant-install-and-empty-rollback-controllers-packaged-not-installed-not-activated"
+        != "repository-only-contract-repaired-closed-adapters-and-runtime-builder-packaged-not-installed-not-activated"
         or contract.get("server") != "seebx"
     ):
         raise PackageError("dormant_store_install_contract_identity_invalid")
@@ -646,8 +658,12 @@ def _verify_contract(contract: dict[str, object]) -> None:
             "completed_empty_rollback_replay_reproves_exact_resource_absence"
         )
         is not True
+        or recovery.get("empty_rollback_stops_exact_stores_before_writer_fence")
+        is not True
+        or recovery.get("empty_rollback_writer_fence_held_from_r07_through_receipt")
+        is not True
         or recovery.get(
-            "empty_rollback_writer_fence_held_from_post_quiescence_through_receipt"
+            "fresh_offline_read_only_empty_recheck_required_at_r07_under_stopped_store_fence"
         )
         is not True
         or recovery.get(
@@ -718,11 +734,23 @@ def _verify_contract(contract: dict[str, object]) -> None:
             "empty_rollback_receipt_binds_verified_runtime_and_full_release_tree_identity"
         )
         is not True
-        or type(blockers) is not list
-        or (
-            "concrete_live_install_and_empty_rollback_store_effect_adapters_not_packaged"
-            not in blockers
+        or receipts.get(
+            "empty_rollback_authority_claim_precedes_durable_receipt_reads_and_eligibility_persistence"
         )
+        is not True
+        or receipts.get("canonical_production_executions_root")
+        != "/var/lib/governed-memory-controller/executions"
+        or receipts.get(
+            "public_install_and_rollback_entrypoints_require_root_owned_production_receipt_store"
+        )
+        is not True
+        or receipts.get(
+            "synthetic_receipt_stores_accepted_only_by_private_in_process_test_wrappers"
+        )
+        is not True
+        or type(blockers) is not list
+        or "selected_live_linux_platform_transport_factory_not_packaged" not in blockers
+        or "pinned_postgresql_driver_not_selected" not in blockers
         or "canonical_install_receipt_emission_not_integrated" in blockers
     ):
         raise PackageError("dormant_store_install_contract_package_claim_boundary_invalid")
@@ -735,9 +763,9 @@ def _verify_plan(plan: dict[str, object]) -> None:
         raise PackageError("dormant_store_install_plan_semantics_invalid")
     if (
         plan.get("schema_version")
-        != "governed-memory-dormant-store-install-stores-controller-plan-v4"
+        != "governed-memory-dormant-store-install-stores-controller-plan-v5"
         or plan.get("state")
-        != "repository-only-claim-bound-install-and-empty-rollback-controller-compositions-packaged-not-installed-not-authorized"
+        != "repository-only-repaired-install-empty-rollback-and-closed-adapters-packaged-not-installed-not-authorized"
         or plan.get("server") != "seebx"
     ):
         raise PackageError("dormant_store_install_plan_identity_invalid")
@@ -771,7 +799,7 @@ def _verify_plan(plan: dict[str, object]) -> None:
     ):
         if (
             type(step) is not dict
-            or set(step) != {"id", "operation", "resource_key"}
+            or set(step) != {"id", "operation", "resource_key", "invariant_only"}
             or step.get("id") != expected_id
             or type(step.get("operation")) is not str
             or not step.get("operation")
@@ -782,6 +810,7 @@ def _verify_plan(plan: dict[str, object]) -> None:
                     or not step.get("resource_key")
                 )
             )
+            or type(step.get("invariant_only")) is not bool
         ):
             raise PackageError("dormant_store_install_rollback_plan_step_invalid")
     live = plan.get("live_execution")
@@ -797,6 +826,10 @@ def _verify_plan(plan: dict[str, object]) -> None:
             "fresh_terminal_canonical_store_readiness_probe_required_for_install_receipt_and_replay"
         )
         is not True
+        or invariants.get(
+            "fresh_offline_read_only_empty_recheck_required_at_r07_under_stopped_store_fence"
+        )
+        is not True
         or type(later_rollback) is not dict
         or later_rollback.get(
             "opaque_verified_install_receipt_and_ledger_capability_required"
@@ -808,6 +841,14 @@ def _verify_plan(plan: dict[str, object]) -> None:
         is not True
         or later_rollback.get(
             "completed_replay_reproves_exact_resource_absence"
+        )
+        is not True
+        or later_rollback.get(
+            "rollback_authority_claim_precedes_durable_receipt_reads_and_eligibility_persistence"
+        )
+        is not True
+        or later_rollback.get(
+            "fresh_offline_read_only_empty_recheck_required_before_first_destructive_step"
         )
         is not True
     ):
@@ -867,9 +908,10 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
     entrypoint = runtime.get("entrypoint_policy")
     proof_execution = proof.get("execution_boundary")
     proof_claims = proof.get("claims")
+    proof_package_context = proof.get("package_context")
     if (
         execution.get("schema_version")
-        != "governed-memory-dormant-store-install-inactive-execution-package-v2"
+        != "governed-memory-dormant-store-install-inactive-execution-package-v3"
         or type(boundary) is not dict
         or boundary.get("approval_authorizes_execution") is not False
         or boundary.get(
@@ -880,12 +922,20 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
             "claim_bound_empty_rollback_controller_composition_callable_non_cli"
         )
         is not True
-        or boundary.get("concrete_live_install_store_effect_adapter_implemented")
-        is not False
+        or boundary.get("closed_postclaim_linux_install_adapter_implemented")
+        is not True
         or boundary.get(
-            "concrete_live_empty_rollback_store_effect_adapter_implemented"
+            "closed_ledger_bound_physical_empty_rollback_adapter_implemented"
         )
+        is not True
+        or boundary.get("selected_live_linux_platform_transport_factory_implemented")
         is not False
+        or boundary.get("pinned_postgresql_live_driver_selected") is not False
+        or boundary.get(
+            "controller_runtime_release_builder_orchestration_implemented"
+        )
+        is not True
+        or boundary.get("controller_runtime_build_transport_implemented") is not False
         or boundary.get("activation_executor_implemented") is not False
         or type(binding) is not dict
         or binding.get("opaque_verified_package_capability_required") is not True
@@ -939,8 +989,12 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
             "completed_empty_rollback_replay_reproves_exact_resource_absence"
         )
         is not True
+        or durability.get("empty_rollback_stops_exact_stores_before_writer_fence")
+        is not True
+        or durability.get("empty_rollback_writer_fence_held_from_r07_through_receipt")
+        is not True
         or durability.get(
-            "empty_rollback_writer_fence_held_from_r06_through_receipt"
+            "fresh_offline_read_only_empty_recheck_required_at_r07_under_stopped_store_fence"
         )
         is not True
         or durability.get(
@@ -956,10 +1010,10 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
         )
         is not True
         or type(execution.get("remaining_blockers")) is not list
-        or (
-            "concrete_live_install_and_empty_rollback_store_effect_adapters_not_packaged"
-            not in execution["remaining_blockers"]
-        )
+        or "selected_live_linux_platform_transport_factory_not_packaged"
+        not in execution["remaining_blockers"]
+        or "pinned_postgresql_driver_not_selected"
+        not in execution["remaining_blockers"]
         or (
             "canonical_install_receipt_emission_not_integrated"
             in execution["remaining_blockers"]
@@ -972,7 +1026,8 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
             "each_host_request_and_ownership_receipt_binds_verified_full_release_tree_sha256"
         )
         is not True
-        or host.get("concrete_store_effect_adapters_packaged") is not False
+        or host.get("closed_store_effect_adapters_packaged") is not True
+        or host.get("selected_live_platform_transports_packaged") is not False
         or type(receipt) is not dict
         or receipt.get(
             "install_receipt_binds_verified_runtime_and_full_release_tree_identity"
@@ -980,6 +1035,20 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
         is not True
         or receipt.get(
             "empty_rollback_receipt_binds_verified_runtime_and_full_release_tree_identity"
+        )
+        is not True
+        or receipt.get(
+            "rollback_authority_claim_precedes_durable_receipt_reads_and_eligibility_persistence"
+        )
+        is not True
+        or receipt.get("canonical_production_executions_root")
+        != "/var/lib/governed-memory-controller/executions"
+        or receipt.get(
+            "public_install_and_rollback_entrypoints_require_root_owned_production_receipt_store"
+        )
+        is not True
+        or receipt.get(
+            "synthetic_receipt_stores_accepted_only_by_private_in_process_test_wrappers"
         )
         is not True
         or type(proof_boundary) is not dict
@@ -994,6 +1063,11 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
         or build.get("current_runtime_built") is not False
         or build.get("current_runtime_installed") is not False
         or build.get("current_release_staged") is not False
+        or build.get(
+            "repository_only_runtime_and_release_builder_orchestration_packaged"
+        )
+        is not True
+        or build.get("concrete_runtime_build_transport_packaged") is not False
         or build.get(
             "controller_runtime_and_release_are_separately_authorized_preinstall_substrate"
         )
@@ -1066,6 +1140,11 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
                 "activation_proven",
             )
         )
+        or type(proof_package_context) is not dict
+        or proof_package_context.get("concrete_live_store_effect_adapters_packaged")
+        is not True
+        or proof_package_context.get("fixed_loopback_store_readiness_adapter_packaged")
+        is not True
         or proof_schema.get("additionalProperties") is not False
         or proof_schema.get("$id")
         != "urn:governed-memory:dormant-store-install:disposable-proof-receipt:v2"
@@ -1074,7 +1153,7 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
         or install_receipt_schema.get("$id")
         != "urn:governed-memory:dormant-store-install-receipt:v1"
         or empty_rollback_receipt_schema.get("$id")
-        != "urn:governed-memory:empty-store-rollback-receipt:v2"
+        != "urn:governed-memory:empty-store-rollback-receipt:v3"
         or not {
             "controller_runtime_receipt_sha256",
             "controller_runtime_root",
@@ -1363,11 +1442,19 @@ def verify() -> dict[str, object]:
         "resolved_store_spec_and_exact_docker_labels_bound": True,
         "resource_identity_ledger_v2_packaged": True,
         "empty_rollback_writer_fence_packaged": True,
+        "fresh_offline_read_only_empty_recheck_required_at_r07_under_stopped_store_fence": True,
         "retained_audit_artifact_hashes_bound": True,
+        "public_entrypoints_require_canonical_root_owned_production_receipt_store": True,
+        "synthetic_receipt_stores_are_private_test_only": True,
         "claim_bound_install_controller_composition_packaged": True,
         "claim_bound_empty_rollback_controller_composition_packaged": True,
-        "concrete_install_store_effect_adapters_packaged": False,
-        "concrete_empty_rollback_store_effect_adapters_packaged": False,
+        "closed_install_store_effect_adapter_packaged": True,
+        "closed_empty_rollback_store_effect_adapter_packaged": True,
+        "selected_live_platform_transports_packaged": False,
+        "pinned_postgresql_driver_selected": False,
+        "durable_create_once_receipt_store_packaged": True,
+        "controller_runtime_release_builder_orchestration_packaged": True,
+        "controller_runtime_build_transport_packaged": False,
         "operation_specific_install_and_empty_rollback_receipts_packaged": True,
         "install_controller_emits_canonical_receipt": True,
         "empty_rollback_controller_emits_canonical_receipt": True,

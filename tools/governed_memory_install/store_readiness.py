@@ -17,8 +17,19 @@ _HASH_RE: Final = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 POSTGRES_BIND: Final = "127.0.0.1:55432"
 QDRANT_BIND: Final = "127.0.0.1:6343"
 DATABASE: Final = "governed_memory"
+BOOTSTRAP_DATABASE: Final = "postgres"
 COLLECTION: Final = "governed_memory_9a54cf123493_000001"
 ALIAS: Final = "governed_memory_active"
+REQUIRED_ROLE_NAMES: Final = (
+    "governed_memory_owner",
+    "governed_memory_api",
+    "governed_memory_worker",
+    "memory_ingest_writer",
+    "memory_erasure_requester",
+)
+EXPECTED_QDRANT_COLLECTION_CONFIG_SHA256: Final = (
+    "a3b9b1071061df2c31b936fdd4cccd682325d997eb3cdf79bec1889f60b8b3d4"
+)
 TERMINAL_MIGRATION_IDS: Final = (
     "governed_memory_foundation_0001",
     "governed_memory_owner_claim_detail_0003",
@@ -31,12 +42,16 @@ class StoreReadinessError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
-class PostgreSQLReadiness:
+class PrebootstrapPostgreSQLReadiness:
+    """Fresh-cluster proof taken before the canonical database is created."""
+
     bind: str
     server_major: int
-    database: str
-    user_schema_count: int
-    user_row_count: int
+    connected_database: str
+    target_database: str
+    target_database_exists: bool
+    required_role_names: tuple[str, ...]
+    present_target_role_names: tuple[str, ...]
     source_connection_count: int
     receipt_sha256: str
 
@@ -45,16 +60,18 @@ class PostgreSQLReadiness:
             self.bind != POSTGRES_BIND
             or type(self.server_major) is not int
             or self.server_major != 16
-            or self.database != DATABASE
-            or type(self.user_schema_count) is not int
-            or self.user_schema_count != 0
-            or type(self.user_row_count) is not int
-            or self.user_row_count != 0
+            or self.connected_database != BOOTSTRAP_DATABASE
+            or self.target_database != DATABASE
+            or self.target_database_exists is not False
+            or self.required_role_names != REQUIRED_ROLE_NAMES
+            or self.present_target_role_names != ()
             or type(self.source_connection_count) is not int
             or self.source_connection_count != 0
             or _HASH_RE.fullmatch(self.receipt_sha256) is None
         ):
-            raise StoreReadinessError("postgres_readiness_invalid")
+            raise StoreReadinessError(
+                "prebootstrap_postgres_readiness_invalid"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,7 +104,7 @@ class QdrantReadiness:
 
 @dataclass(frozen=True, slots=True)
 class EmptyStoreReadiness:
-    postgres: PostgreSQLReadiness
+    postgres: PrebootstrapPostgreSQLReadiness
     qdrant: QdrantReadiness
     provider_call_count: int
     production_read_count: int
@@ -96,14 +113,14 @@ class EmptyStoreReadiness:
     @classmethod
     def create(
         cls,
-        postgres: PostgreSQLReadiness,
+        postgres: PrebootstrapPostgreSQLReadiness,
         qdrant: QdrantReadiness,
         *,
         provider_call_count: int = 0,
         production_read_count: int = 0,
     ) -> EmptyStoreReadiness:
         if (
-            type(postgres) is not PostgreSQLReadiness
+            type(postgres) is not PrebootstrapPostgreSQLReadiness
             or type(qdrant) is not QdrantReadiness
             or type(provider_call_count) is not int
             or provider_call_count != 0
@@ -137,7 +154,10 @@ class TerminalPostgreSQLReadiness:
     server_major: int
     database: str
     applied_migration_ids: tuple[str, ...]
+    exact_role_graph_sha256: str
+    canonical_catalog_sha256: str
     governed_user_row_count: int
+    active_client_count: int
     source_connection_count: int
     receipt_sha256: str
 
@@ -149,8 +169,12 @@ class TerminalPostgreSQLReadiness:
             or self.database != DATABASE
             or type(self.applied_migration_ids) is not tuple
             or self.applied_migration_ids != TERMINAL_MIGRATION_IDS
+            or _HASH_RE.fullmatch(self.exact_role_graph_sha256) is None
+            or _HASH_RE.fullmatch(self.canonical_catalog_sha256) is None
             or type(self.governed_user_row_count) is not int
             or self.governed_user_row_count != 0
+            or type(self.active_client_count) is not int
+            or self.active_client_count != 0
             or type(self.source_connection_count) is not int
             or self.source_connection_count != 0
             or _HASH_RE.fullmatch(self.receipt_sha256) is None
@@ -168,7 +192,9 @@ class TerminalQdrantReadiness:
     alias: str
     collection_exists: bool
     alias_target: str
+    collection_config_sha256: str
     point_count: int
+    unexpected_candidate_collection_count: int
     source_endpoint_count: int
     receipt_sha256: str
 
@@ -181,8 +207,12 @@ class TerminalQdrantReadiness:
             or self.alias != ALIAS
             or self.collection_exists is not True
             or self.alias_target != COLLECTION
+            or self.collection_config_sha256
+            != EXPECTED_QDRANT_COLLECTION_CONFIG_SHA256
             or type(self.point_count) is not int
             or self.point_count != 0
+            or type(self.unexpected_candidate_collection_count) is not int
+            or self.unexpected_candidate_collection_count != 0
             or type(self.source_endpoint_count) is not int
             or self.source_endpoint_count != 0
             or _HASH_RE.fullmatch(self.receipt_sha256) is None
@@ -268,13 +298,16 @@ class StoreReadinessProbe(Protocol):
 
 __all__ = [
     "ALIAS",
+    "BOOTSTRAP_DATABASE",
     "COLLECTION",
     "DATABASE",
     "EmptyStoreReadiness",
+    "EXPECTED_QDRANT_COLLECTION_CONFIG_SHA256",
     "POSTGRES_BIND",
-    "PostgreSQLReadiness",
+    "PrebootstrapPostgreSQLReadiness",
     "QDRANT_BIND",
     "QdrantReadiness",
+    "REQUIRED_ROLE_NAMES",
     "StoreReadinessError",
     "StoreReadinessProbe",
     "TERMINAL_MIGRATION_IDS",

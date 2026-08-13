@@ -111,7 +111,7 @@ class InstallationReceiptTests(unittest.TestCase):
             resource_ledger_sequence=18,
             eligibility_receipt_sha256="c" * 64,
             retained_audit_set_sha256="d" * 64,
-            removed_resource_count=len(ROLLBACK_RESOURCE_KEYS),
+            exact_targets_absent_count=len(ROLLBACK_RESOURCE_KEYS),
         )
 
     def test_install_receipt_is_closed_content_free_and_inactive(self) -> None:
@@ -179,7 +179,7 @@ class InstallationReceiptTests(unittest.TestCase):
         for key, value in (
             ("exact_resources_absent", False),
             ("stores_installed", True),
-            ("removed_resource_count", 0),
+            ("exact_targets_absent_count", 0),
         ):
             receipt = self.rollback_receipt()
             receipt[key] = value
@@ -220,9 +220,9 @@ class InstallationReceiptTests(unittest.TestCase):
 
         for value in (False, 0, len(ROLLBACK_RESOURCE_KEYS) - 1, len(ROLLBACK_RESOURCE_KEYS) + 1):
             receipt = self.rollback_receipt()
-            receipt["removed_resource_count"] = value
+            receipt["exact_targets_absent_count"] = value
             receipt["receipt_sha256"] = receipt_sha256(receipt)
-            with self.subTest(removed_resource_count=value), self.assertRaises(
+            with self.subTest(exact_targets_absent_count=value), self.assertRaises(
                 ReceiptError
             ):
                 verify_empty_rollback_receipt(receipt)

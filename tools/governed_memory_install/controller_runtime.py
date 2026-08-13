@@ -27,7 +27,7 @@ from .package_capability import PackageCapabilityError, _package_capability_part
 
 
 RUNTIME_RECEIPT_SCHEMA: Final = (
-    "governed-memory-controller-runtime-build-receipt-v1"
+    "governed-memory-controller-runtime-build-receipt-v2"
 )
 RUNTIME_RECEIPT_RESULT: Final = "isolated_controller_runtime_built_and_closed"
 RUNTIME_ROOT_PREFIX: PurePosixPath = PurePosixPath(
@@ -79,8 +79,9 @@ _RECEIPT_KEYS: Final = frozenset(
         "network_calls",
         "provider_calls",
         "production_data_read",
-        "production_state_changed",
-        "persistent_resources_created",
+        "active_production_state_changed",
+        "persistent_controller_substrate_created",
+        "persistent_store_resources_created",
     }
 )
 
@@ -113,6 +114,8 @@ class VerifiedControllerRuntimeEvidence:
     python_version: str
     platform_os: str
     platform_architecture: str
+    persistent_controller_substrate_created: bool
+    persistent_store_resources_created: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -265,10 +268,11 @@ def _require_closed_receipt(receipt: Mapping[str, object]) -> None:
                 "user_site_enabled",
                 "system_site_packages_enabled",
                 "production_data_read",
-                "production_state_changed",
-                "persistent_resources_created",
+                "active_production_state_changed",
+                "persistent_store_resources_created",
             )
         )
+        or receipt.get("persistent_controller_substrate_created") is not True
         or type(receipt.get("network_calls")) is not int
         or receipt.get("network_calls") != 0
         or type(receipt.get("provider_calls")) is not int
@@ -1284,6 +1288,8 @@ def verify_controller_runtime_capability(
         python_version=str(receipt["python_version"]),
         platform_os=str(receipt["platform_os"]),
         platform_architecture=str(receipt["platform_architecture"]),
+        persistent_controller_substrate_created=True,
+        persistent_store_resources_created=False,
     )
     return _VerifiedControllerRuntimeCapability(evidence, _RUNTIME_TOKEN)
 

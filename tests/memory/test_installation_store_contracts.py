@@ -17,6 +17,7 @@ from tools.governed_memory_install.host_boundary import (
     DOCKER_BINARY,
     FIXED_ENVIRONMENT,
     HostBoundaryError,
+    SUPERVISOR_INSPECT_TEMPLATES,
     validate_argv,
 )
 from tools.governed_memory_install.image_preflight import (
@@ -34,7 +35,6 @@ from tools.governed_memory_install.linux_plan import (
 )
 from tools.governed_memory_install.resource_identity import (
     ResourceIdentityError,
-    ResourceIdentityLedger,
     resource_ledger_binding_sha256,
     load_ledger,
     parse_ledger_bytes,
@@ -45,6 +45,10 @@ from tools.governed_memory_install.store_supervisor import (
     StoreSupervisorError,
     canonical_labels_sha256,
     exact_containers_from_files,
+)
+from tests.memory.resource_identity_test_support import (
+    append_resource_identity,
+    resource_identity_ledger_bytes,
 )
 
 
@@ -88,20 +92,16 @@ class _SupervisorRunner:
             self.assert_inspect_shape(exact)
             container_id = exact[-1]
             container = self.containers[container_id]
-            value = {
-                "Id": container_id,
-                "Name": "/" + container.name,
-                "Image": container.image_id,
-                "Config": {
-                    "Labels": dict(container.labels),
-                    "Cmd": list(container.command) if container.command else None,
-                    "Env": [
-                        *(f"{key}={value}" for key, value in container.environment_fixed_values.items()),
-                        *(f"{key}=test-secret" for key in sorted(container.environment_secret_keys)),
-                    ],
-                    "Healthcheck": {"Test": ["NONE"]},
-                },
-                "HostConfig": {
+            projections = {
+                "{{json .Id}}": container_id,
+                "{{json .Name}}": "/" + container.name,
+                "{{json .Image}}": container.image_id,
+                "{{json .Config.Labels}}": dict(container.labels),
+                "{{json .Config.Cmd}}": (
+                    list(container.command) if container.command else None
+                ),
+                "{{json .Config.Healthcheck}}": {"Test": ["NONE"]},
+                "{{json .HostConfig}}": {
                     "RestartPolicy": {"Name": container.restart},
                     "PidsLimit": container.pids_limit,
                     "CapAdd": list(container.cap_add),
@@ -122,7 +122,7 @@ class _SupervisorRunner:
                     },
                     "NetworkMode": container.network_name,
                 },
-                "Mounts": [
+                "{{json .Mounts}}": [
                     {
                         "Type": "volume",
                         "Name": container.volume_name,
@@ -130,16 +130,17 @@ class _SupervisorRunner:
                         "RW": True,
                     }
                 ],
-                "NetworkSettings": {
+                "{{json .NetworkSettings}}": {
                     "Networks": {container.network_name: {}}
                 },
-                "State": {
+                "{{json .State}}": {
                     "Running": self.running[container_id],
                     "Status": (
                         "running" if self.running[container_id] else "exited"
                     ),
                 },
             }
+            value = projections[exact[4]]
             return CommandResult(exact, 0, json.dumps(value), "")
         if operation == "start":
             container_id = exact[-1]
@@ -157,7 +158,10 @@ class _SupervisorRunner:
 
     @staticmethod
     def assert_inspect_shape(argv: tuple[str, ...]) -> None:
-        if argv[1:5] != ("container", "inspect", "--format", "{{json .}}"):
+        if (
+            argv[1:4] != ("container", "inspect", "--format")
+            or argv[4] not in SUPERVISOR_INSPECT_TEMPLATES
+        ):
             raise AssertionError("unexpected inspect argv")
 
 
@@ -497,8 +501,9 @@ class DormantStoreInstallStorePackageTests(unittest.TestCase):
         ownership_sha256 = "c" * 64
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "identities.jsonl"
-            ledger = ResourceIdentityLedger(path, binding_sha256=BINDING)
-            first = ledger.append(
+            first = append_resource_identity(
+                path,
+                binding_sha256=BINDING,
                 event="created",
                 resource_kind="container",
                 resource_name="governed-memory-postgres-000001",
@@ -508,7 +513,9 @@ class DormantStoreInstallStorePackageTests(unittest.TestCase):
                 ownership_sha256=ownership_sha256,
                 resource_labels_sha256="d" * 64,
             )
-            second = ledger.append(
+            second = append_resource_identity(
+                path,
+                binding_sha256=BINDING,
                 event="started",
                 resource_kind="container",
                 resource_name="governed-memory-postgres-000001",
@@ -535,13 +542,21 @@ class DormantStoreInstallStorePackageTests(unittest.TestCase):
                     expected_binding_sha256=BINDING,
                 )
             with self.assertRaisesRegex(ResourceIdentityError, "forbidden_content"):
-                ledger.append(
-                    event="observed",
-                    resource_kind="volume",
-                    resource_name="password-cache",
-                    resource_id="volume-0001",
-                    ownership_sha256=ownership_sha256,
-                    resource_labels_sha256="d" * 64,
+                parse_ledger_bytes(
+                    resource_identity_ledger_bytes(
+                        (
+                            {
+                                "event": "observed",
+                                "resource_kind": "volume",
+                                "resource_name": "password-cache",
+                                "resource_id": "volume-0001",
+                                "ownership_sha256": ownership_sha256,
+                                "resource_labels_sha256": "d" * 64,
+                            },
+                        ),
+                        binding_sha256=BINDING,
+                    ),
+                    expected_binding_sha256=BINDING,
                 )
 
     def test_supervisor_uses_only_two_recorded_ids_and_three_operations(self) -> None:
@@ -595,7 +610,7 @@ class DormantStoreInstallStorePackageTests(unittest.TestCase):
         with self.assertRaisesRegex(StoreSupervisorError, "name_drift"):
             supervisor.inspect()
 
-    def test_supervisor_refuses_runtime_topology_or_secret_cross_contamination(self) -> None:
+    def test_supervisor_refuses_runtime_topology_without_reading_environment(self) -> None:
         containers = self._containers()
         runner = _SupervisorRunner(containers)
         runner.containers[POSTGRES_ID] = replace(
@@ -606,17 +621,11 @@ class DormantStoreInstallStorePackageTests(unittest.TestCase):
             StoreSupervisor(runner=runner, containers=containers).inspect()
 
         runner = _SupervisorRunner(containers)
-        runner.containers[POSTGRES_ID] = replace(
-            containers[0],
-            environment_secret_keys=(
-                containers[0].environment_secret_keys
-                | {"QDRANT__SERVICE__API_KEY"}
-            ),
+        StoreSupervisor(runner=runner, containers=containers).inspect()
+        self.assertTrue(runner.calls)
+        self.assertFalse(
+            any("Env" in argument for call in runner.calls for argument in call)
         )
-        with self.assertRaisesRegex(
-            StoreSupervisorError, "environment_forbidden_key_drift"
-        ):
-            StoreSupervisor(runner=runner, containers=containers).inspect()
 
     def test_resolved_spec_and_ledger_bind_supervisor_identity(self) -> None:
         spec = self._bound_spec()
@@ -631,16 +640,15 @@ class DormantStoreInstallStorePackageTests(unittest.TestCase):
                 encoding="ascii",
             )
             spec_path.chmod(0o600)
-            ledger = ResourceIdentityLedger(
-                ledger_path,
-                binding_sha256=resource_ledger_binding_sha256(BINDING),
-            )
+            ledger_binding = resource_ledger_binding_sha256(BINDING)
             for logical_name, container_id, image_id in (
                 ("postgres", POSTGRES_ID, POSTGRES_IMAGE_ID),
                 ("qdrant", QDRANT_ID, QDRANT_IMAGE_ID),
             ):
                 item = containers[logical_name]
-                ledger.append(
+                append_resource_identity(
+                    ledger_path,
+                    binding_sha256=ledger_binding,
                     event="created",
                     resource_kind="container",
                     resource_name=item["name"],

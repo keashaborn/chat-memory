@@ -66,6 +66,18 @@ _IMAGE_REFERENCE_RE = re.compile(
     re.ASCII,
 )
 _COMMAND_PROFILES: Final = frozenset({"image_inspect", "store_supervisor"})
+SUPERVISOR_INSPECT_TEMPLATES: Final = (
+    "{{json .Id}}",
+    "{{json .Name}}",
+    "{{json .Image}}",
+    "{{json .Config.Labels}}",
+    "{{json .Config.Cmd}}",
+    "{{json .Config.Healthcheck}}",
+    "{{json .HostConfig}}",
+    "{{json .Mounts}}",
+    "{{json .NetworkSettings}}",
+    "{{json .State}}",
+)
 _HASH_RE = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _ATTEMPT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z", re.ASCII)
 _SAFE_RESOURCE_RE = re.compile(
@@ -278,6 +290,7 @@ class HostOperationRequest:
     controller_requirements_lock_sha256: str
     supervisor_launcher_path: str
     supervisor_launcher_sha256: str
+    postflight_receipt_path: str
     resource_targets: tuple[HostResourceTarget, ...]
 
     def __post_init__(self) -> None:
@@ -321,6 +334,12 @@ class HostOperationRequest:
             or self.supervisor_launcher_path
             != self.controller_release_root
             + "/tools/governed_memory_install/store_supervisor_launcher.py"
+            or self.postflight_receipt_path
+            != (
+                "/var/lib/governed-memory-controller/executions/"
+                + self.execution_id
+                + "/terminal-postflight-receipt.json"
+            )
             or type(self.resource_targets) is not tuple
             or any(type(target) is not HostResourceTarget for target in self.resource_targets)
             or len(set(self.resource_targets)) != len(self.resource_targets)
@@ -512,8 +531,8 @@ class CommandRunner:
         if self._command_profile == "store_supervisor":
             inspect = (
                 len(argv) == 6
-                and argv[1:5]
-                == ("container", "inspect", "--format", "{{json .}}")
+                and argv[1:4] == ("container", "inspect", "--format")
+                and argv[4] in SUPERVISOR_INSPECT_TEMPLATES
                 and _CONTAINER_ID_RE.fullmatch(argv[5]) is not None
             )
             start = (

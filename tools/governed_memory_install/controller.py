@@ -33,6 +33,14 @@ ATTEMPT_RE: Final = re.compile(
     r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z", re.ASCII
 )
 ACTION_RE: Final = re.compile(r"[a-z][a-z0-9_]{0,95}\Z", re.ASCII)
+INVARIANT_ONLY_EFFECTS: Final = frozenset(
+    {
+        "reverify_preclaimed_execution_lock",
+        "verify_claimed_execution_binding",
+        "verify_live_preflight",
+        "verify_pre_supervisor_resource_identities",
+    }
+)
 
 
 class ControllerError(RuntimeError):
@@ -108,6 +116,12 @@ class PlanStep:
         return self.rollback == (
             "requires_separate_signed_rollback_after_terminal_postflight"
         )
+
+    @property
+    def invariant_only(self) -> bool:
+        """True when APPLIED records a repeatable proof, not a host mutation."""
+
+        return self.effect in INVARIANT_ONLY_EFFECTS
 
     @property
     def compensable(self) -> bool:
@@ -263,6 +277,17 @@ def validate_plan(plan: tuple[PlanStep, ...]) -> str:
                 raise PlanValidationError("dormant_store_install_plan_compensation_invalid")
         elif not step.compensable:
             raise PlanValidationError("dormant_store_install_plan_compensation_invalid")
+    if {
+        step.step_id for step in plan if step.invariant_only
+    } != {
+        "I01_REVERIFY_PRECLAIMED_EXECUTION_LOCK",
+        "I02_VERIFY_CLAIMED_EXECUTION_BINDING",
+        "I03_VERIFY_LIVE_PREFLIGHT",
+        "I17_VERIFY_PRE_SUPERVISOR_RESOURCE_IDENTITIES",
+    }:
+        raise PlanValidationError(
+            "dormant_store_install_plan_invariant_steps_invalid"
+        )
     if len({step.step_id for step in plan}) != 19:
         raise PlanValidationError("dormant_store_install_plan_step_id_duplicate")
     document = plan_install_steps_projection(plan)
@@ -433,7 +458,12 @@ class DormantStoreInstallController:
                 current = step
                 if history.intent_only_step_id != step.step_id:
                     fresh_state = self._probe(step)
-                    if fresh_state is not StepState.BEFORE:
+                    expected_fresh = (
+                        StepState.AFTER
+                        if step.invariant_only
+                        else StepState.BEFORE
+                    )
+                    if fresh_state is not expected_fresh:
                         if step.terminal_postflight and fresh_state is StepState.AFTER:
                             raise CompletedStateError(
                                 "dormant_store_install_unowned_terminal_postflight_present"
@@ -711,7 +741,12 @@ class DormantStoreInstallController:
             elif (
                 history.compensation_started
                 and step.step_id == history.intent_only_step_id
-                and state is not StepState.BEFORE
+                and state
+                is not (
+                    StepState.AFTER
+                    if step.invariant_only
+                    else StepState.BEFORE
+                )
             ):
                 raise StateDriftError(
                     "dormant_store_install_failed_unapplied_step_not_before:" + step.step_id
@@ -719,7 +754,12 @@ class DormantStoreInstallController:
             elif (
                 history.compensation_started
                 and step.step_id not in history.applied_step_ids
-                and state is not StepState.BEFORE
+                and state
+                is not (
+                    StepState.AFTER
+                    if step.invariant_only
+                    else StepState.BEFORE
+                )
             ):
                 raise StateDriftError(
                     "dormant_store_install_unowned_effect_during_compensation:" + step.step_id
@@ -759,7 +799,10 @@ class DormantStoreInstallController:
             state = self._probe(step)
             if state is StepState.DRIFT:
                 raise StateDriftError("dormant_store_install_step_state_drift:" + step.step_id)
-            if state is not StepState.BEFORE:
+            expected = (
+                StepState.AFTER if step.invariant_only else StepState.BEFORE
+            )
+            if state is not expected:
                 if step.terminal_postflight:
                     raise CompletedStateError(
                         "dormant_store_install_unowned_terminal_postflight_present"

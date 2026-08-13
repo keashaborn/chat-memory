@@ -12,6 +12,10 @@ from unittest.mock import patch
 
 from tools.governed_memory_install.authority_state import AuthorityState
 from tools.governed_memory_install.execution_lock import GlobalExecutionLock
+from tools.governed_memory_install.durable_receipts import (
+    DurableReceiptStore,
+    ReceiptArtifact,
+)
 from tools.governed_memory_install.rollback import (
     RETAINED_AUDIT_KEYS,
     ROLLBACK_RESOURCE_KEYS,
@@ -29,15 +33,13 @@ from tools.governed_memory_install.rollback_authority import (
 from tools.governed_memory_install.package_capability import (
     verified_package_evidence,
 )
-from tools.governed_memory_install.resource_identity import (
-    ResourceIdentityLedger,
-    load_ledger,
-)
+from tools.governed_memory_install.resource_identity import load_ledger
 from tests.memory.test_empty_rollback_authority import (
     build_verified_controller_runtime,
     build_verified_install_package,
     build_verified_rollback_capability,
 )
+from tests.memory.resource_identity_test_support import append_resource_identity
 from tools.governed_memory_install.controller_runtime import (
     _RUNTIME_TOKEN,
     _VerifiedControllerRuntimeCapability,
@@ -57,6 +59,7 @@ from tools.governed_memory_install.rollback_entrypoint import (
     RollbackEvent,
     RollbackJournalRecord,
     RollbackObservation,
+    _run_authorized_empty_store_rollback_durable_synthetic,
     claimed_empty_rollback_evidence,
     run_authorized_empty_store_rollback,
     validate_rollback_records,
@@ -71,6 +74,16 @@ from tools.governed_memory_install.receipts import (
 class _Clock:
     def read_utc(self) -> datetime:
         return datetime(2026, 8, 12, 19, 5, tzinfo=timezone.utc)
+
+
+class _ExpiredClock:
+    def read_utc(self) -> datetime:
+        return datetime(2026, 8, 12, 19, 11, tzinfo=timezone.utc)
+
+
+class _NotYetValidClock:
+    def read_utc(self) -> datetime:
+        return datetime(2026, 8, 12, 18, 59, tzinfo=timezone.utc)
 
 
 class _Journal:
@@ -113,10 +126,22 @@ class _Journal:
 
 
 class _JournalFactory:
-    def __init__(self) -> None:
+    synthetic_receipt_root: Path | None = None
+
+    def __init__(self, receipt_root: Path | None = None) -> None:
         self.journal: _Journal | None = None
+        self.receipt_root = (
+            receipt_root
+            if receipt_root is not None
+            else self.synthetic_receipt_root
+        )
 
     def __call__(self, claimed: object) -> _Journal:
+        if self.receipt_root is not None:
+            execution_id = claimed_empty_rollback_evidence(claimed).execution_id
+            execution_root = self.receipt_root / execution_id
+            execution_root.mkdir(mode=0o700, exist_ok=True)
+            os.chmod(execution_root, 0o700)
         if self.journal is None:
             self.journal = _Journal(claimed)
         return self.journal
@@ -139,10 +164,16 @@ class _Operations:
         self.tamper_ownership_step: str | None = None
         self.tamper_runtime_tree_step: str | None = None
         self.observed_resource_names: dict[str, str] = {}
-        self.inject_writer_after_quiescence = False
+        self.inject_writer_after_store_stop = False
         self.live_qdrant_points = 0
         self.return_unverified_sequence = False
         self.active_fence_sha256: str | None = None
+        self.nonwritable_postgres_identity_sha256 = hashlib.sha256(
+            b"stopped:postgres"
+        ).hexdigest()
+        self.nonwritable_qdrant_identity_sha256 = hashlib.sha256(
+            b"stopped:qdrant"
+        ).hexdigest()
         self.fence_acquisitions = 0
         self.fence_releases = 0
         self.tampered_install_receipt_after_r03: bytes | None = None
@@ -205,6 +236,12 @@ class _Operations:
                 expected_controller_release_tree_sha256=(
                     request.controller_release_tree_sha256
                 ),
+                expected_nonwritable_postgres_identity_sha256=(
+                    self.nonwritable_postgres_identity_sha256
+                ),
+                expected_nonwritable_qdrant_identity_sha256=(
+                    self.nonwritable_qdrant_identity_sha256
+                ),
                 expected_fence_sha256=self.active_fence_sha256,
             )
         )
@@ -232,6 +269,12 @@ class _Operations:
             exact_targets_sha256=request.exact_targets_sha256,
             controller_runtime_tree_sha256=request.controller_runtime_tree_sha256,
             controller_release_tree_sha256=request.controller_release_tree_sha256,
+            nonwritable_postgres_identity_sha256=(
+                self.nonwritable_postgres_identity_sha256
+            ),
+            nonwritable_qdrant_identity_sha256=(
+                self.nonwritable_qdrant_identity_sha256
+            ),
             fence_sha256=self.active_fence_sha256,
         )
 
@@ -245,7 +288,7 @@ class _Operations:
         request,
         writer_fence_capability: object | None,
     ) -> dict[str, object]:
-        if request.step.step_id == "R06_REVERIFY_EMPTY_AFTER_QUIESCENCE":
+        if request.step.step_id == "R07_ACQUIRE_STOPPED_STORE_WRITER_FENCE":
             self._validate_fence(request, writer_fence_capability)
         elif writer_fence_capability is not None:
             self._validate_fence(request, writer_fence_capability)
@@ -257,8 +300,8 @@ class _Operations:
         observed["qdrant_points"] = self.live_qdrant_points
         observed["receipt_sha256"] = eligibility_receipt_sha256(observed)
         if (
-            request.step.step_id == "R06_REVERIFY_EMPTY_AFTER_QUIESCENCE"
-            and self.inject_writer_after_quiescence
+            request.step.step_id == "R07_ACQUIRE_STOPPED_STORE_WRITER_FENCE"
+            and self.inject_writer_after_store_stop
         ):
             self.live_qdrant_points = 1
         return observed
@@ -268,7 +311,10 @@ class _Operations:
             self.observed_resource_names[request.step.step_id] = (
                 request.resource.resource_name
             )
-        state = self.states.get(request.step.step_id, "before")
+        state = self.states.get(
+            request.step.step_id,
+            "after" if request.step.invariant_only else "before",
+        )
         revision = hashlib.sha256(
             (request.step.step_id + ":" + state).encode("ascii")
         ).hexdigest()
@@ -293,7 +339,10 @@ class _Operations:
         request,
         expected: RollbackObservation,
     ) -> None:
-        if request.step.step_id != "R05_DISABLE_AND_REMOVE_STORES_SUPERVISOR":
+        if request.step.step_id not in {
+            "R05_DISABLE_AND_REMOVE_STORES_SUPERVISOR",
+            "R06_STOP_EXACT_STORES",
+        }:
             raise RuntimeError("unfenced destructive operation")
         self.states[request.step.step_id] = "after"
         self.apply_count[request.step.step_id] = (
@@ -337,7 +386,11 @@ class _Operations:
     ) -> bool:
         self._validate_fence(request, writer_fence_capability)
         return all(
-            self.states.get(step.step_id) == "after"
+            self.states.get(
+                step.step_id,
+                "after" if step.invariant_only else "before",
+            )
+            == "after"
             for step in rollback_entrypoint.EMPTY_ROLLBACK_STEPS
             if step.resource_key is not None
         )
@@ -362,7 +415,7 @@ class _Operations:
 class DurableRollbackJournalTailTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
-        root = Path(self.temporary.name)
+        root = Path(self.temporary.name).resolve()
         state_dir = root / "authority"
         lock_dir = root / "lock"
         journal_dir = root / "journal"
@@ -421,6 +474,7 @@ class DurableRollbackJournalTailTests(unittest.TestCase):
                 + "/tools/governed_memory_install/store_supervisor_launcher.py"
             ),
             supervisor_launcher_sha256="9" * 64,
+            installation_execution_id="a" * 64,
             journal_binding_sha256="1" * 64,
             journal_path=str(self.path),
             authority_state_path_sha256=hashlib.sha256(
@@ -596,7 +650,7 @@ class DurableRollbackJournalTailTests(unittest.TestCase):
 class EmptyRollbackExecutionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
-        root = Path(self.temporary.name)
+        root = Path(self.temporary.name).resolve()
         state_dir = root / "authority"
         lock_dir = root / "lock"
         state_dir.mkdir(mode=0o700)
@@ -605,6 +659,17 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
         os.chmod(lock_dir, 0o700)
         self.state_path = state_dir / "authority.sqlite3"
         self.lock_path = lock_dir / "execution.lock"
+        self.receipt_root = root / "executions"
+        self.receipt_root.mkdir(mode=0o700)
+        os.chmod(self.receipt_root, 0o700)
+        self.installation_execution_id = "3" * 64
+        installation_receipt_root = (
+            self.receipt_root / self.installation_execution_id
+        )
+        installation_receipt_root.mkdir(mode=0o700)
+        os.chmod(installation_receipt_root, 0o700)
+        self.receipt_store = DurableReceiptStore.synthetic(self.receipt_root)
+        _JournalFactory.synthetic_receipt_root = self.receipt_root
         self.state = AuthorityState(self.state_path, create=True)
         self.lock = GlobalExecutionLock(self.lock_path)
         self.package_capability = build_verified_install_package()
@@ -618,13 +683,12 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
         self.package_sha = package.package_manifest_sha256
         expected = expected_rollback_resource_names(self.package_sha)
         ledger_path = root / "resource-identity.jsonl"
-        ledger = ResourceIdentityLedger(
-            ledger_path, binding_sha256="9" * 64
-        )
         for key in ROLLBACK_RESOURCE_KEYS:
             kind, name = expected[key]
             is_container = kind == "container"
-            ledger.append(
+            append_resource_identity(
+                ledger_path,
+                binding_sha256="9" * 64,
                 event="created",
                 resource_kind=kind,
                 resource_name=name,
@@ -671,7 +735,7 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
             "/opt/governed-memory-controller/releases/" + self.package_sha
         )
         self.install_receipt = build_install_receipt(
-            execution_id="3" * 64,
+            execution_id=self.installation_execution_id,
             attempt_id="install-" + "4" * 40,
             candidate_git_commit=self.commit,
             candidate_git_tree=self.tree,
@@ -714,10 +778,16 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
         self.install_receipt_bytes = rollback_entrypoint.canonical_json_bytes(
             self.install_receipt
         )
+        self.receipt_store.write_once(
+            ReceiptArtifact.INSTALL,
+            self.installation_execution_id,
+            self.install_receipt,
+        )
         self.eligibility = build_empty_rollback_eligibility_receipt(
             candidate_git_commit=self.commit,
             candidate_git_tree=self.tree,
             package_manifest_sha256=self.package_sha,
+            installation_execution_id=self.installation_execution_id,
             installation_receipt_sha256=str(
                 self.install_receipt["receipt_sha256"]
             ),
@@ -738,6 +808,7 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
         self.capability = self._capability(nonce="N" * 32)
 
     def tearDown(self) -> None:
+        _JournalFactory.synthetic_receipt_root = None
         self.lock.close()
         self.temporary.cleanup()
 
@@ -753,6 +824,9 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
                 verified_package_evidence(
                     self.package_capability
                 ).controller_runtime_receipt_sha256
+            ),
+            installation_execution_id=str(
+                self.eligibility["installation_execution_id"]
             ),
             installation_receipt_sha256=str(
                 self.eligibility["installation_receipt_sha256"]
@@ -787,6 +861,7 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
                 held_lock=self.lock.held_capability(),
                 journal_factory=factory,
                 operations=operations,
+                receipt_store=self.receipt_store,
             )
 
     def _operations(self) -> _Operations:
@@ -806,11 +881,11 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
         self.assertEqual(operations.eligibility_checks, 2)
         self.assertEqual(operations.fence_acquisitions, 1)
         self.assertEqual(operations.fence_releases, 1)
-        self.assertEqual(sum(operations.apply_count.values()), 16)
+        self.assertEqual(sum(operations.apply_count.values()), 10)
         self.assertGreater(len(factory.journal.reserve_calls), 0)  # type: ignore[union-attr]
         canonical = verify_empty_rollback_receipt(receipt.canonical_receipt)
         self.assertEqual(
-            canonical["removed_resource_count"], len(ROLLBACK_RESOURCE_KEYS)
+            canonical["exact_targets_absent_count"], len(ROLLBACK_RESOURCE_KEYS)
         )
         self.assertEqual(canonical["journal_head_sha256"], receipt.journal_head_sha256)
         self.assertEqual(canonical["journal_sequence"], receipt.journal_sequence)
@@ -838,10 +913,122 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
             resumed.outcome, "empty_store_rollback_already_complete"
         )
         self.assertEqual(dict(resumed.canonical_receipt), canonical)
-        self.assertEqual(sum(operations.apply_count.values()), 16)
+        self.assertEqual(sum(operations.apply_count.values()), 10)
         self.assertEqual(operations.install_binding_checks, 3)
         self.assertEqual(operations.fence_acquisitions, 2)
         self.assertEqual(operations.fence_releases, 2)
+
+    def test_expired_authority_cannot_persist_eligibility_receipt(self) -> None:
+        eligibility_path = (
+            self.receipt_root
+            / self.installation_execution_id
+            / "empty-rollback-eligibility-receipt.json"
+        )
+        self.assertFalse(eligibility_path.exists())
+        factory = _JournalFactory()
+        operations = self._operations()
+        with (
+            patch.object(rollback_entrypoint, "AUTHORITY_STATE_PATH", self.state_path),
+            patch.object(rollback_entrypoint, "GLOBAL_LOCK_PATH", self.lock_path),
+            self.assertRaisesRegex(
+                EmptyRollbackExecutionError,
+                "empty_rollback_authority_expired",
+            ),
+        ):
+            rollback_entrypoint._run_authorized_empty_store_rollback_synthetic(
+                verified_rollback_capability=self.capability,
+                verified_package_capability=self.package_capability,
+                verified_controller_runtime_capability=self.runtime_capability,
+                eligibility_receipt=self.eligibility,
+                resources=self.resources,
+                authority_state=self.state,
+                clock=_ExpiredClock(),
+                held_lock=self.lock.held_capability(),
+                journal_factory=factory,
+                operations=operations,
+                receipt_store=self.receipt_store,
+            )
+        self.assertFalse(eligibility_path.exists())
+        self.assertIsNone(factory.journal)
+        self.assertEqual(operations.apply_count, {})
+
+    def test_premature_authority_cannot_persist_eligibility_receipt(self) -> None:
+        eligibility_path = (
+            self.receipt_root
+            / self.installation_execution_id
+            / "empty-rollback-eligibility-receipt.json"
+        )
+        factory = _JournalFactory()
+        operations = self._operations()
+        with (
+            patch.object(rollback_entrypoint, "AUTHORITY_STATE_PATH", self.state_path),
+            patch.object(rollback_entrypoint, "GLOBAL_LOCK_PATH", self.lock_path),
+            self.assertRaisesRegex(
+                EmptyRollbackExecutionError,
+                "empty_rollback_authority_not_yet_valid",
+            ),
+        ):
+            rollback_entrypoint._run_authorized_empty_store_rollback_synthetic(
+                verified_rollback_capability=self.capability,
+                verified_package_capability=self.package_capability,
+                verified_controller_runtime_capability=self.runtime_capability,
+                eligibility_receipt=self.eligibility,
+                resources=self.resources,
+                authority_state=self.state,
+                clock=_NotYetValidClock(),
+                held_lock=self.lock.held_capability(),
+                journal_factory=factory,
+                operations=operations,
+                receipt_store=self.receipt_store,
+            )
+        self.assertFalse(eligibility_path.exists())
+        self.assertIsNone(factory.journal)
+        self.assertEqual(operations.apply_count, {})
+
+    def test_wrong_lock_cannot_persist_eligibility_receipt(self) -> None:
+        eligibility_path = (
+            self.receipt_root
+            / self.installation_execution_id
+            / "empty-rollback-eligibility-receipt.json"
+        )
+        wrong_lock = GlobalExecutionLock(self.lock_path.with_name("wrong.lock"))
+        try:
+            factory = _JournalFactory()
+            operations = self._operations()
+            with (
+                patch.object(
+                    rollback_entrypoint,
+                    "AUTHORITY_STATE_PATH",
+                    self.state_path,
+                ),
+                patch.object(
+                    rollback_entrypoint,
+                    "GLOBAL_LOCK_PATH",
+                    self.lock_path,
+                ),
+                self.assertRaisesRegex(
+                    EmptyRollbackExecutionError,
+                    "empty_rollback_execution_authority_invalid",
+                ),
+            ):
+                rollback_entrypoint._run_authorized_empty_store_rollback_synthetic(
+                    verified_rollback_capability=self.capability,
+                    verified_package_capability=self.package_capability,
+                    verified_controller_runtime_capability=self.runtime_capability,
+                    eligibility_receipt=self.eligibility,
+                    resources=self.resources,
+                    authority_state=self.state,
+                    clock=_Clock(),
+                    held_lock=wrong_lock.held_capability(),
+                    journal_factory=factory,
+                    operations=operations,
+                    receipt_store=self.receipt_store,
+                )
+        finally:
+            wrong_lock.close()
+        self.assertFalse(eligibility_path.exists())
+        self.assertIsNone(factory.journal)
+        self.assertEqual(operations.apply_count, {})
 
     def test_caller_controlled_ledger_sequence_is_not_verification(self) -> None:
         factory = _JournalFactory()
@@ -883,6 +1070,7 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
                 held_lock=self.lock.held_capability(),
                 journal_factory=factory,
                 operations=operations,
+                receipt_store=self.receipt_store,
             )
         self.assertIsNone(factory.journal)
         self.assertEqual(operations.apply_count, {})
@@ -1003,7 +1191,7 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
             self._run(factory, operations)
 
         operations.canonical_install_receipt = self.install_receipt_bytes
-        operations.states["R07_REMOVE_EXACT_QDRANT_ALIAS"] = "before"
+        operations.states["R08_REMOVE_EXACT_QDRANT_CONTAINER"] = "before"
         with self.assertRaisesRegex(
             EmptyRollbackExecutionError,
             "completed_state_drift",
@@ -1063,7 +1251,9 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
         def configure(claimed: object) -> _Journal:
             journal = original_factory(claimed)
             if not journal.items:
-                journal.fail_before_applied_step = "R07_REMOVE_EXACT_QDRANT_ALIAS"
+                journal.fail_before_applied_step = (
+                    "R08_REMOVE_EXACT_QDRANT_CONTAINER"
+                )
             return journal
 
         with self.assertRaises(EmptyRollbackExecutionError):
@@ -1082,12 +1272,13 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
                     held_lock=self.lock.held_capability(),
                     journal_factory=configure,
                     operations=operations,
+                    receipt_store=self.receipt_store,
                 )
-        before = operations.apply_count["R07_REMOVE_EXACT_QDRANT_ALIAS"]
+        before = operations.apply_count["R08_REMOVE_EXACT_QDRANT_CONTAINER"]
         receipt = self._run(factory, operations)
         self.assertEqual(receipt.outcome, "empty_store_rollback_complete")
         self.assertEqual(
-            operations.apply_count["R07_REMOVE_EXACT_QDRANT_ALIAS"], before
+            operations.apply_count["R08_REMOVE_EXACT_QDRANT_CONTAINER"], before
         )
 
     def test_durable_append_then_anchor_error_does_not_duplicate_record(self) -> None:
@@ -1099,7 +1290,7 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
             journal = original_factory(claimed)
             if not journal.items:
                 journal.fail_after_durable_step = (
-                    "R08_REMOVE_EXACT_EMPTY_QDRANT_COLLECTION"
+                    "R09_REMOVE_EXACT_POSTGRES_CONTAINER"
                 )
             return journal
 
@@ -1118,22 +1309,25 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
                 held_lock=self.lock.held_capability(),
                 journal_factory=configure,
                 operations=operations,
+                receipt_store=self.receipt_store,
             )
         self.assertEqual(receipt.outcome, "empty_store_rollback_complete")
         records = factory.journal.records()  # type: ignore[union-attr]
         self.assertEqual(
             sum(
-                item.step_id == "R08_REMOVE_EXACT_EMPTY_QDRANT_COLLECTION"
+                item.step_id == "R09_REMOVE_EXACT_POSTGRES_CONTAINER"
                 and item.event == RollbackEvent.APPLIED.value
                 for item in records
             ),
             1,
         )
 
-    def test_nonempty_post_quiescence_recheck_stops_before_store_deletion(self) -> None:
+    def test_nonempty_under_stopped_store_fence_stops_before_store_deletion(
+        self,
+    ) -> None:
         factory = _JournalFactory()
 
-        class _NonemptyAfterQuiescence(_Operations):
+        class _NonemptyUnderStoppedStoreFence(_Operations):
             def observe_empty_eligibility(
                 self,
                 request,
@@ -1143,12 +1337,14 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
                     request,
                     writer_fence_capability,
                 )
-                if request.step.step_id == "R06_REVERIFY_EMPTY_AFTER_QUIESCENCE":
+                if request.step.step_id == (
+                    "R07_ACQUIRE_STOPPED_STORE_WRITER_FENCE"
+                ):
                     receipt["qdrant_points"] = 1
                     receipt["receipt_sha256"] = eligibility_receipt_sha256(receipt)
                 return receipt
 
-        operations = _NonemptyAfterQuiescence(
+        operations = _NonemptyUnderStoppedStoreFence(
             self.eligibility,
             self.install_receipt_bytes,
             self.resources,
@@ -1157,25 +1353,31 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
             self._run(factory, operations)
         self.assertEqual(
             operations.apply_count,
-            {"R05_DISABLE_AND_REMOVE_STORES_SUPERVISOR": 1},
+            {
+                "R05_DISABLE_AND_REMOVE_STORES_SUPERVISOR": 1,
+                "R06_STOP_EXACT_STORES": 1,
+            },
         )
 
-    def test_new_writer_after_quiescence_is_refused_inside_delete_boundary(
+    def test_new_writer_after_store_stop_is_refused_inside_delete_boundary(
         self,
     ) -> None:
         factory = _JournalFactory()
         operations = self._operations()
-        operations.inject_writer_after_quiescence = True
+        operations.inject_writer_after_store_stop = True
         with self.assertRaisesRegex(
             EmptyRollbackExecutionError, "empty_rollback_effect_failed"
         ):
             self._run(factory, operations)
         self.assertEqual(
             operations.apply_count,
-            {"R05_DISABLE_AND_REMOVE_STORES_SUPERVISOR": 1},
+            {
+                "R05_DISABLE_AND_REMOVE_STORES_SUPERVISOR": 1,
+                "R06_STOP_EXACT_STORES": 1,
+            },
         )
         self.assertNotIn(
-            "R07_REMOVE_EXACT_QDRANT_ALIAS", operations.states
+            "R08_REMOVE_EXACT_QDRANT_CONTAINER", operations.states
         )
         self.assertEqual(operations.fence_releases, 1)
         self.assertIsNone(operations.active_fence_sha256)
@@ -1183,7 +1385,7 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
     def test_unowned_effect_and_observation_tamper_fail_closed(self) -> None:
         factory = _JournalFactory()
         operations = self._operations()
-        operations.states["R07_REMOVE_EXACT_QDRANT_ALIAS"] = "after"
+        operations.states["R08_REMOVE_EXACT_QDRANT_CONTAINER"] = "after"
         with self.assertRaisesRegex(
             EmptyRollbackExecutionError, "unowned_prior_effect"
         ):
@@ -1193,7 +1395,7 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
         self.capability = self._capability(nonce="O" * 32)
         factory = _JournalFactory()
         operations = self._operations()
-        operations.tamper_ownership_step = "R07_REMOVE_EXACT_QDRANT_ALIAS"
+        operations.tamper_ownership_step = "R08_REMOVE_EXACT_QDRANT_CONTAINER"
         with self.assertRaisesRegex(
             EmptyRollbackExecutionError, "resource_drift"
         ):
@@ -1244,6 +1446,7 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
                     held_lock=self.lock.held_capability(),
                     journal_factory=factory,
                     operations=operations,
+                    receipt_store=self.receipt_store,
                 )
         self.assertIsNone(factory.journal)
         self.assertEqual(operations.apply_count, {})
@@ -1279,7 +1482,7 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
                 journal_template,
             ),
         ):
-            receipt = run_authorized_empty_store_rollback(
+            receipt = _run_authorized_empty_store_rollback_durable_synthetic(
                 verified_rollback_capability=self.capability,
                 verified_package_capability=self.package_capability,
                 verified_controller_runtime_capability=self.runtime_capability,
@@ -1290,8 +1493,9 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
                 held_lock=self.lock.held_capability(),
                 journal_factory=durable_factory,
                 operations=operations,
+                receipt_store=self.receipt_store,
             )
-            resumed = run_authorized_empty_store_rollback(
+            resumed = _run_authorized_empty_store_rollback_durable_synthetic(
                 verified_rollback_capability=self.capability,
                 verified_package_capability=self.package_capability,
                 verified_controller_runtime_capability=self.runtime_capability,
@@ -1302,6 +1506,7 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
                 held_lock=self.lock.held_capability(),
                 journal_factory=durable_factory,
                 operations=operations,
+                receipt_store=self.receipt_store,
             )
         self.assertEqual(receipt.outcome, "empty_store_rollback_complete")
         self.assertEqual(
@@ -1317,7 +1522,7 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
         self.assertEqual(len(records), receipt.journal_sequence)
         self.assertEqual(records[-1].record_sha256, receipt.journal_head_sha256)
 
-    def test_public_entrypoint_rejects_volatile_duck_typed_journal(self) -> None:
+    def test_public_entrypoint_rejects_synthetic_receipt_store(self) -> None:
         factory = _JournalFactory()
         operations = self._operations()
         with (
@@ -1326,7 +1531,7 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(
                 EmptyRollbackExecutionError,
-                "durable_journal_required",
+                "receipt_store_invalid",
             ):
                 run_authorized_empty_store_rollback(
                     verified_rollback_capability=self.capability,
@@ -1339,6 +1544,36 @@ class EmptyRollbackExecutionTests(unittest.TestCase):
                     held_lock=self.lock.held_capability(),
                     journal_factory=factory,
                     operations=operations,
+                    receipt_store=self.receipt_store,
+                )
+        self.assertIsNone(factory.journal)
+        self.assertEqual(operations.apply_count, {})
+
+    def test_durable_synthetic_path_rejects_volatile_duck_typed_journal(
+        self,
+    ) -> None:
+        factory = _JournalFactory()
+        operations = self._operations()
+        with (
+            patch.object(rollback_entrypoint, "AUTHORITY_STATE_PATH", self.state_path),
+            patch.object(rollback_entrypoint, "GLOBAL_LOCK_PATH", self.lock_path),
+        ):
+            with self.assertRaisesRegex(
+                EmptyRollbackExecutionError,
+                "durable_journal_required",
+            ):
+                _run_authorized_empty_store_rollback_durable_synthetic(
+                    verified_rollback_capability=self.capability,
+                    verified_package_capability=self.package_capability,
+                    verified_controller_runtime_capability=self.runtime_capability,
+                    eligibility_receipt=self.eligibility,
+                    resources=self.resources,
+                    authority_state=self.state,
+                    clock=_Clock(),
+                    held_lock=self.lock.held_capability(),
+                    journal_factory=factory,
+                    operations=operations,
+                    receipt_store=self.receipt_store,
                 )
         self.assertEqual(operations.apply_count, {})
 

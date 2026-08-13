@@ -159,6 +159,7 @@ EXPECTED_PROVIDER_ASSETS = {
 EXPECTED_TEST_FILES = {
     "__init__.py",
     "_fixtures.py",
+    "resource_identity_test_support.py",
     "test_admission.py",
     "test_auth_claim_artifacts.py",
     "test_build_provenance.py",
@@ -168,6 +169,7 @@ EXPECTED_TEST_FILES = {
     "test_conversation_capture.py",
     "test_conversation_deletion.py",
     "test_conversation_erasure_http.py",
+    "test_controller_runtime_builder.py",
     "test_deletion_contracts.py",
     "test_deletion_coordinator.py",
     "test_installation_synthetic_proof.py",
@@ -187,6 +189,8 @@ EXPECTED_TEST_FILES = {
     "test_installation_authority.py",
     "test_intake_boundary.py",
     "test_lifecycle.py",
+    "test_linux_store_effects.py",
+    "test_linux_store_readiness.py",
     "test_once_worker.py",
     "test_openai_adapters.py",
     "test_pilot_marker.py",
@@ -199,6 +203,7 @@ EXPECTED_TEST_FILES = {
     "test_installation_durability_anchors.py",
     "test_installation_receipts.py",
     "test_installation_runtime_capability.py",
+    "test_durable_receipts.py",
     "test_empty_rollback_authority.py",
     "test_empty_rollback_execution.py",
     "test_empty_rollback_plan.py",
@@ -212,6 +217,7 @@ EXPECTED_TEST_FILES = {
     "test_response_runtime.py",
     "test_retrieval.py",
     "test_retrieval_calibration.py",
+    "test_rollback_live_adapter.py",
     "test_runtime_inventory.py",
     "test_runtime_release.py",
     "test_schema_and_rls.py",
@@ -275,7 +281,7 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         )
         self.assertEqual(
             disposition["schema_version"],
-            "governed-memory-current-component-disposition-v1",
+            "governed-memory-current-component-disposition-v2",
         )
         active = disposition["current_successor"]
         self.assertFalse(active["legacy_memory_fallback_allowed"])
@@ -347,10 +353,12 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         self.assertFalse(controller["controller_runtime_built_or_installed"])
         self.assertFalse(controller["controller_release_staged"])
         self.assertFalse(controller["stores_install_owns_or_removes_controller_substrate"])
-        self.assertFalse(controller["concrete_install_store_effect_adapters_packaged"])
-        self.assertFalse(
+        self.assertTrue(controller["concrete_install_store_effect_adapters_packaged"])
+        self.assertTrue(
             controller["concrete_empty_rollback_store_effect_adapters_packaged"]
         )
+        self.assertFalse(controller["selected_live_linux_platform_transports_packaged"])
+        self.assertFalse(controller["pinned_postgresql_driver_selected_or_packaged"])
         self.assertFalse(controller["activation_entrypoint_packaged"])
         safety = disposition["safety"]
         for field in (
@@ -397,8 +405,8 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         manifest = self.load_manifest()
         self.assertEqual(
             manifest["phase"],
-            "phase9b_canonical_dormant_store_install_and_empty_rollback_"
-            "controllers_packaged_inactive_activation_blocked",
+            "phase9d_repository_only_install_empty_rollback_contract_repair_"
+            "adapters_and_runtime_builder_packaged_inactive_activation_blocked",
         )
         self.assertFalse(manifest["production_state_changed"])
         self.assertFalse(manifest["legacy_imports_allowed"])
@@ -526,10 +534,10 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         self.assertEqual(current["scope"], "current_inactive_stores_only_package")
         self.assertEqual(
             current["state"],
-            "phase9b_repository_only_install_and_empty_rollback_controllers_"
-            "packaged_not_authorized",
+            "phase9d_repository_only_contract_repair_closed_adapters_and_"
+            "runtime_builder_packaged_not_authorized",
         )
-        self.assertEqual(current["package_artifact_count"], 56)
+        self.assertEqual(current["package_artifact_count"], 62)
         self.assertEqual(current["store_migration_file_count"], 9)
         self.assertTrue(current["static_package_verification_complete"])
         self.assertTrue(
@@ -574,10 +582,12 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         self.assertFalse(current["controller_runtime_built_or_installed"])
         self.assertFalse(current["controller_release_staged"])
         self.assertFalse(current["stores_install_owns_or_removes_controller_substrate"])
-        self.assertFalse(current["concrete_install_store_effect_adapters_packaged"])
-        self.assertFalse(
+        self.assertTrue(current["concrete_install_store_effect_adapters_packaged"])
+        self.assertTrue(
             current["concrete_empty_rollback_store_effect_adapters_packaged"]
         )
+        self.assertFalse(current["selected_live_linux_platform_transports_packaged"])
+        self.assertFalse(current["pinned_postgresql_driver_selected_or_packaged"])
         self.assertTrue(current["install_controller_emits_canonical_receipt"])
         self.assertTrue(current["empty_rollback_controller_emits_canonical_receipt"])
         self.assertFalse(current["activation_executor_packaged"])
@@ -978,7 +988,12 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         )
         self.assertEqual(
             _file_names(RELEASE_TOOLS),
-            {"__init__.py", "build_candidate_runtime.py", "release_guard.py"},
+            {
+                "__init__.py",
+                "build_candidate_runtime.py",
+                "controller_runtime_builder.py",
+                "release_guard.py",
+            },
         )
         self.assertEqual(
             _file_names(INSTALL_TOOLS),
@@ -989,6 +1004,7 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
                 "controller.py",
                 "controller_runtime.py",
                 "disposable_proof_harness.py",
+                "durable_receipts.py",
                 "execution_authority.py",
                 "execution_capability.py",
                 "execution_lock.py",
@@ -998,6 +1014,8 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
                 "install_entrypoint.py",
                 "journal.py",
                 "linux_plan.py",
+                "linux_store_effects.py",
+                "linux_store_readiness.py",
                 "package.py",
                 "package_capability.py",
                 "receipts.py",
@@ -1006,6 +1024,7 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
                 "rollback_authority.py",
                 "rollback_entrypoint.py",
                 "rollback_journal.py",
+                "rollback_live_adapter.py",
                 "secure_file.py",
                 "store_readiness.py",
                 "store_supervisor.py",
@@ -1051,7 +1070,7 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
             "Phase 8D",
             "Phase 7C",
             "installation/current/package_manifest.json",
-            "56 artifacts",
+            "Phase 9D",
             "claim-bound non-CLI install and empty-rollback controller compositions",
             "structured LifeSwitch data",
             "No service was installed, no route activated",

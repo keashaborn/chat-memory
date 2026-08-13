@@ -22,8 +22,8 @@ from .resource_identity import (
 from .rollback_authority import rollback_capability_evidence
 
 
-ELIGIBILITY_SCHEMA: Final = "governed-memory-empty-store-eligibility-receipt-v1"
-PLAN_SCHEMA: Final = "governed-memory-empty-store-rollback-plan-v1"
+ELIGIBILITY_SCHEMA: Final = "governed-memory-empty-store-eligibility-receipt-v2"
+PLAN_SCHEMA: Final = "governed-memory-empty-store-rollback-plan-v2"
 ROLLBACK_OPERATION: Final = "empty_store_rollback"
 ZERO_HEAD: Final = "0" * 64
 
@@ -39,6 +39,7 @@ _ELIGIBILITY_KEYS = {
     "candidate_git_commit",
     "candidate_git_tree",
     "package_manifest_sha256",
+    "installation_execution_id",
     "installation_receipt_sha256",
     "exact_targets_sha256",
     "resource_ledger_head_sha256",
@@ -93,6 +94,7 @@ RETAINED_AUDIT_KEYS: Final = (
     "rollback_journal",
     "authority_anchor",
     "resource_identity_ledger",
+    "terminal_postflight_receipt",
     "installation_receipt",
     "eligibility_receipt",
 )
@@ -140,6 +142,7 @@ def build_empty_rollback_eligibility_receipt(
     candidate_git_commit: str,
     candidate_git_tree: str,
     package_manifest_sha256: str,
+    installation_execution_id: str,
     installation_receipt_sha256: str,
     exact_targets_sha256: str,
     resource_ledger_head_sha256: str,
@@ -161,6 +164,7 @@ def build_empty_rollback_eligibility_receipt(
         "candidate_git_commit": candidate_git_commit,
         "candidate_git_tree": candidate_git_tree,
         "package_manifest_sha256": package_manifest_sha256,
+        "installation_execution_id": installation_execution_id,
         "installation_receipt_sha256": installation_receipt_sha256,
         "exact_targets_sha256": exact_targets_sha256,
         "resource_ledger_head_sha256": resource_ledger_head_sha256,
@@ -190,6 +194,7 @@ def verify_empty_rollback_eligibility_receipt(
         or receipt.get("operation") != ROLLBACK_OPERATION
         or not _is_commit(receipt.get("candidate_git_commit"))
         or not _is_commit(receipt.get("candidate_git_tree"))
+        or not _is_hash(receipt.get("installation_execution_id"))
     ):
         raise EmptyRollbackError("empty_rollback_eligibility_shape_invalid")
     for key in (
@@ -484,12 +489,14 @@ class EmptyRollbackPlanStep:
     step_id: str
     operation: str
     resource_key: str | None
+    invariant_only: bool = False
 
     def as_dict(self) -> dict[str, object]:
         return {
             "operation": self.operation,
             "resource_key": self.resource_key,
             "step_id": self.step_id,
+            "invariant_only": self.invariant_only,
         }
 
 
@@ -499,22 +506,22 @@ EMPTY_ROLLBACK_STEPS: Final = (
     EmptyRollbackPlanStep("R03_VERIFY_INSTALL_RECEIPT_AND_LEDGER", "verify_install_receipt_and_ledger", None),
     EmptyRollbackPlanStep("R04_VERIFY_EMPTY_ELIGIBILITY", "verify_empty_eligibility", None),
     EmptyRollbackPlanStep("R05_DISABLE_AND_REMOVE_STORES_SUPERVISOR", "disable_and_remove_stores_supervisor", "stores_supervisor"),
-    EmptyRollbackPlanStep("R06_REVERIFY_EMPTY_AFTER_QUIESCENCE", "reverify_empty_after_quiescence", None),
-    EmptyRollbackPlanStep("R07_REMOVE_EXACT_QDRANT_ALIAS", "remove_exact_qdrant_alias", "qdrant_alias"),
-    EmptyRollbackPlanStep("R08_REMOVE_EXACT_EMPTY_QDRANT_COLLECTION", "remove_exact_empty_qdrant_collection", "qdrant_collection"),
-    EmptyRollbackPlanStep("R09_ROLLBACK_EMPTY_PILOT_MARKER_0004", "rollback_empty_pilot_marker_0004", "migration_0004"),
-    EmptyRollbackPlanStep("R10_ROLLBACK_OWNER_CLAIM_DETAIL_0003", "rollback_owner_claim_detail_0003", "migration_0003"),
-    EmptyRollbackPlanStep("R11_ROLLBACK_EMPTY_FOUNDATION_0001", "rollback_empty_foundation_0001", "migration_0001"),
-    EmptyRollbackPlanStep("R12_DROP_EMPTY_CANONICAL_DATABASE_AND_ROLES", "drop_empty_canonical_database_and_roles", "canonical_database_and_roles"),
-    EmptyRollbackPlanStep("R13_STOP_EXACT_STORES", "stop_exact_stores", None),
-    EmptyRollbackPlanStep("R14_REMOVE_EXACT_QDRANT_CONTAINER", "remove_exact_qdrant_container", "qdrant_container"),
-    EmptyRollbackPlanStep("R15_REMOVE_EXACT_POSTGRES_CONTAINER", "remove_exact_postgres_container", "postgres_container"),
-    EmptyRollbackPlanStep("R16_REMOVE_EXACT_EMPTY_QDRANT_VOLUME", "remove_exact_empty_qdrant_volume", "qdrant_volume"),
-    EmptyRollbackPlanStep("R17_REMOVE_EXACT_EMPTY_POSTGRES_VOLUME", "remove_exact_empty_postgres_volume", "postgres_volume"),
-    EmptyRollbackPlanStep("R18_REMOVE_EXACT_UNUSED_NETWORK", "remove_exact_unused_network", "network"),
-    EmptyRollbackPlanStep("R19_REMOVE_FRESH_QDRANT_STORE_SECRET", "remove_fresh_qdrant_store_secret", "qdrant_store_secret"),
-    EmptyRollbackPlanStep("R20_REMOVE_FRESH_POSTGRES_STORE_SECRET", "remove_fresh_postgres_store_secret", "postgres_store_secret"),
-    EmptyRollbackPlanStep("R21_REMOVE_RESOLVED_STORE_SPEC", "remove_resolved_store_spec", "resolved_store_spec"),
+    EmptyRollbackPlanStep("R06_STOP_EXACT_STORES", "stop_exact_stores", None),
+    EmptyRollbackPlanStep("R07_ACQUIRE_STOPPED_STORE_WRITER_FENCE", "acquire_stopped_store_writer_fence", None),
+    EmptyRollbackPlanStep("R08_REMOVE_EXACT_QDRANT_CONTAINER", "remove_exact_qdrant_container", "qdrant_container"),
+    EmptyRollbackPlanStep("R09_REMOVE_EXACT_POSTGRES_CONTAINER", "remove_exact_postgres_container", "postgres_container"),
+    EmptyRollbackPlanStep("R10_REMOVE_EXACT_EMPTY_QDRANT_VOLUME", "remove_exact_empty_qdrant_volume", "qdrant_volume"),
+    EmptyRollbackPlanStep("R11_REMOVE_EXACT_EMPTY_POSTGRES_VOLUME", "remove_exact_empty_postgres_volume", "postgres_volume"),
+    EmptyRollbackPlanStep("R12_REMOVE_EXACT_UNUSED_NETWORK", "remove_exact_unused_network", "network"),
+    EmptyRollbackPlanStep("R13_REMOVE_FRESH_QDRANT_STORE_SECRET", "remove_fresh_qdrant_store_secret", "qdrant_store_secret"),
+    EmptyRollbackPlanStep("R14_REMOVE_FRESH_POSTGRES_STORE_SECRET", "remove_fresh_postgres_store_secret", "postgres_store_secret"),
+    EmptyRollbackPlanStep("R15_REMOVE_RESOLVED_STORE_SPEC", "remove_resolved_store_spec", "resolved_store_spec"),
+    EmptyRollbackPlanStep("R16_VERIFY_QDRANT_ALIAS_PHYSICALLY_ABSENT", "verify_qdrant_alias_physically_absent", "qdrant_alias", True),
+    EmptyRollbackPlanStep("R17_VERIFY_QDRANT_COLLECTION_PHYSICALLY_ABSENT", "verify_qdrant_collection_physically_absent", "qdrant_collection", True),
+    EmptyRollbackPlanStep("R18_VERIFY_PILOT_MARKER_0004_PHYSICALLY_ABSENT", "verify_pilot_marker_0004_physically_absent", "migration_0004", True),
+    EmptyRollbackPlanStep("R19_VERIFY_OWNER_CLAIM_DETAIL_0003_PHYSICALLY_ABSENT", "verify_owner_claim_detail_0003_physically_absent", "migration_0003", True),
+    EmptyRollbackPlanStep("R20_VERIFY_FOUNDATION_0001_PHYSICALLY_ABSENT", "verify_foundation_0001_physically_absent", "migration_0001", True),
+    EmptyRollbackPlanStep("R21_VERIFY_CANONICAL_DATABASE_AND_ROLES_PHYSICALLY_ABSENT", "verify_canonical_database_and_roles_physically_absent", "canonical_database_and_roles", True),
     EmptyRollbackPlanStep("R22_VERIFY_EXACT_ABSENCE_AND_RETAIN_AUDIT", "verify_exact_absence_and_retain_audit", None),
 )
 
@@ -524,6 +531,7 @@ class EmptyRollbackPlan:
     candidate_git_commit: str
     candidate_git_tree: str
     package_manifest_sha256: str
+    installation_execution_id: str
     installation_receipt_sha256: str
     eligibility_receipt_sha256: str
     resource_ledger_head_sha256: str
@@ -541,6 +549,7 @@ class EmptyRollbackPlan:
             "candidate_git_commit": self.candidate_git_commit,
             "candidate_git_tree": self.candidate_git_tree,
             "package_manifest_sha256": self.package_manifest_sha256,
+            "installation_execution_id": self.installation_execution_id,
             "installation_receipt_sha256": self.installation_receipt_sha256,
             "eligibility_receipt_sha256": self.eligibility_receipt_sha256,
             "resource_ledger_head_sha256": self.resource_ledger_head_sha256,
@@ -566,6 +575,7 @@ def _plan_hash_input(
         "candidate_git_commit": eligibility["candidate_git_commit"],
         "candidate_git_tree": eligibility["candidate_git_tree"],
         "package_manifest_sha256": eligibility["package_manifest_sha256"],
+        "installation_execution_id": eligibility["installation_execution_id"],
         "installation_receipt_sha256": eligibility[
             "installation_receipt_sha256"
         ],
@@ -619,6 +629,7 @@ def build_empty_rollback_plan(
         "candidate_git_commit": eligibility["candidate_git_commit"],
         "candidate_git_tree": eligibility["candidate_git_tree"],
         "package_manifest_sha256": package_sha,
+        "installation_execution_id": eligibility["installation_execution_id"],
         "installation_receipt_sha256": eligibility[
             "installation_receipt_sha256"
         ],
@@ -641,6 +652,7 @@ def build_empty_rollback_plan(
         candidate_git_commit=str(document["candidate_git_commit"]),
         candidate_git_tree=str(document["candidate_git_tree"]),
         package_manifest_sha256=package_sha,
+        installation_execution_id=str(document["installation_execution_id"]),
         installation_receipt_sha256=str(
             document["installation_receipt_sha256"]
         ),

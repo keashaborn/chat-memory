@@ -5,7 +5,7 @@ from __future__ import annotations
 
 This module has no installation, rollback, activation, Docker, network, secret,
 PostgreSQL, or Qdrant execution surface. Phase 7C receipts are immutable
-historical evidence only. The current Phase 8G application proof and Phase 9B
+historical evidence only. The current Phase 8G application proof and Phase 9D
 repository-only dormant-store controller package are verified separately;
 installation and activation remain refused.
 """
@@ -218,7 +218,7 @@ EXACT_TARGETS = {
 }
 
 EXPECTED_CURRENT_COMPONENT_DISPOSITION: Mapping[str, object] = {
-    "schema_version": "governed-memory-current-component-disposition-v1",
+    "schema_version": "governed-memory-current-component-disposition-v2",
     "status": (
         "single_current_successor_and_single_current_dormant_store_"
         "controller_package_inactive"
@@ -247,6 +247,21 @@ EXPECTED_CURRENT_COMPONENT_DISPOSITION: Mapping[str, object] = {
         "empty_rollback_entrypoint": (
             "tools/governed_memory_install/rollback_entrypoint.py"
         ),
+        "durable_receipt_store": (
+            "tools/governed_memory_install/durable_receipts.py"
+        ),
+        "closed_linux_install_adapter": (
+            "tools/governed_memory_install/linux_store_effects.py"
+        ),
+        "fixed_loopback_readiness_adapter": (
+            "tools/governed_memory_install/linux_store_readiness.py"
+        ),
+        "physical_empty_rollback_adapter": (
+            "tools/governed_memory_install/rollback_live_adapter.py"
+        ),
+        "controller_runtime_release_builder": (
+            "tools/governed_memory_release/controller_runtime_builder.py"
+        ),
         "synthetic_proof_entrypoint": (
             "tools/governed_memory_validation/"
             "run_installation_synthetic_proof.py"
@@ -267,6 +282,9 @@ EXPECTED_CURRENT_COMPONENT_DISPOSITION: Mapping[str, object] = {
         "claim_bound_install_controller_composition_packaged": True,
         "claim_bound_empty_rollback_controller_composition_packaged": True,
         "controller_runtime_verification_capability_packaged": True,
+        "controller_runtime_release_builder_orchestration_packaged": True,
+        "controller_runtime_builder_publication_transport_packaged": False,
+        "approved_standalone_cpython_substrate_digest_bound": False,
         "full_controller_release_tree_verification_packaged": True,
         "exact_locked_controller_distribution_set_verification_packaged": True,
         "full_release_tree_sha256_bound_through_claim_journal_host_ownership_and_install_receipt": True,
@@ -279,12 +297,22 @@ EXPECTED_CURRENT_COMPONENT_DISPOSITION: Mapping[str, object] = {
         "resolved_store_spec_and_exact_docker_labels_bound": True,
         "resource_identity_ledger_v2_packaged": True,
         "empty_rollback_writer_fence_packaged": True,
+        "empty_rollback_writer_fence_requires_stopped_or_absent_exact_stores": True,
+        "fresh_offline_read_only_empty_recheck_required_at_r07_under_stopped_store_fence": True,
         "retained_audit_artifact_hashes_bound": True,
+        "durable_create_once_receipt_store_packaged": True,
+        "public_entrypoints_require_canonical_root_owned_production_receipt_store": True,
+        "synthetic_receipt_stores_are_private_test_only": True,
         "install_receipt_binds_fresh_terminal_canonical_store_readiness": True,
         "empty_rollback_requires_opaque_verified_install_receipt_and_ledger": True,
         "completed_install_and_empty_rollback_replay_reverification_packaged": True,
-        "concrete_install_store_effect_adapters_packaged": False,
-        "concrete_empty_rollback_store_effect_adapters_packaged": False,
+        "closed_post_claim_linux_install_adapter_and_factory_packaged": True,
+        "fixed_loopback_store_readiness_dto_adapter_packaged": True,
+        "physical_ledger_bound_empty_rollback_adapter_packaged": True,
+        "concrete_install_store_effect_adapters_packaged": True,
+        "concrete_empty_rollback_store_effect_adapters_packaged": True,
+        "selected_live_linux_platform_transports_packaged": False,
+        "pinned_postgresql_driver_selected_or_packaged": False,
         "activation_entrypoint_packaged": False,
         "validation_scope": "synthetic_in_process_only",
         "live_linux_execution_proven": False,
@@ -841,8 +869,17 @@ def _verify_current_package_receipts(
             "completed_install_and_empty_rollback_replay_reverification_packaged"
         )
         is True
-        and package_receipt.get("concrete_install_store_effect_adapters_packaged") is False
-        and package_receipt.get("concrete_empty_rollback_store_effect_adapters_packaged") is False
+        and package_receipt.get("closed_install_store_effect_adapter_packaged") is True
+        and package_receipt.get("closed_empty_rollback_store_effect_adapter_packaged") is True
+        and package_receipt.get("selected_live_platform_transports_packaged") is False
+        and package_receipt.get("pinned_postgresql_driver_selected") is False
+        and package_receipt.get("durable_create_once_receipt_store_packaged") is True
+        and package_receipt.get(
+            "controller_runtime_release_builder_orchestration_packaged"
+        )
+        is True
+        and package_receipt.get("controller_runtime_build_transport_packaged")
+        is False
         and package_receipt.get("activation_entrypoint_packaged") is False
         and package_receipt.get("installation_performed_by_verifier") is False
         and package_receipt.get("images_staged_by_verifier") is False
@@ -930,9 +967,9 @@ def _verify_runtime_manifest(
     current_state = current.get("state") if isinstance(current, dict) else None
     _require(
         runtime.get("schema_version")
-        == "governed-memory-successor-runtime-manifest-v3"
+        == "governed-memory-successor-runtime-manifest-v4"
         and runtime.get("phase")
-        == "phase9b_canonical_dormant_store_install_and_empty_rollback_controllers_packaged_inactive_activation_blocked"
+        == "phase9d_repository_only_install_empty_rollback_contract_repair_adapters_and_runtime_builder_packaged_inactive_activation_blocked"
         and runtime.get("production_state_changed") is False
         and runtime.get("legacy_imports_allowed") is False
         and isinstance(validation, dict)
@@ -1021,7 +1058,7 @@ def _verify_runtime_manifest(
         and isinstance(current, dict)
         and current.get("scope") == "current_inactive_stores_only_package"
         and current_state
-        == "phase9b_repository_only_install_and_empty_rollback_controllers_packaged_not_authorized"
+        == "phase9d_repository_only_contract_repair_closed_adapters_and_runtime_builder_packaged_not_authorized"
         and current.get("package_manifest")
         == "ops/governed_memory/installation/current/package_manifest.json"
         and current.get("package_manifest_schema_version")
@@ -1086,9 +1123,35 @@ def _verify_runtime_manifest(
         is True
         and current.get("resource_identity_ledger_v2_packaged") is True
         and current.get("empty_rollback_writer_fence_packaged") is True
+        and current.get(
+            "fresh_offline_read_only_empty_recheck_required_at_r07_under_stopped_store_fence"
+        )
+        is True
         and current.get("retained_audit_artifact_hashes_bound") is True
-        and current.get("concrete_install_store_effect_adapters_packaged") is False
-        and current.get("concrete_empty_rollback_store_effect_adapters_packaged") is False
+        and current.get("durable_create_once_receipt_store_packaged") is True
+        and current.get(
+            "public_entrypoints_require_canonical_root_owned_production_receipt_store"
+        )
+        is True
+        and current.get("synthetic_receipt_stores_are_private_test_only") is True
+        and current.get("closed_post_claim_linux_install_adapter_and_factory_packaged")
+        is True
+        and current.get("fixed_loopback_store_readiness_dto_adapter_packaged")
+        is True
+        and current.get("physical_ledger_bound_empty_rollback_adapter_packaged")
+        is True
+        and current.get("concrete_install_store_effect_adapters_packaged") is True
+        and current.get("concrete_empty_rollback_store_effect_adapters_packaged") is True
+        and current.get("selected_live_linux_platform_transports_packaged") is False
+        and current.get("pinned_postgresql_driver_selected_or_packaged") is False
+        and current.get(
+            "controller_runtime_release_builder_orchestration_packaged"
+        )
+        is True
+        and current.get("controller_runtime_builder_publication_transport_packaged")
+        is False
+        and current.get("approved_standalone_cpython_substrate_digest_bound")
+        is False
         and current.get("install_controller_emits_canonical_receipt") is True
         and current.get("empty_rollback_controller_emits_canonical_receipt") is True
         and current.get(
@@ -1389,10 +1452,10 @@ def verify_candidate_artifacts() -> dict[str, object]:
         }
     )
     return {
-        "schema_version": "governed-memory-release-artifact-verification-v6",
+        "schema_version": "governed-memory-release-artifact-verification-v7",
         "phase": (
-            "phase9b_canonical_dormant_store_install_and_empty_rollback_"
-            "controllers_packaged_inactive_activation_blocked"
+            "phase9d_repository_only_install_empty_rollback_contract_repair_"
+            "adapters_and_runtime_builder_packaged_inactive_activation_blocked"
         ),
         "artifact_sha256": dict(sorted(observed_hashes.items())),
         "artifact_integrity_verified": True,
@@ -1439,8 +1502,13 @@ def verify_candidate_artifacts() -> dict[str, object]:
         "resource_identity_ledger_v2_packaged": True,
         "empty_rollback_writer_fence_packaged": True,
         "retained_audit_artifact_hashes_bound": True,
-        "concrete_install_store_effect_adapters_packaged": False,
-        "concrete_empty_rollback_store_effect_adapters_packaged": False,
+        "closed_install_store_effect_adapter_packaged": True,
+        "closed_empty_rollback_store_effect_adapter_packaged": True,
+        "selected_live_platform_transports_packaged": False,
+        "pinned_postgresql_driver_selected": False,
+        "durable_create_once_receipt_store_packaged": True,
+        "controller_runtime_release_builder_orchestration_packaged": True,
+        "controller_runtime_build_transport_packaged": False,
         "activation_executor_packaged": False,
         "installation_authorized": False,
         "activation_authorized": False,

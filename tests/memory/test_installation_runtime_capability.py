@@ -150,8 +150,9 @@ class RuntimeCapabilityTests(unittest.TestCase):
             "network_calls": 0,
             "provider_calls": 0,
             "production_data_read": False,
-            "production_state_changed": False,
-            "persistent_resources_created": False,
+            "active_production_state_changed": False,
+            "persistent_controller_substrate_created": True,
+            "persistent_store_resources_created": False,
         }
         raw = _canonical(receipt)
         receipt_sha = hashlib.sha256(raw).hexdigest()
@@ -262,6 +263,8 @@ class RuntimeCapabilityTests(unittest.TestCase):
             ],
         )
         self.assertRegex(receipt_path_facts_sha, r"^[0-9a-f]{64}$")
+        self.assertTrue(evidence.persistent_controller_substrate_created)
+        self.assertFalse(evidence.persistent_store_resources_created)
 
     def test_noncanonical_or_package_mismatched_receipt_is_rejected_before_probe(self):
         capability, raw, receipt, unused_observed, unused_process = self._fixture()
@@ -271,6 +274,20 @@ class RuntimeCapabilityTests(unittest.TestCase):
         ):
             verify_controller_runtime_capability(
                 capability, runtime_build_receipt_json=raw + b"\n"
+            )
+        legacy = dict(receipt)
+        del legacy["persistent_controller_substrate_created"]
+        del legacy["persistent_store_resources_created"]
+        legacy["persistent_resources_created"] = False
+        legacy["production_state_changed"] = legacy.pop(
+            "active_production_state_changed"
+        )
+        with self.assertRaisesRegex(
+            ControllerRuntimeCapabilityError,
+            "controller_runtime_receipt_invalid",
+        ):
+            verify_controller_runtime_capability(
+                capability, runtime_build_receipt_json=_canonical(legacy)
             )
         changed = dict(receipt)
         changed["controller_requirements_lock_sha256"] = "f" * 64

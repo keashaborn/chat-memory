@@ -258,6 +258,8 @@ class _Fixture:
             python_version="3.12.11",
             platform_os="linux",
             platform_architecture="x86_64",
+            persistent_controller_substrate_created=True,
+            persistent_store_resources_created=False,
         )
         return _VerifiedControllerRuntimeCapability(evidence, _RUNTIME_TOKEN)
 
@@ -910,7 +912,10 @@ class _RecoveryBackend:
     def __init__(self) -> None:
         self.records: list[JournalRecord] = []
         self.states = {
-            step.step_id: StepState.BEFORE for step in STORES_ONLY_PLAN
+            step.step_id: (
+                StepState.AFTER if step.invariant_only else StepState.BEFORE
+            )
+            for step in STORES_ONLY_PLAN
         }
 
     def journal_records(self) -> tuple[JournalRecord, ...]:

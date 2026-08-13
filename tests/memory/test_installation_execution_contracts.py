@@ -34,7 +34,7 @@ class DormantStoreInstallExecutionContractTests(unittest.TestCase):
         )
         self.assertEqual(
             contract["schema_version"],
-            "governed-memory-dormant-store-install-inactive-execution-package-v2",
+            "governed-memory-dormant-store-install-inactive-execution-package-v3",
         )
         self.assertEqual(contract["server"], "seebx")
         relationship = contract["package_manifest_relationship"]
@@ -54,14 +54,18 @@ class DormantStoreInstallExecutionContractTests(unittest.TestCase):
                 "claim_bound_empty_rollback_controller_composition_callable_non_cli"
             ]
         )
-        self.assertFalse(
-            boundary["concrete_live_install_store_effect_adapter_implemented"]
+        self.assertTrue(boundary["closed_postclaim_linux_install_adapter_implemented"])
+        self.assertTrue(
+            boundary["closed_ledger_bound_physical_empty_rollback_adapter_implemented"]
         )
         self.assertFalse(
-            boundary[
-                "concrete_live_empty_rollback_store_effect_adapter_implemented"
-            ]
+            boundary["selected_live_linux_platform_transport_factory_implemented"]
         )
+        self.assertFalse(boundary["pinned_postgresql_live_driver_selected"])
+        self.assertTrue(
+            boundary["controller_runtime_release_builder_orchestration_implemented"]
+        )
+        self.assertFalse(boundary["controller_runtime_build_transport_implemented"])
         self.assertFalse(boundary["activation_executor_implemented"])
         for key, value in boundary.items():
             if key.endswith("_in_this_repository_phase"):
@@ -97,7 +101,8 @@ class DormantStoreInstallExecutionContractTests(unittest.TestCase):
             "compensation_effect_before_receipt_resume_supported",
             "terminal_postflight_effect_present_blocks_compensation_and_exact_resume_completes",
             "composite_step_recoverable_state_protocol_implemented",
-            "empty_rollback_writer_fence_held_from_r06_through_receipt",
+            "empty_rollback_stops_exact_stores_before_writer_fence",
+            "empty_rollback_writer_fence_held_from_r07_through_receipt",
             "destructive_rollback_steps_atomically_recheck_empty_under_fence",
             "retained_audit_artifact_hashes_bound_to_rollback_receipt",
         ):
@@ -107,7 +112,8 @@ class DormantStoreInstallExecutionContractTests(unittest.TestCase):
         host = contract["host_action_policy"]
         self.assertTrue(host["typed_operation_specific_boundaries_only"])
         self.assertFalse(host["arbitrary_store_mutation_argv_surface"])
-        self.assertFalse(host["concrete_store_effect_adapters_packaged"])
+        self.assertTrue(host["closed_store_effect_adapters_packaged"])
+        self.assertFalse(host["selected_live_platform_transports_packaged"])
         self.assertTrue(host["controller_runtime_secure_verifier_packaged"])
         self.assertTrue(host["exact_release_path_supervisor_launcher_packaged"])
         receipts = contract["receipt_policy"]
@@ -212,7 +218,10 @@ class DormantStoreInstallExecutionContractTests(unittest.TestCase):
             rollback["properties"]["operation"]["const"],
             "empty_store_rollback",
         )
-        self.assertEqual(rollback["properties"]["removed_resource_count"]["const"], 15)
+        self.assertEqual(
+            rollback["properties"]["exact_targets_absent_count"]["const"],
+            15,
+        )
 
 
 if __name__ == "__main__":

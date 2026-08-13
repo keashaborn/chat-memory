@@ -39,14 +39,12 @@ from tools.governed_memory_install.rollback_authority import (
 from tools.governed_memory_install.package_capability import (
     verified_package_evidence,
 )
-from tools.governed_memory_install.resource_identity import (
-    ResourceIdentityLedger,
-    load_ledger,
-)
+from tools.governed_memory_install.resource_identity import load_ledger
 from tests.memory.test_empty_rollback_authority import (
     build_verified_controller_runtime,
     build_verified_install_package,
 )
+from tests.memory.resource_identity_test_support import append_resource_identity
 
 
 class EmptyRollbackPlanTests(unittest.TestCase):
@@ -63,6 +61,7 @@ class EmptyRollbackPlanTests(unittest.TestCase):
         self.commit = package.candidate_git_commit
         self.tree = package.candidate_git_tree
         self.package_sha = package.package_manifest_sha256
+        self.installation_execution_id = "6" * 64
         self.install_receipt_sha = "d" * 64
         records = self._ledger_records()
         self.ledger_head = records[-1].entry_sha256
@@ -78,6 +77,7 @@ class EmptyRollbackPlanTests(unittest.TestCase):
             candidate_git_commit=self.commit,
             candidate_git_tree=self.tree,
             package_manifest_sha256=self.package_sha,
+            installation_execution_id=self.installation_execution_id,
             installation_receipt_sha256=self.install_receipt_sha,
             exact_targets_sha256=targets_sha,
             resource_ledger_head_sha256=self.ledger_head,
@@ -108,9 +108,6 @@ class EmptyRollbackPlanTests(unittest.TestCase):
         binding = hashlib.sha256(
             f"binding:{self.ledger_counter}".encode("ascii")
         ).hexdigest()
-        ledger = ResourceIdentityLedger(
-            ledger_path, binding_sha256=binding
-        )
         expected = expected_rollback_resource_names(self.package_sha)
         for key in ROLLBACK_RESOURCE_KEYS:
             if key == omit_key:
@@ -119,7 +116,9 @@ class EmptyRollbackPlanTests(unittest.TestCase):
             if key == drift_key:
                 name = "unexpected-" + key
             is_container = kind == "container"
-            ledger.append(
+            append_resource_identity(
+                ledger_path,
+                binding_sha256=binding,
                 event="created",
                 resource_kind=kind,
                 resource_name=name,
@@ -175,6 +174,9 @@ class EmptyRollbackPlanTests(unittest.TestCase):
                     self.package_capability
                 ).controller_runtime_receipt_sha256
             ),
+            installation_execution_id=str(
+                selected_eligibility["installation_execution_id"]
+            ),
             installation_receipt_sha256=str(
                 selected_eligibility["installation_receipt_sha256"]
             ),
@@ -202,6 +204,7 @@ class EmptyRollbackPlanTests(unittest.TestCase):
             "controller_runtime_receipt_sha256": (
                 bindings.controller_runtime_receipt_sha256
             ),
+            "installation_execution_id": bindings.installation_execution_id,
             "installation_receipt_sha256": bindings.installation_receipt_sha256,
             "rollback_plan_sha256": bindings.rollback_plan_sha256,
             "exact_targets_sha256": bindings.exact_targets_sha256,
@@ -292,7 +295,13 @@ class EmptyRollbackPlanTests(unittest.TestCase):
         self.assertEqual(plan.steps, EMPTY_ROLLBACK_STEPS)
         self.assertEqual(plan.retained_audit_keys, RETAINED_AUDIT_KEYS)
         self.assertEqual(plan.steps[4].resource_key, "stores_supervisor")
-        self.assertEqual(plan.steps[-2].resource_key, "resolved_store_spec")
+        self.assertEqual(plan.steps[5].step_id, "R06_STOP_EXACT_STORES")
+        self.assertEqual(
+            plan.steps[6].step_id,
+            "R07_ACQUIRE_STOPPED_STORE_WRITER_FENCE",
+        )
+        self.assertEqual(plan.steps[14].resource_key, "resolved_store_spec")
+        self.assertTrue(all(step.invariant_only for step in plan.steps[15:21]))
         self.assertEqual(
             plan.steps[-1].step_id,
             "R22_VERIFY_EXACT_ABSENCE_AND_RETAIN_AUDIT",
@@ -356,6 +365,7 @@ class EmptyRollbackPlanTests(unittest.TestCase):
     def test_authority_is_bound_to_eligibility_targets_and_ledger(self) -> None:
         capability = self.capability()
         for key in (
+            "installation_execution_id",
             "installation_receipt_sha256",
             "resource_ledger_head_sha256",
             "observation_set_sha256",

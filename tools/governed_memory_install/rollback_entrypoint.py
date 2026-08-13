@@ -54,6 +54,11 @@ from .receipts import (
     build_empty_rollback_receipt,
     verify_install_receipt,
 )
+from .durable_receipts import (
+    DurableReceiptError,
+    DurableReceiptStore,
+    ReceiptArtifact,
+)
 from .rollback_authority import (
     ROLLBACK_OPERATION,
     RollbackAuthorityError,
@@ -75,8 +80,8 @@ ROLLBACK_JOURNAL_TEMPLATE: Final = (
     "/var/lib/governed-memory-controller/executions/"
     "{execution_id}/rollback.jsonl"
 )
-ROLLBACK_JOURNAL_SCHEMA: Final = "governed-memory-empty-store-rollback-journal-v2"
-ROLLBACK_CLAIM_SCHEMA: Final = "governed-memory-claimed-empty-rollback-v2"
+ROLLBACK_JOURNAL_SCHEMA: Final = "governed-memory-empty-store-rollback-journal-v3"
+ROLLBACK_CLAIM_SCHEMA: Final = "governed-memory-claimed-empty-rollback-v3"
 ZERO_HEAD: Final = "0" * 64
 _HASH_RE = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _ATTEMPT_RE = re.compile(r"rollback-[0-9a-f]{40}\Z", re.ASCII)
@@ -86,9 +91,9 @@ _TIMESTAMP_RE = re.compile(
     r"T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z\Z",
     re.ASCII,
 )
-_EXECUTION_DOMAIN: Final = b"governed-memory-empty-rollback-execution-v2\x00"
-_ATTEMPT_DOMAIN: Final = b"governed-memory-empty-rollback-attempt-v2\x00"
-_JOURNAL_DOMAIN: Final = b"governed-memory-empty-rollback-journal-v2\x00"
+_EXECUTION_DOMAIN: Final = b"governed-memory-empty-rollback-execution-v3\x00"
+_ATTEMPT_DOMAIN: Final = b"governed-memory-empty-rollback-attempt-v3\x00"
+_JOURNAL_DOMAIN: Final = b"governed-memory-empty-rollback-journal-v3\x00"
 _RETAINED_AUDIT_SET_DOMAIN: Final = (
     b"governed-memory-empty-rollback-retained-audit-set-v1\x00"
 )
@@ -253,6 +258,7 @@ class ClaimedEmptyRollbackEvidence:
     controller_requirements_lock_sha256: str
     supervisor_launcher_path: str
     supervisor_launcher_sha256: str
+    installation_execution_id: str
     journal_binding_sha256: str
     journal_path: str
     authority_state_path_sha256: str
@@ -311,6 +317,7 @@ class RollbackOperationRequest:
     controller_requirements_lock_sha256: str
     supervisor_launcher_path: str
     supervisor_launcher_sha256: str
+    installation_execution_id: str
     installation_receipt_sha256: str
     eligibility_receipt_sha256: str
     resource_ledger_binding_sha256: str
@@ -375,6 +382,7 @@ class RollbackOperationRequest:
             != self.controller_release_root
             + "/tools/governed_memory_install/store_supervisor_launcher.py"
             or _HASH_RE.fullmatch(self.installation_receipt_sha256) is None
+            or _HASH_RE.fullmatch(self.installation_execution_id) is None
             or _HASH_RE.fullmatch(self.eligibility_receipt_sha256) is None
             or _HASH_RE.fullmatch(self.resource_ledger_binding_sha256) is None
             or _HASH_RE.fullmatch(self.resource_ledger_head_sha256) is None
@@ -418,6 +426,8 @@ class EmptyRollbackWriterFenceAcquisition:
     exact_targets_sha256: str
     controller_runtime_tree_sha256: str
     controller_release_tree_sha256: str
+    nonwritable_postgres_identity_sha256: str
+    nonwritable_qdrant_identity_sha256: str
     fence_sha256: str
 
     def __post_init__(self) -> None:
@@ -428,6 +438,8 @@ class EmptyRollbackWriterFenceAcquisition:
             or _HASH_RE.fullmatch(self.exact_targets_sha256) is None
             or _HASH_RE.fullmatch(self.controller_runtime_tree_sha256) is None
             or _HASH_RE.fullmatch(self.controller_release_tree_sha256) is None
+            or _HASH_RE.fullmatch(self.nonwritable_postgres_identity_sha256) is None
+            or _HASH_RE.fullmatch(self.nonwritable_qdrant_identity_sha256) is None
             or _HASH_RE.fullmatch(self.fence_sha256) is None
         ):
             raise EmptyRollbackExecutionError(
@@ -444,6 +456,8 @@ class EmptyRollbackWriterFenceEvidence:
     exact_targets_sha256: str
     controller_runtime_tree_sha256: str
     controller_release_tree_sha256: str
+    nonwritable_postgres_identity_sha256: str
+    nonwritable_qdrant_identity_sha256: str
     fence_sha256: str
 
 
@@ -470,6 +484,7 @@ class _EmptyRollbackWriterFenceCapability:
 @dataclass(frozen=True, slots=True)
 class VerifiedInstallReceiptLedgerEvidence:
     canonical_receipt_sha256: str
+    installation_execution_id: str
     installation_receipt_sha256: str
     candidate_git_commit: str
     candidate_git_tree: str
@@ -599,6 +614,7 @@ def verify_retained_install_receipt_and_ledger(
         canonical_receipt_sha256=hashlib.sha256(
             canonical_install_receipt
         ).hexdigest(),
+        installation_execution_id=str(receipt["execution_id"]),
         installation_receipt_sha256=str(receipt["receipt_sha256"]),
         candidate_git_commit=str(receipt["candidate_git_commit"]),
         candidate_git_tree=str(receipt["candidate_git_tree"]),
@@ -667,6 +683,8 @@ def validate_install_receipt_ledger_capability(
     evidence = value._evidence
     if (
         _HASH_RE.fullmatch(evidence.canonical_receipt_sha256) is None
+        or evidence.installation_execution_id
+        != request.installation_execution_id
         or evidence.installation_receipt_sha256
         != request.installation_receipt_sha256
         or evidence.candidate_git_commit != expected_candidate_git_commit
@@ -719,6 +737,8 @@ def validate_empty_rollback_writer_fence_capability(
     expected_exact_targets_sha256: str,
     expected_controller_runtime_tree_sha256: str,
     expected_controller_release_tree_sha256: str,
+    expected_nonwritable_postgres_identity_sha256: str | None = None,
+    expected_nonwritable_qdrant_identity_sha256: str | None = None,
     expected_fence_sha256: str | None = None,
 ) -> EmptyRollbackWriterFenceEvidence:
     """Validate the one writer fence held across every destructive boundary."""
@@ -743,6 +763,18 @@ def validate_empty_rollback_writer_fence_capability(
         != expected_controller_runtime_tree_sha256
         or evidence.controller_release_tree_sha256
         != expected_controller_release_tree_sha256
+        or _HASH_RE.fullmatch(evidence.nonwritable_postgres_identity_sha256) is None
+        or _HASH_RE.fullmatch(evidence.nonwritable_qdrant_identity_sha256) is None
+        or (
+            expected_nonwritable_postgres_identity_sha256 is not None
+            and evidence.nonwritable_postgres_identity_sha256
+            != expected_nonwritable_postgres_identity_sha256
+        )
+        or (
+            expected_nonwritable_qdrant_identity_sha256 is not None
+            and evidence.nonwritable_qdrant_identity_sha256
+            != expected_nonwritable_qdrant_identity_sha256
+        )
         or _HASH_RE.fullmatch(evidence.fence_sha256) is None
         or (
             expected_fence_sha256 is not None
@@ -889,6 +921,7 @@ def _claim_empty_rollback(
         raise EmptyRollbackExecutionError("empty_rollback_authority_not_yet_valid")
     runtime_binding = {
         "package_manifest_sha256": evidence.package_manifest_sha256,
+        "installation_execution_id": evidence.installation_execution_id,
         "controller_runtime_receipt_sha256": (
             evidence.controller_runtime_receipt_sha256
         ),
@@ -1004,6 +1037,7 @@ def _claim_empty_rollback(
         ),
         supervisor_launcher_path=evidence.supervisor_launcher_path,
         supervisor_launcher_sha256=evidence.supervisor_launcher_sha256,
+        installation_execution_id=evidence.installation_execution_id,
         journal_binding_sha256=binding_sha,
         journal_path=journal_path,
         authority_state_path_sha256=hashlib.sha256(
@@ -1043,6 +1077,7 @@ class _EmptyRollbackController:
         journal: RollbackJournalAdapter,
         operations: EmptyRollbackOperations,
         held_lock: HeldExecutionLockCapability,
+        receipt_store: DurableReceiptStore,
     ) -> None:
         claim = claimed_empty_rollback_evidence(claimed)
         if (
@@ -1065,6 +1100,7 @@ class _EmptyRollbackController:
                 callable(getattr(journal, name, None))
                 for name in ("records", "reserve_effect_capacity", "append")
             )
+            or type(receipt_store) is not DurableReceiptStore
             or not all(
                 callable(getattr(operations, name, None))
                 for name in (
@@ -1091,6 +1127,7 @@ class _EmptyRollbackController:
         self.journal = journal
         self.operations = operations
         self.held_lock = held_lock
+        self.receipt_store = receipt_store
         self.install_ledger_evidence: (
             VerifiedInstallReceiptLedgerEvidence | None
         ) = None
@@ -1188,6 +1225,7 @@ class _EmptyRollbackController:
             ),
             supervisor_launcher_path=self.claim.supervisor_launcher_path,
             supervisor_launcher_sha256=self.claim.supervisor_launcher_sha256,
+            installation_execution_id=self.plan.installation_execution_id,
             installation_receipt_sha256=self.plan.installation_receipt_sha256,
             eligibility_receipt_sha256=self.plan.eligibility_receipt_sha256,
             resource_ledger_binding_sha256=(
@@ -1223,7 +1261,7 @@ class _EmptyRollbackController:
             raise EmptyRollbackExecutionError(
                 "empty_rollback_writer_fence_already_held"
             )
-        request = self._request(self.plan.steps[5])
+        request = self._request(self.plan.steps[6])
         acquisition = self.operations.acquire_empty_writer_fence(request)
         if (
             type(acquisition) is not EmptyRollbackWriterFenceAcquisition
@@ -1254,6 +1292,12 @@ class _EmptyRollbackController:
                 controller_release_tree_sha256=(
                     self.claim.controller_release_tree_sha256
                 ),
+                nonwritable_postgres_identity_sha256=(
+                    acquisition.nonwritable_postgres_identity_sha256
+                ),
+                nonwritable_qdrant_identity_sha256=(
+                    acquisition.nonwritable_qdrant_identity_sha256
+                ),
                 fence_sha256=acquisition.fence_sha256,
             ),
             _WRITER_FENCE_TOKEN,
@@ -1270,7 +1314,7 @@ class _EmptyRollbackController:
             return
         self._require_lock()
         self._validate_writer_fence()
-        request = self._request(self.plan.steps[5])
+        request = self._request(self.plan.steps[6])
         try:
             self.operations.release_empty_writer_fence(
                 request,
@@ -1338,6 +1382,9 @@ class _EmptyRollbackController:
                     "supervisor_launcher_sha256": (
                         request.supervisor_launcher_sha256
                     ),
+                    "installation_execution_id": (
+                        request.installation_execution_id
+                    ),
                     "installation_receipt_sha256": (
                         request.installation_receipt_sha256
                     ),
@@ -1379,9 +1426,9 @@ class _EmptyRollbackController:
             return
         if step.step_id in {
             "R04_VERIFY_EMPTY_ELIGIBILITY",
-            "R06_REVERIFY_EMPTY_AFTER_QUIESCENCE",
+            "R07_ACQUIRE_STOPPED_STORE_WRITER_FENCE",
         }:
-            if step.step_id == "R06_REVERIFY_EMPTY_AFTER_QUIESCENCE":
+            if step.step_id == "R07_ACQUIRE_STOPPED_STORE_WRITER_FENCE":
                 self._acquire_and_reverify_writer_fence()
             else:
                 observed = self.operations.observe_empty_eligibility(
@@ -1421,8 +1468,20 @@ class _EmptyRollbackController:
                 "empty_rollback_resource_drift"
             )
         if observed.state == "after":
+            if step.invariant_only:
+                self._validate_writer_fence()
+                self.operations.apply_if_still_empty(
+                    request,
+                    observed,
+                    self.writer_fence_capability,
+                    self.signed_eligibility,
+                )
+                return
             if recovering:
-                if step.step_id != "R05_DISABLE_AND_REMOVE_STORES_SUPERVISOR":
+                if step.step_id not in {
+                    "R05_DISABLE_AND_REMOVE_STORES_SUPERVISOR",
+                    "R06_STOP_EXACT_STORES",
+                }:
                     self._validate_writer_fence()
                     self.operations.apply_if_still_empty(
                         request,
@@ -1440,7 +1499,10 @@ class _EmptyRollbackController:
             )
         try:
             self._require_lock()
-            if step.step_id == "R05_DISABLE_AND_REMOVE_STORES_SUPERVISOR":
+            if step.step_id in {
+                "R05_DISABLE_AND_REMOVE_STORES_SUPERVISOR",
+                "R06_STOP_EXACT_STORES",
+            }:
                 self.operations.apply(request, observed)
             else:
                 self._validate_writer_fence()
@@ -1539,8 +1601,25 @@ class _EmptyRollbackController:
             resource_ledger_sequence=evidence.resource_ledger_sequence,
             eligibility_receipt_sha256=self.plan.eligibility_receipt_sha256,
             retained_audit_set_sha256=self.retained_audit_set_sha256,
-            removed_resource_count=len(self.resources),
+            exact_targets_absent_count=len(self.resources),
         )
+        try:
+            durable = self.receipt_store.write_once(
+                ReceiptArtifact.EMPTY_ROLLBACK,
+                self.claim.execution_id,
+                canonical,
+            )
+        except DurableReceiptError as error:
+            raise EmptyRollbackExecutionError(
+                "empty_rollback_durable_receipt_persistence_failed"
+            ) from error
+        if (
+            durable.receipt_sha256 != canonical["receipt_sha256"]
+            or dict(durable.canonical_receipt) != canonical
+        ):
+            raise EmptyRollbackExecutionError(
+                "empty_rollback_durable_receipt_unconfirmed"
+            )
         return EmptyRollbackExecutionReceipt(
             outcome=outcome,
             execution_id=self.claim.execution_id,
@@ -1550,7 +1629,9 @@ class _EmptyRollbackController:
             journal_sequence=len(records),
             journal_head_sha256=records[-1].record_sha256,
             applied_step_ids=tuple(step.step_id for step in self.plan.steps),
-            canonical_receipt=MappingProxyType(canonical),
+            canonical_receipt=MappingProxyType(
+                dict(durable.canonical_receipt)
+            ),
         )
 
     def _verify_terminal_state_and_evidence(self) -> None:
@@ -1627,7 +1708,7 @@ class _EmptyRollbackController:
         if applied_count >= 3:
             self._require_current_install_binding()
         open_intent = bool(records and records[-1].event == RollbackEvent.INTENT.value)
-        if 6 <= applied_count < len(self.plan.steps):
+        if 7 <= applied_count < len(self.plan.steps):
             self._acquire_and_reverify_writer_fence()
         for index, step in enumerate(self.plan.steps):
             if index < applied_count:
@@ -1666,7 +1747,9 @@ def _run_authorized_empty_store_rollback(
     held_lock: HeldExecutionLockCapability,
     journal_factory: RollbackJournalFactory,
     operations: EmptyRollbackOperations,
+    receipt_store: DurableReceiptStore,
     require_durable_journal: bool,
+    require_production_receipt_store: bool,
 ) -> EmptyRollbackExecutionReceipt:
     """Shared composition; non-durable use is restricted to in-process tests."""
 
@@ -1741,6 +1824,22 @@ def _run_authorized_empty_store_rollback(
         ControllerRuntimeCapabilityError,
     ) as error:
         raise EmptyRollbackExecutionError("empty_rollback_plan_refused") from error
+    if (
+        not callable(journal_factory)
+        or type(receipt_store) is not DurableReceiptStore
+        or type(require_durable_journal) is not bool
+        or type(require_production_receipt_store) is not bool
+    ):
+        raise EmptyRollbackExecutionError("empty_rollback_journal_factory_invalid")
+    try:
+        if require_production_receipt_store:
+            receipt_store.require_production_binding()
+        else:
+            receipt_store.require_synthetic_binding()
+    except DurableReceiptError as error:
+        raise EmptyRollbackExecutionError(
+            "empty_rollback_receipt_store_invalid"
+        ) from error
     claimed = _claim_empty_rollback(
         verified_rollback_capability,
         plan,
@@ -1748,8 +1847,45 @@ def _run_authorized_empty_store_rollback(
         clock=clock,
         held_lock=held_lock,
     )
-    if not callable(journal_factory):
-        raise EmptyRollbackExecutionError("empty_rollback_journal_factory_invalid")
+    claim_evidence = claimed_empty_rollback_evidence(claimed)
+    if claim_evidence.installation_execution_id != plan.installation_execution_id:
+        raise EmptyRollbackExecutionError(
+            "empty_rollback_installation_execution_binding_mismatch"
+        )
+    try:
+        durable_install = receipt_store.read(
+            ReceiptArtifact.INSTALL,
+            plan.installation_execution_id,
+        )
+        if (
+            durable_install.receipt_sha256
+            != plan.installation_receipt_sha256
+            or durable_install.canonical_receipt.get("package_manifest_sha256")
+            != plan.package_manifest_sha256
+        ):
+            raise EmptyRollbackExecutionError(
+                "empty_rollback_install_receipt_preclaim_mismatch"
+            )
+        durable_eligibility = receipt_store.write_once(
+            ReceiptArtifact.EMPTY_ROLLBACK_ELIGIBILITY,
+            plan.installation_execution_id,
+            eligibility_receipt,
+        )
+    except EmptyRollbackExecutionError:
+        raise
+    except DurableReceiptError as error:
+        raise EmptyRollbackExecutionError(
+            "empty_rollback_preclaim_receipt_validation_failed"
+        ) from error
+    if (
+        durable_eligibility.receipt_sha256
+        != plan.eligibility_receipt_sha256
+        or dict(durable_eligibility.canonical_receipt)
+        != dict(eligibility_receipt)
+    ):
+        raise EmptyRollbackExecutionError(
+            "empty_rollback_eligibility_receipt_persistence_mismatch"
+        )
     journal = journal_factory(claimed)
     try:
         if require_durable_journal:
@@ -1770,6 +1906,7 @@ def _run_authorized_empty_store_rollback(
             journal=journal,
             operations=operations,
             held_lock=held_lock,
+            receipt_store=receipt_store,
         ).run()
     finally:
         close = getattr(journal, "close", None)
@@ -1789,6 +1926,7 @@ def _run_authorized_empty_store_rollback_synthetic(
     held_lock: HeldExecutionLockCapability,
     journal_factory: RollbackJournalFactory,
     operations: EmptyRollbackOperations,
+    receipt_store: DurableReceiptStore,
 ) -> EmptyRollbackExecutionReceipt:
     """Private test harness path for fault-injected in-process journals."""
 
@@ -1805,7 +1943,44 @@ def _run_authorized_empty_store_rollback_synthetic(
         held_lock=held_lock,
         journal_factory=journal_factory,
         operations=operations,
+        receipt_store=receipt_store,
         require_durable_journal=False,
+        require_production_receipt_store=False,
+    )
+
+
+def _run_authorized_empty_store_rollback_durable_synthetic(
+    *,
+    verified_rollback_capability: object,
+    verified_package_capability: object,
+    verified_controller_runtime_capability: object,
+    eligibility_receipt: Mapping[str, object],
+    resources: object,
+    authority_state: AuthorityState,
+    clock: TrustedUtcClock,
+    held_lock: HeldExecutionLockCapability,
+    journal_factory: RollbackJournalFactory,
+    operations: EmptyRollbackOperations,
+    receipt_store: DurableReceiptStore,
+) -> EmptyRollbackExecutionReceipt:
+    """Private durable-journal test path requiring a synthetic receipt store."""
+
+    return _run_authorized_empty_store_rollback(
+        verified_rollback_capability=verified_rollback_capability,
+        verified_package_capability=verified_package_capability,
+        verified_controller_runtime_capability=(
+            verified_controller_runtime_capability
+        ),
+        eligibility_receipt=eligibility_receipt,
+        resources=resources,
+        authority_state=authority_state,
+        clock=clock,
+        held_lock=held_lock,
+        journal_factory=journal_factory,
+        operations=operations,
+        receipt_store=receipt_store,
+        require_durable_journal=True,
+        require_production_receipt_store=False,
     )
 
 
@@ -1821,6 +1996,7 @@ def run_authorized_empty_store_rollback(
     held_lock: HeldExecutionLockCapability,
     journal_factory: RollbackJournalFactory,
     operations: EmptyRollbackOperations,
+    receipt_store: DurableReceiptStore,
 ) -> EmptyRollbackExecutionReceipt:
     """Claim and execute only with the exact durable rollback journal."""
 
@@ -1837,7 +2013,9 @@ def run_authorized_empty_store_rollback(
         held_lock=held_lock,
         journal_factory=journal_factory,
         operations=operations,
+        receipt_store=receipt_store,
         require_durable_journal=True,
+        require_production_receipt_store=True,
     )
 
 

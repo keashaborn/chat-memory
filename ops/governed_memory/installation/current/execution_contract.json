@@ -1,6 +1,6 @@
 {
-  "schema_version": "governed-memory-dormant-store-install-inactive-execution-package-v2",
-  "state": "repository-only-claim-bound-controller-compositions-packaged-not-installed-not-activated",
+  "schema_version": "governed-memory-dormant-store-install-inactive-execution-package-v3",
+  "state": "repository-only-closed-install-rollback-and-runtime-builder-compositions-packaged-not-installed-not-activated",
   "server": "seebx",
   "package_manifest_relationship": {
     "this_contract_is_hash_bound_by_package_manifest": true,
@@ -25,8 +25,12 @@
     "approval_authorizes_execution": false,
     "claim_bound_install_controller_composition_callable_non_cli": true,
     "claim_bound_empty_rollback_controller_composition_callable_non_cli": true,
-    "concrete_live_install_store_effect_adapter_implemented": false,
-    "concrete_live_empty_rollback_store_effect_adapter_implemented": false,
+    "closed_postclaim_linux_install_adapter_implemented": true,
+    "closed_ledger_bound_physical_empty_rollback_adapter_implemented": true,
+    "selected_live_linux_platform_transport_factory_implemented": false,
+    "pinned_postgresql_live_driver_selected": false,
+    "controller_runtime_release_builder_orchestration_implemented": true,
+    "controller_runtime_build_transport_implemented": false,
     "activation_executor_implemented": false,
     "host_commands_executed_in_this_repository_phase": 0,
     "docker_calls_in_this_repository_phase": 0,
@@ -72,7 +76,9 @@
     "install_receipt_replay_requires_fresh_terminal_store_readiness_probe": true,
     "empty_rollback_resume_revalidates_install_receipt_and_resource_ledger": true,
     "completed_empty_rollback_replay_reproves_exact_resource_absence": true,
-    "empty_rollback_writer_fence_held_from_r06_through_receipt": true,
+    "empty_rollback_stops_exact_stores_before_writer_fence": true,
+    "empty_rollback_writer_fence_held_from_r07_through_receipt": true,
+    "fresh_offline_read_only_empty_recheck_required_at_r07_under_stopped_store_fence": true,
     "destructive_rollback_steps_atomically_recheck_empty_under_fence": true,
     "retained_audit_artifact_hashes_bound_to_rollback_receipt": true,
     "end_to_end_live_process_crash_recovery_claimed": false
@@ -91,7 +97,9 @@
     "controller_runtime_secure_verifier_packaged": true,
     "exact_release_path_supervisor_launcher_packaged": true,
     "each_host_request_and_ownership_receipt_binds_verified_full_release_tree_sha256": true,
-    "concrete_store_effect_adapters_packaged": false
+    "closed_store_effect_adapters_packaged": true,
+    "selected_live_platform_transports_packaged": false,
+    "caller_selected_argv_url_sql_host_or_port_allowed": false
   },
   "receipt_policy": {
     "install_and_empty_rollback_use_distinct_schemas": true,
@@ -102,6 +110,13 @@
     "install_receipt_binds_verified_runtime_and_full_release_tree_identity": true,
     "empty_rollback_receipt_binds_verified_install_receipt_and_exact_ledger": true,
     "empty_rollback_receipt_binds_verified_runtime_and_full_release_tree_identity": true,
+    "durable_create_once_install_eligibility_and_rollback_receipt_store_packaged": true,
+    "install_receipt_persisted_before_return": true,
+    "rollback_authority_claim_precedes_durable_receipt_reads_and_eligibility_persistence": true,
+    "final_rollback_receipt_persisted_while_writer_fence_held": true,
+    "canonical_production_executions_root": "/var/lib/governed-memory-controller/executions",
+    "public_install_and_rollback_entrypoints_require_root_owned_production_receipt_store": true,
+    "synthetic_receipt_stores_accepted_only_by_private_in_process_test_wrappers": true,
     "receipt_schema_files_hash_bound_by_package": true,
     "activation_receipt_packaged": false
   },
@@ -119,7 +134,10 @@
   },
   "remaining_blockers": [
     "controller_runtime_and_release_substrate_not_separately_built_installed_or_receipted",
-    "concrete_live_install_and_empty_rollback_store_effect_adapters_not_packaged",
+    "approved_standalone_cpython_and_offline_wheelhouse_not_staged",
+    "controller_runtime_build_transport_not_packaged",
+    "selected_live_linux_platform_transport_factory_not_packaged",
+    "pinned_postgresql_driver_not_selected",
     "live_disposable_linux_proof_not_run",
     "images_not_staged_or_receipted",
     "authority_substrate_and_trusted_clock_not_installed",

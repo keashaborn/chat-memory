@@ -43,6 +43,9 @@ from tests.memory.test_installation_durable_journal import (
     _Fixture,
     _encoded_record,
 )
+from tests.memory.resource_identity_test_support import (
+    append_resource_identity,
+)
 
 RESOURCE_LABELS_SHA256 = "d" * 64
 
@@ -53,7 +56,10 @@ class _DurableControllerBackend:
     def __init__(self, journal: DurableJournal) -> None:
         self.journal = journal
         self.states = {
-            step.step_id: StepState.BEFORE for step in STORES_ONLY_PLAN
+            step.step_id: (
+                StepState.AFTER if step.invariant_only else StepState.BEFORE
+            )
+            for step in STORES_ONLY_PLAN
         }
         self.apply_calls: Counter[str] = Counter()
 
@@ -251,11 +257,9 @@ class InstallationDurabilityAnchorTests(unittest.TestCase):
         ledger = self._ledger(create=True)
         self._append_network_identity(ledger)
         path = Path(self.evidence.resource_identity_ledger_path)
-        compatibility_writer = ResourceIdentityLedger(
+        append_resource_identity(
             path,
             binding_sha256=ledger.binding_sha256,
-        )
-        compatibility_writer.append(
             event="observed",
             resource_kind="network",
             resource_name="governed-memory-test-net",
@@ -369,11 +373,10 @@ class InstallationDurabilityAnchorTests(unittest.TestCase):
 
     def test_resource_ledger_multi_entry_anchor_gap_refuses(self) -> None:
         secure = self._ledger(create=True)
-        compatibility_writer = ResourceIdentityLedger(
-            Path(self.evidence.resource_identity_ledger_path),
+        path = Path(self.evidence.resource_identity_ledger_path)
+        append_resource_identity(
+            path,
             binding_sha256=secure.binding_sha256,
-        )
-        compatibility_writer.append(
             event="created",
             resource_kind="network",
             resource_name="governed-memory-test-net",
@@ -381,7 +384,9 @@ class InstallationDurabilityAnchorTests(unittest.TestCase):
             ownership_sha256=HASH_C,
             resource_labels_sha256=RESOURCE_LABELS_SHA256,
         )
-        compatibility_writer.append(
+        append_resource_identity(
+            path,
+            binding_sha256=secure.binding_sha256,
             event="observed",
             resource_kind="network",
             resource_name="governed-memory-test-net",

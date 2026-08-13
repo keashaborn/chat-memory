@@ -38,7 +38,10 @@ class _HermeticBackend:
     def __init__(self) -> None:
         self.records: list[JournalRecord] = []
         self.states = {
-            step.step_id: StepState.BEFORE for step in STORES_ONLY_PLAN
+            step.step_id: (
+                StepState.AFTER if step.invariant_only else StepState.BEFORE
+            )
+            for step in STORES_ONLY_PLAN
         }
         self.actions: list[tuple[str, str]] = []
         self.fail_before_step: str | None = None
@@ -70,9 +73,13 @@ class _HermeticBackend:
         if self.fail_before_step == step.step_id:
             self.fail_before_step = None
             raise RuntimeError("synthetic_pre_effect_failure")
-        if self.states[step.step_id] is not StepState.BEFORE:
+        expected = (
+            StepState.AFTER if step.invariant_only else StepState.BEFORE
+        )
+        if self.states[step.step_id] is not expected:
             raise RuntimeError("synthetic_effect_already_present")
-        self.states[step.step_id] = StepState.AFTER
+        if not step.invariant_only:
+            self.states[step.step_id] = StepState.AFTER
         if self.inject_after_apply is not None and (
             self.inject_after_apply[0] == step.step_id
         ):
@@ -201,8 +208,15 @@ class DormantStoreInstallControllerTests(unittest.TestCase):
                 "empty_rollback_controller_emits_canonical_receipt": True,
                 "typed_operation_specific_boundary_packaged": True,
                 "generic_store_mutation_argv_surface_packaged": False,
-                "concrete_install_store_effect_adapters_packaged": False,
-                "concrete_empty_rollback_store_effect_adapters_packaged": False,
+                "closed_install_store_effect_adapter_packaged": True,
+                "closed_empty_rollback_store_effect_adapter_packaged": True,
+                "selected_live_platform_transports_packaged": False,
+                "pinned_postgresql_driver_selected": False,
+                "durable_create_once_receipt_store_packaged": True,
+                "public_entrypoints_require_canonical_root_owned_production_receipt_store": True,
+                "synthetic_receipt_stores_are_private_test_only": True,
+                "controller_runtime_release_builder_orchestration_packaged": True,
+                "controller_runtime_build_transport_packaged": False,
                 "activation_entrypoint_packaged": False,
                 "bounded_image_inspect_runner_primitive_packaged": True,
                 "local_image_inspect_adapter_packaged": True,

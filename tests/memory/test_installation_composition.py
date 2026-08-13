@@ -43,6 +43,7 @@ from tools.governed_memory_install.image_preflight import (
     LocalImageSetReadiness,
 )
 from tools.governed_memory_install.install_backend import (
+    ClaimBoundInstallDependencies,
     ClaimBoundInstallBackend,
     InstallBackendError,
     InstallPrerequisites,
@@ -50,13 +51,13 @@ from tools.governed_memory_install.install_backend import (
 from tools.governed_memory_install.install_entrypoint import (
     INACTIVE_REFUSAL_CODE,
     InstallEntrypointError,
+    _run_authorized_dormant_store_install_synthetic,
     run_authorized_dormant_store_install,
 )
+from tools.governed_memory_install.durable_receipts import DurableReceiptStore
 from tools.governed_memory_install.journal import DurableJournal
 from tools.governed_memory_install.linux_plan import (
     ExecutionBinding,
-    ExactStoreEnvironment,
-    ExactStoreEnvironmentSet,
     LinuxPlanError,
     bind_store_spec,
     validate_store_spec,
@@ -67,9 +68,11 @@ from tools.governed_memory_install.package_capability import (
     verify_install_package_capability,
 )
 from tools.governed_memory_install.store_readiness import (
+    EXPECTED_QDRANT_COLLECTION_CONFIG_SHA256,
     EmptyStoreReadiness,
-    PostgreSQLReadiness,
+    PrebootstrapPostgreSQLReadiness,
     QdrantReadiness,
+    REQUIRED_ROLE_NAMES,
     StoreReadinessError,
     TERMINAL_MIGRATION_IDS,
     TerminalCanonicalStoreReadiness,
@@ -79,7 +82,6 @@ from tools.governed_memory_install.store_readiness import (
 from tools.governed_memory_install.resource_identity import (
     ResourceIdentityError,
     ResourceIdentityLedger,
-    resource_ledger_binding_sha256,
 )
 from tools.governed_memory_install.rollback import ROLLBACK_RESOURCE_KEYS
 from tools.governed_memory_install.receipts import verify_install_receipt
@@ -91,6 +93,7 @@ from tools.governed_memory_install.controller_runtime import (
 from tools.governed_memory_install.image_preflight import (
     expectations_from_store_spec,
 )
+from tests.memory.test_installation_durable_journal import _Fixture
 
 
 HASH_A = "a" * 64
@@ -121,11 +124,13 @@ def _static_store_spec() -> dict[str, object]:
     )
 
 
-def _resolved_store_spec() -> dict[str, object]:
+def _resolved_store_spec(
+    journal_binding_sha256: str = JOURNAL_BINDING_SHA256,
+) -> dict[str, object]:
     return bind_store_spec(
         _static_store_spec(),
         ExecutionBinding(
-            binding_sha256=JOURNAL_BINDING_SHA256,
+            binding_sha256=journal_binding_sha256,
             authorization_id=AUTHORIZATION_ID,
             authorization_nonce_sha256=AUTHORIZATION_NONCE_SHA256,
             execution_id="7" * 64,
@@ -206,6 +211,8 @@ def _synthetic_runtime_capability(
         python_version="3.12.11",
         platform_os="linux",
         platform_architecture="x86_64",
+        persistent_controller_substrate_created=True,
+        persistent_store_resources_created=False,
     )
     return _VerifiedControllerRuntimeCapability(evidence, _RUNTIME_TOKEN)
 
@@ -219,7 +226,10 @@ def _terminal_readiness(
             16,
             "governed_memory",
             TERMINAL_MIGRATION_IDS,
+            "7" * 64,
+            "8" * 64,
             governed_user_row_count,
+            0,
             0,
             "9" * 64,
         ),
@@ -230,6 +240,8 @@ def _terminal_readiness(
             "governed_memory_active",
             True,
             "governed_memory_9a54cf123493_000001",
+            EXPECTED_QDRANT_COLLECTION_CONFIG_SHA256,
+            0,
             0,
             0,
             "a" * 64,
@@ -237,7 +249,16 @@ def _terminal_readiness(
     )
 
 
-def _binding() -> object:
+def _binding(
+    *,
+    journal_binding_sha256: str = JOURNAL_BINDING_SHA256,
+    resolved_store_spec: dict[str, object] | None = None,
+) -> object:
+    selected_store_spec = (
+        _resolved_store_spec(journal_binding_sha256)
+        if resolved_store_spec is None
+        else resolved_store_spec
+    )
     evidence = ClaimedExecutionBindingEvidence(
         result_type="dormant_store_install_claimed_execution_binding_v1",
         claim_result="claimed_new",
@@ -283,7 +304,7 @@ def _binding() -> object:
         supervisor_launcher_sha256="f" * 64,
         store_spec_sha256="2" * 64,
         resolved_store_spec_sha256=hashlib.sha256(
-            _canonical(_resolved_store_spec())
+            _canonical(selected_store_spec)
         ).hexdigest(),
         resource_identity_implementation_sha256="3" * 64,
         global_lock_path_sha256="4" * 64,
@@ -293,9 +314,50 @@ def _binding() -> object:
         execution_journal_path="/tmp/execution/journal.jsonl",
         execution_id="7" * 64,
         attempt_id="install-" + "9" * 40,
-        journal_binding_sha256=JOURNAL_BINDING_SHA256,
+        journal_binding_sha256=journal_binding_sha256,
     )
     return _ClaimedExecutionBinding(evidence, _CLAIMED_EXECUTION_TOKEN)
+
+
+class _Readiness:
+    def __init__(self) -> None:
+        self.fresh_calls = 0
+        self.terminal_calls = 0
+        self.terminal_user_row_count = 0
+
+    def verify_fresh_empty_stores(self) -> EmptyStoreReadiness:
+        self.fresh_calls += 1
+        return EmptyStoreReadiness.create(
+            PrebootstrapPostgreSQLReadiness(
+                "127.0.0.1:55432",
+                16,
+                "postgres",
+                "governed_memory",
+                False,
+                REQUIRED_ROLE_NAMES,
+                (),
+                0,
+                "7" * 64,
+            ),
+            QdrantReadiness(
+                "127.0.0.1:6343",
+                "1.19.0",
+                "governed_memory_9a54cf123493_000001",
+                "governed_memory_active",
+                False,
+                0,
+                0,
+                "8" * 64,
+            ),
+        )
+
+    def verify_terminal_canonical_stores(
+        self,
+    ) -> TerminalCanonicalStoreReadiness:
+        self.terminal_calls += 1
+        return _terminal_readiness(
+            governed_user_row_count=self.terminal_user_row_count
+        )
 
 
 def _prerequisites() -> InstallPrerequisites:
@@ -320,50 +382,6 @@ def _prerequisites() -> InstallPrerequisites:
             ),
         )
     )
-    environments = ExactStoreEnvironmentSet(
-        ExactStoreEnvironment(
-            "postgres",
-            frozenset({"POSTGRES_DB", "POSTGRES_PASSWORD", "POSTGRES_USER"}),
-            {"POSTGRES_PASSWORD": "5" * 64},
-        ),
-        ExactStoreEnvironment(
-            "qdrant",
-            frozenset({"QDRANT__SERVICE__API_KEY"}),
-            {"QDRANT__SERVICE__API_KEY": "6" * 64},
-        ),
-    )
-    class _Readiness:
-        def __init__(self) -> None:
-            self.fresh_calls = 0
-            self.terminal_calls = 0
-            self.terminal_user_row_count = 0
-
-        def verify_fresh_empty_stores(self) -> EmptyStoreReadiness:
-            self.fresh_calls += 1
-            return EmptyStoreReadiness.create(
-                PostgreSQLReadiness(
-                    "127.0.0.1:55432", 16, "governed_memory", 0, 0, 0, "7" * 64
-                ),
-                QdrantReadiness(
-                    "127.0.0.1:6343",
-                    "1.19.0",
-                    "governed_memory_9a54cf123493_000001",
-                    "governed_memory_active",
-                    False,
-                    0,
-                    0,
-                    "8" * 64,
-                ),
-            )
-
-        def verify_terminal_canonical_stores(
-            self,
-        ) -> TerminalCanonicalStoreReadiness:
-            self.terminal_calls += 1
-            return _terminal_readiness(
-                governed_user_row_count=self.terminal_user_row_count
-            )
-
     return InstallPrerequisites(
         store_spec_sha256="2" * 64,
         controller_runtime_receipt_sha256=RUNTIME_RECEIPT_SHA256,
@@ -393,8 +411,6 @@ def _prerequisites() -> InstallPrerequisites:
         supervisor_launcher_sha256="f" * 64,
         local_images=images,
         expected_images=expected_images,
-        environments=environments,
-        readiness_probe=_Readiness(),
     )
 
 
@@ -424,7 +440,10 @@ class _Journal:
 
 class _TypedHost:
     def __init__(self) -> None:
-        self.states = {step.step_id: "before" for step in STORES_ONLY_PLAN}
+        self.states = {
+            step.step_id: ("after" if step.invariant_only else "before")
+            for step in STORES_ONLY_PLAN
+        }
         self.operations: list[str] = []
         self.tamper_ownership = False
         self.omit_identity_step: str | None = None
@@ -542,6 +561,18 @@ class _TypedHost:
 class InstallationCompositionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
+        self.identity_fixture = _Fixture(
+            Path(self.temporary.name) / "identity-fixture"
+        )
+        self.identity_binding = self.identity_fixture.claimed_binding()
+        self.identity_evidence = _claimed_execution_binding_evidence(
+            self.identity_binding
+        )
+        identity_parent = Path(
+            self.identity_evidence.resource_identity_ledger_path
+        ).parent
+        identity_parent.mkdir(parents=True, mode=0o700)
+        os.chmod(identity_parent, 0o700)
         directory = Path(self.temporary.name) / "lock"
         directory.mkdir(mode=0o700)
         os.chmod(directory, 0o700)
@@ -549,21 +580,39 @@ class InstallationCompositionTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.lock.close()
+        self.identity_fixture.close()
         self.temporary.cleanup()
+
+    def _identity_ledger(self) -> ResourceIdentityLedger:
+        path = Path(self.identity_evidence.resource_identity_ledger_path)
+        return ResourceIdentityLedger(
+            path,
+            claimed_execution_binding=self.identity_binding,
+            authority_state=self.identity_fixture.state,
+            held_lock=self.identity_fixture.execution_lock.held_capability(),
+            create=not path.exists(),
+        )
 
     def _backend(self) -> tuple[ClaimBoundInstallBackend, _Journal, _TypedHost]:
         journal = _Journal()
         host = _TypedHost()
+        readiness = _Readiness()
+        resolved_store_spec = _resolved_store_spec(
+            self.identity_evidence.journal_binding_sha256
+        )
         backend = ClaimBoundInstallBackend(
-            claimed_execution_binding=_binding(),
+            claimed_execution_binding=_binding(
+                journal_binding_sha256=(
+                    self.identity_evidence.journal_binding_sha256
+                ),
+                resolved_store_spec=resolved_store_spec,
+            ),
             journal=journal,
             host_operations=host,
+            readiness_probe=readiness,
             prerequisites=_prerequisites(),
-            resource_identity_ledger=ResourceIdentityLedger(
-                Path(self.temporary.name) / "resources.jsonl",
-                binding_sha256=resource_ledger_binding_sha256("8" * 64),
-            ),
-            resolved_store_spec=_resolved_store_spec(),
+            resource_identity_ledger=self._identity_ledger(),
+            resolved_store_spec=resolved_store_spec,
         )
         return backend, journal, host
 
@@ -867,7 +916,9 @@ class InstallationCompositionTests(unittest.TestCase):
         self.assertEqual(backend.resource_identity_records(), ())
 
     def test_backend_rejects_resolved_store_spec_drift(self) -> None:
-        resolved = _resolved_store_spec()
+        resolved = _resolved_store_spec(
+            self.identity_evidence.journal_binding_sha256
+        )
         resolved["resources"]["network"]["labels"][
             "lifeswitch.governed-memory.authorization-id"
         ] = "different-auth"
@@ -875,26 +926,43 @@ class InstallationCompositionTests(unittest.TestCase):
             InstallBackendError, "install_resolved_store_spec_invalid"
         ):
             ClaimBoundInstallBackend(
-                claimed_execution_binding=_binding(),
+                claimed_execution_binding=_binding(
+                    journal_binding_sha256=(
+                        self.identity_evidence.journal_binding_sha256
+                    ),
+                    resolved_store_spec=resolved,
+                ),
                 journal=_Journal(),
                 host_operations=_TypedHost(),
+                readiness_probe=_Readiness(),
                 prerequisites=_prerequisites(),
-                resource_identity_ledger=ResourceIdentityLedger(
-                    Path(self.temporary.name) / "drift-resources.jsonl",
-                    binding_sha256=resource_ledger_binding_sha256(
-                        JOURNAL_BINDING_SHA256
-                    ),
-                ),
+                resource_identity_ledger=self._identity_ledger(),
                 resolved_store_spec=resolved,
             )
 
     def test_readiness_rejects_boolean_numeric_fields(self) -> None:
         constructors = (
-            lambda: PostgreSQLReadiness(
-                "127.0.0.1:55432", False, "governed_memory", 0, 0, 0, "1" * 64
+            lambda: PrebootstrapPostgreSQLReadiness(
+                "127.0.0.1:55432",
+                False,
+                "postgres",
+                "governed_memory",
+                False,
+                REQUIRED_ROLE_NAMES,
+                (),
+                0,
+                "1" * 64,
             ),
-            lambda: PostgreSQLReadiness(
-                "127.0.0.1:55432", 16, "governed_memory", False, 0, 0, "1" * 64
+            lambda: PrebootstrapPostgreSQLReadiness(
+                "127.0.0.1:55432",
+                16,
+                "postgres",
+                "governed_memory",
+                0,
+                REQUIRED_ROLE_NAMES,
+                (),
+                0,
+                "1" * 64,
             ),
             lambda: QdrantReadiness(
                 "127.0.0.1:6343",
@@ -907,8 +975,16 @@ class InstallationCompositionTests(unittest.TestCase):
                 "2" * 64,
             ),
             lambda: EmptyStoreReadiness.create(
-                PostgreSQLReadiness(
-                    "127.0.0.1:55432", 16, "governed_memory", 0, 0, 0, "1" * 64
+                PrebootstrapPostgreSQLReadiness(
+                    "127.0.0.1:55432",
+                    16,
+                    "postgres",
+                    "governed_memory",
+                    False,
+                    REQUIRED_ROLE_NAMES,
+                    (),
+                    0,
+                    "1" * 64,
                 ),
                 QdrantReadiness(
                     "127.0.0.1:6343",
@@ -927,7 +1003,10 @@ class InstallationCompositionTests(unittest.TestCase):
                 16,
                 "governed_memory",
                 TERMINAL_MIGRATION_IDS,
+                "7" * 64,
+                "8" * 64,
                 False,
+                0,
                 0,
                 "9" * 64,
             ),
@@ -938,6 +1017,8 @@ class InstallationCompositionTests(unittest.TestCase):
                 "governed_memory_active",
                 False,
                 "governed_memory_9a54cf123493_000001",
+                EXPECTED_QDRANT_COLLECTION_CONFIG_SHA256,
+                0,
                 0,
                 0,
                 "a" * 64,
@@ -949,6 +1030,8 @@ class InstallationCompositionTests(unittest.TestCase):
                 "governed_memory_active",
                 True,
                 "wrong_collection",
+                EXPECTED_QDRANT_COLLECTION_CONFIG_SHA256,
+                0,
                 0,
                 0,
                 "a" * 64,
@@ -996,9 +1079,10 @@ class InstallationCompositionTests(unittest.TestCase):
                 clock=None,  # type: ignore[arg-type]
                 held_lock=self.lock.held_capability(),
                 journal_factory=lambda unused: calls.append("journal"),  # type: ignore[arg-type]
-                host_operations=None,  # type: ignore[arg-type]
+                dependencies_factory=None,  # type: ignore[arg-type]
                 prerequisites=None,  # type: ignore[arg-type]
                 resource_identity_ledger_factory=None,  # type: ignore[arg-type]
+                receipt_store=None,  # type: ignore[arg-type]
             )
         self.assertEqual(calls, [])
 
@@ -1007,11 +1091,12 @@ class InstallationCompositionTests(unittest.TestCase):
     ) -> None:
         root = Path(self.temporary.name)
         state_dir = root / "authority"
-        execution_dir = root / "executions"
+        execution_dir = (root / "executions").resolve()
         state_dir.mkdir(mode=0o700)
         execution_dir.mkdir(mode=0o700)
         os.chmod(state_dir, 0o700)
         os.chmod(execution_dir, 0o700)
+        receipt_store = DurableReceiptStore.synthetic(execution_dir)
         state = AuthorityState(state_dir / "authority.sqlite3", create=True)
         contract = {
             "exact_targets": {
@@ -1128,6 +1213,10 @@ class InstallationCompositionTests(unittest.TestCase):
             ).hexdigest(),
         )
         host = _TypedHost()
+        readiness_probe = _Readiness()
+
+        def dependencies_factory(**unused: object) -> ClaimBoundInstallDependencies:
+            return ClaimBoundInstallDependencies(host, readiness_probe)
 
         def journal_factory(claimed: object) -> DurableJournal:
             evidence = _claimed_execution_binding_evidence(claimed)
@@ -1153,49 +1242,9 @@ class InstallationCompositionTests(unittest.TestCase):
                 create=not path.exists(),
             )
 
-        receipt = run_authorized_dormant_store_install(
-            verified_scope_capability=scope_capability,
-            verified_package_capability=package_capability,
-            verified_controller_runtime_capability=runtime_capability,
-            authority_state=state,
-            clock=_Clock(),
-            held_lock=self.lock.held_capability(),
-            journal_factory=journal_factory,
-            resource_identity_ledger_factory=ledger_factory,
-            host_operations=host,
-            prerequisites=prerequisites,
-        )
-        verified = verify_install_receipt(receipt)
-        readiness_probe = prerequisites.readiness_probe
-        self.assertEqual(verified["resource_ledger_sequence"], 15)
-        self.assertEqual(verified["journal_sequence"], 38)
-        self.assertEqual(
-            verified["terminal_store_readiness_sha256"],
-            backend_readiness_sha := _terminal_readiness().receipt_sha256,
-        )
-        self.assertRegex(backend_readiness_sha, r"^[0-9a-f]{64}$")
-        self.assertEqual(readiness_probe.fresh_calls, 1)
-        self.assertEqual(readiness_probe.terminal_calls, 1)
-        resumed = run_authorized_dormant_store_install(
-            verified_scope_capability=scope_capability,
-            verified_package_capability=package_capability,
-            verified_controller_runtime_capability=runtime_capability,
-            authority_state=state,
-            clock=_Clock(),
-            held_lock=self.lock.held_capability(),
-            journal_factory=journal_factory,
-            resource_identity_ledger_factory=ledger_factory,
-            host_operations=host,
-            prerequisites=prerequisites,
-        )
-        self.assertEqual(resumed, verified)
-        self.assertEqual(len(host.operations), 19)
-        self.assertEqual(readiness_probe.fresh_calls, 1)
-        self.assertEqual(readiness_probe.terminal_calls, 2)
-
-        readiness_probe.terminal_user_row_count = 1
         with self.assertRaisesRegex(
-            InstallEntrypointError, "dormant_install_backend_refused"
+            InstallEntrypointError,
+            "dormant_install_composition_dependency_invalid",
         ):
             run_authorized_dormant_store_install(
                 verified_scope_capability=scope_capability,
@@ -1206,8 +1255,69 @@ class InstallationCompositionTests(unittest.TestCase):
                 held_lock=self.lock.held_capability(),
                 journal_factory=journal_factory,
                 resource_identity_ledger_factory=ledger_factory,
-                host_operations=host,
+                dependencies_factory=dependencies_factory,
                 prerequisites=prerequisites,
+                receipt_store=receipt_store,
+            )
+        self.assertEqual(host.operations, [])
+
+        receipt = _run_authorized_dormant_store_install_synthetic(
+            verified_scope_capability=scope_capability,
+            verified_package_capability=package_capability,
+            verified_controller_runtime_capability=runtime_capability,
+            authority_state=state,
+            clock=_Clock(),
+            held_lock=self.lock.held_capability(),
+            journal_factory=journal_factory,
+            resource_identity_ledger_factory=ledger_factory,
+            dependencies_factory=dependencies_factory,
+            prerequisites=prerequisites,
+            receipt_store=receipt_store,
+        )
+        verified = verify_install_receipt(receipt)
+        self.assertEqual(verified["resource_ledger_sequence"], 15)
+        self.assertEqual(verified["journal_sequence"], 38)
+        self.assertEqual(
+            verified["terminal_store_readiness_sha256"],
+            backend_readiness_sha := _terminal_readiness().receipt_sha256,
+        )
+        self.assertRegex(backend_readiness_sha, r"^[0-9a-f]{64}$")
+        self.assertEqual(readiness_probe.fresh_calls, 1)
+        self.assertEqual(readiness_probe.terminal_calls, 1)
+        resumed = _run_authorized_dormant_store_install_synthetic(
+            verified_scope_capability=scope_capability,
+            verified_package_capability=package_capability,
+            verified_controller_runtime_capability=runtime_capability,
+            authority_state=state,
+            clock=_Clock(),
+            held_lock=self.lock.held_capability(),
+            journal_factory=journal_factory,
+            resource_identity_ledger_factory=ledger_factory,
+            dependencies_factory=dependencies_factory,
+            prerequisites=prerequisites,
+            receipt_store=receipt_store,
+        )
+        self.assertEqual(resumed, verified)
+        self.assertEqual(len(host.operations), 19)
+        self.assertEqual(readiness_probe.fresh_calls, 1)
+        self.assertEqual(readiness_probe.terminal_calls, 2)
+
+        readiness_probe.terminal_user_row_count = 1
+        with self.assertRaisesRegex(
+            InstallEntrypointError, "dormant_install_backend_refused"
+        ):
+            _run_authorized_dormant_store_install_synthetic(
+                verified_scope_capability=scope_capability,
+                verified_package_capability=package_capability,
+                verified_controller_runtime_capability=runtime_capability,
+                authority_state=state,
+                clock=_Clock(),
+                held_lock=self.lock.held_capability(),
+                journal_factory=journal_factory,
+                resource_identity_ledger_factory=ledger_factory,
+                dependencies_factory=dependencies_factory,
+                prerequisites=prerequisites,
+                receipt_store=receipt_store,
             )
         self.assertEqual(readiness_probe.terminal_calls, 3)
         self.assertEqual(len(host.operations), 19)

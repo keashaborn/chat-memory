@@ -44,17 +44,17 @@ def observation(operation: str, *, state: str) -> dict[str, object]:
     }
 
 
-class Phase9BReleaseArtifactTests(unittest.TestCase):
+class Phase9DReleaseArtifactTests(unittest.TestCase):
     def test_current_package_and_retained_application_evidence_verify(self) -> None:
         result = verify_candidate_artifacts()
         self.assertEqual(
             result["schema_version"],
-            "governed-memory-release-artifact-verification-v6",
+            "governed-memory-release-artifact-verification-v7",
         )
         self.assertEqual(
             result["phase"],
-            "phase9b_canonical_dormant_store_install_and_empty_rollback_"
-            "controllers_packaged_inactive_activation_blocked",
+            "phase9d_repository_only_install_empty_rollback_contract_repair_"
+            "adapters_and_runtime_builder_packaged_inactive_activation_blocked",
         )
         self.assertTrue(result["artifact_integrity_verified"])
         self.assertTrue(
@@ -83,7 +83,7 @@ class Phase9BReleaseArtifactTests(unittest.TestCase):
         self.assertTrue(
             result["current_store_package_static_verification_complete"]
         )
-        self.assertEqual(result["current_store_package_artifact_count"], 56)
+        self.assertEqual(result["current_store_package_artifact_count"], 62)
         self.assertTrue(result["synthetic_proof_harness_packaged"])
         self.assertFalse(result["current_store_synthetic_proof_complete"])
         self.assertFalse(
@@ -118,10 +118,15 @@ class Phase9BReleaseArtifactTests(unittest.TestCase):
         self.assertFalse(result["controller_runtime_built_or_installed"])
         self.assertFalse(result["controller_release_staged"])
         self.assertFalse(result["stores_install_owns_or_removes_controller_substrate"])
-        self.assertFalse(result["concrete_install_store_effect_adapters_packaged"])
-        self.assertFalse(
-            result["concrete_empty_rollback_store_effect_adapters_packaged"]
+        self.assertTrue(result["closed_install_store_effect_adapter_packaged"])
+        self.assertTrue(result["closed_empty_rollback_store_effect_adapter_packaged"])
+        self.assertFalse(result["selected_live_platform_transports_packaged"])
+        self.assertFalse(result["pinned_postgresql_driver_selected"])
+        self.assertTrue(result["durable_create_once_receipt_store_packaged"])
+        self.assertTrue(
+            result["controller_runtime_release_builder_orchestration_packaged"]
         )
+        self.assertFalse(result["controller_runtime_build_transport_packaged"])
         self.assertFalse(result["activation_executor_packaged"])
         self.assertFalse(result["installation_authorized"])
         self.assertFalse(result["activation_authorized"])
@@ -323,8 +328,13 @@ class Phase9BReleaseArtifactTests(unittest.TestCase):
                 "completed_install_and_empty_rollback_replay_reverification_packaged",
                 False,
             ),
-            ("concrete_install_store_effect_adapters_packaged", True),
-            ("concrete_empty_rollback_store_effect_adapters_packaged", True),
+            ("closed_install_store_effect_adapter_packaged", False),
+            ("closed_empty_rollback_store_effect_adapter_packaged", False),
+            ("selected_live_platform_transports_packaged", True),
+            ("pinned_postgresql_driver_selected", True),
+            ("durable_create_once_receipt_store_packaged", False),
+            ("controller_runtime_release_builder_orchestration_packaged", False),
+            ("controller_runtime_build_transport_packaged", True),
             ("images_staged_by_verifier", True),
             ("secrets_touched_by_verifier", True),
         ):

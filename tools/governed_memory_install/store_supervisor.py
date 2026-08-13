@@ -13,7 +13,12 @@ import json
 from pathlib import Path
 from typing import Mapping, Protocol, Sequence
 
-from .host_boundary import CommandResult, CommandRunner, DOCKER_BINARY
+from .host_boundary import (
+    CommandResult,
+    CommandRunner,
+    DOCKER_BINARY,
+    SUPERVISOR_INSPECT_TEMPLATES,
+)
 from .linux_plan import canonical_labels_sha256, load_store_spec
 from .resource_identity import (
     load_ledger,
@@ -167,22 +172,48 @@ class StoreSupervisor:
         self._containers = containers
 
     def _inspect(self, expected: ExactContainer) -> ContainerState:
-        result = self._runner.run(
-            (
-                DOCKER_BINARY,
-                "container",
-                "inspect",
-                "--format",
-                "{{json .}}",
-                expected.container_id,
+        projected: list[object] = []
+        for template in SUPERVISOR_INSPECT_TEMPLATES:
+            result = self._runner.run(
+                (
+                    DOCKER_BINARY,
+                    "container",
+                    "inspect",
+                    "--format",
+                    template,
+                    expected.container_id,
+                )
             )
-        )
-        try:
-            observed = json.loads(result.stdout)
-        except (TypeError, json.JSONDecodeError) as error:
-            raise StoreSupervisorError("container_inspect_json_invalid") from error
-        if type(observed) is not dict:
-            raise StoreSupervisorError("container_inspect_shape_invalid")
+            try:
+                projected.append(json.loads(result.stdout))
+            except (TypeError, json.JSONDecodeError) as error:
+                raise StoreSupervisorError("container_inspect_json_invalid") from error
+        (
+            container_id,
+            name,
+            image_id,
+            labels,
+            command,
+            healthcheck,
+            host_config,
+            mounts,
+            network_settings,
+            state,
+        ) = projected
+        observed = {
+            "Id": container_id,
+            "Name": name,
+            "Image": image_id,
+            "Config": {
+                "Labels": labels,
+                "Cmd": command,
+                "Healthcheck": healthcheck,
+            },
+            "HostConfig": host_config,
+            "Mounts": mounts,
+            "NetworkSettings": network_settings,
+            "State": state,
+        }
         if observed.get("Id") != expected.container_id:
             raise StoreSupervisorError("container_id_drift")
         if observed.get("Name") != "/" + expected.name:
@@ -203,7 +234,6 @@ class StoreSupervisor:
             command_matches = observed_command in (None, [])
         if not command_matches:
             raise StoreSupervisorError("container_command_drift")
-        self._verify_environment(expected, config.get("Env"))
         if config.get("Healthcheck") != {"Test": ["NONE"]}:
             raise StoreSupervisorError("container_healthcheck_drift")
         self._verify_host_config(expected, host_config)
@@ -221,29 +251,6 @@ class StoreSupervisor:
             running=state["Running"],
             status=state["Status"],
         )
-
-    @staticmethod
-    def _verify_environment(expected: ExactContainer, value: object) -> None:
-        if type(value) is not list or any(type(item) is not str for item in value):
-            raise StoreSupervisorError("container_environment_invalid")
-        observed: dict[str, str] = {}
-        for item in value:
-            key, separator, setting = item.partition("=")
-            if not separator or not key or key in observed:
-                raise StoreSupervisorError("container_environment_invalid")
-            observed[key] = setting
-        observed_keys = frozenset(observed)
-        if not expected.environment_required_keys.issubset(observed_keys):
-            raise StoreSupervisorError("container_environment_required_key_drift")
-        if expected.environment_forbidden_keys & observed_keys:
-            raise StoreSupervisorError("container_environment_forbidden_key_drift")
-        if any(
-            observed.get(key) != setting
-            for key, setting in expected.environment_fixed_values.items()
-        ):
-            raise StoreSupervisorError("container_environment_fixed_value_drift")
-        if any(not observed.get(key) for key in expected.environment_secret_keys):
-            raise StoreSupervisorError("container_environment_secret_absent")
 
     @staticmethod
     def _verify_host_config(expected: ExactContainer, value: object) -> None:

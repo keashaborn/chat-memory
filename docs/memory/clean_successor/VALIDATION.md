@@ -15,7 +15,7 @@ resources only; it is not installation or live-production evidence.
 
 ## Canonical repository checks
 
-Run first on **Local Mac** from the isolated Phase 9B candidate. After the exact
+Run first on **Local Mac** from the isolated Phase 9D candidate. After the exact
 patch is transferred, repeat the same checks on **seebx** from its isolated
 candidate worktree:
 
@@ -54,25 +54,36 @@ not rewritten merely to make filenames shorter.
 - Current runtime build: successfully rebuilt from hash-locked offline wheels;
   source-bound receipt current; not Docker, store, installation, or activation
   proof.
-- Current installation package: 56 artifacts statically verified; claim-bound
+- Current installation package: exact manifest membership statically verified;
+  claim-bound
   non-CLI install and empty-rollback compositions, durable journals, an anchored
-  identity ledger, canonical operation receipts, fresh terminal-readiness
-  replay checks, opaque rollback receipt/ledger binding, a secure runtime
-  verifier, an exact release-path launcher, resolved-spec Docker-label binding,
-  one empty-rollback writer fence, and retained audit hashes are packaged. The
-  verifier closes the complete 56-member release tree with no extras and
-  requires exact equality between the locked and installed normalized
-  distribution sets. Its release-tree hash is bound through the claim, journal,
-  host ownership, and install receipt. Empty rollback separately requires the
-  verified runtime capability and binds the exact runtime/release identity
-  through signed authority, claim, journal, operation requests and observations,
-  writer fence, retained install receipt, and rollback receipt. The runtime
-  verifier was not executed,
-  no controller runtime was built or installed, and no release was staged.
-  Runtime and release are separate preinstallation substrate retained by empty
-  rollback, not resources owned by the stores transaction. Concrete live
-  effect adapters are absent; no installation occurred, and current live
-  installation state was not reverified.
+  identity ledger, canonical operation receipts, a create-once durable receipt
+  store whose public entrypoints require the canonical root-owned executions
+  path, fresh terminal-readiness replay checks, opaque rollback receipt/ledger
+  binding, a secure runtime verifier, an exact release-path launcher,
+  resolved-spec Docker-label binding, one stopped-store empty-rollback writer
+  fence, a required fresh offline/read-only emptiness recheck under that fence,
+  and retained audit hashes are packaged. The verifier closes the
+  complete manifest-defined release tree with no extras and requires exact
+  equality between the locked and installed normalized distribution sets. The
+  rollback authority claim validates trusted time and the exact global lock
+  before any durable receipt read or eligibility-receipt persistence. Its
+  release-tree hash is bound through the claim, journal, host ownership, and
+  install receipt. Empty rollback separately requires the verified runtime
+  capability and binds the exact runtime/release identity through signed
+  authority, claim, journal, operation requests and observations, writer fence,
+  retained install receipt, and rollback receipt.
+
+  Phase 9D additionally packages closed post-claim Linux install and dependency
+  factory code, a fixed loopback readiness DTO adapter, a physical ledger-bound
+  empty-rollback adapter, and controller runtime/release builder orchestration.
+  These reviewed layers expose only typed, exact operations. They do not ship a
+  selected live Linux/Docker/systemd/root-file/Qdrant transport or a pinned
+  PostgreSQL driver, and the builder has no live publication transport or bound
+  approved standalone CPython substrate. The runtime verifier was not executed,
+  no controller runtime was built, staged, or installed, no release was
+  published, no installation occurred, and current live installation state was
+  not reverified.
 - Current full-chain migration: artifact integrity and Phase 8G disposable
   apply/rollback/absence/reapply verified; not production-applied.
 - Current disposable PostgreSQL/Qdrant validation: passed against commit
@@ -110,13 +121,17 @@ later, separately authorized closure.
 
 ## Safety boundary
 
-The rebuild used hash-locked offline wheels. The successful disposable run used
+The Phase 8G application-runtime rebuild used hash-locked offline wheels. The
+successful disposable run used
 only invocation-owned PostgreSQL/Qdrant resources with pinned local image
 digests, synthetic inputs, no persistent mounts, zero provider calls, and zero
 production reads or endpoint calls. Independent postflight checks found no
 owned resources or listeners and confirmed unchanged live repository, service,
-and Docker identities. Source preparation, installation, and production
-operations remain separately authorized work.
+and Docker identities. Phase 9D added repository code and exercised only
+synthetic in-process tests; it did not run Docker, access secrets, read
+production data, call a provider, build or install the controller runtime, or
+change a service, PostgreSQL, or Qdrant. Source preparation, installation, and
+production operations remain separately authorized work.
 
 An earlier failed attempt produced no terminal receipt. Its fail-closed worker
 mode exposed stale test setup and receipt labels; cleanup completed before the

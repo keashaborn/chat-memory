@@ -2,8 +2,9 @@
 
 ## Current repository authority
 
-Phase 9B retains one current successor path and one canonical dormant-store
-controller package. The repository-only package is the only current stores-only package:
+Phase 9D retains one current successor path and one canonical dormant-store
+controller package. The repository-only package is the only current stores-only
+package:
 
 - package manifest: `ops/governed_memory/installation/current/package_manifest.json`;
 - offline package verifier: `tools/governed_memory_install/package.py`;
@@ -12,16 +13,29 @@ controller package. The repository-only package is the only current stores-only 
 - controller: `tools/governed_memory_install/controller.py`;
 - authority verifier: `tools/governed_memory_install/authority.py`;
 - durable journal: `tools/governed_memory_install/journal.py`;
+- durable create-once receipt store:
+  `tools/governed_memory_install/durable_receipts.py`;
+- closed post-claim Linux effects and dependency factory:
+  `tools/governed_memory_install/linux_store_effects.py`;
+- fixed loopback readiness DTO adapter:
+  `tools/governed_memory_install/linux_store_readiness.py`;
+- ledger-bound physical empty-rollback adapter:
+  `tools/governed_memory_install/rollback_live_adapter.py`;
+- controller runtime/release builder orchestration:
+  `tools/governed_memory_release/controller_runtime_builder.py`;
 - synthetic proof backend: `tools/governed_memory_install/synthetic_backend.py`.
 
 Phase 8D removed the parallel Phase 8A successor-install implementation. Phase
 9B moved the surviving package to the phase-neutral `installation/current/`
 identity and moved prior phase material under the non-executable history roots.
+Phase 9D repaired the install and empty-rollback contracts and added the closed
+adapters and inert runtime/release builder orchestration without installing or
+activating them.
 
 The current store manifest contains nine store artifacts. The current package
-contains 56 artifacts. The global `schema_contract.json` is verified by the
-full-chain migration manifest and is intentionally excluded from the
-stores-only package.
+membership and count are authoritative only in its generated manifest. The
+global `schema_contract.json` is verified by the full-chain migration manifest
+and is intentionally excluded from the stores-only package.
 
 ## Current state
 
@@ -38,27 +52,45 @@ manifest. The repository candidate remains inactive and activation-blocked.
 
 The repository packages an offline verifier, an in-process synthetic proof
 harness, and claim-bound non-CLI install and empty-rollback controller
-compositions with durable journals, an anchored resource ledger, and canonical
-operation receipts. Install receipt creation and replay require a fresh
-post-migration readiness proof; empty rollback requires an opaque exact
-install-receipt/ledger binding, holds one writer fence through every destructive
-effect and receipt emission, and binds the retained audit-artifact hashes. The
-separate rollback signature also binds the verified controller-runtime receipt;
-the exact runtime and complete release-tree identities continue through the
-rollback claim, journal, every operation request and observation, writer fence,
-retained install-receipt check, and final rollback receipt. The
-package includes a secure runtime-verification capability and exact release-path
-supervisor launcher source. The verifier requires the complete 56-member
-release tree to match the package manifest with no extra, linked, special, or
-writable members, and requires the installed normalized distribution set to
-exactly equal the hash-locked controller dependency set. The release-tree hash
-is carried through the install execution claim, durable journal, host ownership
-requests, and final install receipt. No controller runtime has been built or
-installed and no controller release has been staged. Those are separately
-authorized preinstallation substrate; the stores transaction cannot create or
-remove them. It does not package the concrete Linux, Docker,
-PostgreSQL, or Qdrant effect adapters, a built controller runtime, a live
-installation proof, or an activation executor.
+compositions with durable journals, a create-once durable receipt store, an
+anchored resource ledger, and canonical operation receipts. Install receipt
+creation and replay require a fresh post-migration readiness proof. Public
+install and rollback entrypoints accept that receipt store only at the
+canonical root-owned executions path; caller-selected synthetic stores are
+restricted to private in-process test wrappers. Empty rollback requires an
+opaque exact install-receipt/ledger binding, stops both
+stores before acquiring its stopped-store writer fence, holds that fence
+through every destructive effect and final receipt persistence, requires a
+fresh offline/read-only emptiness observation under the fence before the first
+destructive step, and binds the retained audit-artifact hashes. Its effects are
+derived from exact physical ledger targets rather than caller-supplied
+commands, endpoints, or resource names.
+
+The package includes a closed post-claim Linux install adapter and dependency
+factory, fixed loopback readiness DTO adapter, physical ledger-bound
+empty-rollback adapter, secure runtime-verification capability, exact
+release-path supervisor launcher source, and controller runtime/release builder
+orchestration. The verifier requires the complete manifest-defined release tree
+with no extra, linked, special, or writable members and requires the installed
+normalized distribution set to exactly equal the hash-locked controller
+dependency set. The release-tree hash is carried through the install execution
+claim, durable journal, host ownership requests, and final install receipt. The
+separate rollback signature binds the verified controller-runtime receipt; the
+exact runtime and release-tree identities continue through rollback authority,
+claim, journal, every operation request and observation, writer fence, retained
+install-receipt check, and final rollback receipt.
+The rollback authority, trusted time, exact global lock, and single-use nonce
+are validated and claimed before any durable receipt read or eligibility-receipt
+persistence.
+
+The adapters deliberately do not select or ship live low-level Linux, Docker,
+systemd, root-file, PostgreSQL, or Qdrant transports. In particular, no pinned
+PostgreSQL driver has been selected. The runtime builder is orchestration only:
+an externally approved standalone CPython substrate digest and a separately
+authorized publication transport are still required. No controller runtime was
+built, staged, or installed; no release was published; and no image, secret,
+service, PostgreSQL, or Qdrant state was touched. There is no live installation
+proof or activation executor.
 
 The active chat response path is successor-only. It no longer accepts the old
 Memory V1 prompt object, stored assistant-response preferences, or a fallback
@@ -147,16 +179,20 @@ timer or cron quiescence alone does not prove exclusivity.
 
 ## Next gate
 
-The current disposable-proof gate is closed. The next gate is a separate,
-reviewed build and installation of the exact controller runtime and immutable
-release substrate, followed by concrete store-effect adapters and disposable
-Linux proof. Dormant installation remains a
+The current disposable-proof gate is closed. The next gate must bind an
+externally approved standalone CPython substrate, implement and review the
+builder publication transport and selected low-level platform transports,
+select and pin the PostgreSQL driver, then separately authorize the exact
+controller runtime/release build and disposable Linux installation proof.
+Dormant installation remains a
 separate ungranted authority, so release remains refused with
 `inactive_installation_package_not_authorized`. Before any installation,
 resolve and re-prove the remaining blockers in
-`ops/governed_memory/installation/current/contract.json`. Source PostgreSQL preparation is
-governed by a separate, phase-neutral source-preparation authorization. It is
-not authorized by this disposable proof or by a stores-only install signature.
+`ops/governed_memory/installation/current/contract.json` and the global
+production-activation blockers in `ops/governed_memory/runtime_manifest.json`.
+Source PostgreSQL preparation is governed by a separate, phase-neutral
+source-preparation authorization. It is not authorized by this disposable
+proof or by a stores-only install signature.
 
 The retired Phase 8A source-role template and service-account contract have no
 current replacement package. Rebuilding and independently governing the source

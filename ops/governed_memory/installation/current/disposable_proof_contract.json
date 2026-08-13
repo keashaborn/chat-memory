@@ -93,7 +93,8 @@
     "claim_bound_non_cli_empty_rollback_composition_packaged_separately": true,
     "durable_anchored_install_and_rollback_journals_packaged_separately": true,
     "durable_anchored_resource_identity_ledger_packaged_separately": true,
-    "concrete_live_store_effect_adapters_packaged": false,
+    "concrete_live_store_effect_adapters_packaged": true,
+    "fixed_loopback_store_readiness_adapter_packaged": true,
     "exact_controller_process_is_trusted": true,
     "hostile_same_process_capability_forgery_resisted": false
   },

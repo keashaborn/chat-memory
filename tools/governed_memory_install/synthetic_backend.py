@@ -161,7 +161,10 @@ class SyntheticBackend:
         self._scenario = scenario
         self._records: list[JournalRecord] = []
         self._states = {
-            step.step_id: StepState.BEFORE for step in STORES_ONLY_PLAN
+            step.step_id: (
+                StepState.AFTER if step.invariant_only else StepState.BEFORE
+            )
+            for step in STORES_ONLY_PLAN
         }
         self._counts: Counter[str] = Counter()
         self._fault_fired = False
@@ -241,7 +244,8 @@ class SyntheticBackend:
                 self._fire_interruption(
                     "synthetic_in_process_interruption_before_effect"
                 )
-        self._states[step.step_id] = StepState.AFTER
+        if not step.invariant_only:
+            self._states[step.step_id] = StepState.AFTER
         if not self._fault_fired and self._scenario.target_step_id == step.step_id:
             if self._scenario.fault_point == FAULT_FAIL_AFTER_EFFECT:
                 self._fire_failure("synthetic_failure_after_effect")

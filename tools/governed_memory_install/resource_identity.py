@@ -426,10 +426,9 @@ class ResourceIdentityLedger:
         self,
         path: Path,
         *,
-        binding_sha256: str | None = None,
-        claimed_execution_binding: object | None = None,
-        authority_state: AuthorityState | None = None,
-        held_lock: HeldExecutionLockCapability | None = None,
+        claimed_execution_binding: object,
+        authority_state: AuthorityState,
+        held_lock: HeldExecutionLockCapability,
         expected_uid: int | None = None,
         create: bool = False,
     ) -> None:
@@ -439,33 +438,15 @@ class ResourceIdentityLedger:
         self.expected_uid = os.geteuid() if expected_uid is None else expected_uid
         if type(self.expected_uid) is not int or self.expected_uid < 0:
             raise ResourceIdentityError("identity_ledger_configuration_invalid")
-        self.authority_state: AuthorityState | None = None
-        self.held_lock: HeldExecutionLockCapability | None = None
-        self._secure_mode = claimed_execution_binding is not None
-        self._last_anchor_result = "legacy_unanchored"
-        if not self._secure_mode:
-            if (
-                not self.path.is_absolute()
-                or not isinstance(binding_sha256, str)
-                or _HASH_RE.fullmatch(binding_sha256) is None
-                or authority_state is not None
-                or held_lock is not None
-                or create
-            ):
-                raise ResourceIdentityError(
-                    "identity_ledger_configuration_invalid"
-                )
-            # Compatibility-only parser/test mode.  It is intentionally not
-            # accepted as a current installation execution boundary.
-            self.binding_sha256 = binding_sha256
-            return
-        if binding_sha256 is not None or type(authority_state) is not AuthorityState:
+        self.authority_state = authority_state
+        self.held_lock = held_lock
+        self._last_anchor_result = "unreconciled"
+        if type(authority_state) is not AuthorityState:
             raise ResourceIdentityError("identity_ledger_configuration_invalid")
         try:
             binding = _claimed_execution_binding_evidence(
                 claimed_execution_binding
             )
-            assert held_lock is not None
             validate_held_execution_lock(held_lock)
         except (AssertionError, ClaimedExecutionBindingError, ExecutionLockError) as error:
             raise ResourceIdentityError(
@@ -495,8 +476,6 @@ class ResourceIdentityLedger:
         self._secure_reconcile(create=create)
 
     def _require_lock(self) -> None:
-        if not self._secure_mode or self.held_lock is None:
-            raise ResourceIdentityError("identity_ledger_secure_mode_required")
         try:
             validate_held_execution_lock(self.held_lock)
         except ExecutionLockError as error:
@@ -509,8 +488,6 @@ class ResourceIdentityLedger:
         records: tuple[ResourceIdentityRecord, ...],
     ) -> None:
         self._require_lock()
-        assert self.authority_state is not None
-        assert self.held_lock is not None
         sequence = len(records)
         head = records[-1].entry_sha256 if records else ZERO_HEAD
         prior = records[-1].previous_entry_sha256 if records else ZERO_HEAD
@@ -560,8 +537,6 @@ class ResourceIdentityLedger:
             expected_binding_sha256=self.binding_sha256,
         )
         head = records[-1].entry_sha256 if records else ZERO_HEAD
-        assert self.authority_state is not None
-        assert self.held_lock is not None
         try:
             anchor = self.authority_state.read_resource_ledger_anchor(
                 self.binding_sha256,
@@ -641,7 +616,7 @@ class ResourceIdentityLedger:
 
     @property
     def secure_execution_mode(self) -> bool:
-        return self._secure_mode
+        return True
 
     def _open_secure(
         self,
@@ -681,8 +656,6 @@ class ResourceIdentityLedger:
                 name=self.path.name,
                 expected_uid=self.expected_uid,
             )
-            assert self.authority_state is not None
-            assert self.held_lock is not None
             try:
                 self.authority_state.seal_filesystem_identity(
                     self.binding_sha256,
@@ -756,12 +729,6 @@ class ResourceIdentityLedger:
     def records(self) -> tuple[ResourceIdentityRecord, ...]:
         """Return an anchored snapshot in current execution mode only."""
 
-        if not self._secure_mode:
-            return load_ledger(
-                self.path,
-                expected_binding_sha256=self.binding_sha256,
-                expected_uid=self.expected_uid,
-            )
         directory_descriptor, descriptor, records = self._open_secure(
             create=False
         )
@@ -883,129 +850,16 @@ class ResourceIdentityLedger:
         image_id: str | None = None,
         image_repo_digest: str | None = None,
     ) -> ResourceIdentityRecord:
-        if self._secure_mode:
-            return self._secure_append(
-                event=event,
-                resource_kind=resource_kind,
-                resource_name=resource_name,
-                resource_id=resource_id,
-                ownership_sha256=ownership_sha256,
-                resource_labels_sha256=resource_labels_sha256,
-                image_id=image_id,
-                image_repo_digest=image_repo_digest,
-            )
-        directory_descriptor = _open_secure_parent(
-            self.path, expected_uid=self.expected_uid
+        return self._secure_append(
+            event=event,
+            resource_kind=resource_kind,
+            resource_name=resource_name,
+            resource_id=resource_id,
+            ownership_sha256=ownership_sha256,
+            resource_labels_sha256=resource_labels_sha256,
+            image_id=image_id,
+            image_repo_digest=image_repo_digest,
         )
-        flags = os.O_APPEND | os.O_CLOEXEC | _nofollow_flag() | os.O_RDWR
-        created = False
-        try:
-            try:
-                descriptor = os.open(
-                    self.path.name,
-                    flags | os.O_CREAT | os.O_EXCL,
-                    0o600,
-                    dir_fd=directory_descriptor,
-                )
-                created = True
-            except FileExistsError:
-                descriptor = os.open(
-                    self.path.name,
-                    flags,
-                    dir_fd=directory_descriptor,
-                )
-        except OSError as error:
-            os.close(directory_descriptor)
-            raise ResourceIdentityError("identity_ledger_open_failed") from error
-        try:
-            if created:
-                os.fchmod(descriptor, 0o600)
-                os.fsync(descriptor)
-                os.fsync(directory_descriptor)
-            fcntl.flock(descriptor, fcntl.LOCK_EX)
-            info = _validate_open_file(
-                descriptor,
-                directory_descriptor=directory_descriptor,
-                name=self.path.name,
-                expected_uid=self.expected_uid,
-            )
-            raw = _read_open_file(descriptor, expected_size=info.st_size)
-            records = parse_ledger_bytes(
-                raw, expected_binding_sha256=self.binding_sha256
-            )
-            current = next(
-                (
-                    record
-                    for record in reversed(records)
-                    if record.resource_kind == resource_kind
-                    and record.resource_name == resource_name
-                ),
-                None,
-            )
-            previous_event = current.event if current is not None else None
-            if event not in _TRANSITIONS[previous_event]:
-                raise ResourceIdentityError("identity_transition_invalid")
-            if current is not None and (
-                current.resource_id != resource_id
-                or current.image_id != image_id
-                or current.image_repo_digest != image_repo_digest
-                or current.ownership_sha256 != ownership_sha256
-                or current.resource_labels_sha256 != resource_labels_sha256
-            ):
-                raise ResourceIdentityError("identity_resource_drift")
-            payload: dict[str, object] = {
-                "binding_sha256": self.binding_sha256,
-                "event": event,
-                "image_id": image_id,
-                "image_repo_digest": image_repo_digest,
-                "ownership_sha256": ownership_sha256,
-                "resource_labels_sha256": resource_labels_sha256,
-                "previous_entry_sha256": (
-                    records[-1].entry_sha256 if records else ZERO_HEAD
-                ),
-                "resource_id": resource_id,
-                "resource_kind": resource_kind,
-                "resource_name": resource_name,
-                "schema_version": SCHEMA_VERSION,
-                "sequence": len(records) + 1,
-            }
-            _validate_payload(payload)
-            value = dict(payload)
-            value["entry_sha256"] = hashlib.sha256(
-                _canonical_json(payload)
-            ).hexdigest()
-            encoded = _canonical_json(value) + b"\n"
-            if len(encoded) > MAX_ENTRY_BYTES:
-                raise ResourceIdentityError("identity_entry_size_invalid")
-            if info.st_size + len(encoded) > MAX_LEDGER_BYTES:
-                raise ResourceIdentityError("identity_ledger_too_large")
-            _validate_open_file(
-                descriptor,
-                directory_descriptor=directory_descriptor,
-                name=self.path.name,
-                expected_uid=self.expected_uid,
-            )
-            written = 0
-            while written < len(encoded):
-                count = os.write(descriptor, encoded[written:])
-                if count <= 0:
-                    raise ResourceIdentityError("identity_ledger_write_failed")
-                written += count
-            os.fsync(descriptor)
-            os.fsync(directory_descriptor)
-            _validate_open_file(
-                descriptor,
-                directory_descriptor=directory_descriptor,
-                name=self.path.name,
-                expected_uid=self.expected_uid,
-            )
-            return _record_from_value(value)
-        finally:
-            try:
-                fcntl.flock(descriptor, fcntl.LOCK_UN)
-            finally:
-                os.close(descriptor)
-                os.close(directory_descriptor)
 
 
 def latest_exact_resources(

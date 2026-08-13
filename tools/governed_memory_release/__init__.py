@@ -2,5 +2,6 @@
 
 __all__ = [
     "build_candidate_runtime",
+    "controller_runtime_builder",
     "release_guard",
 ]

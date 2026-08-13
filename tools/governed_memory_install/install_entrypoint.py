@@ -20,12 +20,12 @@ from .execution_capability import (
     claim_dormant_store_install_execution_binding,
 )
 from .execution_lock import HeldExecutionLockCapability
-from .host_boundary import TypedHostOperations
 from .controller_runtime import (
     ControllerRuntimeCapabilityError,
     _controller_runtime_capability_evidence,
 )
 from .install_backend import (
+    ClaimBoundInstallDependencies,
     ClaimBoundInstallBackend,
     InstallBackendError,
     InstallPrerequisites,
@@ -39,6 +39,11 @@ from .package_capability import (
     _package_capability_parts,
 )
 from .receipts import build_install_receipt, canonical_json_bytes
+from .durable_receipts import (
+    DurableReceiptError,
+    DurableReceiptStore,
+    ReceiptArtifact,
+)
 from .resource_identity import ResourceIdentityLedger
 from .rollback import (
     EmptyRollbackError,
@@ -63,7 +68,20 @@ class ResourceIdentityLedgerFactory(Protocol):
     ) -> ResourceIdentityLedger: ...
 
 
-def run_authorized_dormant_store_install(
+class ClaimBoundInstallDependenciesFactory(Protocol):
+    def __call__(
+        self,
+        *,
+        claimed_execution_binding: object,
+        resolved_store_spec: Mapping[str, object],
+        verified_artifacts: Mapping[str, bytes],
+        prerequisites: InstallPrerequisites,
+        journal: JournalAdapter,
+        resource_identity_ledger: ResourceIdentityLedger,
+    ) -> ClaimBoundInstallDependencies: ...
+
+
+def _run_authorized_dormant_store_install(
     *,
     verified_scope_capability: object,
     verified_package_capability: object,
@@ -72,11 +90,13 @@ def run_authorized_dormant_store_install(
     clock: TrustedUtcClock,
     held_lock: HeldExecutionLockCapability,
     journal_factory: JournalFactory,
-    host_operations: TypedHostOperations,
+    dependencies_factory: ClaimBoundInstallDependenciesFactory,
     prerequisites: InstallPrerequisites,
     resource_identity_ledger_factory: ResourceIdentityLedgerFactory,
+    receipt_store: DurableReceiptStore,
+    require_production_receipt_store: bool,
 ) -> Mapping[str, object]:
-    """Claim one authorization and run exactly the sealed current plan."""
+    """Shared production/synthetic composition over the sealed current plan."""
 
     if (
         verified_scope_capability is None
@@ -87,14 +107,23 @@ def run_authorized_dormant_store_install(
     if (
         not callable(journal_factory)
         or type(prerequisites) is not InstallPrerequisites
-        or not callable(getattr(host_operations, "observe", None))
-        or not callable(getattr(host_operations, "apply", None))
-        or not callable(getattr(host_operations, "compensate", None))
+        or not callable(dependencies_factory)
         or not callable(resource_identity_ledger_factory)
+        or type(receipt_store) is not DurableReceiptStore
+        or type(require_production_receipt_store) is not bool
     ):
         raise InstallEntrypointError(
             "dormant_install_composition_dependency_invalid"
         )
+    try:
+        if require_production_receipt_store:
+            receipt_store.require_production_binding()
+        else:
+            receipt_store.require_synthetic_binding()
+    except DurableReceiptError as error:
+        raise InstallEntrypointError(
+            "dormant_install_composition_dependency_invalid"
+        ) from error
     try:
         package_evidence, unused_scope, artifacts = (
             _package_capability_parts(verified_package_capability)
@@ -213,10 +242,23 @@ def run_authorized_dormant_store_install(
             raise InstallEntrypointError(
                 "dormant_install_secure_resource_ledger_required"
             )
+        dependencies = dependencies_factory(
+            claimed_execution_binding=claimed,
+            resolved_store_spec=resolved_store_spec,
+            verified_artifacts=artifacts,
+            prerequisites=prerequisites,
+            journal=journal,
+            resource_identity_ledger=resource_identity_ledger,
+        )
+        if type(dependencies) is not ClaimBoundInstallDependencies:
+            raise InstallEntrypointError(
+                "dormant_install_claim_bound_dependencies_invalid"
+            )
         backend = ClaimBoundInstallBackend(
             claimed_execution_binding=claimed,
             journal=journal,
-            host_operations=host_operations,
+            host_operations=dependencies.host_operations,
+            readiness_probe=dependencies.readiness_probe,
             prerequisites=prerequisites,
             resource_identity_ledger=resource_identity_ledger,
             resolved_store_spec=resolved_store_spec,
@@ -275,7 +317,7 @@ def run_authorized_dormant_store_install(
         terminal_readiness = (
             backend.verify_terminal_canonical_store_readiness()
         )
-        return build_install_receipt(
+        install_receipt = build_install_receipt(
             execution_id=evidence.execution_id,
             attempt_id=evidence.attempt_id,
             candidate_git_commit=evidence.candidate_git_commit,
@@ -326,7 +368,21 @@ def run_authorized_dormant_store_install(
                 terminal_readiness.receipt_sha256
             ),
         )
-    except (InstallBackendError, EmptyRollbackError) as error:
+        durable_receipt = receipt_store.write_once(
+            ReceiptArtifact.INSTALL,
+            evidence.execution_id,
+            install_receipt,
+        )
+        if (
+            durable_receipt.receipt_sha256
+            != install_receipt["receipt_sha256"]
+            or dict(durable_receipt.canonical_receipt) != install_receipt
+        ):
+            raise InstallEntrypointError(
+                "dormant_install_durable_receipt_unconfirmed"
+            )
+        return dict(durable_receipt.canonical_receipt)
+    except (InstallBackendError, EmptyRollbackError, DurableReceiptError) as error:
         raise InstallEntrypointError("dormant_install_backend_refused") from error
     finally:
         close = getattr(journal, "close", None)
@@ -334,8 +390,77 @@ def run_authorized_dormant_store_install(
             close()
 
 
+def _run_authorized_dormant_store_install_synthetic(
+    *,
+    verified_scope_capability: object,
+    verified_package_capability: object,
+    verified_controller_runtime_capability: object,
+    authority_state: AuthorityState,
+    clock: TrustedUtcClock,
+    held_lock: HeldExecutionLockCapability,
+    journal_factory: JournalFactory,
+    dependencies_factory: ClaimBoundInstallDependenciesFactory,
+    prerequisites: InstallPrerequisites,
+    resource_identity_ledger_factory: ResourceIdentityLedgerFactory,
+    receipt_store: DurableReceiptStore,
+) -> Mapping[str, object]:
+    """Private in-process test path accepting only a synthetic receipt store."""
+
+    return _run_authorized_dormant_store_install(
+        verified_scope_capability=verified_scope_capability,
+        verified_package_capability=verified_package_capability,
+        verified_controller_runtime_capability=(
+            verified_controller_runtime_capability
+        ),
+        authority_state=authority_state,
+        clock=clock,
+        held_lock=held_lock,
+        journal_factory=journal_factory,
+        dependencies_factory=dependencies_factory,
+        prerequisites=prerequisites,
+        resource_identity_ledger_factory=resource_identity_ledger_factory,
+        receipt_store=receipt_store,
+        require_production_receipt_store=False,
+    )
+
+
+def run_authorized_dormant_store_install(
+    *,
+    verified_scope_capability: object,
+    verified_package_capability: object,
+    verified_controller_runtime_capability: object,
+    authority_state: AuthorityState,
+    clock: TrustedUtcClock,
+    held_lock: HeldExecutionLockCapability,
+    journal_factory: JournalFactory,
+    dependencies_factory: ClaimBoundInstallDependenciesFactory,
+    prerequisites: InstallPrerequisites,
+    resource_identity_ledger_factory: ResourceIdentityLedgerFactory,
+    receipt_store: DurableReceiptStore,
+) -> Mapping[str, object]:
+    """Claim and execute only with the canonical root-owned receipt store."""
+
+    return _run_authorized_dormant_store_install(
+        verified_scope_capability=verified_scope_capability,
+        verified_package_capability=verified_package_capability,
+        verified_controller_runtime_capability=(
+            verified_controller_runtime_capability
+        ),
+        authority_state=authority_state,
+        clock=clock,
+        held_lock=held_lock,
+        journal_factory=journal_factory,
+        dependencies_factory=dependencies_factory,
+        prerequisites=prerequisites,
+        resource_identity_ledger_factory=resource_identity_ledger_factory,
+        receipt_store=receipt_store,
+        require_production_receipt_store=True,
+    )
+
+
 __all__ = [
     "INACTIVE_REFUSAL_CODE",
+    "ClaimBoundInstallDependenciesFactory",
     "InstallEntrypointError",
     "ResourceIdentityLedgerFactory",
     "run_authorized_dormant_store_install",

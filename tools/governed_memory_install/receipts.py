@@ -15,7 +15,7 @@ from .rollback import ROLLBACK_RESOURCE_KEYS
 
 
 INSTALL_RECEIPT_SCHEMA: Final = "governed-memory-dormant-store-install-receipt-v1"
-ROLLBACK_RECEIPT_SCHEMA: Final = "governed-memory-empty-store-rollback-receipt-v2"
+ROLLBACK_RECEIPT_SCHEMA: Final = "governed-memory-empty-store-rollback-receipt-v3"
 INSTALL_OPERATION: Final = "dormant_store_install"
 ROLLBACK_OPERATION: Final = "empty_store_rollback"
 INSTALL_RESULT: Final = "dormant_store_installation_complete_inactive"
@@ -77,7 +77,7 @@ _ROLLBACK_KEYS = _COMMON_KEYS | _RUNTIME_IDENTITY_KEYS | {
     "installation_receipt_sha256",
     "eligibility_receipt_sha256",
     "retained_audit_set_sha256",
-    "removed_resource_count",
+    "exact_targets_absent_count",
     "exact_resources_absent",
     "stores_installed",
     "stores_supervisor_installed",
@@ -350,7 +350,7 @@ def build_empty_rollback_receipt(
     resource_ledger_sequence: int,
     eligibility_receipt_sha256: str,
     retained_audit_set_sha256: str,
-    removed_resource_count: int,
+    exact_targets_absent_count: int,
 ) -> dict[str, object]:
     receipt: dict[str, object] = {
         "schema_version": ROLLBACK_RECEIPT_SCHEMA,
@@ -393,7 +393,7 @@ def build_empty_rollback_receipt(
         "resource_ledger_sequence": resource_ledger_sequence,
         "eligibility_receipt_sha256": eligibility_receipt_sha256,
         "retained_audit_set_sha256": retained_audit_set_sha256,
-        "removed_resource_count": removed_resource_count,
+        "exact_targets_absent_count": exact_targets_absent_count,
         "exact_resources_absent": True,
         "stores_installed": False,
         "stores_supervisor_installed": False,
@@ -420,8 +420,8 @@ def verify_empty_rollback_receipt(
         or receipt.get("exact_resources_absent") is not True
         or receipt.get("stores_installed") is not False
         or receipt.get("stores_supervisor_installed") is not False
-        or type(receipt.get("removed_resource_count")) is not int
-        or receipt["removed_resource_count"] != len(ROLLBACK_RESOURCE_KEYS)
+        or type(receipt.get("exact_targets_absent_count")) is not int
+        or receipt["exact_targets_absent_count"] != len(ROLLBACK_RESOURCE_KEYS)
     ):
         raise ReceiptError("rollback_receipt_shape_invalid")
     for key in (

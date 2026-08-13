@@ -557,7 +557,11 @@ def _verify_states(
     for step in STORES_ONLY_PLAN:
         expected = (
             StepState.AFTER.value
-            if step.step_id in applied_set and step.step_id not in compensated_set
+            if step.invariant_only
+            or (
+                step.step_id in applied_set
+                and step.step_id not in compensated_set
+            )
             else StepState.BEFORE.value
         )
         _require(observed[step.step_id] == expected, "proof_state_projection_invalid")
@@ -634,8 +638,12 @@ def _run_case(
                     outcome = "same_attempt_compensated"
                     applied = receipt.applied_step_ids
                     compensated = receipt.compensated_step_ids
+                    target = STORES_ONLY_PLAN[target_position]
                     expected_count = target_position + (
-                        1 if scenario.family == FAMILY_FAIL_AFTER_EFFECT else 0
+                        1
+                        if scenario.family == FAMILY_FAIL_AFTER_EFFECT
+                        or target.invariant_only
+                        else 0
                     )
                     _require(
                         applied

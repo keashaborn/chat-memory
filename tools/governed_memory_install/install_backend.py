@@ -42,12 +42,7 @@ from .image_preflight import (
     LocalImageSetReadiness,
     validate_image_set_against_expectations,
 )
-from .linux_plan import (
-    ExactStoreEnvironmentSet,
-    LinuxPlanError,
-    canonical_labels_sha256,
-    validate_store_spec,
-)
+from .linux_plan import LinuxPlanError, canonical_labels_sha256, validate_store_spec
 from .store_readiness import (
     EmptyStoreReadiness,
     StoreReadinessProbe,
@@ -73,6 +68,34 @@ class JournalAdapter(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
+class ClaimBoundInstallDependencies:
+    """Effect dependencies minted after the execution binding exists."""
+
+    host_operations: TypedHostOperations
+    readiness_probe: StoreReadinessProbe
+
+    def __post_init__(self) -> None:
+        if (
+            not callable(getattr(self.host_operations, "observe", None))
+            or not callable(getattr(self.host_operations, "apply", None))
+            or not callable(getattr(self.host_operations, "compensate", None))
+            or not callable(
+                getattr(self.readiness_probe, "verify_fresh_empty_stores", None)
+            )
+            or not callable(
+                getattr(
+                    self.readiness_probe,
+                    "verify_terminal_canonical_stores",
+                    None,
+                )
+            )
+        ):
+            raise InstallBackendError(
+                "claim_bound_install_dependencies_invalid"
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class InstallPrerequisites:
     store_spec_sha256: str
     controller_runtime_receipt_sha256: str
@@ -90,8 +113,6 @@ class InstallPrerequisites:
     supervisor_launcher_sha256: str
     local_images: LocalImageSetReadiness
     expected_images: tuple[ImageExpectation, ImageExpectation]
-    environments: ExactStoreEnvironmentSet
-    readiness_probe: StoreReadinessProbe
 
     def __post_init__(self) -> None:
         if (
@@ -131,17 +152,6 @@ class InstallPrerequisites:
             or type(self.local_images) is not LocalImageSetReadiness
             or not isinstance(self.expected_images, tuple)
             or len(self.expected_images) != 2
-            or type(self.environments) is not ExactStoreEnvironmentSet
-            or not callable(
-                getattr(self.readiness_probe, "verify_fresh_empty_stores", None)
-            )
-            or not callable(
-                getattr(
-                    self.readiness_probe,
-                    "verify_terminal_canonical_stores",
-                    None,
-                )
-            )
         ):
             raise InstallBackendError("install_prerequisites_invalid")
         try:
@@ -165,6 +175,7 @@ class ClaimBoundInstallBackend:
         claimed_execution_binding: object,
         journal: JournalAdapter,
         host_operations: TypedHostOperations,
+        readiness_probe: StoreReadinessProbe,
         prerequisites: InstallPrerequisites,
         resource_identity_ledger: ResourceIdentityLedger,
         resolved_store_spec: Mapping[str, object],
@@ -183,6 +194,16 @@ class ClaimBoundInstallBackend:
             or not callable(getattr(host_operations, "observe", None))
             or not callable(getattr(host_operations, "apply", None))
             or not callable(getattr(host_operations, "compensate", None))
+            or not callable(
+                getattr(readiness_probe, "verify_fresh_empty_stores", None)
+            )
+            or not callable(
+                getattr(
+                    readiness_probe,
+                    "verify_terminal_canonical_stores",
+                    None,
+                )
+            )
             or type(prerequisites) is not InstallPrerequisites
             or type(resource_identity_ledger) is not ResourceIdentityLedger
         ):
@@ -281,6 +302,7 @@ class ClaimBoundInstallBackend:
         self._binding = evidence
         self._journal = journal
         self._host = host_operations
+        self._readiness_probe = readiness_probe
         self._prerequisites = prerequisites
         self._identity_ledger = resource_identity_ledger
         self._fresh_empty_readiness: EmptyStoreReadiness | None = None
@@ -415,6 +437,11 @@ class ClaimBoundInstallBackend:
             supervisor_launcher_sha256=(
                 self._binding.supervisor_launcher_sha256
             ),
+            postflight_receipt_path=(
+                "/var/lib/governed-memory-controller/executions/"
+                + self._binding.execution_id
+                + "/terminal-postflight-receipt.json"
+            ),
             resource_targets=targets,
         )
 
@@ -440,6 +467,7 @@ class ClaimBoundInstallBackend:
                 request.controller_release_tree_sha256
             ),
             "supervisor_launcher_sha256": request.supervisor_launcher_sha256,
+            "postflight_receipt_path": request.postflight_receipt_path,
             "revision_sha256": revision_sha256,
         }
         return hashlib.sha256(
@@ -487,6 +515,7 @@ class ClaimBoundInstallBackend:
                     "supervisor_launcher_sha256": (
                         request.supervisor_launcher_sha256
                     ),
+                    "postflight_receipt_path": request.postflight_receipt_path,
                     "resource_kind": resource_kind,
                     "resource_name": resource_name,
                     "resource_id": resource_id,
@@ -615,9 +644,7 @@ class ClaimBoundInstallBackend:
         if self._fresh_empty_readiness is not None:
             return
         try:
-            readiness = (
-                self._prerequisites.readiness_probe.verify_fresh_empty_stores()
-            )
+            readiness = self._readiness_probe.verify_fresh_empty_stores()
         except Exception as error:
             raise InstallBackendError("install_store_readiness_failed") from error
         if type(readiness) is not EmptyStoreReadiness:
@@ -630,10 +657,7 @@ class ClaimBoundInstallBackend:
         """Run a fresh terminal probe; this method deliberately never caches."""
 
         try:
-            readiness = (
-                self._prerequisites.readiness_probe
-                .verify_terminal_canonical_stores()
-            )
+            readiness = self._readiness_probe.verify_terminal_canonical_stores()
         except Exception as error:
             raise InstallBackendError(
                 "install_terminal_store_readiness_failed"
@@ -748,7 +772,12 @@ class ClaimBoundInstallBackend:
     def apply(self, step: PlanStep) -> None:
         key = (step.step_id, False)
         request, current = self._observe(step, compensation=False)
-        if current.state not in {StepState.BEFORE.value, StepState.RECOVERABLE.value}:
+        allowed_states = (
+            {StepState.AFTER.value}
+            if step.invariant_only
+            else {StepState.BEFORE.value, StepState.RECOVERABLE.value}
+        )
+        if current.state not in allowed_states:
             raise InstallBackendError("install_apply_state_invalid")
         expected = self._observations.pop(key)
         try:
@@ -810,6 +839,7 @@ class ClaimBoundInstallBackend:
 
 __all__ = [
     "ClaimBoundInstallBackend",
+    "ClaimBoundInstallDependencies",
     "InstallBackendError",
     "InstallPrerequisites",
 ]

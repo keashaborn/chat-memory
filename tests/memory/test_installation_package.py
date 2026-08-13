@@ -36,8 +36,8 @@ class DormantStoreInstallPackageTests(unittest.TestCase):
         self.assertEqual(receipt["schema_version"], (
             "governed-memory-dormant-store-install-package-verification-v4"
         ))
-        self.assertEqual(receipt["artifact_count"], 56)
-        self.assertEqual(len(package.EXPECTED_ARTIFACTS), 56)
+        self.assertEqual(receipt["artifact_count"], 62)
+        self.assertEqual(len(package.EXPECTED_ARTIFACTS), 62)
         self.assertTrue(
             receipt["durable_install_and_rollback_journal_adapters_packaged"]
         )
@@ -84,10 +84,15 @@ class DormantStoreInstallPackageTests(unittest.TestCase):
         self.assertTrue(
             receipt["claim_bound_empty_rollback_controller_composition_packaged"]
         )
-        self.assertFalse(receipt["concrete_install_store_effect_adapters_packaged"])
-        self.assertFalse(
-            receipt["concrete_empty_rollback_store_effect_adapters_packaged"]
+        self.assertTrue(receipt["closed_install_store_effect_adapter_packaged"])
+        self.assertTrue(receipt["closed_empty_rollback_store_effect_adapter_packaged"])
+        self.assertFalse(receipt["selected_live_platform_transports_packaged"])
+        self.assertFalse(receipt["pinned_postgresql_driver_selected"])
+        self.assertTrue(receipt["durable_create_once_receipt_store_packaged"])
+        self.assertTrue(
+            receipt["controller_runtime_release_builder_orchestration_packaged"]
         )
+        self.assertFalse(receipt["controller_runtime_build_transport_packaged"])
         self.assertTrue(
             receipt["operation_specific_install_and_empty_rollback_receipts_packaged"]
         )
@@ -217,7 +222,7 @@ class DormantStoreInstallPackageTests(unittest.TestCase):
             package.MANIFEST.read_text(encoding="ascii")
         )
         self.assertEqual(checked_in, generate_installation_package_manifest.generate())
-        self.assertEqual(package.verify()["artifact_count"], 56)
+        self.assertEqual(package.verify()["artifact_count"], 62)
 
     def test_verifier_generator_and_local_migration_binding_are_hash_bound(
         self,
@@ -275,7 +280,10 @@ class DormantStoreInstallPackageTests(unittest.TestCase):
                 parent = parent.parent
         self.assertEqual(
             required,
-            {"tools/governed_memory_install/__init__.py"},
+            {
+                "tools/governed_memory_install/__init__.py",
+                "tools/governed_memory_release/__init__.py",
+            },
         )
         self.assertTrue(required.issubset(package.EXPECTED_ARTIFACTS))
 
