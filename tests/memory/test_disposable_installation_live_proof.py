@@ -236,6 +236,30 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
         self.assertIn("remove_exact_permit(permit_inode)", source)
         self.assertIn("os.unlink(runner.PERMIT_PATH.name", source)
 
+    def test_permit_stability_ignores_access_time_but_not_content_metadata(self) -> None:
+        fields = {
+            "st_dev": 1,
+            "st_ino": 2,
+            "st_mode": 0o100400,
+            "st_uid": 0,
+            "st_gid": 0,
+            "st_nlink": 1,
+            "st_size": 100,
+            "st_mtime_ns": 3,
+            "st_ctime_ns": 4,
+        }
+        before = mock.Mock(**fields, st_atime_ns=5)
+        after = mock.Mock(**fields, st_atime_ns=6)
+        self.assertEqual(
+            proof._stable_file_identity(before),
+            proof._stable_file_identity(after),
+        )
+        after.st_size = 101
+        self.assertNotEqual(
+            proof._stable_file_identity(before),
+            proof._stable_file_identity(after),
+        )
+
     def test_issuer_supervision_is_bounded_and_kills_exact_process_group(self) -> None:
         source = Path(issuer.__file__).read_text(encoding="utf-8")
         self.assertIn("os.setsid()", source)

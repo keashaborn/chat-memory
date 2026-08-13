@@ -528,6 +528,23 @@ def _verify_rollback_delegation(
     return MappingProxyType(dict(envelope))
 
 
+def _stable_file_identity(value: os.stat_result) -> tuple[int, ...]:
+    """Exclude access time, which may change solely because the file was read."""
+
+    return (
+        value.st_dev,
+        value.st_ino,
+        stat.S_IFMT(value.st_mode),
+        stat.S_IMODE(value.st_mode),
+        value.st_uid,
+        value.st_gid,
+        value.st_nlink,
+        value.st_size,
+        value.st_mtime_ns,
+        value.st_ctime_ns,
+    )
+
+
 def _load_verified_permit(
     inputs: ProofInputs,
     artifacts: Mapping[str, bytes],
@@ -552,7 +569,11 @@ def _load_verified_permit(
         ):
             raise LiveProofError("phase9_live_proof_permit_identity_invalid")
         raw = os.read(descriptor, opened.st_size + 1)
-        if len(raw) != opened.st_size or os.fstat(descriptor) != opened:
+        after = os.fstat(descriptor)
+        if (
+            len(raw) != opened.st_size
+            or _stable_file_identity(after) != _stable_file_identity(opened)
+        ):
             raise LiveProofError("phase9_live_proof_permit_changed")
     except LiveProofError:
         raise
