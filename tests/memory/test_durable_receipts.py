@@ -101,6 +101,7 @@ class DurableReceiptStoreTests(unittest.TestCase):
         self.root = Path(self.temporary.name).resolve() / "executions"
         self.execution_root = self.root / EXECUTION_ID
         self.execution_root.mkdir(parents=True, mode=0o700)
+        os.chmod(self.root, 0o700)
         os.chmod(self.execution_root, 0o700)
         self.store = DurableReceiptStore.synthetic(self.root)
 

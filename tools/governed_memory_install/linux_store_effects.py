@@ -6,8 +6,9 @@ This module is the concrete step dispatcher.  It never accepts argv, shell
 text, SQL selected by a caller, URLs, host names, ports, HTTP paths, or raw
 credentials.  Low-level Docker, systemd, PostgreSQL, Qdrant, and root-file
 drivers are pre-bound to the exact validated store specification by an
-injected platform factory.  Phase 9D intentionally does not select the live
-PostgreSQL driver; that separately pinned transport remains a Phase 9E input.
+injected platform factory.  Phase 9F closes the request and source contracts
+but deliberately packages no live transport factory or executable PostgreSQL
+stage machine.
 """
 
 from dataclasses import dataclass
@@ -55,14 +56,6 @@ STORE_SECRET_DIRECTORY: Final = (
 )
 POSTGRES_STORE_SECRET_PATH: Final = STORE_SECRET_DIRECTORY + "/postgres.env"
 QDRANT_STORE_SECRET_PATH: Final = STORE_SECRET_DIRECTORY + "/qdrant.env"
-POSTGRES_STORE_SECRET_PUBLIC_ID: Final = (
-    "path-sha256:"
-    + hashlib.sha256(POSTGRES_STORE_SECRET_PATH.encode("ascii")).hexdigest()
-)
-QDRANT_STORE_SECRET_PUBLIC_ID: Final = (
-    "path-sha256:"
-    + hashlib.sha256(QDRANT_STORE_SECRET_PATH.encode("ascii")).hexdigest()
-)
 RETAINED_ROOT_DIRECTORY_PATHS: Final = (
     CONTROLLER_CONFIG_DIRECTORY,
     STORE_SECRET_DIRECTORY,
@@ -99,6 +92,26 @@ def _canonical_bytes(value: object) -> bytes:
 
 def _sha256(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
+
+
+def secret_environment_public_id(path: str, execution_id: str) -> str:
+    """Bind a public secret-file identity to one execution without its value."""
+
+    if path not in {POSTGRES_STORE_SECRET_PATH, QDRANT_STORE_SECRET_PATH} or (
+        _HASH_RE.fullmatch(execution_id) is None
+    ):
+        raise LinuxStoreEffectsError("secret_environment_identity_invalid")
+    return "execution-path-sha256:" + _sha256(
+        _canonical_bytes(
+            {
+                "schema_version": (
+                    "governed-memory-secret-environment-identity-v1"
+                ),
+                "execution_id": execution_id,
+                "path": path,
+            }
+        )
+    )
 
 
 def _expected_rollback_resource_names(
@@ -353,22 +366,9 @@ class BoundSystemdSupervisorSnapshot:
             return BoundResourceSnapshot(
                 EffectPresence.EXACT, exact.composite_identity_sha256
             )
-        allowed_kinds = (
-            self.unit_kind
-            in {FilesystemNodeKind.ABSENT, FilesystemNodeKind.REGULAR_FILE}
-            and self.enablement_kind
-            in {FilesystemNodeKind.ABSENT, FilesystemNodeKind.SYMLINK}
-        )
-        if (
-            allowed_kinds
-            and self.unit_kind is FilesystemNodeKind.ABSENT
-            and enablement_exact
-        ) or (
-            allowed_kinds
-            and unit_exact
-            and self.enablement_kind is FilesystemNodeKind.ABSENT
-        ):
-            return BoundResourceSnapshot(EffectPresence.PARTIAL)
+        # There is no durable daemon-reload substep journal or exact prefix
+        # resume operation yet.  A one-sided unit/link prefix therefore needs
+        # manual review and is never a recoverable mutation state.
         return BoundResourceSnapshot(EffectPresence.DRIFT)
 
 
@@ -516,12 +516,19 @@ class SystemFreshSecretSource:
 class SecretEnvironmentDocument:
     """Typed environment document handed only to the root-file driver."""
 
-    __slots__ = ("logical_name", "_secret")
+    __slots__ = ("logical_name", "execution_id", "_secret")
 
-    def __init__(self, logical_name: str, secret: FreshSecret) -> None:
-        if logical_name not in {"postgres", "qdrant"} or type(secret) is not FreshSecret:
+    def __init__(
+        self, logical_name: str, execution_id: str, secret: FreshSecret
+    ) -> None:
+        if (
+            logical_name not in {"postgres", "qdrant"}
+            or _HASH_RE.fullmatch(execution_id) is None
+            or type(secret) is not FreshSecret
+        ):
             raise LinuxStoreEffectsError("secret_environment_document_invalid")
         self.logical_name = logical_name
+        self.execution_id = execution_id
         self._secret = secret
 
     def __repr__(self) -> str:
@@ -529,13 +536,19 @@ class SecretEnvironmentDocument:
 
     def _render_for_root_writer_only(self) -> bytes:
         secret = self._secret._for_root_writer_only()
+        binding = (
+            b"# governed-memory-execution-id="
+            + self.execution_id.encode("ascii")
+            + b"\n"
+        )
         if self.logical_name == "postgres":
             return (
-                b"POSTGRES_DB=postgres\n"
+                binding
+                + b"POSTGRES_DB=postgres\n"
                 b"POSTGRES_PASSWORD=" + secret + b"\n"
                 b"POSTGRES_USER=governed_memory_bootstrap\n"
             )
-        return b"QDRANT__SERVICE__API_KEY=" + secret + b"\n"
+        return binding + b"QDRANT__SERVICE__API_KEY=" + secret + b"\n"
 
 
 @dataclass(frozen=True, slots=True)
@@ -1427,8 +1440,12 @@ class LinuxStoreHostOperations:
         expected = self._expected_names
         by_identity = {
             expected["resolved_store_spec"]: self._identity.resolved_store_spec_sha256,
-            expected["postgres_store_secret"]: POSTGRES_STORE_SECRET_PUBLIC_ID,
-            expected["qdrant_store_secret"]: QDRANT_STORE_SECRET_PUBLIC_ID,
+            expected["postgres_store_secret"]: secret_environment_public_id(
+                POSTGRES_STORE_SECRET_PATH, self._identity.execution_id
+            ),
+            expected["qdrant_store_secret"]: secret_environment_public_id(
+                QDRANT_STORE_SECRET_PATH, self._identity.execution_id
+            ),
             expected["canonical_database_and_roles"]: (
                 self._artifacts.canonical_bootstrap.sha256
             ),
@@ -1557,14 +1574,20 @@ class LinuxStoreHostOperations:
         observed = files.observe_qdrant_secret()
         if observed.presence is EffectPresence.ABSENT:
             secret = self._secrets.generate_qdrant_api_key()
-            files.create_qdrant_secret(SecretEnvironmentDocument("qdrant", secret))
+            files.create_qdrant_secret(
+                SecretEnvironmentDocument(
+                    "qdrant", self._identity.execution_id, secret
+                )
+            )
         elif observed.presence is not EffectPresence.EXACT:
             raise LinuxStoreEffectsError("qdrant_secret_not_recoverable")
         observed = files.observe_postgres_secret()
         if observed.presence is EffectPresence.ABSENT:
             secret = self._secrets.generate_postgres_password()
             files.create_postgres_secret(
-                SecretEnvironmentDocument("postgres", secret)
+                SecretEnvironmentDocument(
+                    "postgres", self._identity.execution_id, secret
+                )
             )
         elif observed.presence is not EffectPresence.EXACT:
             raise LinuxStoreEffectsError("postgres_secret_not_recoverable")
@@ -1806,9 +1829,14 @@ class LinuxInstallDependenciesFactory:
         self,
         *,
         transport_factory: BoundLinuxStoreTransportFactory,
+        expected_postgres_catalog_sha256: str,
         secret_source: FreshSecretSource | None = None,
     ) -> None:
-        if not callable(transport_factory):
+        if (
+            not callable(transport_factory)
+            or type(expected_postgres_catalog_sha256) is not str
+            or _HASH_RE.fullmatch(expected_postgres_catalog_sha256) is None
+        ):
             raise LinuxStoreEffectsError("linux_transport_factory_invalid")
         source = secret_source if secret_source is not None else SystemFreshSecretSource()
         if (
@@ -1817,6 +1845,11 @@ class LinuxInstallDependenciesFactory:
         ):
             raise LinuxStoreEffectsError("linux_secret_source_invalid")
         self._transport_factory = transport_factory
+        # Package authority selects the expected catalog independently.  The
+        # transport may observe a catalog but cannot select its own verifier.
+        self._expected_postgres_catalog_sha256 = (
+            expected_postgres_catalog_sha256
+        )
         self._secret_source = source
 
     def __call__(
@@ -1911,6 +1944,9 @@ class LinuxInstallDependenciesFactory:
             readiness = ClosedStoreReadinessProbe(
                 postgres=transports.postgres,
                 qdrant=transports.qdrant,
+                expected_postgres_catalog_sha256=(
+                    self._expected_postgres_catalog_sha256
+                ),
             )
             operations = LinuxStoreHostOperations(
                 identity=identity,
@@ -1954,6 +1990,7 @@ __all__ = [
     "LinuxStoreHostOperations",
     "LivePreflightSnapshot",
     "SecretEnvironmentDocument",
+    "secret_environment_public_id",
     "CONTROLLER_CONFIG_DIRECTORY",
     "RETAINED_ROOT_DIRECTORY_PATHS",
     "STORE_SECRET_DIRECTORY",

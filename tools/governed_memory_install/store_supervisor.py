@@ -17,7 +17,9 @@ from .host_boundary import (
     CommandResult,
     CommandRunner,
     DOCKER_BINARY,
-    SUPERVISOR_INSPECT_TEMPLATES,
+    SUPERVISOR_LABEL_KEYS,
+    SUPERVISOR_INSPECT_TEMPLATE_BY_LOGICAL,
+    SUPERVISOR_NETWORK_NAME,
 )
 from .linux_plan import canonical_labels_sha256, load_store_spec
 from .resource_identity import (
@@ -42,6 +44,7 @@ class ExactContainer:
     name: str
     container_id: str
     image_id: str
+    image_reference: str
     image_repo_digest: str
     labels: Mapping[str, str]
     labels_sha256: str
@@ -51,6 +54,7 @@ class ExactContainer:
     environment_fixed_values: Mapping[str, str]
     environment_forbidden_keys: frozenset[str]
     network_name: str
+    network_id: str
     host_ip: str
     host_port: int
     container_port: int
@@ -94,7 +98,17 @@ def exact_containers_from_files(
     )
     latest = latest_exact_resources(records)
     containers = spec["resources"]["containers"]
-    network_name = spec["resources"]["network"]["name"]
+    network_spec = spec["resources"]["network"]
+    network_name = network_spec["name"]
+    network_record = latest.get(("network", network_name))
+    if network_record is None:
+        raise StoreSupervisorError("container_network_identity_absent")
+    if network_record.event == "removed":
+        raise StoreSupervisorError("container_network_identity_removed")
+    if network_record.resource_labels_sha256 != canonical_labels_sha256(
+        network_spec["labels"]
+    ):
+        raise StoreSupervisorError("container_network_labels_identity_mismatch")
     exact: list[ExactContainer] = []
     for logical_name in ("postgres", "qdrant"):
         expected = containers[logical_name]
@@ -122,6 +136,7 @@ def exact_containers_from_files(
                 name=name,
                 container_id=record.resource_id,
                 image_id=record.image_id,
+                image_reference=expected["image"]["reference"],
                 image_repo_digest=record.image_repo_digest,
                 labels=labels,
                 labels_sha256=labels_sha256,
@@ -131,6 +146,7 @@ def exact_containers_from_files(
                 environment_fixed_values=dict(environment["fixed_values"]),
                 environment_forbidden_keys=frozenset(environment["forbidden_keys"]),
                 network_name=network_name,
+                network_id=network_record.resource_id,
                 host_ip=publish["host"],
                 host_port=publish["host_port"],
                 container_port=publish["container_port"],
@@ -172,141 +188,211 @@ class StoreSupervisor:
         self._containers = containers
 
     def _inspect(self, expected: ExactContainer) -> ContainerState:
-        projected: list[object] = []
-        for template in SUPERVISOR_INSPECT_TEMPLATES:
-            result = self._runner.run(
-                (
-                    DOCKER_BINARY,
-                    "container",
-                    "inspect",
-                    "--format",
-                    template,
-                    expected.container_id,
-                )
+        template = SUPERVISOR_INSPECT_TEMPLATE_BY_LOGICAL[
+            expected.logical_name
+        ]
+        result = self._runner.run(
+            (
+                DOCKER_BINARY,
+                "container",
+                "inspect",
+                "--format",
+                template,
+                expected.container_id,
             )
-            try:
-                projected.append(json.loads(result.stdout))
-            except (TypeError, json.JSONDecodeError) as error:
-                raise StoreSupervisorError("container_inspect_json_invalid") from error
-        (
-            container_id,
-            name,
-            image_id,
-            labels,
-            command,
-            healthcheck,
-            host_config,
-            mounts,
-            network_settings,
-            state,
-        ) = projected
-        observed = {
-            "Id": container_id,
-            "Name": name,
-            "Image": image_id,
-            "Config": {
-                "Labels": labels,
-                "Cmd": command,
-                "Healthcheck": healthcheck,
-            },
-            "HostConfig": host_config,
-            "Mounts": mounts,
-            "NetworkSettings": network_settings,
-            "State": state,
-        }
-        if observed.get("Id") != expected.container_id:
+        )
+        try:
+            projected = json.loads(result.stdout)
+        except (TypeError, json.JSONDecodeError) as error:
+            raise StoreSupervisorError(
+                "container_inspect_json_invalid"
+            ) from error
+        if type(projected) is not list:
+            raise StoreSupervisorError("container_inspect_json_invalid")
+        try:
+            (
+                container_id,
+                name,
+                image_id,
+                image_reference,
+                command,
+                healthcheck_count,
+                healthcheck_first,
+                label_count,
+                *tail,
+            ) = projected
+        except ValueError as error:
+            raise StoreSupervisorError(
+                "container_inspect_json_invalid"
+            ) from error
+        label_values = tail[: len(SUPERVISOR_LABEL_KEYS)]
+        try:
+            (
+                restart_name,
+                restart_maximum_retry_count,
+                pids_limit,
+                cap_add,
+                cap_drop,
+                security_opt,
+                readonly_rootfs,
+                network_mode,
+                host_port_count,
+                host_port_binding,
+                unrelated_host_port_binding,
+                log_driver,
+                log_option_count,
+                log_max_file,
+                log_max_size,
+                tmpfs_count,
+                tmpfs_value,
+                mount_count,
+                mount_type,
+                mount_name,
+                mount_destination,
+                mount_read_write,
+                runtime_port_count,
+                runtime_port_binding,
+                unrelated_runtime_port_binding,
+                network_count,
+                network_id,
+                running,
+                status,
+                paused,
+                restarting,
+                dead,
+                oom_killed,
+            ) = tail[len(SUPERVISOR_LABEL_KEYS) :]
+        except ValueError as error:
+            raise StoreSupervisorError(
+                "container_inspect_json_invalid"
+            ) from error
+        if container_id != expected.container_id:
             raise StoreSupervisorError("container_id_drift")
-        if observed.get("Name") != "/" + expected.name:
+        if name != "/" + expected.name:
             raise StoreSupervisorError("container_name_drift")
-        if observed.get("Image") != expected.image_id:
+        if image_id != expected.image_id:
             raise StoreSupervisorError("container_image_drift")
-        config = observed.get("Config")
-        host_config = observed.get("HostConfig")
-        mounts = observed.get("Mounts")
-        network_settings = observed.get("NetworkSettings")
-        state = observed.get("State")
-        if type(config) is not dict or config.get("Labels") != dict(expected.labels):
-            raise StoreSupervisorError("container_labels_drift")
-        observed_command = config.get("Cmd")
-        if expected.command:
-            command_matches = observed_command == list(expected.command)
-        else:
-            command_matches = observed_command in (None, [])
-        if not command_matches:
+        if image_reference != expected.image_reference:
+            raise StoreSupervisorError("container_image_reference_drift")
+        observed_command = tuple(command or ()) if type(command) in {list, type(None)} else None
+        if observed_command != expected.command:
             raise StoreSupervisorError("container_command_drift")
-        if config.get("Healthcheck") != {"Test": ["NONE"]}:
-            raise StoreSupervisorError("container_healthcheck_drift")
-        self._verify_host_config(expected, host_config)
-        self._verify_mount(expected, mounts)
-        self._verify_network(expected, network_settings)
         if (
-            type(state) is not dict
-            or type(state.get("Running")) is not bool
-            or type(state.get("Status")) is not str
+            type(healthcheck_count) is not int
+            or healthcheck_count != 1
+            or healthcheck_first != "NONE"
+        ):
+            raise StoreSupervisorError("container_healthcheck_drift")
+        expected_labels = dict(expected.labels)
+        observed_labels = dict(zip(SUPERVISOR_LABEL_KEYS, label_values, strict=True))
+        if (
+            type(label_count) is not int
+            or label_count != len(SUPERVISOR_LABEL_KEYS)
+            or set(expected_labels) != set(SUPERVISOR_LABEL_KEYS)
+            or observed_labels != expected_labels
+        ):
+            raise StoreSupervisorError("container_labels_drift")
+        expected_port_binding = [
+            {
+                "HostIp": expected.host_ip,
+                "HostPort": str(expected.host_port),
+            }
+        ]
+        if (
+            restart_name != expected.restart
+            or type(restart_maximum_retry_count) is not int
+            or restart_maximum_retry_count != 0
+        ):
+            raise StoreSupervisorError("container_restart_drift")
+        if type(pids_limit) is not int or pids_limit != expected.pids_limit:
+            raise StoreSupervisorError("container_pids_limit_drift")
+        if (
+            type(cap_add) not in {list, type(None)}
+            or tuple(cap_add or ()) != expected.cap_add
+        ):
+            raise StoreSupervisorError("container_cap_add_drift")
+        if (
+            type(cap_drop) not in {list, type(None)}
+            or tuple(cap_drop or ()) != expected.cap_drop
+        ):
+            raise StoreSupervisorError("container_cap_drop_drift")
+        if (
+            type(security_opt) not in {list, type(None)}
+            or tuple(security_opt or ()) != expected.security_opt
+            or readonly_rootfs is not False
+        ):
+            raise StoreSupervisorError("container_security_opt_drift")
+        if (
+            network_mode != expected.network_name
+            or type(host_port_count) is not int
+            or host_port_count != 1
+            or host_port_binding != expected_port_binding
+            or unrelated_host_port_binding is not None
+        ):
+            raise StoreSupervisorError("container_port_binding_drift")
+        if (
+            log_driver != expected.log_driver
+            or type(log_option_count) is not int
+            or log_option_count != len(expected.log_options)
+            or {
+                "max-file": log_max_file,
+                "max-size": log_max_size,
+            }
+            != dict(expected.log_options)
+        ):
+            raise StoreSupervisorError("container_logging_drift")
+        if (
+            type(tmpfs_count) is not int
+            or tmpfs_count != len(expected.tmpfs)
+            or tmpfs_value != expected.tmpfs.get("/tmp")
+        ):
+            raise StoreSupervisorError("container_tmpfs_drift")
+        if (
+            type(mount_count) is not int
+            or mount_count != 1
+            or mount_type != "volume"
+            or mount_name != expected.volume_name
+            or mount_destination != expected.volume_target
+            or mount_read_write is not True
+        ):
+            raise StoreSupervisorError("container_mount_drift")
+        if (
+            type(runtime_port_count) is not int
+            or runtime_port_count != 1
+            or runtime_port_binding != expected_port_binding
+            or unrelated_runtime_port_binding is not None
+        ):
+            raise StoreSupervisorError("container_runtime_port_drift")
+        if (
+            expected.network_name != SUPERVISOR_NETWORK_NAME
+            or type(network_count) is not int
+            or network_count != 1
+            or network_id != expected.network_id
+        ):
+            raise StoreSupervisorError("container_network_drift")
+        if (
+            type(running) is not bool
+            or type(status) is not str
+            or paused is not False
+            or restarting is not False
+            or dead is not False
+            or oom_killed is not False
+            or (
+                running is True
+                and status != "running"
+            )
+            or (
+                running is False
+                and status not in {"created", "exited"}
+            )
         ):
             raise StoreSupervisorError("container_state_invalid")
         return ContainerState(
             logical_name=expected.logical_name,
             container_id=expected.container_id,
-            running=state["Running"],
-            status=state["Status"],
+            running=running,
+            status=status,
         )
-
-    @staticmethod
-    def _verify_host_config(expected: ExactContainer, value: object) -> None:
-        if type(value) is not dict:
-            raise StoreSupervisorError("container_host_config_invalid")
-        restart = value.get("RestartPolicy")
-        log_config = value.get("LogConfig")
-        port_bindings = value.get("PortBindings")
-        expected_binding = {
-            f"{expected.container_port}/tcp": [
-                {"HostIp": expected.host_ip, "HostPort": str(expected.host_port)}
-            ]
-        }
-        if type(restart) is not dict or restart.get("Name") != expected.restart:
-            raise StoreSupervisorError("container_restart_drift")
-        if value.get("PidsLimit") != expected.pids_limit:
-            raise StoreSupervisorError("container_pids_limit_drift")
-        if tuple(value.get("CapAdd") or ()) != expected.cap_add:
-            raise StoreSupervisorError("container_cap_add_drift")
-        if tuple(value.get("CapDrop") or ()) != expected.cap_drop:
-            raise StoreSupervisorError("container_cap_drop_drift")
-        if tuple(value.get("SecurityOpt") or ()) != expected.security_opt:
-            raise StoreSupervisorError("container_security_opt_drift")
-        if value.get("Tmpfs") != dict(expected.tmpfs):
-            raise StoreSupervisorError("container_tmpfs_drift")
-        if (
-            type(log_config) is not dict
-            or log_config.get("Type") != expected.log_driver
-            or log_config.get("Config") != dict(expected.log_options)
-        ):
-            raise StoreSupervisorError("container_logging_drift")
-        if port_bindings != expected_binding:
-            raise StoreSupervisorError("container_port_binding_drift")
-        if value.get("NetworkMode") != expected.network_name:
-            raise StoreSupervisorError("container_network_mode_drift")
-
-    @staticmethod
-    def _verify_mount(expected: ExactContainer, value: object) -> None:
-        if type(value) is not list or len(value) != 1 or type(value[0]) is not dict:
-            raise StoreSupervisorError("container_mount_drift")
-        mount = value[0]
-        if (
-            mount.get("Type") != "volume"
-            or mount.get("Name") != expected.volume_name
-            or mount.get("Destination") != expected.volume_target
-            or mount.get("RW") is not True
-        ):
-            raise StoreSupervisorError("container_mount_drift")
-
-    @staticmethod
-    def _verify_network(expected: ExactContainer, value: object) -> None:
-        if type(value) is not dict:
-            raise StoreSupervisorError("container_network_drift")
-        networks = value.get("Networks")
-        if type(networks) is not dict or set(networks) != {expected.network_name}:
-            raise StoreSupervisorError("container_network_drift")
 
     def inspect(self) -> tuple[ContainerState, ContainerState]:
         return tuple(self._inspect(item) for item in self._containers)  # type: ignore[return-value]
@@ -329,7 +415,7 @@ class StoreSupervisor:
             before = self._inspect(container)
             if before.running:
                 self._runner.run(
-                    (DOCKER_BINARY, "stop", "--time=10", container.container_id)
+                    (DOCKER_BINARY, "stop", "--timeout=10", container.container_id)
                 )
             after = self._inspect(container)
             if after.running:

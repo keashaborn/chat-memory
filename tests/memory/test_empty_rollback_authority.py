@@ -217,6 +217,7 @@ def build_verified_controller_runtime(package_capability: object) -> object:
         controller_runtime_receipt_sha256=(
             package.controller_runtime_receipt_sha256
         ),
+        build_plan_sha256="a" * 64,
         package_manifest_sha256=package.package_manifest_sha256,
         controller_runtime_contract_sha256=(
             package.controller_runtime_contract_sha256
@@ -224,6 +225,10 @@ def build_verified_controller_runtime(package_capability: object) -> object:
         controller_requirements_lock_sha256=(
             package.controller_requirements_lock_sha256
         ),
+        standalone_cpython_specification_sha256="b" * 64,
+        standalone_cpython_archive_sha256="c" * 64,
+        standalone_cpython_payload_tree_sha256="d" * 64,
+        wheelhouse_tree_sha256="e" * 64,
         runtime_root=runtime_root,
         runtime_tree_sha256="4" * 64,
         release_root=release_root,

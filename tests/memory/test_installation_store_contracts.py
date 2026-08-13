@@ -17,6 +17,10 @@ from tools.governed_memory_install.host_boundary import (
     DOCKER_BINARY,
     FIXED_ENVIRONMENT,
     HostBoundaryError,
+    IMAGE_INSPECT_TEMPLATE,
+    SUPERVISOR_LABEL_KEYS,
+    SUPERVISOR_INSPECT_TEMPLATE_BY_LOGICAL,
+    SUPERVISOR_NETWORK_NAME,
     SUPERVISOR_INSPECT_TEMPLATES,
     validate_argv,
 )
@@ -64,10 +68,11 @@ POSTGRES_ID = "1" * 64
 QDRANT_ID = "2" * 64
 POSTGRES_IMAGE_ID = "sha256:" + "3" * 64
 QDRANT_IMAGE_ID = "sha256:" + "4" * 64
+NETWORK_ID = "network-id-9a54cf123493-000001"
 
 
 class _QueueRunner:
-    def __init__(self, outputs: list[dict[str, object]]) -> None:
+    def __init__(self, outputs: list[object]) -> None:
         self.outputs = list(outputs)
         self.calls: list[tuple[str, ...]] = []
 
@@ -82,6 +87,22 @@ class _SupervisorRunner:
     def __init__(self, containers: tuple[ExactContainer, ExactContainer]) -> None:
         self.containers = {item.container_id: item for item in containers}
         self.running = {item.container_id: False for item in containers}
+        self.networks = {
+            item.container_id: item.network_name for item in containers
+        }
+        self.commands = {
+            item.container_id: list(item.command) if item.command else None
+            for item in containers
+        }
+        self.restart_names = {
+            item.container_id: item.restart for item in containers
+        }
+        self.cap_drops = {
+            item.container_id: list(item.cap_drop) for item in containers
+        }
+        self.mount_destinations = {
+            item.container_id: item.volume_target for item in containers
+        }
         self.calls: list[tuple[str, ...]] = []
 
     def run(self, argv: tuple[str, ...]) -> CommandResult:
@@ -92,55 +113,60 @@ class _SupervisorRunner:
             self.assert_inspect_shape(exact)
             container_id = exact[-1]
             container = self.containers[container_id]
-            projections = {
-                "{{json .Id}}": container_id,
-                "{{json .Name}}": "/" + container.name,
-                "{{json .Image}}": container.image_id,
-                "{{json .Config.Labels}}": dict(container.labels),
-                "{{json .Config.Cmd}}": (
-                    list(container.command) if container.command else None
+            port_binding = [
+                {
+                    "HostIp": container.host_ip,
+                    "HostPort": str(container.host_port),
+                }
+            ]
+            value = [
+                container_id,
+                "/" + container.name,
+                container.image_id,
+                container.image_reference,
+                self.commands[container_id],
+                1,
+                "NONE",
+                len(container.labels),
+                *(container.labels.get(key) for key in SUPERVISOR_LABEL_KEYS),
+                self.restart_names[container_id],
+                0,
+                container.pids_limit,
+                list(container.cap_add) or None,
+                self.cap_drops[container_id] or None,
+                list(container.security_opt),
+                False,
+                container.network_name,
+                1,
+                port_binding,
+                None,
+                container.log_driver,
+                len(container.log_options),
+                container.log_options["max-file"],
+                container.log_options["max-size"],
+                len(container.tmpfs),
+                container.tmpfs["/tmp"],
+                1,
+                "volume",
+                container.volume_name,
+                self.mount_destinations[container_id],
+                True,
+                1,
+                port_binding,
+                None,
+                1,
+                (
+                    container.network_id
+                    if self.networks[container_id] == SUPERVISOR_NETWORK_NAME
+                    else None
                 ),
-                "{{json .Config.Healthcheck}}": {"Test": ["NONE"]},
-                "{{json .HostConfig}}": {
-                    "RestartPolicy": {"Name": container.restart},
-                    "PidsLimit": container.pids_limit,
-                    "CapAdd": list(container.cap_add),
-                    "CapDrop": list(container.cap_drop),
-                    "SecurityOpt": list(container.security_opt),
-                    "Tmpfs": dict(container.tmpfs),
-                    "LogConfig": {
-                        "Type": container.log_driver,
-                        "Config": dict(container.log_options),
-                    },
-                    "PortBindings": {
-                        f"{container.container_port}/tcp": [
-                            {
-                                "HostIp": container.host_ip,
-                                "HostPort": str(container.host_port),
-                            }
-                        ]
-                    },
-                    "NetworkMode": container.network_name,
-                },
-                "{{json .Mounts}}": [
-                    {
-                        "Type": "volume",
-                        "Name": container.volume_name,
-                        "Destination": container.volume_target,
-                        "RW": True,
-                    }
-                ],
-                "{{json .NetworkSettings}}": {
-                    "Networks": {container.network_name: {}}
-                },
-                "{{json .State}}": {
-                    "Running": self.running[container_id],
-                    "Status": (
-                        "running" if self.running[container_id] else "exited"
-                    ),
-                },
-            }
-            value = projections[exact[4]]
+                self.running[container_id],
+                "running" if self.running[container_id] else "exited",
+                False,
+                False,
+                False,
+                False,
+            ]
             return CommandResult(exact, 0, json.dumps(value), "")
         if operation == "start":
             container_id = exact[-1]
@@ -195,6 +221,7 @@ class DormantStoreInstallStorePackageTests(unittest.TestCase):
                     name=item["name"],
                     container_id=container_id,
                     image_id=image_id,
+                    image_reference=item["image"]["reference"],
                     image_repo_digest=item["image"]["repo_digest"],
                     labels=labels,
                     labels_sha256=canonical_labels_sha256(labels),
@@ -212,6 +239,7 @@ class DormantStoreInstallStorePackageTests(unittest.TestCase):
                         item["environment_contract"]["forbidden_keys"]
                     ),
                     network_name=spec["resources"]["network"]["name"],
+                    network_id=NETWORK_ID,
                     host_ip=item["publish"]["host"],
                     host_port=item["publish"]["host_port"],
                     container_port=item["publish"]["container_port"],
@@ -267,7 +295,14 @@ class DormantStoreInstallStorePackageTests(unittest.TestCase):
         popen.return_value = first_process
         reference = "postgres:16-alpine@sha256:" + "5" * 64
         result = CommandRunner().run(
-            (DOCKER_BINARY, "image", "inspect", "--format", "{{json .}}", reference)
+            (
+                DOCKER_BINARY,
+                "image",
+                "inspect",
+                "--format",
+                IMAGE_INSPECT_TEMPLATE,
+                reference,
+            )
         )
         self.assertEqual(result.stdout, "ok\n")
         kwargs = popen.call_args.kwargs
@@ -286,7 +321,7 @@ class DormantStoreInstallStorePackageTests(unittest.TestCase):
                     "image",
                     "inspect",
                     "--format",
-                    "{{json .}}",
+                    IMAGE_INSPECT_TEMPLATE,
                     reference,
                 )
             )
@@ -310,18 +345,18 @@ class DormantStoreInstallStorePackageTests(unittest.TestCase):
         )
         runner = _QueueRunner(
             [
-                {
-                    "Id": POSTGRES_IMAGE_ID,
-                    "RepoDigests": ["postgres@" + digest_one],
-                    "Os": "linux",
-                    "Architecture": "amd64",
-                },
-                {
-                    "Id": QDRANT_IMAGE_ID,
-                    "RepoDigests": ["qdrant/qdrant@" + digest_two],
-                    "Os": "linux",
-                    "Architecture": "amd64",
-                },
+                [
+                    POSTGRES_IMAGE_ID,
+                    ["postgres@" + digest_one],
+                    "linux",
+                    "amd64",
+                ],
+                [
+                    QDRANT_IMAGE_ID,
+                    ["qdrant/qdrant@" + digest_two],
+                    "linux",
+                    "amd64",
+                ],
             ]
         )
         identities = inspect_local_images(runner, expectations)
@@ -335,12 +370,12 @@ class DormantStoreInstallStorePackageTests(unittest.TestCase):
             self.assertNotIn("pull", call)
 
         wrong = _QueueRunner(
-            [{
-                "Id": POSTGRES_IMAGE_ID,
-                "RepoDigests": ["postgres@sha256:" + "7" * 64],
-                "Os": "linux",
-                "Architecture": "amd64",
-            }]
+            [[
+                POSTGRES_IMAGE_ID,
+                ["postgres@sha256:" + "7" * 64],
+                "linux",
+                "amd64",
+            ]]
         )
         with self.assertRaisesRegex(ImagePreflightError, "exact_repo_digest_absent"):
             inspect_local_images(wrong, expectations[:1])
@@ -583,6 +618,7 @@ class DormantStoreInstallStorePackageTests(unittest.TestCase):
             name="wrong-name",
             container_id=POSTGRES_ID,
             image_id=POSTGRES_IMAGE_ID,
+            image_reference=containers[0].image_reference,
             image_repo_digest=containers[0].image_repo_digest,
             labels=containers[0].labels,
             labels_sha256=containers[0].labels_sha256,
@@ -592,6 +628,7 @@ class DormantStoreInstallStorePackageTests(unittest.TestCase):
             environment_fixed_values=containers[0].environment_fixed_values,
             environment_forbidden_keys=containers[0].environment_forbidden_keys,
             network_name=containers[0].network_name,
+            network_id=containers[0].network_id,
             host_ip=containers[0].host_ip,
             host_port=containers[0].host_port,
             container_port=containers[0].container_port,
@@ -610,14 +647,11 @@ class DormantStoreInstallStorePackageTests(unittest.TestCase):
         with self.assertRaisesRegex(StoreSupervisorError, "name_drift"):
             supervisor.inspect()
 
-    def test_supervisor_refuses_runtime_topology_without_reading_environment(self) -> None:
+    def test_supervisor_refuses_network_drift_without_broad_config_reads(self) -> None:
         containers = self._containers()
         runner = _SupervisorRunner(containers)
-        runner.containers[POSTGRES_ID] = replace(
-            containers[0],
-            pids_limit=containers[0].pids_limit + 1,
-        )
-        with self.assertRaisesRegex(StoreSupervisorError, "pids_limit_drift"):
+        runner.networks[POSTGRES_ID] = "unrelated-network"
+        with self.assertRaisesRegex(StoreSupervisorError, "network_drift"):
             StoreSupervisor(runner=runner, containers=containers).inspect()
 
         runner = _SupervisorRunner(containers)
@@ -626,6 +660,42 @@ class DormantStoreInstallStorePackageTests(unittest.TestCase):
         self.assertFalse(
             any("Env" in argument for call in runner.calls for argument in call)
         )
+        rendered = "\n".join(" ".join(call) for call in runner.calls)
+        for broad in (
+            "{{json .HostConfig}}",
+            "{{json .Mounts}}",
+            "{{json .NetworkSettings}}",
+            "{{json .State}}",
+            "{{json .Config.Labels}}",
+            "{{json .Config.Env}}",
+        ):
+            self.assertNotIn(broad, rendered)
+
+    def test_supervisor_refuses_nonsecret_container_hardening_drift(self) -> None:
+        containers = self._containers()
+        cases = (
+            ("command", lambda runner: runner.commands.__setitem__(
+                POSTGRES_ID, ["sh", "-c", "malicious"]
+            )),
+            ("restart", lambda runner: runner.restart_names.__setitem__(
+                POSTGRES_ID, "always"
+            )),
+            ("cap_drop", lambda runner: runner.cap_drops.__setitem__(
+                POSTGRES_ID, []
+            )),
+            ("mount", lambda runner: runner.mount_destinations.__setitem__(
+                POSTGRES_ID, "/tmp/changed"
+            )),
+        )
+        for label, mutate in cases:
+            runner = _SupervisorRunner(containers)
+            mutate(runner)
+            with self.subTest(label=label), self.assertRaises(
+                StoreSupervisorError
+            ):
+                StoreSupervisor(
+                    runner=runner, containers=containers
+                ).inspect()
 
     def test_resolved_spec_and_ledger_bind_supervisor_identity(self) -> None:
         spec = self._bound_spec()
@@ -641,6 +711,21 @@ class DormantStoreInstallStorePackageTests(unittest.TestCase):
             )
             spec_path.chmod(0o600)
             ledger_binding = resource_ledger_binding_sha256(BINDING)
+            network = spec["resources"]["network"]
+            append_resource_identity(
+                ledger_path,
+                binding_sha256=ledger_binding,
+                event="created",
+                resource_kind="network",
+                resource_name=network["name"],
+                resource_id=NETWORK_ID,
+                ownership_sha256=hashlib.sha256(
+                    b"network:owned"
+                ).hexdigest(),
+                resource_labels_sha256=canonical_labels_sha256(
+                    network["labels"]
+                ),
+            )
             for logical_name, container_id, image_id in (
                 ("postgres", POSTGRES_ID, POSTGRES_IMAGE_ID),
                 ("qdrant", QDRANT_ID, QDRANT_IMAGE_ID),

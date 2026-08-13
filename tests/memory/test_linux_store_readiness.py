@@ -19,9 +19,16 @@ from tools.governed_memory_install.store_readiness import (
     COLLECTION,
     EXPECTED_QDRANT_COLLECTION_CONFIG_SHA256,
     POSTGRES_BIND,
+    POSTGRES_SERVER_VERSION,
     QDRANT_BIND,
+    QDRANT_SERVER_VERSION,
     REQUIRED_ROLE_NAMES,
     TERMINAL_MIGRATION_IDS,
+)
+
+
+EXPECTED_TEST_CATALOG_SHA256 = (
+    "0904117a50afd970b753ae185200391c4d5524d3c2b35db4c2e8e33b9a81f25e"
 )
 
 
@@ -45,6 +52,7 @@ def _terminal_postgres() -> TerminalPostgreSQLSnapshot:
     return TerminalPostgreSQLSnapshot(
         bind=POSTGRES_BIND,
         server_major=16,
+        server_version=POSTGRES_SERVER_VERSION,
         database="governed_memory",
         applied_migration_ids=TERMINAL_MIGRATION_IDS,
         roles=_roles(),
@@ -71,7 +79,7 @@ def _terminal_postgres() -> TerminalPostgreSQLSnapshot:
 def _terminal_qdrant() -> TerminalQdrantSnapshot:
     return TerminalQdrantSnapshot(
         bind=QDRANT_BIND,
-        server_version="1.19.0",
+        server_version=QDRANT_SERVER_VERSION,
         collection_exists=True,
         alias_target=COLLECTION,
         collection_config=QdrantCollectionConfiguration(
@@ -93,6 +101,7 @@ class _Postgres:
         self.prebootstrap = PrebootstrapPostgreSQLSnapshot(
             bind=POSTGRES_BIND,
             server_major=16,
+            server_version=POSTGRES_SERVER_VERSION,
             connected_database="postgres",
             target_database_exists=False,
             present_target_role_names=(),
@@ -113,7 +122,7 @@ class _Qdrant:
     def __init__(self) -> None:
         self.prebootstrap = PrebootstrapQdrantSnapshot(
             bind=QDRANT_BIND,
-            server_version="1.19.0",
+            server_version=QDRANT_SERVER_VERSION,
             collection_exists=False,
             point_count=0,
             source_endpoint_count=0,
@@ -134,7 +143,9 @@ class LinuxStoreReadinessTests(unittest.TestCase):
         postgres = _Postgres()
         qdrant = _Qdrant()
         receipt = ClosedStoreReadinessProbe(
-            postgres=postgres, qdrant=qdrant
+            postgres=postgres,
+            qdrant=qdrant,
+            expected_postgres_catalog_sha256=EXPECTED_TEST_CATALOG_SHA256,
         ).verify_fresh_empty_stores()
         self.assertEqual(receipt.postgres.connected_database, "postgres")
         self.assertEqual(receipt.postgres.target_database, "governed_memory")
@@ -156,14 +167,20 @@ class LinuxStoreReadinessTests(unittest.TestCase):
                 postgres.prebootstrap = replace(postgres.prebootstrap, **mutation)
                 with self.assertRaises(LinuxStoreReadinessError):
                     ClosedStoreReadinessProbe(
-                        postgres=postgres, qdrant=_Qdrant()
+                        postgres=postgres,
+                        qdrant=_Qdrant(),
+                        expected_postgres_catalog_sha256=(
+                            EXPECTED_TEST_CATALOG_SHA256
+                        ),
                     ).verify_fresh_empty_stores()
 
     def test_terminal_receipt_hashes_normalized_catalog_role_graph_and_config(
         self,
     ) -> None:
         receipt = ClosedStoreReadinessProbe(
-            postgres=_Postgres(), qdrant=_Qdrant()
+            postgres=_Postgres(),
+            qdrant=_Qdrant(),
+            expected_postgres_catalog_sha256=EXPECTED_TEST_CATALOG_SHA256,
         ).verify_terminal_canonical_stores()
         self.assertEqual(receipt.postgres.applied_migration_ids, TERMINAL_MIGRATION_IDS)
         self.assertRegex(receipt.postgres.exact_role_graph_sha256, r"^[0-9a-f]{64}$")
@@ -183,7 +200,11 @@ class LinuxStoreReadinessTests(unittest.TestCase):
         with self.assertRaisesRegex(
             LinuxStoreReadinessError, "readiness_transport_invalid"
         ):
-            ClosedStoreReadinessProbe(postgres=postgres, qdrant=_Qdrant())
+            ClosedStoreReadinessProbe(
+                postgres=postgres,
+                qdrant=_Qdrant(),
+                expected_postgres_catalog_sha256=EXPECTED_TEST_CATALOG_SHA256,
+            ).verify_terminal_canonical_stores()
 
         class FailingPostgres(_Postgres):
             def inspect_prebootstrap(self) -> PrebootstrapPostgreSQLSnapshot:
@@ -192,7 +213,9 @@ class LinuxStoreReadinessTests(unittest.TestCase):
         error: LinuxStoreReadinessError | None = None
         try:
             ClosedStoreReadinessProbe(
-                postgres=FailingPostgres(), qdrant=_Qdrant()
+                postgres=FailingPostgres(),
+                qdrant=_Qdrant(),
+                expected_postgres_catalog_sha256=EXPECTED_TEST_CATALOG_SHA256,
             ).verify_fresh_empty_stores()
         except LinuxStoreReadinessError as caught:
             error = caught
@@ -200,6 +223,37 @@ class LinuxStoreReadinessTests(unittest.TestCase):
         self.assertEqual(str(error), "fresh_store_probe_failed")
         self.assertIsNone(error.__cause__)
         self.assertNotIn("secret", repr(error).lower())
+
+    def test_refuses_version_drift_and_unapproved_catalog(self) -> None:
+        postgres = _Postgres()
+        with self.assertRaises(LinuxStoreReadinessError):
+            replace(postgres.prebootstrap, server_version="16.15")
+
+        qdrant = _Qdrant()
+        with self.assertRaises(LinuxStoreReadinessError):
+            replace(qdrant.terminal, server_version="1.19.1")
+
+        postgres = _Postgres()
+        postgres.terminal = replace(
+            postgres.terminal,
+            catalog_identities=postgres.terminal.catalog_identities + (
+                PostgreSQLCatalogIdentity(
+                    "schema",
+                    "memory",
+                    "unexpected",
+                    "governed_memory_owner",
+                    "f" * 64,
+                ),
+            ),
+        )
+        with self.assertRaisesRegex(
+            LinuxStoreReadinessError, "terminal_postgres_catalog_mismatch"
+        ):
+            ClosedStoreReadinessProbe(
+                postgres=postgres,
+                qdrant=_Qdrant(),
+                expected_postgres_catalog_sha256=EXPECTED_TEST_CATALOG_SHA256,
+            ).verify_terminal_canonical_stores()
 
 
 if __name__ == "__main__":

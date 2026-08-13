@@ -229,6 +229,7 @@ class _Fixture:
         evidence = VerifiedControllerRuntimeEvidence(
             result_type="verified_controller_runtime_v1",
             controller_runtime_receipt_sha256=RUNTIME_RECEIPT_SHA256,
+            build_plan_sha256="9" * 64,
             package_manifest_sha256=self.package_manifest_sha256,
             controller_runtime_contract_sha256=hashlib.sha256(
                 self.controller_runtime_contract_json
@@ -236,6 +237,10 @@ class _Fixture:
             controller_requirements_lock_sha256=hashlib.sha256(
                 self.controller_requirements_lock
             ).hexdigest(),
+            standalone_cpython_specification_sha256="a" * 64,
+            standalone_cpython_archive_sha256="b" * 64,
+            standalone_cpython_payload_tree_sha256="c" * 64,
+            wheelhouse_tree_sha256="d" * 64,
             runtime_root=runtime_root,
             runtime_tree_sha256="3" * 64,
             release_root=release_root,

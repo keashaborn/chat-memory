@@ -36,8 +36,8 @@ class DormantStoreInstallPackageTests(unittest.TestCase):
         self.assertEqual(receipt["schema_version"], (
             "governed-memory-dormant-store-install-package-verification-v4"
         ))
-        self.assertEqual(receipt["artifact_count"], 62)
-        self.assertEqual(len(package.EXPECTED_ARTIFACTS), 62)
+        self.assertEqual(receipt["artifact_count"], 65)
+        self.assertEqual(len(package.EXPECTED_ARTIFACTS), 65)
         self.assertTrue(
             receipt["durable_install_and_rollback_journal_adapters_packaged"]
         )
@@ -58,11 +58,30 @@ class DormantStoreInstallPackageTests(unittest.TestCase):
         for field in (
             "resolved_store_spec_and_exact_docker_labels_bound",
             "resource_identity_ledger_v2_packaged",
-            "empty_rollback_writer_fence_packaged",
             "retained_audit_artifact_hashes_bound",
             "empty_rollback_full_runtime_and_release_identity_bound_through_authority_claim_journal_requests_observations_writer_fence_and_receipt",
         ):
             self.assertTrue(receipt[field], field)
+        for field in (
+            "closed_live_transport_contracts_packaged",
+            "postgresql_source_closure_contract_packaged",
+            "runtime_input_selection_contract_repaired",
+            "runtime_build_receipt_provenance_v3_packaged",
+            "exact_postgresql_16_14_and_qdrant_1_19_0_readiness_required",
+        ):
+            self.assertTrue(receipt[field], field)
+        for field in (
+            "empty_rollback_writer_fence_packaged",
+            "fresh_offline_read_only_empty_recheck_required_at_r07_under_stopped_store_fence",
+            "complete_closed_live_transport_substrate_set_packaged",
+            "complete_closed_live_transport_substrate_set_integrated_into_bound_factory",
+            "driver_native_postgresql_stage_contract_packaged",
+            "driver_native_postgresql_executable_stage_machine_packaged",
+            "approved_terminal_postgresql_catalog_manifest_selected",
+            "durable_live_empty_rollback_writer_fence_transport_packaged",
+            "stopped_store_semantic_empty_recheck_is_valid",
+        ):
+            self.assertFalse(receipt[field], field)
         self.assertTrue(
             receipt["claim_bound_install_controller_composition_packaged"]
         )
@@ -89,6 +108,18 @@ class DormantStoreInstallPackageTests(unittest.TestCase):
         self.assertFalse(receipt["selected_live_platform_transports_packaged"])
         self.assertFalse(receipt["pinned_postgresql_driver_selected"])
         self.assertTrue(receipt["durable_create_once_receipt_store_packaged"])
+        contract = json.loads(package.CONTRACT.read_text(encoding="utf-8"))
+        receipts = contract["receipt_policy"]
+        self.assertFalse(
+            receipts[
+                "empty_rollback_receipt_persisted_create_once_while_writer_fence_held"
+            ]
+        )
+        self.assertTrue(
+            receipts[
+                "empty_rollback_receipt_persistence_create_once_while_live_writer_fence_held_required"
+            ]
+        )
         self.assertTrue(
             receipt["controller_runtime_release_builder_orchestration_packaged"]
         )
@@ -131,6 +162,12 @@ class DormantStoreInstallPackageTests(unittest.TestCase):
         self.assertEqual(
             receipt["controller_runtime_contract_canonical_sha256"],
             package.EXPECTED_CONTROLLER_RUNTIME_CONTRACT_CANONICAL_SHA256,
+        )
+        self.assertEqual(
+            receipt[
+                "postgres_source_closure_contract_canonical_sha256"
+            ],
+            package.EXPECTED_POSTGRES_SOURCE_CLOSURE_CANONICAL_SHA256,
         )
         self.assertEqual(
             receipt["proof_contract_canonical_sha256"],
@@ -222,7 +259,7 @@ class DormantStoreInstallPackageTests(unittest.TestCase):
             package.MANIFEST.read_text(encoding="ascii")
         )
         self.assertEqual(checked_in, generate_installation_package_manifest.generate())
-        self.assertEqual(package.verify()["artifact_count"], 62)
+        self.assertEqual(package.verify()["artifact_count"], 65)
 
     def test_verifier_generator_and_local_migration_binding_are_hash_bound(
         self,
@@ -258,6 +295,9 @@ class DormantStoreInstallPackageTests(unittest.TestCase):
             "tools/governed_memory_validation/run_installation_synthetic_proof.py",
             "tools/governed_memory_validation/verify_store_migration_manifest.py",
             "ops/governed_memory/installation/current/postgres/migration_bindings.json",
+            "ops/governed_memory/installation/current/postgres/source_closure_contract.json",
+            "tools/governed_memory_install/linux_live_transports.py",
+            "tools/governed_memory_install/postgres_source_closure.py",
         }
         self.assertTrue(required.issubset(artifacts))
         for historical in (

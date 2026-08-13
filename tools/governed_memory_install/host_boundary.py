@@ -15,6 +15,7 @@ import re
 import selectors
 import subprocess
 import time
+from types import MappingProxyType
 from typing import Final, Protocol, Sequence
 
 
@@ -66,17 +67,90 @@ _IMAGE_REFERENCE_RE = re.compile(
     re.ASCII,
 )
 _COMMAND_PROFILES: Final = frozenset({"image_inspect", "store_supervisor"})
-SUPERVISOR_INSPECT_TEMPLATES: Final = (
-    "{{json .Id}}",
-    "{{json .Name}}",
-    "{{json .Image}}",
-    "{{json .Config.Labels}}",
-    "{{json .Config.Cmd}}",
-    "{{json .Config.Healthcheck}}",
-    "{{json .HostConfig}}",
-    "{{json .Mounts}}",
-    "{{json .NetworkSettings}}",
-    "{{json .State}}",
+IMAGE_INSPECT_TEMPLATE: Final = (
+    "[{{json .Id}},{{json .RepoDigests}},{{json .Os}},"
+    "{{json .Architecture}}]"
+)
+SUPERVISOR_NETWORK_NAME: Final = "governed-memory-net-9a54cf123493-000001"
+SUPERVISOR_POSTGRES_PORT_KEY: Final = "5432/tcp"
+SUPERVISOR_QDRANT_PORT_KEY: Final = "6333/tcp"
+SUPERVISOR_LABEL_KEYS: Final = (
+    "lifeswitch.governed-memory.authorization-id",
+    "lifeswitch.governed-memory.authorization-nonce-sha256",
+    "lifeswitch.governed-memory.candidate",
+    "lifeswitch.governed-memory.execution-binding-sha256",
+    "lifeswitch.governed-memory.execution-id",
+    "lifeswitch.governed-memory.package-generation",
+    "lifeswitch.governed-memory.package-manifest-sha256",
+)
+
+
+def _supervisor_inspect_template(port_key: str, unrelated_port_key: str) -> str:
+    """Return one exact non-secret Docker projection for a store container."""
+
+    expressions = (
+        ".Id",
+        ".Name",
+        ".Image",
+        ".Config.Image",
+        ".Config.Cmd",
+        "(len .Config.Healthcheck.Test)",
+        "(index .Config.Healthcheck.Test 0)",
+        "(len .Config.Labels)",
+        *tuple(
+            f'(index .Config.Labels "{key}")'
+            for key in SUPERVISOR_LABEL_KEYS
+        ),
+        ".HostConfig.RestartPolicy.Name",
+        ".HostConfig.RestartPolicy.MaximumRetryCount",
+        ".HostConfig.PidsLimit",
+        ".HostConfig.CapAdd",
+        ".HostConfig.CapDrop",
+        ".HostConfig.SecurityOpt",
+        ".HostConfig.ReadonlyRootfs",
+        ".HostConfig.NetworkMode",
+        "(len .HostConfig.PortBindings)",
+        f'(index .HostConfig.PortBindings "{port_key}")',
+        f'(index .HostConfig.PortBindings "{unrelated_port_key}")',
+        ".HostConfig.LogConfig.Type",
+        "(len .HostConfig.LogConfig.Config)",
+        '(index .HostConfig.LogConfig.Config "max-file")',
+        '(index .HostConfig.LogConfig.Config "max-size")',
+        "(len .HostConfig.Tmpfs)",
+        '(index .HostConfig.Tmpfs "/tmp")',
+        "(len .Mounts)",
+        "(index .Mounts 0).Type",
+        "(index .Mounts 0).Name",
+        "(index .Mounts 0).Destination",
+        "(index .Mounts 0).RW",
+        "(len .NetworkSettings.Ports)",
+        f'(index .NetworkSettings.Ports "{port_key}")',
+        f'(index .NetworkSettings.Ports "{unrelated_port_key}")',
+        "(len .NetworkSettings.Networks)",
+        f'(index .NetworkSettings.Networks "{SUPERVISOR_NETWORK_NAME}").NetworkID',
+        ".State.Running",
+        ".State.Status",
+        ".State.Paused",
+        ".State.Restarting",
+        ".State.Dead",
+        ".State.OOMKilled",
+    )
+    return "[" + ",".join(f"{{{{json {item}}}}}" for item in expressions) + "]"
+
+
+SUPERVISOR_INSPECT_TEMPLATE_BY_LOGICAL: Final = MappingProxyType({
+    "postgres": _supervisor_inspect_template(
+        SUPERVISOR_POSTGRES_PORT_KEY,
+        SUPERVISOR_QDRANT_PORT_KEY,
+    ),
+    "qdrant": _supervisor_inspect_template(
+        SUPERVISOR_QDRANT_PORT_KEY,
+        SUPERVISOR_POSTGRES_PORT_KEY,
+    ),
+})
+SUPERVISOR_INSPECT_TEMPLATES: Final = tuple(
+    SUPERVISOR_INSPECT_TEMPLATE_BY_LOGICAL[key]
+    for key in ("postgres", "qdrant")
 )
 _HASH_RE = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _ATTEMPT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z", re.ASCII)
@@ -523,7 +597,8 @@ class CommandRunner:
         if self._command_profile == "image_inspect":
             if (
                 len(argv) != 6
-                or argv[1:5] != ("image", "inspect", "--format", "{{json .}}")
+                or argv[1:5]
+                != ("image", "inspect", "--format", IMAGE_INSPECT_TEMPLATE)
                 or _IMAGE_REFERENCE_RE.fullmatch(argv[5]) is None
             ):
                 raise HostBoundaryError("command_profile_refused")
@@ -542,7 +617,7 @@ class CommandRunner:
             )
             stop = (
                 len(argv) == 4
-                and argv[1:3] == ("stop", "--time=10")
+                and argv[1:3] == ("stop", "--timeout=10")
                 and _CONTAINER_ID_RE.fullmatch(argv[3]) is not None
             )
             if not (inspect or start or stop):

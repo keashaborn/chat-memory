@@ -5,7 +5,7 @@ from __future__ import annotations
 
 This module has no installation, rollback, activation, Docker, network, secret,
 PostgreSQL, or Qdrant execution surface. Phase 7C receipts are immutable
-historical evidence only. The current Phase 8G application proof and Phase 9D
+historical evidence only. The current Phase 8G application proof and Phase 9F
 repository-only dormant-store controller package are verified separately;
 installation and activation remain refused.
 """
@@ -262,6 +262,15 @@ EXPECTED_CURRENT_COMPONENT_DISPOSITION: Mapping[str, object] = {
         "controller_runtime_release_builder": (
             "tools/governed_memory_release/controller_runtime_builder.py"
         ),
+        "closed_live_transport_contracts": (
+            "tools/governed_memory_install/linux_live_transports.py"
+        ),
+        "postgresql_source_closure_module": (
+            "tools/governed_memory_install/postgres_source_closure.py"
+        ),
+        "postgresql_source_closure_contract": (
+            "ops/governed_memory/installation/current/postgres/source_closure_contract.json"
+        ),
         "synthetic_proof_entrypoint": (
             "tools/governed_memory_validation/"
             "run_installation_synthetic_proof.py"
@@ -296,9 +305,21 @@ EXPECTED_CURRENT_COMPONENT_DISPOSITION: Mapping[str, object] = {
         "stores_install_owns_or_removes_controller_substrate": False,
         "resolved_store_spec_and_exact_docker_labels_bound": True,
         "resource_identity_ledger_v2_packaged": True,
-        "empty_rollback_writer_fence_packaged": True,
-        "empty_rollback_writer_fence_requires_stopped_or_absent_exact_stores": True,
-        "fresh_offline_read_only_empty_recheck_required_at_r07_under_stopped_store_fence": True,
+        "empty_rollback_writer_fence_packaged": False,
+        "fresh_offline_read_only_empty_recheck_required_at_r07_under_stopped_store_fence": False,
+        "closed_live_transport_contracts_packaged": True,
+        "complete_closed_live_transport_substrate_set_packaged": False,
+        "complete_closed_live_transport_substrate_set_integrated_into_bound_factory": False,
+        "postgresql_source_closure_contract_packaged": True,
+        "driver_native_postgresql_stage_contract_packaged": False,
+        "driver_native_postgresql_executable_stage_machine_packaged": False,
+        "runtime_input_selection_contract_repaired": True,
+        "runtime_build_receipt_provenance_v3_packaged": True,
+        "exact_postgresql_16_14_and_qdrant_1_19_0_readiness_required": True,
+        "approved_terminal_postgresql_catalog_manifest_selected": False,
+        "durable_live_empty_rollback_writer_fence_transport_packaged": False,
+        "stopped_store_semantic_empty_recheck_is_valid": False,
+        "required_future_order_is_live_writer_fence_empty_recheck_then_stop_then_physical_removal": True,
         "retained_audit_artifact_hashes_bound": True,
         "durable_create_once_receipt_store_packaged": True,
         "public_entrypoints_require_canonical_root_owned_production_receipt_store": True,
@@ -853,7 +874,45 @@ def _verify_current_package_receipts(
         )
         is True
         and package_receipt.get("resource_identity_ledger_v2_packaged") is True
-        and package_receipt.get("empty_rollback_writer_fence_packaged") is True
+        and package_receipt.get("empty_rollback_writer_fence_packaged") is False
+        and package_receipt.get(
+            "fresh_offline_read_only_empty_recheck_required_at_r07_under_stopped_store_fence"
+        )
+        is False
+        and package_receipt.get("closed_live_transport_contracts_packaged") is True
+        and package_receipt.get("complete_closed_live_transport_substrate_set_packaged") is False
+        and package_receipt.get(
+            "complete_closed_live_transport_substrate_set_integrated_into_bound_factory"
+        )
+        is False
+        and package_receipt.get(
+            "postgresql_source_closure_contract_packaged"
+        )
+        is True
+        and package_receipt.get(
+            "driver_native_postgresql_stage_contract_packaged"
+        )
+        is False
+        and package_receipt.get(
+            "driver_native_postgresql_executable_stage_machine_packaged"
+        )
+        is False
+        and package_receipt.get("runtime_input_selection_contract_repaired") is True
+        and package_receipt.get("runtime_build_receipt_provenance_v3_packaged") is True
+        and package_receipt.get(
+            "exact_postgresql_16_14_and_qdrant_1_19_0_readiness_required"
+        )
+        is True
+        and package_receipt.get(
+            "approved_terminal_postgresql_catalog_manifest_selected"
+        )
+        is False
+        and package_receipt.get(
+            "durable_live_empty_rollback_writer_fence_transport_packaged"
+        )
+        is False
+        and package_receipt.get("stopped_store_semantic_empty_recheck_is_valid")
+        is False
         and package_receipt.get("retained_audit_artifact_hashes_bound") is True
         and package_receipt.get("install_controller_emits_canonical_receipt") is True
         and package_receipt.get("empty_rollback_controller_emits_canonical_receipt") is True
@@ -969,7 +1028,7 @@ def _verify_runtime_manifest(
         runtime.get("schema_version")
         == "governed-memory-successor-runtime-manifest-v4"
         and runtime.get("phase")
-        == "phase9d_repository_only_install_empty_rollback_contract_repair_adapters_and_runtime_builder_packaged_inactive_activation_blocked"
+        == "phase9f_repository_only_closed_live_transport_contract_and_runtime_input_repair_packaged_inactive_activation_blocked"
         and runtime.get("production_state_changed") is False
         and runtime.get("legacy_imports_allowed") is False
         and isinstance(validation, dict)
@@ -1058,7 +1117,7 @@ def _verify_runtime_manifest(
         and isinstance(current, dict)
         and current.get("scope") == "current_inactive_stores_only_package"
         and current_state
-        == "phase9d_repository_only_contract_repair_closed_adapters_and_runtime_builder_packaged_not_authorized"
+        == "phase9f_repository_only_live_transport_contracts_postgresql_source_closure_and_runtime_input_repair_packaged_not_authorized"
         and current.get("package_manifest")
         == "ops/governed_memory/installation/current/package_manifest.json"
         and current.get("package_manifest_schema_version")
@@ -1075,6 +1134,22 @@ def _verify_runtime_manifest(
         == package_receipt.get("plan_canonical_sha256")
         and current.get("controller_plan")
         == "ops/governed_memory/installation/current/controller_plan.json"
+        and current.get("execution_contract_canonical_sha256")
+        == package_receipt.get("execution_contract_canonical_sha256")
+        and current.get("execution_contract")
+        == "ops/governed_memory/installation/current/execution_contract.json"
+        and current.get("controller_runtime_contract_canonical_sha256")
+        == package_receipt.get("controller_runtime_contract_canonical_sha256")
+        and current.get("controller_runtime_contract")
+        == "ops/governed_memory/installation/current/controller_runtime_contract.json"
+        and current.get(
+            "postgres_source_closure_contract_canonical_sha256"
+        )
+        == package_receipt.get(
+            "postgres_source_closure_contract_canonical_sha256"
+        )
+        and current.get("postgres_source_closure_contract")
+        == "ops/governed_memory/installation/current/postgres/source_closure_contract.json"
         and current.get("store_migration_manifest_sha256")
         == store_receipt.get("manifest_sha256")
         and current.get("store_migration_manifest")
@@ -1122,9 +1197,41 @@ def _verify_runtime_manifest(
         and current.get("resolved_store_spec_and_exact_docker_labels_bound")
         is True
         and current.get("resource_identity_ledger_v2_packaged") is True
-        and current.get("empty_rollback_writer_fence_packaged") is True
+        and current.get("empty_rollback_writer_fence_packaged") is False
         and current.get(
             "fresh_offline_read_only_empty_recheck_required_at_r07_under_stopped_store_fence"
+        )
+        is False
+        and current.get("closed_live_transport_contracts_packaged") is True
+        and current.get("complete_closed_live_transport_substrate_set_packaged") is False
+        and current.get(
+            "complete_closed_live_transport_substrate_set_integrated_into_bound_factory"
+        )
+        is False
+        and current.get(
+            "postgresql_source_closure_contract_packaged"
+        )
+        is True
+        and current.get("driver_native_postgresql_stage_contract_packaged") is False
+        and current.get(
+            "driver_native_postgresql_executable_stage_machine_packaged"
+        )
+        is False
+        and current.get("runtime_input_selection_contract_repaired") is True
+        and current.get("runtime_build_receipt_provenance_v3_packaged") is True
+        and current.get(
+            "exact_postgresql_16_14_and_qdrant_1_19_0_readiness_required"
+        )
+        is True
+        and current.get("approved_terminal_postgresql_catalog_manifest_selected")
+        is False
+        and current.get(
+            "durable_live_empty_rollback_writer_fence_transport_packaged"
+        )
+        is False
+        and current.get("stopped_store_semantic_empty_recheck_is_valid") is False
+        and current.get(
+            "required_future_order_is_live_writer_fence_empty_recheck_then_stop_then_physical_removal"
         )
         is True
         and current.get("retained_audit_artifact_hashes_bound") is True
@@ -1454,8 +1561,8 @@ def verify_candidate_artifacts() -> dict[str, object]:
     return {
         "schema_version": "governed-memory-release-artifact-verification-v7",
         "phase": (
-            "phase9d_repository_only_install_empty_rollback_contract_repair_"
-            "adapters_and_runtime_builder_packaged_inactive_activation_blocked"
+            "phase9f_repository_only_closed_live_transport_contract_and_runtime_"
+            "input_repair_packaged_inactive_activation_blocked"
         ),
         "artifact_sha256": dict(sorted(observed_hashes.items())),
         "artifact_integrity_verified": True,
@@ -1500,7 +1607,20 @@ def verify_candidate_artifacts() -> dict[str, object]:
         "stores_install_owns_or_removes_controller_substrate": False,
         "resolved_store_spec_and_exact_docker_labels_bound": True,
         "resource_identity_ledger_v2_packaged": True,
-        "empty_rollback_writer_fence_packaged": True,
+        "empty_rollback_writer_fence_packaged": False,
+        "fresh_offline_read_only_empty_recheck_required_at_r07_under_stopped_store_fence": False,
+        "closed_live_transport_contracts_packaged": True,
+        "complete_closed_live_transport_substrate_set_packaged": False,
+        "complete_closed_live_transport_substrate_set_integrated_into_bound_factory": False,
+        "postgresql_source_closure_contract_packaged": True,
+        "driver_native_postgresql_stage_contract_packaged": False,
+        "driver_native_postgresql_executable_stage_machine_packaged": False,
+        "runtime_input_selection_contract_repaired": True,
+        "runtime_build_receipt_provenance_v3_packaged": True,
+        "exact_postgresql_16_14_and_qdrant_1_19_0_readiness_required": True,
+        "approved_terminal_postgresql_catalog_manifest_selected": False,
+        "durable_live_empty_rollback_writer_fence_transport_packaged": False,
+        "stopped_store_semantic_empty_recheck_is_valid": False,
         "retained_audit_artifact_hashes_bound": True,
         "closed_install_store_effect_adapter_packaged": True,
         "closed_empty_rollback_store_effect_adapter_packaged": True,

@@ -75,6 +75,7 @@ from tools.governed_memory_install.store_readiness import (
     REQUIRED_ROLE_NAMES,
     StoreReadinessError,
     TERMINAL_MIGRATION_IDS,
+    POSTGRES_SERVER_VERSION,
     TerminalCanonicalStoreReadiness,
     TerminalPostgreSQLReadiness,
     TerminalQdrantReadiness,
@@ -173,6 +174,7 @@ def _synthetic_runtime_capability(
     evidence = VerifiedControllerRuntimeEvidence(
         result_type="verified_controller_runtime_v1",
         controller_runtime_receipt_sha256=RUNTIME_RECEIPT_SHA256,
+        build_plan_sha256="2" * 64,
         package_manifest_sha256=package_manifest_sha256,
         controller_runtime_contract_sha256=hashlib.sha256(
             artifacts[
@@ -183,6 +185,10 @@ def _synthetic_runtime_capability(
         controller_requirements_lock_sha256=hashlib.sha256(
             artifacts["ops/governed_memory/controller-requirements.lock"]
         ).hexdigest(),
+        standalone_cpython_specification_sha256="3" * 64,
+        standalone_cpython_archive_sha256="4" * 64,
+        standalone_cpython_payload_tree_sha256="5" * 64,
+        wheelhouse_tree_sha256="6" * 64,
         runtime_root=RUNTIME_ROOT,
         runtime_tree_sha256="b" * 64,
         release_root=release_root,
@@ -224,6 +230,7 @@ def _terminal_readiness(
         TerminalPostgreSQLReadiness(
             "127.0.0.1:55432",
             16,
+            POSTGRES_SERVER_VERSION,
             "governed_memory",
             TERMINAL_MIGRATION_IDS,
             "7" * 64,
@@ -331,6 +338,7 @@ class _Readiness:
             PrebootstrapPostgreSQLReadiness(
                 "127.0.0.1:55432",
                 16,
+                POSTGRES_SERVER_VERSION,
                 "postgres",
                 "governed_memory",
                 False,
@@ -945,6 +953,7 @@ class InstallationCompositionTests(unittest.TestCase):
             lambda: PrebootstrapPostgreSQLReadiness(
                 "127.0.0.1:55432",
                 False,
+                POSTGRES_SERVER_VERSION,
                 "postgres",
                 "governed_memory",
                 False,
@@ -956,6 +965,7 @@ class InstallationCompositionTests(unittest.TestCase):
             lambda: PrebootstrapPostgreSQLReadiness(
                 "127.0.0.1:55432",
                 16,
+                POSTGRES_SERVER_VERSION,
                 "postgres",
                 "governed_memory",
                 0,
@@ -978,6 +988,7 @@ class InstallationCompositionTests(unittest.TestCase):
                 PrebootstrapPostgreSQLReadiness(
                     "127.0.0.1:55432",
                     16,
+                    POSTGRES_SERVER_VERSION,
                     "postgres",
                     "governed_memory",
                     False,
@@ -1001,6 +1012,7 @@ class InstallationCompositionTests(unittest.TestCase):
             lambda: TerminalPostgreSQLReadiness(
                 "127.0.0.1:55432",
                 16,
+                POSTGRES_SERVER_VERSION,
                 "governed_memory",
                 TERMINAL_MIGRATION_IDS,
                 "7" * 64,

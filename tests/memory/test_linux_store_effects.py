@@ -32,12 +32,13 @@ from tools.governed_memory_install.linux_store_effects import (
     LivePreflightSnapshot,
     SecretEnvironmentDocument,
     CONTROLLER_CONFIG_DIRECTORY,
-    POSTGRES_STORE_SECRET_PUBLIC_ID,
-    QDRANT_STORE_SECRET_PUBLIC_ID,
+    POSTGRES_STORE_SECRET_PATH,
+    QDRANT_STORE_SECRET_PATH,
     SYSTEMD_ENABLEMENT_PATH,
     SYSTEMD_ENABLEMENT_TARGET,
     SYSTEMD_UNIT_PATH,
     STORE_SECRET_DIRECTORY,
+    secret_environment_public_id,
     _ExecutionIdentity,
 )
 from tools.governed_memory_install.linux_store_readiness import (
@@ -57,6 +58,8 @@ from tools.governed_memory_install.store_readiness import (
     QDRANT_BIND,
     REQUIRED_ROLE_NAMES,
     TERMINAL_MIGRATION_IDS,
+    POSTGRES_SERVER_VERSION,
+    QDRANT_SERVER_VERSION,
 )
 
 
@@ -140,10 +143,15 @@ class _Files:
         self.spec = False
         self.postgres = False
         self.qdrant = False
-        self.postgres_resource_id = POSTGRES_STORE_SECRET_PUBLIC_ID
-        self.qdrant_resource_id = QDRANT_STORE_SECRET_PUBLIC_ID
+        self.postgres_resource_id = secret_environment_public_id(
+            POSTGRES_STORE_SECRET_PATH, EXECUTION_ID
+        )
+        self.qdrant_resource_id = secret_environment_public_id(
+            QDRANT_STORE_SECRET_PATH, EXECUTION_ID
+        )
         self.postflight: bytes | None = None
         self.secret_document_reprs: list[str] = []
+        self.rendered_secret_documents: list[bytes] = []
         self.parent_directories = {
             CONTROLLER_CONFIG_DIRECTORY: ("root", "root", 0o700, True, False),
             STORE_SECRET_DIRECTORY: ("root", "root", 0o700, True, False),
@@ -188,12 +196,22 @@ class _Files:
         if document.logical_name != expected:
             raise AssertionError("wrong secret environment")
         rendered = document._render_for_root_writer_only()
+        expected_prefix = (
+            b"# governed-memory-execution-id="
+            + EXECUTION_ID.encode("ascii")
+            + b"\n"
+        )
+        if document.execution_id != EXECUTION_ID or not rendered.startswith(
+            expected_prefix
+        ):
+            raise AssertionError("secret execution binding malformed")
         if expected == "postgres":
-            if not rendered.startswith(b"POSTGRES_DB=postgres\n"):
+            if b"POSTGRES_DB=postgres\n" not in rendered:
                 raise AssertionError("postgres environment malformed")
-        elif not rendered.startswith(b"QDRANT__SERVICE__API_KEY="):
+        elif b"QDRANT__SERVICE__API_KEY=" not in rendered:
             raise AssertionError("qdrant environment malformed")
         self.secret_document_reprs.append(repr(document))
+        self.rendered_secret_documents.append(rendered)
 
     def create_postgres_secret(self, document: SecretEnvironmentDocument) -> None:
         self._accept_secret("postgres", document)
@@ -392,6 +410,7 @@ class _Postgres:
         return PrebootstrapPostgreSQLSnapshot(
             POSTGRES_BIND,
             16,
+            POSTGRES_SERVER_VERSION,
             "postgres",
             self.bootstrap,
             REQUIRED_ROLE_NAMES if self.bootstrap else (),
@@ -408,6 +427,7 @@ class _Postgres:
         return TerminalPostgreSQLSnapshot(
             POSTGRES_BIND,
             16,
+            POSTGRES_SERVER_VERSION,
             "governed_memory",
             TERMINAL_MIGRATION_IDS,
             roles,
@@ -471,13 +491,13 @@ class _Qdrant:
 
     def inspect_prebootstrap(self) -> PrebootstrapQdrantSnapshot:
         return PrebootstrapQdrantSnapshot(
-            QDRANT_BIND, "1.19.0", self.collection, 0, 0
+            QDRANT_BIND, QDRANT_SERVER_VERSION, self.collection, 0, 0
         )
 
     def inspect_terminal(self) -> TerminalQdrantSnapshot:
         return TerminalQdrantSnapshot(
             QDRANT_BIND,
-            "1.19.0",
+            QDRANT_SERVER_VERSION,
             self.collection,
             COLLECTION if self.alias else "",
             QdrantCollectionConfiguration(3072, "Dot", True, 1),
@@ -562,7 +582,11 @@ class LinuxStoreEffectsTests(unittest.TestCase):
             self.systemd,
         )
         self.readiness = ClosedStoreReadinessProbe(
-            postgres=self.postgres, qdrant=self.qdrant
+            postgres=self.postgres,
+            qdrant=self.qdrant,
+            expected_postgres_catalog_sha256=(
+                "b03adbc71a48465b61b5388e9e2a85090f81c3045aa7af733480c186c1936077"
+            ),
         )
         runtime_root = (
             "/opt/governed-memory-controller/runtimes/" + RUNTIME_RECEIPT_SHA256
@@ -669,6 +693,15 @@ class LinuxStoreEffectsTests(unittest.TestCase):
         self.assertEqual(len(self.files.secret_document_reprs), 2)
         self.assertTrue(
             all("<redacted>" in value for value in self.files.secret_document_reprs)
+        )
+        self.assertTrue(
+            all(
+                (
+                    "# governed-memory-execution-id=" + EXECUTION_ID
+                ).encode("ascii")
+                in document
+                for document in self.files.rendered_secret_documents
+            )
         )
         public = repr(
             (

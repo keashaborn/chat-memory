@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 from tools.governed_memory_install import authority
 from tools.governed_memory_install.controller_runtime import (
+    CONTROLLER_RUNTIME_CONTRACT_RELATIVE_PATH,
     ControllerRuntimeCapabilityError,
     LAUNCHER_RELATIVE_PATH,
     PACKAGE_MANIFEST_RELATIVE_PATH,
@@ -44,7 +45,10 @@ def _canonical(value: object) -> bytes:
 
 class RuntimeCapabilityTests(unittest.TestCase):
     def _runtime_package_artifacts(
-        self, *, lock_bytes: bytes | None = None
+        self,
+        *,
+        lock_bytes: bytes | None = None,
+        ready_contract: bool = True,
     ) -> dict[str, bytes]:
         package_root = ROOT / "tools/governed_memory_install"
         artifacts = {
@@ -52,11 +56,61 @@ class RuntimeCapabilityTests(unittest.TestCase):
             for path in package_root.glob("*.py")
         }
         lock_path = str(REQUIREMENTS_LOCK_RELATIVE_PATH)
-        artifacts[lock_path] = (
-            (ROOT / lock_path).read_bytes()
-            if lock_bytes is None
-            else lock_bytes
-        )
+        if lock_bytes is None:
+            lock_bytes = (ROOT / lock_path).read_bytes()
+            if ready_contract:
+                lock_bytes += (
+                    "psycopg==3.3.4 \\\n"
+                    "    --hash=sha256:"
+                    "b6bbc25ccf05c8fad3b061d9db2ef0909a555171b84b07f29458a447253d679a\n"
+                    "psycopg-binary==3.3.4 \\\n"
+                    "    --hash=sha256:"
+                    "e7510c37550f91a187e3660a8cc50d4b760f8c3b8b2f89ebc5698cd2c7f2c85d\n"
+                ).encode("ascii")
+        artifacts[lock_path] = lock_bytes
+        contract_path = str(CONTROLLER_RUNTIME_CONTRACT_RELATIVE_PATH)
+        contract_raw = (ROOT / contract_path).read_bytes()
+        if ready_contract:
+            contract = json.loads(contract_raw)
+            cpython = contract["selected_runtime_inputs"][
+                "standalone_cpython"
+            ]
+            cpython["archive_staged"] = True
+            cpython["archive_bytes_sha256_verified_locally"] = True
+            cpython["archive_member_types_verified"] = True
+            cpython["specification_sha256"] = "3" * 64
+            cpython["payload_tree_sha256"] = "4" * 64
+            driver = contract["selected_runtime_inputs"][
+                "postgresql_driver"
+            ]
+            for key in (
+                "binary_native_library_closure_inspected",
+                "current_controller_lock_contains_selection",
+                "driver_native_postgresql_stages_packaged",
+                "exact_wheel_filenames_frozen",
+                "selection_ready_for_runtime_build",
+                "wheel_bytes_sha256_verified_locally",
+                "wheel_bytes_staged",
+            ):
+                driver[key] = True
+            wheelhouse = contract["selected_runtime_inputs"]["wheelhouse"]
+            wheelhouse["canonical_member_count"] = 5
+            wheelhouse["canonical_total_bytes"] = 12345
+            wheelhouse["canonical_tree_sha256"] = "5" * 64
+            wheelhouse["wheelhouse_staged"] = True
+            build_policy = contract["build_policy"]
+            build_policy["standalone_cpython_archive_staged"] = True
+            build_policy[
+                "standalone_cpython_archive_content_verified"
+            ] = True
+            build_policy["offline_wheelhouse_staged"] = True
+            build_policy["canonical_wheelhouse_identity_present"] = True
+            build_policy["preferred_postgresql_driver_locked"] = True
+            contract["dependency_policy"][
+                "current_lock_contains_preferred_postgresql_driver"
+            ] = True
+            contract_raw = _canonical(contract)
+        artifacts[contract_path] = contract_raw
         return artifacts
 
     def _fixture(
@@ -64,10 +118,24 @@ class RuntimeCapabilityTests(unittest.TestCase):
         *,
         distributions: dict[str, str] | None = None,
         lock_bytes: bytes | None = None,
+        ready_contract: bool = True,
     ):
         package_sha = "a" * 64
-        runtime_contract_sha = "b" * 64
-        artifacts = self._runtime_package_artifacts(lock_bytes=lock_bytes)
+        artifacts = self._runtime_package_artifacts(
+            lock_bytes=lock_bytes,
+            ready_contract=ready_contract,
+        )
+        runtime_contract = json.loads(
+            artifacts[
+                str(CONTROLLER_RUNTIME_CONTRACT_RELATIVE_PATH)
+            ].decode("ascii")
+        )
+        selected_cpython = runtime_contract["selected_runtime_inputs"][
+            "standalone_cpython"
+        ]
+        runtime_contract_sha = hashlib.sha256(
+            artifacts[str(CONTROLLER_RUNTIME_CONTRACT_RELATIVE_PATH)]
+        ).hexdigest()
         lock_sha = hashlib.sha256(
             artifacts[str(REQUIREMENTS_LOCK_RELATIVE_PATH)]
         ).hexdigest()
@@ -98,6 +166,8 @@ class RuntimeCapabilityTests(unittest.TestCase):
                     {
                         "cffi": "2.1.0",
                         "cryptography": "49.0.0",
+                        "psycopg": "3.3.4",
+                        "psycopg-binary": "3.3.4",
                         "pycparser": "3.0",
                     }
                     if distributions is None
@@ -109,7 +179,7 @@ class RuntimeCapabilityTests(unittest.TestCase):
                 "platform_architecture": "x86_64",
                 "platform_os": "linux",
                 "python_implementation": "CPython",
-                "python_version": "3.12.3",
+                "python_version": selected_cpython["python_version"],
                 "setuptools_present": False,
                 "system_site_packages_enabled": False,
                 "user_site_enabled": False,
@@ -131,8 +201,15 @@ class RuntimeCapabilityTests(unittest.TestCase):
             "package_manifest_sha256": package_sha,
             "controller_runtime_contract_sha256": runtime_contract_sha,
             "controller_requirements_lock_sha256": lock_sha,
+            "build_plan_sha256": "2" * 64,
+            "standalone_cpython_specification_sha256": "3" * 64,
+            "standalone_cpython_archive_sha256": selected_cpython[
+                "archive_sha256"
+            ],
+            "standalone_cpython_payload_tree_sha256": "4" * 64,
+            "wheelhouse_tree_sha256": "5" * 64,
             "python_implementation": "CPython",
-            "python_version": "3.12.3",
+            "python_version": selected_cpython["python_version"],
             "platform_os": "linux",
             "platform_architecture": "x86_64",
             "runtime_tree_sha256": observed.runtime_tree_sha256,
@@ -239,6 +316,16 @@ class RuntimeCapabilityTests(unittest.TestCase):
             evidence.controller_runtime_receipt_sha256,
             hashlib.sha256(raw).hexdigest(),
         )
+        for field in (
+            "build_plan_sha256",
+            "standalone_cpython_specification_sha256",
+            "standalone_cpython_archive_sha256",
+            "standalone_cpython_payload_tree_sha256",
+            "wheelhouse_tree_sha256",
+        ):
+            self.assertEqual(
+                getattr(evidence, field), unused_receipt[field], field
+            )
         self.assertEqual(
             evidence.interpreter_path,
             evidence.runtime_root + "/bin/python",
@@ -265,6 +352,22 @@ class RuntimeCapabilityTests(unittest.TestCase):
         self.assertRegex(receipt_path_facts_sha, r"^[0-9a-f]{64}$")
         self.assertTrue(evidence.persistent_controller_substrate_created)
         self.assertFalse(evidence.persistent_store_resources_created)
+
+    def test_current_unready_runtime_inputs_refuse_before_probe(self):
+        capability, raw, unused_receipt, unused_observed, unused_process = (
+            self._fixture(ready_contract=False)
+        )
+        with patch(
+            "tools.governed_memory_install.controller_runtime."
+            "_observe_filesystem"
+        ) as probe, self.assertRaisesRegex(
+            ControllerRuntimeCapabilityError,
+            "controller_runtime_input_contract_not_ready",
+        ):
+            verify_controller_runtime_capability(
+                capability, runtime_build_receipt_json=raw
+            )
+        probe.assert_not_called()
 
     def test_noncanonical_or_package_mismatched_receipt_is_rejected_before_probe(self):
         capability, raw, receipt, unused_observed, unused_process = self._fixture()
@@ -315,6 +418,89 @@ class RuntimeCapabilityTests(unittest.TestCase):
                     changed_package, runtime_build_receipt_json=changed_raw
                 )
             probe.assert_not_called()
+
+    def test_runtime_input_provenance_is_closed_and_authority_bound(self):
+        capability, raw, receipt, unused_observed, unused_process = self._fixture()
+        provenance_fields = (
+            "build_plan_sha256",
+            "standalone_cpython_specification_sha256",
+            "standalone_cpython_archive_sha256",
+            "standalone_cpython_payload_tree_sha256",
+            "wheelhouse_tree_sha256",
+        )
+        for field in provenance_fields:
+            with self.subTest(field=field, defect="missing"):
+                changed = dict(receipt)
+                del changed[field]
+                with patch(
+                    "tools.governed_memory_install.controller_runtime."
+                    "_observe_filesystem"
+                ) as probe, self.assertRaisesRegex(
+                    ControllerRuntimeCapabilityError,
+                    "controller_runtime_receipt_invalid",
+                ):
+                    verify_controller_runtime_capability(
+                        capability,
+                        runtime_build_receipt_json=_canonical(changed),
+                    )
+                probe.assert_not_called()
+            with self.subTest(field=field, defect="invalid"):
+                changed = dict(receipt)
+                changed[field] = "not-a-hash"
+                with patch(
+                    "tools.governed_memory_install.controller_runtime."
+                    "_observe_filesystem"
+                ) as probe, self.assertRaisesRegex(
+                    ControllerRuntimeCapabilityError,
+                    "controller_runtime_receipt_invalid",
+                ):
+                    verify_controller_runtime_capability(
+                        capability,
+                        runtime_build_receipt_json=_canonical(changed),
+                    )
+                probe.assert_not_called()
+            with self.subTest(field=field, defect="authority-hash"):
+                changed = dict(receipt)
+                changed[field] = "9" * 64
+                with patch(
+                    "tools.governed_memory_install.controller_runtime."
+                    "_observe_filesystem"
+                ) as probe, self.assertRaisesRegex(
+                    ControllerRuntimeCapabilityError,
+                    "controller_runtime_package_binding_mismatch",
+                ):
+                    verify_controller_runtime_capability(
+                        capability,
+                        runtime_build_receipt_json=_canonical(changed),
+                    )
+                probe.assert_not_called()
+
+        changed_archive = dict(receipt)
+        changed_archive["standalone_cpython_archive_sha256"] = "9" * 64
+        changed_raw = _canonical(changed_archive)
+        changed_capability = _VerifiedPackageCapability(
+            replace(
+                capability._evidence,
+                controller_runtime_receipt_sha256=hashlib.sha256(
+                    changed_raw
+                ).hexdigest(),
+            ),
+            {},
+            dict(capability._artifacts),
+            _PACKAGE_TOKEN,
+        )
+        with patch(
+            "tools.governed_memory_install.controller_runtime."
+            "_observe_filesystem"
+        ) as probe, self.assertRaisesRegex(
+            ControllerRuntimeCapabilityError,
+            "controller_runtime_input_binding_mismatch",
+        ):
+            verify_controller_runtime_capability(
+                changed_capability,
+                runtime_build_receipt_json=changed_raw,
+            )
+        probe.assert_not_called()
 
     def test_filesystem_or_process_drift_is_rejected(self):
         capability, raw, unused_receipt, observed, process = self._fixture()

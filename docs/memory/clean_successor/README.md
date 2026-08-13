@@ -2,7 +2,7 @@
 
 ## Current repository authority
 
-Phase 9D retains one current successor path and one canonical dormant-store
+Phase 9F retains one current successor path and one canonical dormant-store
 controller package. The repository-only package is the only current stores-only
 package:
 
@@ -23,14 +23,22 @@ package:
   `tools/governed_memory_install/rollback_live_adapter.py`;
 - controller runtime/release builder orchestration:
   `tools/governed_memory_release/controller_runtime_builder.py`;
+- immutable Docker, systemd, root-file, and Qdrant request/observation contracts:
+  `tools/governed_memory_install/linux_live_transports.py`;
+- PostgreSQL driver-native source-closure and execution-requirements contract:
+  `tools/governed_memory_install/postgres_source_closure.py` and
+  `ops/governed_memory/installation/current/postgres/source_closure_contract.json`;
 - synthetic proof backend: `tools/governed_memory_install/synthetic_backend.py`.
 
 Phase 8D removed the parallel Phase 8A successor-install implementation. Phase
 9B moved the surviving package to the phase-neutral `installation/current/`
 identity and moved prior phase material under the non-executable history roots.
-Phase 9D repaired the install and empty-rollback contracts and added the closed
-adapters and inert runtime/release builder orchestration without installing or
-activating them.
+Phase 9D repaired the install and empty-rollback contracts and added closed
+adapters and inert runtime/release builder orchestration. Phase 9F repaired the
+runtime-input and receipt-provenance contracts and added immutable live-
+transport request identities plus a PostgreSQL source-closure contract. It
+packages no executable live transport or driver-native PostgreSQL stage
+machine. None are installed or activated.
 
 The current store manifest contains nine store artifacts. The current package
 membership and count are authoritative only in its generated manifest. The
@@ -58,11 +66,11 @@ creation and replay require a fresh post-migration readiness proof. Public
 install and rollback entrypoints accept that receipt store only at the
 canonical root-owned executions path; caller-selected synthetic stores are
 restricted to private in-process test wrappers. Empty rollback requires an
-opaque exact install-receipt/ledger binding, stops both
-stores before acquiring its stopped-store writer fence, holds that fence
-through every destructive effect and final receipt persistence, requires a
-fresh offline/read-only emptiness observation under the fence before the first
-destructive step, and binds the retained audit-artifact hashes. Its effects are
+opaque exact install-receipt/ledger binding and binds retained audit-artifact
+hashes, but it has no durable live writer-exclusion transport. A future live
+implementation must acquire a durable writer fence, semantically recheck
+emptiness, stop the exact stores, remove exact resources, and persist the final
+receipt while holding that fence. Its effects are
 derived from exact physical ledger targets rather than caller-supplied
 commands, endpoints, or resource names.
 
@@ -83,11 +91,32 @@ The rollback authority, trusted time, exact global lock, and single-use nonce
 are validated and claimed before any durable receipt read or eligibility-receipt
 persistence.
 
-The adapters deliberately do not select or ship live low-level Linux, Docker,
-systemd, root-file, PostgreSQL, or Qdrant transports. In particular, no pinned
-PostgreSQL driver has been selected. The runtime builder is orchestration only:
-an externally approved standalone CPython substrate digest and a separately
-authorized publication transport are still required. No controller runtime was
+Phase 9F ships immutable low-level Docker, systemd, root-file, and Qdrant
+request/observation contracts. It retains two narrowly executable earlier
+primitives: selected-field local-image inspection and exact-ledger-container-ID
+supervisor inspect/start/stop. Their Docker projections were reduced to
+non-secret fields and the stop flag was corrected. No complete live transport
+set or bound platform factory exists for resource creation/removal, root files,
+PostgreSQL, or Qdrant. Absence is distinct from unknown failure, systemd partial
+prefixes require manual review, and root-file removal requires device, inode,
+content-hash, and execution identity. The PostgreSQL
+contract closes the canonical source hashes and the required roles, timeouts,
+advisory-lock lifecycle, privacy predicates, catalog authority, and rollback
+prefix semantics. It exposes no executable SQL/stage machine and refuses live
+construction. Psycopg 3.3.4 is the preferred exact synchronous target:
+`psycopg-3.3.4-py3-none-any.whl` and
+`psycopg_binary-3.3.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl`.
+Those names and expected hashes are selected, but the wheels are not locked,
+staged, verified, or native-closure inspected. The Astral CPython 3.12.13
+archive identity is selected, but its
+bytes, members, and payload tree are not staged or verified. A canonical
+wheelhouse contract exists without a staged wheelhouse or tree hash, and no
+approved terminal PostgreSQL catalog exists; live execution must refuse. The
+runtime builder also refuses the unstaged CPython input and current
+driver-incomplete lock, and the installed-runtime capability verifier rejects
+any contract whose substrate, driver, or wheelhouse readiness is incomplete.
+Runtime
+receipt v3 provenance is packaged. No controller runtime was
 built, staged, or installed; no release was published; and no image, secret,
 service, PostgreSQL, or Qdrant state was touched. There is no live installation
 proof or activation executor.
@@ -179,10 +208,11 @@ timer or cron quiescence alone does not prove exclusivity.
 
 ## Next gate
 
-The current disposable-proof gate is closed. The next gate must bind an
-externally approved standalone CPython substrate, implement and review the
-builder publication transport and selected low-level platform transports,
-select and pin the PostgreSQL driver, then separately authorize the exact
+The current disposable-proof gate is closed. The next gate must stage and
+verify the selected standalone CPython substrate, lock and verify Psycopg and
+the canonical wheelhouse, select the terminal PostgreSQL catalog, integrate the
+packaged low-level transports, implement the builder publication transport and
+durable live rollback writer fence, then separately authorize the exact
 controller runtime/release build and disposable Linux installation proof.
 Dormant installation remains a
 separate ungranted authority, so release remains refused with

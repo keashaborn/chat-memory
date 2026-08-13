@@ -58,6 +58,21 @@ class DormantStoreInstallExecutionContractTests(unittest.TestCase):
         self.assertTrue(
             boundary["closed_ledger_bound_physical_empty_rollback_adapter_implemented"]
         )
+        self.assertTrue(boundary["closed_live_transport_contracts_implemented"])
+        self.assertFalse(
+            boundary["complete_closed_live_transport_substrate_set_implemented"]
+        )
+        self.assertTrue(
+            boundary[
+                "postgresql_source_closure_contract_implemented"
+            ]
+        )
+        self.assertFalse(
+            boundary["driver_native_postgresql_stage_contract_implemented"]
+        )
+        self.assertFalse(
+            boundary["driver_native_postgresql_executable_stage_machine_implemented"]
+        )
         self.assertFalse(
             boundary["selected_live_linux_platform_transport_factory_implemented"]
         )
@@ -101,18 +116,45 @@ class DormantStoreInstallExecutionContractTests(unittest.TestCase):
             "compensation_effect_before_receipt_resume_supported",
             "terminal_postflight_effect_present_blocks_compensation_and_exact_resume_completes",
             "composite_step_recoverable_state_protocol_implemented",
-            "empty_rollback_stops_exact_stores_before_writer_fence",
-            "empty_rollback_writer_fence_held_from_r07_through_receipt",
-            "destructive_rollback_steps_atomically_recheck_empty_under_fence",
+            "required_future_order_is_live_writer_fence_empty_recheck_then_stop_then_physical_removal",
             "retained_audit_artifact_hashes_bound_to_rollback_receipt",
         ):
             self.assertTrue(durability[key], key)
-        self.assertFalse(durability["end_to_end_live_process_crash_recovery_claimed"])
+        for key in (
+            "empty_rollback_stops_exact_stores_before_writer_fence",
+            "empty_rollback_writer_fence_held_from_r07_through_receipt",
+            "fresh_offline_read_only_empty_recheck_required_at_r07_under_stopped_store_fence",
+            "destructive_rollback_steps_atomically_recheck_empty_under_fence",
+            "stopped_store_semantic_empty_recheck_is_valid",
+            "durable_live_writer_fence_transport_implemented",
+            "end_to_end_live_process_crash_recovery_claimed",
+        ):
+            self.assertFalse(durability[key], key)
 
         host = contract["host_action_policy"]
         self.assertTrue(host["typed_operation_specific_boundaries_only"])
         self.assertFalse(host["arbitrary_store_mutation_argv_surface"])
         self.assertTrue(host["closed_store_effect_adapters_packaged"])
+        self.assertTrue(host["closed_live_transport_contracts_packaged"])
+        self.assertFalse(
+            host["complete_closed_live_transport_substrate_set_packaged"]
+        )
+        self.assertTrue(
+            host["postgresql_source_closure_contract_packaged"]
+        )
+        self.assertFalse(host["driver_native_postgresql_stage_contract_packaged"])
+        self.assertFalse(
+            host["driver_native_postgresql_executable_stage_machine_packaged"]
+        )
+        self.assertTrue(host["bounded_image_inspection_command_primitive_packaged"])
+        self.assertTrue(
+            host[
+                "image_inspection_projection_is_id_repo_digests_os_architecture_only"
+            ]
+        )
+        self.assertTrue(
+            host["store_supervisor_observations_use_narrow_nonsecret_fields_only"]
+        )
         self.assertFalse(host["selected_live_platform_transports_packaged"])
         self.assertTrue(host["controller_runtime_secure_verifier_packaged"])
         self.assertTrue(host["exact_release_path_supervisor_launcher_packaged"])
@@ -121,6 +163,14 @@ class DormantStoreInstallExecutionContractTests(unittest.TestCase):
         self.assertTrue(receipts["closed_content_free_builders_and_verifiers_packaged"])
         self.assertTrue(receipts["empty_rollback_controller_emits_canonical_receipt"])
         self.assertTrue(receipts["install_controller_emits_canonical_receipt"])
+        self.assertFalse(
+            receipts["final_rollback_receipt_persisted_while_writer_fence_held"]
+        )
+        self.assertTrue(
+            receipts[
+                "final_rollback_receipt_persistence_while_live_writer_fence_held_required"
+            ]
+        )
         self.assertNotIn(
             "canonical_install_receipt_emission_not_integrated",
             contract["remaining_blockers"],

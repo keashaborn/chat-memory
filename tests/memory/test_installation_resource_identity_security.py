@@ -20,6 +20,7 @@ from tools.governed_memory_install.host_boundary import (
     CommandRunner,
     DOCKER_BINARY,
     HostBoundaryError,
+    IMAGE_INSPECT_TEMPLATE,
     SUPERVISOR_INSPECT_TEMPLATES,
 )
 from tools.governed_memory_install.secure_file import (
@@ -116,7 +117,7 @@ class DormantStoreInstallResourceIdentitySecurityTests(unittest.TestCase):
                 "image",
                 "inspect",
                 "--format",
-                "{{json .}}",
+                IMAGE_INSPECT_TEMPLATE,
                 "postgres:16-alpine@sha256:" + "5" * 64,
             )
         )
@@ -138,7 +139,7 @@ class DormantStoreInstallResourceIdentitySecurityTests(unittest.TestCase):
                 )
             )
         supervisor._validate_profile(
-            (DOCKER_BINARY, "stop", "--time=10", CONTAINER_ID)
+            (DOCKER_BINARY, "stop", "--timeout=10", CONTAINER_ID)
         )
         with self.assertRaisesRegex(HostBoundaryError, "profile_refused"):
             supervisor._validate_profile(

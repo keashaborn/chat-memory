@@ -22,7 +22,9 @@ from .store_readiness import (
     DATABASE,
     EXPECTED_QDRANT_COLLECTION_CONFIG_SHA256,
     POSTGRES_BIND,
+    POSTGRES_SERVER_VERSION,
     QDRANT_BIND,
+    QDRANT_SERVER_VERSION,
     REQUIRED_ROLE_NAMES,
     TERMINAL_MIGRATION_IDS,
     EmptyStoreReadiness,
@@ -40,7 +42,6 @@ _SAFE_IDENTIFIER_RE = re.compile(
     r"[A-Za-z_][A-Za-z0-9_.:()\[\], -]{0,511}\Z", re.ASCII
 )
 _HASH_RE = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
-_QDRANT_VERSION_RE = re.compile(r"1\.19\.[0-9]{1,4}(?:[-+][A-Za-z0-9.-]{1,48})?\Z", re.ASCII)
 
 
 class LinuxStoreReadinessError(RuntimeError):
@@ -75,6 +76,7 @@ class PrebootstrapPostgreSQLSnapshot:
 
     bind: str
     server_major: int
+    server_version: str
     connected_database: str
     target_database_exists: bool
     present_target_role_names: tuple[str, ...]
@@ -85,6 +87,7 @@ class PrebootstrapPostgreSQLSnapshot:
             self.bind != POSTGRES_BIND
             or type(self.server_major) is not int
             or self.server_major != 16
+            or self.server_version != POSTGRES_SERVER_VERSION
             or self.connected_database != BOOTSTRAP_DATABASE
             or type(self.target_database_exists) is not bool
             or type(self.present_target_role_names) is not tuple
@@ -111,7 +114,7 @@ class PrebootstrapQdrantSnapshot:
         if (
             self.bind != QDRANT_BIND
             or type(self.server_version) is not str
-            or _QDRANT_VERSION_RE.fullmatch(self.server_version) is None
+            or self.server_version != QDRANT_SERVER_VERSION
             or self.collection_exists is not False
             or type(self.point_count) is not int
             or self.point_count != 0
@@ -224,6 +227,7 @@ class PostgreSQLCatalogIdentity:
 class TerminalPostgreSQLSnapshot:
     bind: str
     server_major: int
+    server_version: str
     database: str
     applied_migration_ids: tuple[str, ...]
     roles: tuple[CanonicalPostgreSQLRole, ...]
@@ -251,6 +255,7 @@ class TerminalPostgreSQLSnapshot:
             self.bind != POSTGRES_BIND
             or type(self.server_major) is not int
             or self.server_major != 16
+            or self.server_version != POSTGRES_SERVER_VERSION
             or self.database != DATABASE
             or self.applied_migration_ids != TERMINAL_MIGRATION_IDS
             or self.roles != expected_roles
@@ -329,7 +334,7 @@ class TerminalQdrantSnapshot:
         if (
             self.bind != QDRANT_BIND
             or type(self.server_version) is not str
-            or _QDRANT_VERSION_RE.fullmatch(self.server_version) is None
+            or self.server_version != QDRANT_SERVER_VERSION
             or self.collection_exists is not True
             or self.alias_target != COLLECTION
             or type(self.collection_config) is not QdrantCollectionConfiguration
@@ -371,6 +376,7 @@ class ClosedStoreReadinessProbe:
         *,
         postgres: FixedPostgreSQLReadinessTransport,
         qdrant: FixedQdrantReadinessTransport,
+        expected_postgres_catalog_sha256: str,
     ) -> None:
         if (
             getattr(postgres, "bind", None) != POSTGRES_BIND
@@ -379,10 +385,14 @@ class ClosedStoreReadinessProbe:
             or not callable(getattr(postgres, "inspect_terminal", None))
             or not callable(getattr(qdrant, "inspect_prebootstrap", None))
             or not callable(getattr(qdrant, "inspect_terminal", None))
+            or _HASH_RE.fullmatch(expected_postgres_catalog_sha256) is None
         ):
             raise LinuxStoreReadinessError("readiness_transport_invalid")
         self._postgres = postgres
         self._qdrant = qdrant
+        self._expected_postgres_catalog_sha256 = (
+            expected_postgres_catalog_sha256
+        )
 
     @staticmethod
     def _prebootstrap_postgres_receipt(
@@ -400,6 +410,7 @@ class ClosedStoreReadinessProbe:
                 ),
                 "required_role_names": list(REQUIRED_ROLE_NAMES),
                 "server_major": snapshot.server_major,
+                "server_version": snapshot.server_version,
                 "source_connection_count": snapshot.source_connection_count,
                 "target_database": DATABASE,
                 "target_database_exists": snapshot.target_database_exists,
@@ -442,6 +453,7 @@ class ClosedStoreReadinessProbe:
         postgres_receipt = PrebootstrapPostgreSQLReadiness(
             bind=postgres.bind,
             server_major=postgres.server_major,
+            server_version=postgres.server_version,
             connected_database=postgres.connected_database,
             target_database=DATABASE,
             target_database_exists=postgres.target_database_exists,
@@ -482,6 +494,7 @@ class ClosedStoreReadinessProbe:
                 "exact_role_graph_sha256": role_graph_sha256,
                 "governed_user_row_count": snapshot.governed_user_row_count,
                 "server_major": snapshot.server_major,
+                "server_version": snapshot.server_version,
                 "source_connection_count": snapshot.source_connection_count,
             }
         )
@@ -539,6 +552,10 @@ class ClosedStoreReadinessProbe:
         }
         role_graph_sha256 = _canonical_sha256(role_graph)
         catalog_sha256 = _canonical_sha256(catalog)
+        if catalog_sha256 != self._expected_postgres_catalog_sha256:
+            raise LinuxStoreReadinessError(
+                "terminal_postgres_catalog_mismatch"
+            )
         config_sha256 = _canonical_sha256(
             qdrant.collection_config.canonical_document()
         )
@@ -550,6 +567,7 @@ class ClosedStoreReadinessProbe:
         postgres_receipt = TerminalPostgreSQLReadiness(
             bind=postgres.bind,
             server_major=postgres.server_major,
+            server_version=postgres.server_version,
             database=postgres.database,
             applied_migration_ids=postgres.applied_migration_ids,
             exact_role_graph_sha256=role_graph_sha256,

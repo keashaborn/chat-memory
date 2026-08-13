@@ -27,7 +27,7 @@ from .package_capability import PackageCapabilityError, _package_capability_part
 
 
 RUNTIME_RECEIPT_SCHEMA: Final = (
-    "governed-memory-controller-runtime-build-receipt-v2"
+    "governed-memory-controller-runtime-build-receipt-v3"
 )
 RUNTIME_RECEIPT_RESULT: Final = "isolated_controller_runtime_built_and_closed"
 RUNTIME_ROOT_PREFIX: PurePosixPath = PurePosixPath(
@@ -47,12 +47,18 @@ PACKAGE_MANIFEST_RELATIVE_PATH: Final = PurePosixPath(
 REQUIREMENTS_LOCK_RELATIVE_PATH: Final = PurePosixPath(
     "ops/governed_memory/controller-requirements.lock"
 )
+CONTROLLER_RUNTIME_CONTRACT_RELATIVE_PATH: Final = PurePosixPath(
+    "ops/governed_memory/installation/current/controller_runtime_contract.json"
+)
 MAX_RECEIPT_BYTES: Final = 128 * 1024
 MAX_PROBE_BYTES: Final = 1024 * 1024
 _EXPECTED_UID: int = 0
 
 _HASH_RE: Final = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _VERSION_RE: Final = re.compile(r"3\.12\.[0-9]+\Z", re.ASCII)
+_WHEEL_FILENAME_RE: Final = re.compile(
+    r"[A-Za-z0-9][A-Za-z0-9._+-]{0,239}\.whl\Z", re.ASCII
+)
 _RECEIPT_KEYS: Final = frozenset(
     {
         "schema_version",
@@ -60,6 +66,11 @@ _RECEIPT_KEYS: Final = frozenset(
         "package_manifest_sha256",
         "controller_runtime_contract_sha256",
         "controller_requirements_lock_sha256",
+        "build_plan_sha256",
+        "standalone_cpython_specification_sha256",
+        "standalone_cpython_archive_sha256",
+        "standalone_cpython_payload_tree_sha256",
+        "wheelhouse_tree_sha256",
         "python_implementation",
         "python_version",
         "platform_os",
@@ -94,9 +105,14 @@ class ControllerRuntimeCapabilityError(RuntimeError):
 class VerifiedControllerRuntimeEvidence:
     result_type: str
     controller_runtime_receipt_sha256: str
+    build_plan_sha256: str
     package_manifest_sha256: str
     controller_runtime_contract_sha256: str
     controller_requirements_lock_sha256: str
+    standalone_cpython_specification_sha256: str
+    standalone_cpython_archive_sha256: str
+    standalone_cpython_payload_tree_sha256: str
+    wheelhouse_tree_sha256: str
     runtime_root: str
     runtime_tree_sha256: str
     release_root: str
@@ -132,6 +148,15 @@ class _ObservedRuntime:
 class _ProcessProbeResult:
     inventory_bytes: bytes
     launcher_help_probe_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class _SelectedRuntimeInputs:
+    python_version: str
+    archive_sha256: str
+    specification_sha256: str
+    payload_tree_sha256: str
+    wheelhouse_tree_sha256: str
 
 
 _RUNTIME_TOKEN = object()
@@ -239,6 +264,11 @@ def _require_closed_receipt(receipt: Mapping[str, object]) -> None:
         "package_manifest_sha256",
         "controller_runtime_contract_sha256",
         "controller_requirements_lock_sha256",
+        "build_plan_sha256",
+        "standalone_cpython_specification_sha256",
+        "standalone_cpython_archive_sha256",
+        "standalone_cpython_payload_tree_sha256",
+        "wheelhouse_tree_sha256",
         "runtime_tree_sha256",
         "release_tree_sha256",
         "interpreter_sha256",
@@ -281,6 +311,164 @@ def _require_closed_receipt(receipt: Mapping[str, object]) -> None:
         raise ControllerRuntimeCapabilityError(
             "controller_runtime_receipt_invalid"
         )
+
+
+def _selected_runtime_input_identity(
+    raw: bytes,
+    *,
+    expected_contract_sha256: str,
+    requirements_lock: bytes,
+) -> _SelectedRuntimeInputs:
+    """Return only a fully staged, lock-closed runtime-input selection."""
+
+    if (
+        type(raw) is not bytes
+        or not raw
+        or len(raw) > MAX_RECEIPT_BYTES
+        or not _is_hash(expected_contract_sha256)
+        or hashlib.sha256(raw).hexdigest() != expected_contract_sha256
+    ):
+        raise ControllerRuntimeCapabilityError(
+            "controller_runtime_input_contract_invalid"
+        )
+    try:
+        document = json.loads(
+            raw.decode("ascii"),
+            object_pairs_hook=_unique_object,
+            parse_constant=lambda unused: (_ for _ in ()).throw(
+                ControllerRuntimeCapabilityError(
+                    "controller_runtime_input_contract_invalid"
+                )
+            ),
+        )
+        selected = document["selected_runtime_inputs"]
+        cpython = selected["standalone_cpython"]
+        driver = selected["postgresql_driver"]
+        wheelhouse = selected["wheelhouse"]
+        build_policy = document["build_policy"]
+        dependency_policy = document["dependency_policy"]
+    except (KeyError, TypeError, UnicodeError, json.JSONDecodeError):
+        raise ControllerRuntimeCapabilityError(
+            "controller_runtime_input_contract_invalid"
+        ) from None
+    except ControllerRuntimeCapabilityError:
+        raise ControllerRuntimeCapabilityError(
+            "controller_runtime_input_contract_invalid"
+        ) from None
+    if (
+        type(document) is not dict
+        or document.get("schema_version")
+        != "governed-memory-dormant-store-install-controller-runtime-contract-v2"
+        or type(selected) is not dict
+        or type(cpython) is not dict
+        or type(driver) is not dict
+        or type(wheelhouse) is not dict
+        or type(build_policy) is not dict
+        or type(dependency_policy) is not dict
+        or cpython.get("implementation") != "CPython"
+        or type(cpython.get("python_version")) is not str
+        or _VERSION_RE.fullmatch(str(cpython["python_version"])) is None
+        or type(cpython.get("archive_name")) is not str
+        or not cpython["archive_name"]
+        or not _is_hash(cpython.get("archive_sha256"))
+        or cpython.get("payload_root") != "python"
+        or cpython.get("interpreter_relative_path")
+        != str(INTERPRETER_RELATIVE_PATH)
+        or cpython.get("archive_staged") is not True
+        or cpython.get("archive_bytes_sha256_verified_locally") is not True
+        or cpython.get("archive_member_types_verified") is not True
+        or not _is_hash(cpython.get("specification_sha256"))
+        or not _is_hash(cpython.get("payload_tree_sha256"))
+        or build_policy.get("approved_standalone_cpython_substrate_selected")
+        is not True
+        or build_policy.get("standalone_cpython_archive_staged") is not True
+        or build_policy.get("standalone_cpython_archive_content_verified")
+        is not True
+        or build_policy.get("offline_wheelhouse_staged") is not True
+        or build_policy.get("canonical_wheelhouse_identity_present") is not True
+        or build_policy.get("preferred_postgresql_driver_locked") is not True
+        or dependency_policy.get(
+            "current_lock_contains_preferred_postgresql_driver"
+        )
+        is not True
+        or driver.get("api_style") != "synchronous"
+        or driver.get("preferred_extra") != "binary"
+        or driver.get("asyncpg_is_controller_driver") is not False
+        or driver.get("current_controller_lock_contains_selection") is not True
+        or driver.get("exact_wheel_filenames_frozen") is not True
+        or driver.get("wheel_bytes_staged") is not True
+        or driver.get("wheel_bytes_sha256_verified_locally") is not True
+        or driver.get("binary_native_library_closure_inspected") is not True
+        or driver.get("driver_native_postgresql_stages_packaged") is not True
+        or driver.get("selection_ready_for_runtime_build") is not True
+        or wheelhouse.get("wheelhouse_staged") is not True
+        or not _is_hash(wheelhouse.get("canonical_tree_sha256"))
+        or type(wheelhouse.get("canonical_member_count")) is not int
+        or type(wheelhouse.get("canonical_total_bytes")) is not int
+        or wheelhouse["canonical_member_count"] <= 0
+        or wheelhouse["canonical_total_bytes"] <= 0
+    ):
+        raise ControllerRuntimeCapabilityError(
+            "controller_runtime_input_contract_not_ready"
+        )
+    lock_bindings = _requirements_lock_bindings(requirements_lock)
+    distributions = driver.get("preferred_distributions")
+    if type(distributions) is not list or len(distributions) != 2:
+        raise ControllerRuntimeCapabilityError(
+            "controller_runtime_input_contract_not_ready"
+        )
+    selected_driver: set[str] = set()
+    for item in distributions:
+        if (
+            type(item) is not dict
+            or set(item)
+            != {
+                "normalized_distribution",
+                "selected_wheel_filename",
+                "selected_wheel_sha256",
+                "version",
+            }
+            or type(item.get("normalized_distribution")) is not str
+            or type(item.get("version")) is not str
+            or type(item.get("selected_wheel_filename")) is not str
+            or _WHEEL_FILENAME_RE.fullmatch(
+                str(item["selected_wheel_filename"])
+            )
+            is None
+            or PurePosixPath(str(item["selected_wheel_filename"])).name
+            != item["selected_wheel_filename"]
+            or not _is_hash(item.get("selected_wheel_sha256"))
+        ):
+            raise ControllerRuntimeCapabilityError(
+                "controller_runtime_input_contract_not_ready"
+            )
+        name = str(item["normalized_distribution"])
+        binding = lock_bindings.get(name)
+        if (
+            name in selected_driver
+            or name not in {"psycopg", "psycopg-binary"}
+            or binding is None
+            or binding[0] != item["version"]
+            or item["selected_wheel_sha256"] not in binding[1]
+        ):
+            raise ControllerRuntimeCapabilityError(
+                "controller_runtime_input_contract_not_ready"
+            )
+        selected_driver.add(name)
+    if (
+        selected_driver != {"psycopg", "psycopg-binary"}
+        or wheelhouse["canonical_member_count"] != len(lock_bindings)
+    ):
+        raise ControllerRuntimeCapabilityError(
+            "controller_runtime_input_contract_not_ready"
+        )
+    return _SelectedRuntimeInputs(
+        python_version=str(cpython["python_version"]),
+        archive_sha256=str(cpython["archive_sha256"]),
+        specification_sha256=str(cpython["specification_sha256"]),
+        payload_tree_sha256=str(cpython["payload_tree_sha256"]),
+        wheelhouse_tree_sha256=str(wheelhouse["canonical_tree_sha256"]),
+    )
 
 
 def _open_absolute_directory(path: PurePosixPath) -> int:
@@ -756,8 +944,10 @@ def _normalized_distribution_name(value: str) -> str:
     return re.sub(r"[-_.]+", "-", value).lower()
 
 
-def _requirements_from_lock(raw: bytes) -> dict[str, str]:
-    """Parse the deliberately narrow, fully hash-locked runtime lock."""
+def _requirements_lock_bindings(
+    raw: bytes,
+) -> dict[str, tuple[str, frozenset[str]]]:
+    """Parse exact versions and hashes from the narrow runtime lock."""
 
     try:
         text = raw.decode("ascii")
@@ -790,7 +980,7 @@ def _requirements_from_lock(raw: bytes) -> dict[str, str]:
             "controller_runtime_requirements_lock_invalid"
         )
 
-    required: dict[str, str] = {}
+    required: dict[str, tuple[str, frozenset[str]]] = {}
     head_pattern = re.compile(
         r"([A-Za-z0-9][A-Za-z0-9._-]*)=="
         r"([A-Za-z0-9][A-Za-z0-9.+!_-]*)\Z",
@@ -800,22 +990,48 @@ def _requirements_from_lock(raw: bytes) -> dict[str, str]:
     for logical in logical_lines:
         tokens = logical.split()
         match = head_pattern.fullmatch(tokens[0]) if tokens else None
-        hashes = [hash_pattern.fullmatch(token) for token in tokens[1:]]
-        if match is None or not hashes or any(item is None for item in hashes):
+        hash_matches = [hash_pattern.fullmatch(token) for token in tokens[1:]]
+        if match is None or not hash_matches or any(
+            item is None for item in hash_matches
+        ):
             raise ControllerRuntimeCapabilityError(
                 "controller_runtime_requirements_lock_invalid"
             )
         normalized = _normalized_distribution_name(match.group(1))
         if (
             normalized in required
-            or len({item.group(1) for item in hashes if item is not None})
-            != len(hashes)
+            or len(
+                {
+                    item.group(1)
+                    for item in hash_matches
+                    if item is not None
+                }
+            )
+            != len(hash_matches)
         ):
             raise ControllerRuntimeCapabilityError(
                 "controller_runtime_requirements_lock_invalid"
             )
-        required[normalized] = match.group(2)
+        required[normalized] = (
+            match.group(2),
+            frozenset(
+                item.group(1)
+                for item in hash_matches
+                if item is not None
+            ),
+        )
     return dict(sorted(required.items()))
+
+
+def _requirements_from_lock(raw: bytes) -> dict[str, str]:
+    """Return exact normalized distributions and versions from the lock."""
+
+    return {
+        name: version
+        for name, (version, unused_hashes) in _requirements_lock_bindings(
+            raw
+        ).items()
+    }
 
 
 def _module_name_for_path(path: str) -> tuple[str, bool] | None:
@@ -1117,15 +1333,25 @@ def verify_controller_runtime_capability(
     artifact_digests = _package_artifact_digests(package_artifacts)
     lock_path = str(REQUIREMENTS_LOCK_RELATIVE_PATH)
     launcher_relative = str(LAUNCHER_RELATIVE_PATH)
+    runtime_contract_path = str(CONTROLLER_RUNTIME_CONTRACT_RELATIVE_PATH)
     if (
         artifact_digests.get(lock_path)
         != package.controller_requirements_lock_sha256
         or artifact_digests.get(launcher_relative)
         != package.supervisor_launcher_sha256
+        or artifact_digests.get(runtime_contract_path)
+        != package.controller_runtime_contract_sha256
     ):
         raise ControllerRuntimeCapabilityError(
             "controller_runtime_package_binding_mismatch"
         )
+    selected_runtime_inputs = _selected_runtime_input_identity(
+        package_artifacts[runtime_contract_path],
+        expected_contract_sha256=(
+            package.controller_runtime_contract_sha256
+        ),
+        requirements_lock=package_artifacts[lock_path],
+    )
     required_distributions = _requirements_from_lock(
         package_artifacts[lock_path]
     )
@@ -1146,6 +1372,20 @@ def verify_controller_runtime_capability(
     ):
         raise ControllerRuntimeCapabilityError(
             "controller_runtime_package_binding_mismatch"
+        )
+    if (
+        receipt["python_version"] != selected_runtime_inputs.python_version
+        or receipt["standalone_cpython_archive_sha256"]
+        != selected_runtime_inputs.archive_sha256
+        or receipt["standalone_cpython_specification_sha256"]
+        != selected_runtime_inputs.specification_sha256
+        or receipt["standalone_cpython_payload_tree_sha256"]
+        != selected_runtime_inputs.payload_tree_sha256
+        or receipt["wheelhouse_tree_sha256"]
+        != selected_runtime_inputs.wheelhouse_tree_sha256
+    ):
+        raise ControllerRuntimeCapabilityError(
+            "controller_runtime_input_binding_mismatch"
         )
     runtime_root = RUNTIME_ROOT_PREFIX / receipt_sha256
     release_root = RELEASE_ROOT_PREFIX / package.package_manifest_sha256
@@ -1260,6 +1500,7 @@ def verify_controller_runtime_capability(
     evidence = VerifiedControllerRuntimeEvidence(
         result_type="verified_controller_runtime_v1",
         controller_runtime_receipt_sha256=receipt_sha256,
+        build_plan_sha256=str(receipt["build_plan_sha256"]),
         package_manifest_sha256=package.package_manifest_sha256,
         controller_runtime_contract_sha256=(
             package.controller_runtime_contract_sha256
@@ -1267,6 +1508,16 @@ def verify_controller_runtime_capability(
         controller_requirements_lock_sha256=(
             package.controller_requirements_lock_sha256
         ),
+        standalone_cpython_specification_sha256=str(
+            receipt["standalone_cpython_specification_sha256"]
+        ),
+        standalone_cpython_archive_sha256=str(
+            receipt["standalone_cpython_archive_sha256"]
+        ),
+        standalone_cpython_payload_tree_sha256=str(
+            receipt["standalone_cpython_payload_tree_sha256"]
+        ),
+        wheelhouse_tree_sha256=str(receipt["wheelhouse_tree_sha256"]),
         runtime_root=str(runtime_root),
         runtime_tree_sha256=str(receipt["runtime_tree_sha256"]),
         release_root=str(release_root),

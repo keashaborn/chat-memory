@@ -16,6 +16,8 @@ from typing import Final, Protocol
 _HASH_RE: Final = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 POSTGRES_BIND: Final = "127.0.0.1:55432"
 QDRANT_BIND: Final = "127.0.0.1:6343"
+POSTGRES_SERVER_VERSION: Final = "16.14"
+QDRANT_SERVER_VERSION: Final = "1.19.0"
 DATABASE: Final = "governed_memory"
 BOOTSTRAP_DATABASE: Final = "postgres"
 COLLECTION: Final = "governed_memory_9a54cf123493_000001"
@@ -47,6 +49,7 @@ class PrebootstrapPostgreSQLReadiness:
 
     bind: str
     server_major: int
+    server_version: str
     connected_database: str
     target_database: str
     target_database_exists: bool
@@ -60,6 +63,7 @@ class PrebootstrapPostgreSQLReadiness:
             self.bind != POSTGRES_BIND
             or type(self.server_major) is not int
             or self.server_major != 16
+            or self.server_version != POSTGRES_SERVER_VERSION
             or self.connected_database != BOOTSTRAP_DATABASE
             or self.target_database != DATABASE
             or self.target_database_exists is not False
@@ -89,7 +93,7 @@ class QdrantReadiness:
         if (
             self.bind != QDRANT_BIND
             or not isinstance(self.server_version, str)
-            or not self.server_version.startswith("1.19.")
+            or self.server_version != QDRANT_SERVER_VERSION
             or self.collection != COLLECTION
             or self.alias != ALIAS
             or self.collection_exists is not False
@@ -152,6 +156,7 @@ class TerminalPostgreSQLReadiness:
 
     bind: str
     server_major: int
+    server_version: str
     database: str
     applied_migration_ids: tuple[str, ...]
     exact_role_graph_sha256: str
@@ -166,6 +171,7 @@ class TerminalPostgreSQLReadiness:
             self.bind != POSTGRES_BIND
             or type(self.server_major) is not int
             or self.server_major != 16
+            or self.server_version != POSTGRES_SERVER_VERSION
             or self.database != DATABASE
             or type(self.applied_migration_ids) is not tuple
             or self.applied_migration_ids != TERMINAL_MIGRATION_IDS
@@ -202,7 +208,7 @@ class TerminalQdrantReadiness:
         if (
             self.bind != QDRANT_BIND
             or not isinstance(self.server_version, str)
-            or not self.server_version.startswith("1.19.")
+            or self.server_version != QDRANT_SERVER_VERSION
             or self.collection != COLLECTION
             or self.alias != ALIAS
             or self.collection_exists is not True
@@ -304,8 +310,10 @@ __all__ = [
     "EmptyStoreReadiness",
     "EXPECTED_QDRANT_COLLECTION_CONFIG_SHA256",
     "POSTGRES_BIND",
+    "POSTGRES_SERVER_VERSION",
     "PrebootstrapPostgreSQLReadiness",
     "QDRANT_BIND",
+    "QDRANT_SERVER_VERSION",
     "QdrantReadiness",
     "REQUIRED_ROLE_NAMES",
     "StoreReadinessError",

@@ -15,9 +15,8 @@ resources only; it is not installation or live-production evidence.
 
 ## Canonical repository checks
 
-Run first on **Local Mac** from the isolated Phase 9D candidate. After the exact
-patch is transferred, repeat the same checks on **seebx** from its isolated
-candidate worktree:
+Run on **seebx** from the isolated Phase 8D candidate carrying the current
+Phase 9F repository-only patch:
 
 ```bash
 python3 -I -B tools/governed_memory_install/package.py verify-package
@@ -61,9 +60,11 @@ not rewritten merely to make filenames shorter.
   store whose public entrypoints require the canonical root-owned executions
   path, fresh terminal-readiness replay checks, opaque rollback receipt/ledger
   binding, a secure runtime verifier, an exact release-path launcher,
-  resolved-spec Docker-label binding, one stopped-store empty-rollback writer
-  fence, a required fresh offline/read-only emptiness recheck under that fence,
-  and retained audit hashes are packaged. The verifier closes the
+  resolved-spec Docker-label binding, logical in-process rollback-fence
+  machinery, and retained audit hashes are packaged. No durable live writer
+  fence or stopped-store semantic emptiness recheck exists. The required future
+  order is live writer fence plus semantic recheck, then stop, removal, and
+  receipt persistence while holding the fence. The verifier closes the
   complete manifest-defined release tree with no extras and requires exact
   equality between the locked and installed normalized distribution sets. The
   rollback authority claim validates trusted time and the exact global lock
@@ -74,13 +75,24 @@ not rewritten merely to make filenames shorter.
   authority, claim, journal, operation requests and observations, writer fence,
   retained install receipt, and rollback receipt.
 
-  Phase 9D additionally packages closed post-claim Linux install and dependency
+  Phase 9F additionally packages closed post-claim Linux install and dependency
   factory code, a fixed loopback readiness DTO adapter, a physical ledger-bound
   empty-rollback adapter, and controller runtime/release builder orchestration.
-  These reviewed layers expose only typed, exact operations. They do not ship a
-  selected live Linux/Docker/systemd/root-file/Qdrant transport or a pinned
-  PostgreSQL driver, and the builder has no live publication transport or bound
-  approved standalone CPython substrate. The runtime verifier was not executed,
+  These reviewed layers expose typed operation models. Immutable Docker,
+  systemd, root-file, and Qdrant request/observation contracts are packaged.
+  Narrow selected-field image inspection and exact-ledger-container supervisor
+  inspect/start/stop primitives are retained and repaired, but no complete live
+  transport set or bound platform factory exists. The PostgreSQL contract closes exact
+  source identities and all required native-translation, session-role,
+  privacy, catalog, and rollback-prefix conditions; executable native stages
+  are absent and construction refuses. The selected exact Psycopg wheel names
+  are `psycopg-3.3.4-py3-none-any.whl` and
+  `psycopg_binary-3.3.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl`;
+  neither is locked or verified;
+  CPython and wheelhouse bytes are not staged; no approved terminal PostgreSQL
+  catalog exists. The runtime builder deterministically refuses these current
+  inputs, and the runtime capability verifier rejects incomplete selected
+  inputs before any filesystem or process probe. The runtime verifier was not executed,
   no controller runtime was built, staged, or installed, no release was
   published, no installation occurred, and current live installation state was
   not reverified.
@@ -127,7 +139,7 @@ only invocation-owned PostgreSQL/Qdrant resources with pinned local image
 digests, synthetic inputs, no persistent mounts, zero provider calls, and zero
 production reads or endpoint calls. Independent postflight checks found no
 owned resources or listeners and confirmed unchanged live repository, service,
-and Docker identities. Phase 9D added repository code and exercised only
+and Docker identities. Phase 9F added repository code and exercised only
 synthetic in-process tests; it did not run Docker, access secrets, read
 production data, call a provider, build or install the controller runtime, or
 change a service, PostgreSQL, or Qdrant. Source preparation, installation, and

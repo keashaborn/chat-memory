@@ -44,7 +44,7 @@ def observation(operation: str, *, state: str) -> dict[str, object]:
     }
 
 
-class Phase9DReleaseArtifactTests(unittest.TestCase):
+class Phase9FReleaseArtifactTests(unittest.TestCase):
     def test_current_package_and_retained_application_evidence_verify(self) -> None:
         result = verify_candidate_artifacts()
         self.assertEqual(
@@ -53,8 +53,8 @@ class Phase9DReleaseArtifactTests(unittest.TestCase):
         )
         self.assertEqual(
             result["phase"],
-            "phase9d_repository_only_install_empty_rollback_contract_repair_"
-            "adapters_and_runtime_builder_packaged_inactive_activation_blocked",
+            "phase9f_repository_only_closed_live_transport_contract_and_runtime_"
+            "input_repair_packaged_inactive_activation_blocked",
         )
         self.assertTrue(result["artifact_integrity_verified"])
         self.assertTrue(
@@ -83,7 +83,7 @@ class Phase9DReleaseArtifactTests(unittest.TestCase):
         self.assertTrue(
             result["current_store_package_static_verification_complete"]
         )
-        self.assertEqual(result["current_store_package_artifact_count"], 62)
+        self.assertEqual(result["current_store_package_artifact_count"], 65)
         self.assertTrue(result["synthetic_proof_harness_packaged"])
         self.assertFalse(result["current_store_synthetic_proof_complete"])
         self.assertFalse(
@@ -111,13 +111,36 @@ class Phase9DReleaseArtifactTests(unittest.TestCase):
             "supervisor_launcher_source_packaged",
             "resolved_store_spec_and_exact_docker_labels_bound",
             "resource_identity_ledger_v2_packaged",
-            "empty_rollback_writer_fence_packaged",
             "retained_audit_artifact_hashes_bound",
         ):
             self.assertTrue(result[field], field)
         self.assertFalse(result["controller_runtime_built_or_installed"])
         self.assertFalse(result["controller_release_staged"])
         self.assertFalse(result["stores_install_owns_or_removes_controller_substrate"])
+        self.assertFalse(result["empty_rollback_writer_fence_packaged"])
+        self.assertFalse(
+            result[
+                "fresh_offline_read_only_empty_recheck_required_at_r07_under_stopped_store_fence"
+            ]
+        )
+        for field in (
+            "closed_live_transport_contracts_packaged",
+            "postgresql_source_closure_contract_packaged",
+            "runtime_input_selection_contract_repaired",
+            "runtime_build_receipt_provenance_v3_packaged",
+            "exact_postgresql_16_14_and_qdrant_1_19_0_readiness_required",
+        ):
+            self.assertTrue(result[field], field)
+        for field in (
+            "complete_closed_live_transport_substrate_set_packaged",
+            "complete_closed_live_transport_substrate_set_integrated_into_bound_factory",
+            "driver_native_postgresql_stage_contract_packaged",
+            "driver_native_postgresql_executable_stage_machine_packaged",
+            "approved_terminal_postgresql_catalog_manifest_selected",
+            "durable_live_empty_rollback_writer_fence_transport_packaged",
+            "stopped_store_semantic_empty_recheck_is_valid",
+        ):
+            self.assertFalse(result[field], field)
         self.assertTrue(result["closed_install_store_effect_adapter_packaged"])
         self.assertTrue(result["closed_empty_rollback_store_effect_adapter_packaged"])
         self.assertFalse(result["selected_live_platform_transports_packaged"])
@@ -238,7 +261,27 @@ class Phase9DReleaseArtifactTests(unittest.TestCase):
                 {"resource_identity_ledger_v2_packaged": False}
             ),
             lambda value: value["inactive_store_package"].update(
-                {"empty_rollback_writer_fence_packaged": False}
+                {"empty_rollback_writer_fence_packaged": True}
+            ),
+            lambda value: value["inactive_store_package"].update(
+                {"closed_live_transport_contracts_packaged": False}
+            ),
+            lambda value: value["inactive_store_package"].update(
+                {"complete_closed_live_transport_substrate_set_integrated_into_bound_factory": True}
+            ),
+            lambda value: value["inactive_store_package"].update(
+                {
+                    "postgresql_source_closure_contract_packaged": False
+                }
+            ),
+            lambda value: value["inactive_store_package"].update(
+                {"runtime_input_selection_contract_repaired": False}
+            ),
+            lambda value: value["inactive_store_package"].update(
+                {"runtime_build_receipt_provenance_v3_packaged": False}
+            ),
+            lambda value: value["inactive_store_package"].update(
+                {"approved_terminal_postgresql_catalog_manifest_selected": True}
             ),
             lambda value: value["inactive_store_package"].update(
                 {"retained_audit_artifact_hashes_bound": False}
@@ -314,7 +357,17 @@ class Phase9DReleaseArtifactTests(unittest.TestCase):
             ("stores_install_owns_or_removes_controller_substrate", True),
             ("resolved_store_spec_and_exact_docker_labels_bound", False),
             ("resource_identity_ledger_v2_packaged", False),
-            ("empty_rollback_writer_fence_packaged", False),
+            ("empty_rollback_writer_fence_packaged", True),
+            ("fresh_offline_read_only_empty_recheck_required_at_r07_under_stopped_store_fence", True),
+            ("closed_live_transport_contracts_packaged", False),
+            ("complete_closed_live_transport_substrate_set_integrated_into_bound_factory", True),
+            ("postgresql_source_closure_contract_packaged", False),
+            ("runtime_input_selection_contract_repaired", False),
+            ("runtime_build_receipt_provenance_v3_packaged", False),
+            ("exact_postgresql_16_14_and_qdrant_1_19_0_readiness_required", False),
+            ("approved_terminal_postgresql_catalog_manifest_selected", True),
+            ("durable_live_empty_rollback_writer_fence_transport_packaged", True),
+            ("stopped_store_semantic_empty_recheck_is_valid", True),
             ("retained_audit_artifact_hashes_bound", False),
             (
                 "install_receipt_binds_fresh_terminal_canonical_store_readiness",

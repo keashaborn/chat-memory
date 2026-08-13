@@ -8,7 +8,7 @@ import json
 import re
 from typing import Final, Mapping, Protocol, Sequence
 
-from .host_boundary import CommandResult, DOCKER_BINARY
+from .host_boundary import CommandResult, DOCKER_BINARY, IMAGE_INSPECT_TEMPLATE
 
 
 _SHA256_RE = re.compile(r"sha256:[0-9a-f]{64}\Z", re.ASCII)
@@ -16,7 +16,7 @@ _REPO_DIGEST_RE = re.compile(r"[a-z0-9][a-z0-9._/-]*@sha256:[0-9a-f]{64}\Z")
 _REFERENCE_RE = re.compile(
     r"[a-z0-9][a-z0-9._/-]*(?::[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}\Z"
 )
-_INSPECT_FORMAT: Final = "{{json .}}"
+_INSPECT_FORMAT: Final = IMAGE_INSPECT_TEMPLATE
 
 
 class ImagePreflightError(RuntimeError):
@@ -116,15 +116,12 @@ def _inspect_one(runner: Runner, expected: ImageExpectation) -> LocalImageIdenti
     )
     try:
         observed = json.loads(result.stdout)
-    except (TypeError, json.JSONDecodeError) as error:
-        raise ImagePreflightError("image_inspect_json_invalid") from error
-    if type(observed) is not dict:
+    except (TypeError, json.JSONDecodeError):
+        raise ImagePreflightError("image_inspect_json_invalid") from None
+    if type(observed) is not list or len(observed) != 4:
         raise ImagePreflightError("image_inspect_shape_invalid")
 
-    image_id = observed.get("Id")
-    repo_digests = observed.get("RepoDigests")
-    os_name = observed.get("Os")
-    architecture = observed.get("Architecture")
+    image_id, repo_digests, os_name, architecture = observed
     if type(image_id) is not str or _SHA256_RE.fullmatch(image_id) is None:
         raise ImagePreflightError("image_id_invalid")
     if (

@@ -7,7 +7,7 @@ source-bound runtime and passed its isolated disposable application, store, and
 chat-deletion proof. It has not installed or activated a functioning live
 memory service.
 
-Phase 9D packages claim-bound non-CLI install and empty-rollback controller
+Phase 9F packages claim-bound non-CLI install and empty-rollback controller
 compositions, durable journals, exact resource-ledger provenance, canonical
 receipts, and a create-once durable receipt store. It also packages a secure
 production receipt-store binding: public install and rollback entrypoints
@@ -16,11 +16,12 @@ remain private test-only inputs. A secure controller-runtime verifier closes
 the complete manifest-defined release
 tree with no extras and requires the exact locked distribution set; an exact
 release-path supervisor launcher; resolved-spec Docker-label binding; and a
-single stopped-store empty-rollback writer fence held through terminal absence,
-retained audit-hash verification, and final receipt persistence. Receipt replay
-requires a fresh offline/read-only emptiness observation under that physical
-fence before the first destructive step and is fail-closed on fresh terminal
-readiness or exact rollback
+logical empty-rollback fence contract and retained audit-hash verification.
+There is no durable live writer-exclusion transport and a stopped store cannot
+provide a semantic emptiness recheck. A future implementation must acquire a
+live writer fence, semantically recheck emptiness, stop exact stores, remove
+exact resources, and persist the final receipt while holding the fence. Receipt
+replay is fail-closed on fresh terminal readiness or exact rollback
 receipt/ledger/absence drift. The full release-tree hash is bound through the
 install claim, journal, host ownership, and install receipt. Empty rollback
 independently requires the exact verified controller runtime and release
@@ -30,15 +31,25 @@ receipt.
 That authority claim validates trusted time and the exact global lock before
 any durable receipt read or eligibility-receipt persistence.
 
-Phase 9D also packages a closed post-claim Linux install adapter and dependency
+Phase 9F also packages a closed post-claim Linux install adapter and dependency
 factory, fixed loopback readiness DTO adapter, physical ledger-bound
 empty-rollback adapter, and controller runtime/release builder orchestration.
-They accept typed exact operations and do not expose caller-selected commands,
-endpoints, SQL, or resource names. They do not ship the selected live low-level
-Linux, Docker, systemd, root-file, PostgreSQL, or Qdrant transports, and no
-pinned PostgreSQL driver has been selected. The builder still requires an
-externally approved standalone CPython substrate digest and a separately
-authorized publication transport. No controller runtime was built, staged, or
+They accept typed exact operation models and do not expose caller-selected
+commands, endpoints, SQL, or resource names. Immutable Docker, systemd,
+root-file, and Qdrant request/observation contracts are packaged. Narrow
+selected-field image inspection and exact-ledger-container supervisor
+inspect/start/stop primitives are retained and repaired, but no complete live
+transport set or bound resource lifecycle factory is present. The PostgreSQL source-closure contract
+records the exact semantic requirements but packages no executable native
+stage or rollback-prefix machine; construction refuses. The preferred exact
+Psycopg 3.3.4 wheels are `psycopg-3.3.4-py3-none-any.whl` and
+`psycopg_binary-3.3.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl`;
+they are not locked, staged, verified, or native-closure inspected. The selected CPython
+3.12.13 archive is not staged or payload-verified; no wheelhouse tree or
+approved terminal PostgreSQL catalog exists, and the runtime builder refuses
+the current incomplete driver lock; the runtime capability verifier also
+rejects the incomplete selection. No controller runtime was built,
+staged, or
 installed; no release was published; no live activation executor or promoted
 live proof exists. Runtime and release remain separately authorized
 preinstallation substrate retained by empty rollback, not resources owned by
@@ -71,10 +82,15 @@ reading or reusing legacy or provider credentials.
 The live transport and deployment layer must close these implementation gaps
 before authorization:
 
-- select and pin the PostgreSQL driver and implement the fixed PostgreSQL
-  transport without caller-selected SQL or connection targets;
-- implement the selected low-level Linux, Docker, systemd, root-file, Qdrant,
-  secret, and readiness transports behind the closed Phase 9D adapters;
+- lock and verify Psycopg; translate every canonical bootstrap, role,
+  privacy, catalog, migration, and rollback-prefix predicate into fixed native
+  stages without caller-selected SQL or connection targets;
+- implement the reviewed live transports behind the immutable contracts,
+  including non-secret observations, exact absence classification, safe
+  root-file identity, journaled systemd recovery, and the durable live rollback
+  writer fence;
+- select the exact terminal PostgreSQL catalog and stage the approved CPython
+  and canonical wheelhouse inputs;
 - complete image-baseline, hardening, external-readiness, and boot-recovery
   checks.
 

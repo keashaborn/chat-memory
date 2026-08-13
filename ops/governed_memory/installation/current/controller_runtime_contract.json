@@ -1,20 +1,100 @@
 {
   "schema_version": "governed-memory-dormant-store-install-controller-runtime-contract-v2",
-  "state": "runtime-identity-specified-not-built-not-installed-not-authorized",
+  "state": "runtime-inputs-selected-contract-repaired-not-staged-not-built-not-installed-not-authorized",
   "platform": {
     "implementation": "CPython",
     "python_version": "3.12",
     "os": "linux",
     "architecture": "x86_64"
   },
+  "selected_runtime_inputs": {
+    "standalone_cpython": {
+      "selection_state": "exact-upstream-identity-selected-not-staged-or-payload-verified",
+      "upstream": "astral-sh/python-build-standalone",
+      "upstream_release": "20260807",
+      "implementation": "CPython",
+      "python_version": "3.12.13",
+      "distribution_kind": "standalone-cpython-install-only",
+      "archive_name": "cpython-3.12.13+20260807-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+      "archive_sha256": "506191be3ee7bd190a8834dcdc1b3bc70aab50608deccc711935aa007239cabd",
+      "payload_root": "python",
+      "interpreter_relative_path": "bin/python",
+      "upstream_identity_metadata_audited": true,
+      "archive_staged": false,
+      "archive_bytes_sha256_verified_locally": false,
+      "archive_member_types_verified": false,
+      "specification_sha256": null,
+      "payload_tree_sha256": null
+    },
+    "postgresql_driver": {
+      "selection_state": "preferred-exact-target-not-in-current-lock-not-staged-not-verified",
+      "api_style": "synchronous",
+      "preferred_extra": "binary",
+      "preferred_distributions": [
+        {
+          "normalized_distribution": "psycopg",
+          "version": "3.3.4",
+          "selected_wheel_filename": "psycopg-3.3.4-py3-none-any.whl",
+          "selected_wheel_sha256": "b6bbc25ccf05c8fad3b061d9db2ef0909a555171b84b07f29458a447253d679a"
+        },
+        {
+          "normalized_distribution": "psycopg-binary",
+          "version": "3.3.4",
+          "selected_wheel_filename": "psycopg_binary-3.3.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+          "selected_wheel_sha256": "e7510c37550f91a187e3660a8cc50d4b760f8c3b8b2f89ebc5698cd2c7f2c85d"
+        }
+      ],
+      "asyncpg_is_controller_driver": false,
+      "current_controller_lock_contains_selection": false,
+      "exact_wheel_filenames_frozen": false,
+      "wheel_bytes_staged": false,
+      "wheel_bytes_sha256_verified_locally": false,
+      "binary_native_library_closure_inspected": false,
+      "postgresql_source_closure_contract_packaged": true,
+      "driver_native_postgresql_stages_packaged": false,
+      "selection_ready_for_runtime_build": false
+    },
+    "wheelhouse": {
+      "selection_state": "canonical-membership-policy-defined-no-wheelhouse-present",
+      "tree_schema_version": "governed-memory-controller-offline-wheelhouse-tree-v1",
+      "tree_hash_algorithm": "sha256-of-ascii-canonical-json",
+      "canonical_json_rules": "sorted-object-keys-no-whitespace-no-trailing-newline-ensure-ascii",
+      "platform_identity": {
+        "python_tag": "cp312",
+        "os": "linux",
+        "architecture": "x86_64"
+      },
+      "member_fields": [
+        "distribution",
+        "filename",
+        "sha256",
+        "size",
+        "version"
+      ],
+      "member_order": "normalized-distribution-then-filename-ascii",
+      "exactly_one_wheel_per_locked_distribution": true,
+      "wheel_sha256_must_match_that_distributions_lock_hash": true,
+      "wheel_filename_must_match_normalized_distribution_and_locked_version": true,
+      "extra_missing_duplicate_or_path-bearing_members_refused": true,
+      "caller_supplied_opaque_tree_sha256_accepted": false,
+      "filesystem_modes_ownership_and-no-follow-type-proof_are_separate_transport_evidence": true,
+      "canonical_tree_sha256": null,
+      "canonical_member_count": null,
+      "canonical_total_bytes": null,
+      "wheelhouse_staged": false
+    }
+  },
   "dependency_policy": {
     "lock_file": "ops/governed_memory/controller-requirements.lock",
     "require_hashes": true,
     "locked_distribution_set_must_exactly_equal_installed_normalized_distribution_set": true,
     "offline_wheelhouse_required": true,
+    "canonical_wheelhouse_membership_and_tree_hash_required": true,
     "network_install_allowed": false,
     "reuse_successor_application_runtime": false,
-    "reuse_system_python_site_packages": false
+    "reuse_system_python_site_packages": false,
+    "current_lock_contains_preferred_postgresql_driver": false,
+    "preferred_postgresql_driver_must_be_locked_before_runtime_build": true
   },
   "build_policy": {
     "isolated_controller_environment_required": true,
@@ -25,21 +105,35 @@
     "full_release_tree_sha256_required": true,
     "controller_runtime_and_release_are_separately_authorized_preinstall_substrate": true,
     "repository_only_runtime_and_release_builder_orchestration_packaged": true,
+    "builder_accepts_only_selected_standalone_cpython_archive_name_and_sha256": true,
     "builder_requires_exact_externally_approved_standalone_cpython_substrate": true,
+    "builder_reparses_exact_standalone_cpython_specification_before_any_transport_call": true,
     "builder_requires_exact_offline_wheelhouse_tree": true,
+    "builder_derives_wheelhouse_tree_from_exact_member_bytes": true,
+    "builder_accepts_caller_supplied_opaque_wheelhouse_hash": false,
     "builder_requires_no_replace_publication_and_fsynced_parents": true,
     "builder_recovers_only_exact_owned_partial_stage": true,
     "builder_refuses_partial_publication_for_manual_review": true,
     "concrete_runtime_build_transport_packaged": false,
-    "approved_standalone_cpython_substrate_selected": false,
+    "approved_standalone_cpython_substrate_selected": true,
+    "standalone_cpython_archive_staged": false,
+    "standalone_cpython_archive_content_verified": false,
     "offline_wheelhouse_staged": false,
+    "canonical_wheelhouse_identity_present": false,
+    "preferred_postgresql_driver_locked": false,
     "current_runtime_built": false,
     "current_runtime_installed": false,
     "current_release_staged": false,
     "runtime_build_or_install_performed_by_repository_phase": false
   },
   "runtime_build_receipt_policy": {
-    "schema_version": "governed-memory-controller-runtime-build-receipt-v2",
+    "schema_version": "governed-memory-controller-runtime-build-receipt-v3",
+    "build_plan_sha256_required": true,
+    "standalone_cpython_specification_sha256_required": true,
+    "standalone_cpython_archive_sha256_required": true,
+    "standalone_cpython_payload_tree_sha256_required": true,
+    "canonical_wheelhouse_tree_sha256_required": true,
+    "receipt_input_hashes_must_equal_selected_staged_runtime_contract": true,
     "persistent_controller_substrate_created_after_successful_publication": true,
     "persistent_store_resources_created_after_successful_publication": false,
     "active_production_state_changed_after_successful_publication": false,
@@ -48,6 +142,7 @@
   },
   "verification_policy": {
     "secure_receipt_bound_no_follow_verifier_packaged": true,
+    "runtime_capability_refuses_unready_substrate_driver_or_wheelhouse_before_probe": true,
     "runtime_and_release_tree_hash_verification_required": true,
     "full_release_tree_must_exactly_match_package_manifest_with_no_extra_members": true,
     "release_symlink_special_file_hardlink_or_writable_member_allowed": false,

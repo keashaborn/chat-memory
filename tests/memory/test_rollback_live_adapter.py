@@ -365,6 +365,7 @@ class ExactPhysicalRollbackOperationsTests(unittest.TestCase):
         executions = root / "executions"
         execution_root = executions / EXECUTION_ID
         execution_root.mkdir(parents=True, mode=0o700)
+        os.chmod(executions, 0o700)
         os.chmod(execution_root, 0o700)
         self.receipts = DurableReceiptStore.synthetic(executions)
         self.receipts.write_once(
