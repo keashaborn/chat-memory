@@ -403,6 +403,12 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr.decode())
         self.assertIn(b"--package-manifest-sha256", completed.stdout)
 
+    def test_issuer_execs_runner_with_isolation_and_no_bytecode_writes(self) -> None:
+        arguments = issuer._runner_argv(inputs())
+        self.assertEqual(arguments[:3], ("python", "-I", "-B"))
+        source = Path(proof.__file__).read_text(encoding="utf-8")
+        self.assertIn("phase9_live_proof_bytecode_writes_not_disabled", source)
+
 
 if __name__ == "__main__":
     unittest.main()

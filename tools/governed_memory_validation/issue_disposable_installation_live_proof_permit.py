@@ -532,6 +532,7 @@ def _runner_argv(inputs: runner.ProofInputs) -> tuple[str, ...]:
     return (
         "python",
         "-I",
+        "-B",
         str(
             runner.RELEASE_ROOT_PREFIX
             / inputs.package_manifest_sha256

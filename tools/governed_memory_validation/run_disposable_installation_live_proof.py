@@ -15,6 +15,12 @@ cleanup.  If rollback authority has been minted, failure recovery can only
 resume the exact public ledger-bound rollback.
 """
 
+import sys
+
+_DONT_WRITE_BYTECODE_AT_START = sys.dont_write_bytecode
+if __name__ == "__main__" and not _DONT_WRITE_BYTECODE_AT_START:
+    raise SystemExit("phase9_live_proof_bytecode_writes_not_disabled")
+
 import argparse
 import base64
 from dataclasses import dataclass, replace
@@ -27,7 +33,6 @@ from pathlib import Path, PurePosixPath
 import re
 import signal
 import stat
-import sys
 import time
 from types import MappingProxyType
 from typing import Final, Mapping, Sequence
