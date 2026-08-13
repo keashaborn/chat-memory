@@ -73,7 +73,7 @@ EMPTY_ROLLBACK_RECEIPT_SCHEMA_RELATIVE: Final = (
 )
 
 EXPECTED_CONTRACT_CANONICAL_SHA256: Final = (
-    "1323b9c26c7ab4c9f53b3beecdfcc6a44e63fb7824fc58133ebb29756c950e40"
+    "87157d21fbab0eedba982de0df998ba3d4551ccff68b77cb2bd98b4bceecb893"
 )
 EXPECTED_PLAN_CANONICAL_SHA256: Final = (
     "839cfa4987f9a90b4dff2f54a269a46b4e0a2ed56221f043ad311e536ade6a7b"
@@ -88,10 +88,10 @@ EXPECTED_EXECUTION_CONTRACT_CANONICAL_SHA256: Final = (
     "c16eead2cb7391705d6639eec4aa42c5a3f176a885c0c3c94d74163a5419ac3f"
 )
 EXPECTED_CONTROLLER_RUNTIME_CONTRACT_CANONICAL_SHA256: Final = (
-    "9f26899b9a7e667d13eaedc503db8917b9b345dab7b898671d285cec692ec623"
+    "60580592361d52b6af3d57d023d7bdd3f0876d677f736e6ee00aeb85841d79ac"
 )
 EXPECTED_POSTGRES_NATIVE_STAGE_CONTRACT_CANONICAL_SHA256: Final = (
-    "d728aaeb385b4643d673c0ee795d702c063227622403e6bc3c3f91bc1dee4203"
+    "beb37dc03b77148aa669ca0026341ada88351560c7d1f4e08d0e15d127e1e6df"
 )
 EXPECTED_PROOF_CONTRACT_CANONICAL_SHA256: Final = (
     "b7c576bae6cc9f7644462b9e7130cd9eecca190925405fa7629e5378283ac2f9"
@@ -682,6 +682,8 @@ def _verify_contract(contract: dict[str, object]) -> None:
         != "psycopg[binary]==3.3.4"
         or migration.get("preferred_synchronous_driver_locked_staged_and_verified")
         is not True
+        or migration.get("runtime_postgresql_driver_identity_sha256")
+        != "364760713fd35d8d7029c972e9cc23ec69f3b5c4a9a1ce6bab302a525f0ef8fa"
         or migration.get("approved_terminal_catalog_manifest_selected")
         is not True
         or migration.get("source_postgresql_connections") != 0
@@ -1167,7 +1169,7 @@ def _verify_postgres_native_stage_contract(contract: dict[str, object]) -> None:
         _canonical_sha256(contract)
         != EXPECTED_POSTGRES_NATIVE_STAGE_CONTRACT_CANONICAL_SHA256
         or contract.get("schema_version")
-        != "governed-memory-postgres-native-stage-contract-v3"
+        != "governed-memory-postgres-native-stage-contract-v4"
         or contract.get("state")
         != "source-closed-concrete-psycopg-transport-exact-prefix-machine-runtime-bound-terminal-catalog-disposable-selected-inactive"
         or contract.get("server_version") != "16.14"
@@ -1223,13 +1225,17 @@ def _verify_postgres_native_stage_contract(contract: dict[str, object]) -> None:
         or preferred_driver.get("selected_wheels")
         != [
             "psycopg-3.3.4-py3-none-any.whl",
-            "psycopg_binary-3.3.4-cp312-cp312-manylinux_2_17_x86_64.whl",
+            "psycopg_binary-3.3.4-cp312-cp312-manylinux2014_x86_64."
+            "manylinux_2_17_x86_64.whl",
         ]
         or preferred_driver.get("preference_contract_packaged") is not True
         or preferred_driver.get("exact_driver_identity_contract_packaged")
         is not True
         or preferred_driver.get("runtime_driver_identity_sha256")
-        != "01807067729fbb8db7560ee937e7c729d8eb90e289c712a071450b0d808da457"
+        != "364760713fd35d8d7029c972e9cc23ec69f3b5c4a9a1ce6bab302a525f0ef8fa"
+        or type(preferred_driver.get("runtime_driver_probe")) is not dict
+        or _canonical_sha256(preferred_driver["runtime_driver_probe"])
+        != "364760713fd35d8d7029c972e9cc23ec69f3b5c4a9a1ce6bab302a525f0ef8fa"
         or preferred_driver.get("independent_native_audit_identity_sha256")
         != "bb6714cb1f3cead78935ae10f9e2ba630f4e9266c208395c6292ff0667f5f7ee"
         or preferred_driver.get("pq_impl") != "binary"
@@ -1754,7 +1760,7 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
         or selected_driver.get("concrete_psycopg_postgresql_transport_packaged")
         is not True
         or selected_driver.get("runtime_driver_identity_sha256")
-        != "01807067729fbb8db7560ee937e7c729d8eb90e289c712a071450b0d808da457"
+        != "364760713fd35d8d7029c972e9cc23ec69f3b5c4a9a1ce6bab302a525f0ef8fa"
         or type(selected_wheelhouse) is not dict
         or selected_wheelhouse.get("selection_state")
         != "exact-six-wheel-canonical-wheelhouse-staged-and-verified"

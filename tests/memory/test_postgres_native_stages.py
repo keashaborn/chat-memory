@@ -667,7 +667,7 @@ class PostgreSQLNativeStageTests(unittest.TestCase):
         self.assertEqual(checked_in, document)
         self.assertEqual(
             document["schema_version"],
-            "governed-memory-postgres-native-stage-contract-v3",
+            "governed-memory-postgres-native-stage-contract-v4",
         )
         coverage = document["terminal_catalog"]["security_sensitive_coverage"]
         self.assertTrue(all(coverage.values()))
@@ -678,6 +678,29 @@ class PostgreSQLNativeStageTests(unittest.TestCase):
         self.assertEqual(
             document["terminal_catalog"]["approved_normalized_catalog_sha256"],
             APPROVED_TERMINAL_CATALOG_SHA256,
+        )
+        driver = document["preferred_driver"]
+        probe = subject.runtime_driver_probe_document()
+        self.assertEqual(driver["runtime_driver_probe"], probe)
+        self.assertEqual(len(probe["native_files"]), 17)
+        self.assertEqual(
+            [item["path"] for item in probe["native_files"]],
+            sorted(item["path"] for item in probe["native_files"]),
+        )
+        self.assertEqual(
+            hashlib.sha256(
+                json.dumps(
+                    probe,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=True,
+                ).encode("ascii")
+            ).hexdigest(),
+            subject.EXPECTED_DRIVER_IDENTITY_SHA256,
+        )
+        self.assertEqual(
+            subject.EXPECTED_DRIVER_IDENTITY_SHA256,
+            "364760713fd35d8d7029c972e9cc23ec69f3b5c4a9a1ce6bab302a525f0ef8fa",
         )
         columns_sql = CATALOG_QUERIES[CatalogQueryId.COLUMNS].sql
         self.assertNotIn(" AS collation ", columns_sql)

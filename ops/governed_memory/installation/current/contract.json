@@ -249,7 +249,7 @@
     "preferred_synchronous_driver_target": "psycopg[binary]==3.3.4",
     "preferred_synchronous_driver_locked_staged_and_verified": true,
     "preferred_synchronous_driver_staging_scope": "verified-incoming-selection-for-closed-plan-not-offline-publication",
-    "runtime_postgresql_driver_identity_sha256": "01807067729fbb8db7560ee937e7c729d8eb90e289c712a071450b0d808da457",
+    "runtime_postgresql_driver_identity_sha256": "364760713fd35d8d7029c972e9cc23ec69f3b5c4a9a1ce6bab302a525f0ef8fa",
     "approved_terminal_catalog_manifest_selected": true,
     "approved_terminal_catalog_sha256": "c37620ecb2d1f9a771ea67ce4a71f1d15700f26dba01d4386d70e801a692e1cc",
     "included_migrations": [

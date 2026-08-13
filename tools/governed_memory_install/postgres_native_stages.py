@@ -39,9 +39,6 @@ STATEMENT_TIMEOUT_MILLISECONDS: Final = 15_000
 PYTHON_VERSION: Final = "3.12.13"
 PREFERRED_PSYCOPG_VERSION: Final = "3.3.4"
 PREFERRED_LIBPQ_VERSION: Final = 180000
-EXPECTED_DRIVER_IDENTITY_SHA256: Final = (
-    "01807067729fbb8db7560ee937e7c729d8eb90e289c712a071450b0d808da457"
-)
 APPROVED_TERMINAL_CATALOG_SHA256: Final = (
     "c37620ecb2d1f9a771ea67ce4a71f1d15700f26dba01d4386d70e801a692e1cc"
 )
@@ -75,6 +72,116 @@ def _canonical_bytes(value: object) -> bytes:
 
 def _sha256(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
+
+
+_DRIVER_RUNTIME_NATIVE_FILES: Final = (
+    (
+        "psycopg_binary.libs/libcom_err-2abe824b.so.2.1",
+        17_497,
+        "5426dcb54dd01c9eedda05e2179f0e47114e8b48a534ffe9e94916e79471b257",
+    ),
+    (
+        "psycopg_binary.libs/libcrypt-13f4f5d0.so.1",
+        221_657,
+        "a74d1e8438d224e0fff14da0001f5e50129b0d666a103bf981b976770158d106",
+    ),
+    (
+        "psycopg_binary.libs/libcrypto-e7530dde.so.3",
+        6_502_241,
+        "3761d43a07bc3a119cfce159a0ae50b5fd526bd9db8bf9e87626487d12fc89cd",
+    ),
+    (
+        "psycopg_binary.libs/libgssapi_krb5-497db0c6.so.2.2",
+        345_209,
+        "2a74b0330ee973281b26f8ebe4acef0ebf9ee99c6b68497cf9151fff6c4c34e1",
+    ),
+    (
+        "psycopg_binary.libs/libk5crypto-b1f99d5c.so.3.1",
+        219_953,
+        "9844e5009e70a6ad2fb22b587306810fe2a7b1b9f6b9922daa1c78ba3466de27",
+    ),
+    (
+        "psycopg_binary.libs/libkeyutils-dfe70bd6.so.1.5",
+        17_913,
+        "c29e41b03cf4b2dffbfb4960946e2b42f82c0ca5d53d231d3f0fc597ba274488",
+    ),
+    (
+        "psycopg_binary.libs/libkrb5-fcafa220.so.3.3",
+        1_018_953,
+        "b2aab528ff4cab2144e5ce01b246ac09f574a072a53ff63ea81d6bb29b26b8f1",
+    ),
+    (
+        "psycopg_binary.libs/libkrb5support-d0bcff84.so.0.1",
+        76_873,
+        "6a71f57d748fef79b4e736d5348875545d0a224fa8928b5d62a3cf2647fc109f",
+    ),
+    (
+        "psycopg_binary.libs/liblber-9320a7df.so.2.0.200",
+        60_977,
+        "39df9a3a7d6fb2f3dec38d4892bae83ceb5f4c45fea50ce838f68f23cb0b7eaf",
+    ),
+    (
+        "psycopg_binary.libs/libldap-fa0f4823.so.2.0.200",
+        451_417,
+        "09cd64a08d8ebb3cb3e3f2313f6d6e5ba737e7603c6bb8c3266cd4f4f69689cb",
+    ),
+    (
+        "psycopg_binary.libs/libpcre-9513aab5.so.1.2.0",
+        406_817,
+        "02eda850e04931656d8af81f5171bff74d8bec1553d3d85c3d32d7fc5efe8864",
+    ),
+    (
+        "psycopg_binary.libs/libpq-2be5f14a.so.5.18",
+        416_049,
+        "3918e961944c87346958a1fd8f6618f386af647c080bdda53cea03cb74327e88",
+    ),
+    (
+        "psycopg_binary.libs/libsasl2-84219a89.so.3.0.0",
+        134_753,
+        "ae3f8967d5fa191dac7c6ae5f9130f659cf2f5cb66b2f7e5c5a1a5a47369fe5a",
+    ),
+    (
+        "psycopg_binary.libs/libselinux-0922c95c.so.1",
+        178_337,
+        "d4fa8e7fb3add960a68325a59c9694244aea3213fd739a50815cb067c4965654",
+    ),
+    (
+        "psycopg_binary.libs/libssl-4a840876.so.3",
+        1_147_337,
+        "461301beff504e1f2eb844dcb70de2d986de76cc89e7b6e15b3a68b97187e1ac",
+    ),
+    (
+        "psycopg_binary/_psycopg.cpython-312-x86_64-linux-gnu.so",
+        734_705,
+        "cd784a19160d1dc7d7d355a702cd33db4d5978ed6553a708d687960eecf83d3a",
+    ),
+    (
+        "psycopg_binary/pq.cpython-312-x86_64-linux-gnu.so",
+        341_641,
+        "21c93d0002a339c065961c853f168d8cbd68ab7146fe02e6fdd2819ab01337f3",
+    ),
+)
+
+
+def runtime_driver_probe_document() -> dict[str, object]:
+    """Return the exact selected-wheel runtime identity preimage."""
+
+    return {
+        "schema_version": "governed-memory-psycopg-runtime-probe-v1",
+        "python_version": PYTHON_VERSION,
+        "psycopg_version": PREFERRED_PSYCOPG_VERSION,
+        "pq_impl": "binary",
+        "libpq_version": PREFERRED_LIBPQ_VERSION,
+        "native_files": [
+            {"path": path, "size": size, "sha256": sha256}
+            for path, size, sha256 in _DRIVER_RUNTIME_NATIVE_FILES
+        ],
+    }
+
+
+EXPECTED_DRIVER_IDENTITY_SHA256: Final = _sha256(
+    _canonical_bytes(runtime_driver_probe_document())
+)
 
 
 SOURCE_SHA256: Final[Mapping[str, str]] = MappingProxyType(
@@ -1625,7 +1732,7 @@ def contract_document() -> dict[str, object]:
             }
         )
     document: dict[str, object] = {
-        "schema_version": "governed-memory-postgres-native-stage-contract-v3",
+        "schema_version": "governed-memory-postgres-native-stage-contract-v4",
         "state": (
             "source-closed-concrete-psycopg-transport-exact-prefix-machine-"
             "runtime-bound-terminal-catalog-disposable-selected-inactive"
@@ -1669,18 +1776,19 @@ def contract_document() -> dict[str, object]:
                 "psycopg-3.3.4-py3-none-any.whl",
                 (
                     "psycopg_binary-3.3.4-cp312-cp312-"
-                    "manylinux_2_17_x86_64.whl"
+                    "manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
                 ),
             ],
             "preference_contract_packaged": True,
             "exact_driver_identity_contract_packaged": True,
             "runtime_driver_identity_sha256": EXPECTED_DRIVER_IDENTITY_SHA256,
+            "runtime_driver_probe": runtime_driver_probe_document(),
             "independent_native_audit_identity_sha256": (
                 INDEPENDENT_NATIVE_AUDIT_IDENTITY_SHA256
             ),
             "pq_impl": "binary",
             "libpq_version": PREFERRED_LIBPQ_VERSION,
-            "native_file_count": 17,
+            "native_file_count": len(_DRIVER_RUNTIME_NATIVE_FILES),
             "exact_wheel_filenames_frozen": True,
             "wheel_bytes_staged": True,
             "wheel_bytes_verified": True,
@@ -1834,4 +1942,5 @@ __all__ = [
     "construct_current_machine",
     "contract_document",
     "normalize_catalog_rows",
+    "runtime_driver_probe_document",
 ]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 from pathlib import Path
 from pathlib import PurePosixPath
@@ -288,6 +289,63 @@ class DormantStoreInstallPackageTests(unittest.TestCase):
         )
         self.assertEqual(checked_in, generate_installation_package_manifest.generate())
         self.assertEqual(package.verify()["artifact_count"], 74)
+
+    def test_postgres_runtime_driver_probe_is_exact_and_cross_bound(self) -> None:
+        native = json.loads(
+            (ROOT / package.POSTGRES_NATIVE_STAGE_CONTRACT_RELATIVE).read_text(
+                encoding="ascii"
+            )
+        )
+        runtime = json.loads(
+            (ROOT / package.CONTROLLER_RUNTIME_CONTRACT_RELATIVE).read_text(
+                encoding="ascii"
+            )
+        )
+        contract = json.loads(package.CONTRACT.read_text(encoding="ascii"))
+        preferred = native["preferred_driver"]
+        probe = preferred["runtime_driver_probe"]
+        identity = hashlib.sha256(
+            json.dumps(
+                probe,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+                allow_nan=False,
+            ).encode("ascii")
+        ).hexdigest()
+        self.assertEqual(
+            identity,
+            preferred["runtime_driver_identity_sha256"],
+        )
+        self.assertEqual(
+            identity,
+            runtime["selected_runtime_inputs"]["postgresql_driver"][
+                "runtime_driver_identity_sha256"
+            ],
+        )
+        self.assertEqual(
+            identity,
+            contract["migration_policy"][
+                "runtime_postgresql_driver_identity_sha256"
+            ],
+        )
+        for mutate in (
+            lambda value: value["native_files"][0].__setitem__("size", 1),
+            lambda value: value["native_files"][0].__setitem__(
+                "sha256", "0" * 64
+            ),
+            lambda value: value["native_files"].reverse(),
+            lambda value: value["native_files"].append(
+                copy.deepcopy(value["native_files"][0])
+            ),
+        ):
+            changed = copy.deepcopy(native)
+            mutate(changed["preferred_driver"]["runtime_driver_probe"])
+            with self.assertRaisesRegex(
+                package.PackageError,
+                "dormant_store_postgres_native_stage_contract_invalid",
+            ):
+                package._verify_postgres_native_stage_contract(changed)
 
     def test_verifier_generator_and_local_migration_binding_are_hash_bound(
         self,

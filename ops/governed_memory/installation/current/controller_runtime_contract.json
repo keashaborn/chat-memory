@@ -68,7 +68,7 @@
       "binary_native_library_closure_inspected": true,
       "driver_native_postgresql_stages_packaged": true,
       "concrete_psycopg_postgresql_transport_packaged": true,
-      "runtime_driver_identity_sha256": "01807067729fbb8db7560ee937e7c729d8eb90e289c712a071450b0d808da457",
+      "runtime_driver_identity_sha256": "364760713fd35d8d7029c972e9cc23ec69f3b5c4a9a1ce6bab302a525f0ef8fa",
       "selection_ready_for_runtime_build": true
     },
     "wheelhouse": {
