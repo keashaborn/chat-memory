@@ -1199,8 +1199,22 @@ import sysconfig
 
 runtime_root = Path(sys.argv[1]).resolve(strict=True)
 
-def relative_to_runtime(value):
-    resolved = Path(value).resolve(strict=True)
+def relative_to_runtime(value, *, allow_missing_stdlib_zip=False):
+    candidate = Path(value)
+    try:
+        resolved = candidate.resolve(strict=True)
+    except FileNotFoundError as error:
+        expected_zip = runtime_root / "lib" / (
+            f"python{sys.version_info.major}{sys.version_info.minor}.zip"
+        )
+        if (
+            not allow_missing_stdlib_zip
+            or not candidate.is_absolute()
+            or candidate != expected_zip
+            or candidate.is_symlink()
+        ):
+            raise SystemExit("controller_runtime_import_path_invalid") from error
+        resolved = candidate.parent.resolve(strict=True) / candidate.name
     try:
         relative = resolved.relative_to(runtime_root)
     except ValueError as error:
@@ -1230,7 +1244,10 @@ prefixes = {
 if set(prefixes.values()) != {"."}:
     raise SystemExit("controller_runtime_not_standalone")
 
-import_paths = [relative_to_runtime(value) for value in sys.path]
+import_paths = [
+    relative_to_runtime(value, allow_missing_stdlib_zip=True)
+    for value in sys.path
+]
 if len(import_paths) != len(set(import_paths)):
     raise SystemExit("controller_runtime_duplicate_import_path")
 

@@ -15,6 +15,7 @@ from tools.governed_memory_install.controller_runtime import (
     PACKAGE_MANIFEST_RELATIVE_PATH,
     RUNTIME_RECEIPT_RESULT,
     RUNTIME_RECEIPT_SCHEMA,
+    _INVENTORY_PROBE,
 )
 from tools.governed_memory_release.controller_runtime_builder import (
     ControllerRuntimeBuildError,
@@ -30,6 +31,7 @@ from tools.governed_memory_release.runtime_publication_transport import (
     NodeObservation,
     ProcessResult,
     TreeMember,
+    _SUBSTRATE_CONFINEMENT_PROBE,
 )
 
 
@@ -1092,6 +1094,24 @@ class RuntimePublicationTransportTests(unittest.TestCase):
         with self.assertRaises(ControllerRuntimeBuildError):
             transport.observe_stage(forged)
         self.assertEqual(primitives.calls, [])
+
+    def test_only_exact_missing_standard_library_zip_is_admitted(self):
+        for probe, refusal in (
+            (
+                _SUBSTRATE_CONFINEMENT_PROBE,
+                "standalone_cpython_import_path_invalid",
+            ),
+            (_INVENTORY_PROBE, "controller_runtime_import_path_invalid"),
+        ):
+            with self.subTest(refusal=refusal):
+                self.assertIn(
+                    'f"python{sys.version_info.major}{sys.version_info.minor}.zip"',
+                    probe,
+                )
+                self.assertIn("candidate != expected_zip", probe)
+                self.assertIn("or candidate.is_symlink()", probe)
+                self.assertIn("allow_missing_stdlib_zip=True", probe)
+                self.assertIn(refusal, probe)
 
 
 if __name__ == "__main__":

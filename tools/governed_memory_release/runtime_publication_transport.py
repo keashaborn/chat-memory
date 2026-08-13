@@ -138,8 +138,22 @@ from pathlib import Path
 root = Path(sys.argv[1]).resolve(strict=True)
 interpreter = Path(sys.executable).resolve(strict=True)
 
-def confined(value):
-    resolved = Path(value).resolve(strict=True)
+def confined(value, *, allow_missing_stdlib_zip=False):
+    candidate = Path(value)
+    try:
+        resolved = candidate.resolve(strict=True)
+    except FileNotFoundError as error:
+        expected_zip = root / "lib" / (
+            f"python{sys.version_info.major}{sys.version_info.minor}.zip"
+        )
+        if (
+            not allow_missing_stdlib_zip
+            or not candidate.is_absolute()
+            or candidate != expected_zip
+            or candidate.is_symlink()
+        ):
+            raise SystemExit("standalone_cpython_import_path_invalid") from error
+        resolved = candidate.parent.resolve(strict=True) / candidate.name
     try:
         relative = resolved.relative_to(root)
     except ValueError as error:
@@ -159,7 +173,9 @@ if set(prefixes.values()) != {"."}:
     raise SystemExit("standalone_cpython_prefix_mismatch")
 if not sys.path or any(not isinstance(value, str) or not value for value in sys.path):
     raise SystemExit("standalone_cpython_import_path_invalid")
-import_paths = [confined(value) for value in sys.path]
+import_paths = [
+    confined(value, allow_missing_stdlib_zip=True) for value in sys.path
+]
 if len(import_paths) != len(set(import_paths)):
     raise SystemExit("standalone_cpython_duplicate_import_path")
 configured = sysconfig.get_paths()

@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from tools.governed_memory_install import authority
+from tools.governed_memory_install import authority, store_supervisor_launcher
 from tools.governed_memory_install.controller_runtime import (
     CONTROLLER_RUNTIME_CONTRACT_RELATIVE_PATH,
     ControllerRuntimeCapabilityError,
@@ -878,6 +878,137 @@ class RuntimeCapabilityTests(unittest.TestCase):
         self.assertIn(
             'if set(prefixes.values()) != {"."}', _INVENTORY_PROBE
         )
+
+
+class StoreSupervisorLauncherTests(unittest.TestCase):
+    def _staged_fixture(self, root: Path) -> tuple[Path, Path, str]:
+        staging = root / "build-staging"
+        release = staging / ("a" * 64) / "release"
+        launcher = release / store_supervisor_launcher._RELATIVE
+        launcher.parent.mkdir(parents=True)
+        launcher.write_bytes(b"synthetic launcher\n")
+        launcher.chmod(0o500)
+        manifest = release / store_supervisor_launcher._MANIFEST_RELATIVE
+        manifest.parent.mkdir(parents=True)
+        raw = b'{"synthetic":"exact staged package"}\n'
+        manifest.write_bytes(raw)
+        manifest.chmod(0o400)
+        return staging, launcher, hashlib.sha256(raw).hexdigest()
+
+    def test_final_release_location_remains_valid_for_operations(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            package_sha256 = "b" * 64
+            releases = root / "releases"
+            launcher = (
+                releases
+                / package_sha256
+                / store_supervisor_launcher._RELATIVE
+            )
+            launcher.parent.mkdir(parents=True)
+            launcher.write_bytes(b"synthetic launcher\n")
+            with (
+                patch.object(store_supervisor_launcher, "_RELEASES", releases),
+                patch.object(
+                    store_supervisor_launcher, "__file__", str(launcher)
+                ),
+            ):
+                self.assertEqual(
+                    store_supervisor_launcher._verified_release_root(
+                        package_sha256, staged_help_probe=False
+                    ),
+                    releases / package_sha256,
+                )
+
+    def test_exact_staged_help_location_requires_bound_manifest(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            staging, launcher, package_sha256 = self._staged_fixture(root)
+            with (
+                patch.object(
+                    store_supervisor_launcher, "_BUILD_STAGING", staging
+                ),
+                patch.object(
+                    store_supervisor_launcher, "__file__", str(launcher)
+                ),
+                patch.object(
+                    store_supervisor_launcher, "_ROOT_UID", os.getuid()
+                ),
+                patch.object(
+                    store_supervisor_launcher, "_ROOT_GID", os.getgid()
+                ),
+            ):
+                self.assertEqual(
+                    store_supervisor_launcher._verified_release_root(
+                        package_sha256, staged_help_probe=True
+                    ),
+                    staging / ("a" * 64) / "release",
+                )
+
+    def test_staged_operational_command_is_refused(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            staging, launcher, package_sha256 = self._staged_fixture(root)
+            with (
+                patch.object(
+                    store_supervisor_launcher, "_BUILD_STAGING", staging
+                ),
+                patch.object(
+                    store_supervisor_launcher, "__file__", str(launcher)
+                ),
+                self.assertRaisesRegex(
+                    store_supervisor_launcher.StoreSupervisorLauncherError,
+                    "launcher_release_identity_mismatch",
+                ),
+            ):
+                store_supervisor_launcher._verified_release_root(
+                    package_sha256, staged_help_probe=False
+                )
+
+    def test_staged_manifest_hash_mode_and_symlink_are_enforced(self):
+        for mutation in ("hash", "mode", "symlink"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                staging, launcher, package_sha256 = self._staged_fixture(root)
+                manifest = (
+                    staging
+                    / ("a" * 64)
+                    / "release"
+                    / store_supervisor_launcher._MANIFEST_RELATIVE
+                )
+                expected = package_sha256
+                if mutation == "hash":
+                    expected = "c" * 64
+                elif mutation == "mode":
+                    manifest.chmod(0o600)
+                else:
+                    raw = manifest.read_bytes()
+                    target = manifest.with_name("manifest.target")
+                    target.write_bytes(raw)
+                    target.chmod(0o400)
+                    manifest.unlink()
+                    manifest.symlink_to(target)
+                with (
+                    patch.object(
+                        store_supervisor_launcher, "_BUILD_STAGING", staging
+                    ),
+                    patch.object(
+                        store_supervisor_launcher, "__file__", str(launcher)
+                    ),
+                    patch.object(
+                        store_supervisor_launcher, "_ROOT_UID", os.getuid()
+                    ),
+                    patch.object(
+                        store_supervisor_launcher, "_ROOT_GID", os.getgid()
+                    ),
+                    self.assertRaisesRegex(
+                        store_supervisor_launcher.StoreSupervisorLauncherError,
+                        "launcher_staged_manifest_invalid",
+                    ),
+                ):
+                    store_supervisor_launcher._verified_release_root(
+                        expected, staged_help_probe=True
+                    )
 
 
 if __name__ == "__main__":
