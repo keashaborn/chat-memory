@@ -2,7 +2,7 @@
   "schema_version": "governed-memory-dormant-store-install-stores-controller-plan-v5",
   "state": "phase9j-install-ready-closed-runtime-and-store-transports-packaged-not-installed-not-activated",
   "server": "seebx",
-  "candidate_id": "governed_memory_9a54cf123493_000001",
+  "candidate_id": "governed_memory_9a54cf123493_000002",
   "contract": "ops/governed_memory/installation/current/contract.json",
   "execution_invariants": {
     "ordered_steps_only": true,

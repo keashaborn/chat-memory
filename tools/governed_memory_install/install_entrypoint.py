@@ -475,7 +475,7 @@ def _run_authorized_dormant_store_install(
             )
         store_spec = json.loads(
             artifacts[
-                "ops/governed_memory/installation/store_spec.json"
+                "ops/governed_memory/installation/store_spec-v2.json"
             ].decode("ascii")
         )
         expected_images = expectations_from_store_spec(store_spec)

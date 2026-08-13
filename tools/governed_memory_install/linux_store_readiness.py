@@ -394,7 +394,7 @@ class TerminalQdrantSnapshot:
 
 
 class FixedPostgreSQLReadinessTransport(Protocol):
-    """Pinned driver at 127.0.0.1:55432; no caller-selected query surface."""
+    """Pinned driver at 127.0.0.1:55433; no caller-selected query surface."""
 
     bind: str
 
@@ -404,7 +404,7 @@ class FixedPostgreSQLReadinessTransport(Protocol):
 
 
 class FixedQdrantReadinessTransport(Protocol):
-    """Pinned HTTP client at 127.0.0.1:6343; no caller-selected path."""
+    """Pinned HTTP client at 127.0.0.1:6344; no caller-selected path."""
 
     bind: str
 

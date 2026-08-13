@@ -73,10 +73,10 @@ EMPTY_ROLLBACK_RECEIPT_SCHEMA_RELATIVE: Final = (
 )
 
 EXPECTED_CONTRACT_CANONICAL_SHA256: Final = (
-    "82d1acb2379ba8c3cebcde8f5b819736f174572a5eb4e6932f4ea209d56ab9a0"
+    "74731a53895902096c9593fe514d4de959237f8b06013f77c3e1ce57545345ec"
 )
 EXPECTED_PLAN_CANONICAL_SHA256: Final = (
-    "577ceb84d7d2a25f2386c647dcc837e237a8c644b39ba0399b9464b60e6be766"
+    "bbf65fd4435413632a2b6834b54371aa8f0c0033242339183a541bef259b90eb"
 )
 EXPECTED_CONTROLLER_SOURCE_SHA256: Final = (
     "5a18628c85aab814360667341f685f809ac240b484a5fe6e10c727f54a752de5"
@@ -85,13 +85,13 @@ EXPECTED_CONTROLLER_MODEL_SHA256: Final = (
     "d3701a21b827da66122906e1dcc2828ce69f06e1048164df1c4d0ca0321c3de8"
 )
 EXPECTED_EXECUTION_CONTRACT_CANONICAL_SHA256: Final = (
-    "f6f9657efaea3c75d4f63b2fc2a7bfaf24002d3f33691a4f2c11cfc243fa63fd"
+    "f76e1fd9116116c5282f933bfe4f3b1dcdddbf6246325ad90c39bf741bd7b856"
 )
 EXPECTED_CONTROLLER_RUNTIME_CONTRACT_CANONICAL_SHA256: Final = (
     "60580592361d52b6af3d57d023d7bdd3f0876d677f736e6ee00aeb85841d79ac"
 )
 EXPECTED_POSTGRES_NATIVE_STAGE_CONTRACT_CANONICAL_SHA256: Final = (
-    "beb37dc03b77148aa669ca0026341ada88351560c7d1f4e08d0e15d127e1e6df"
+    "82f35d96260fdef0a7ba959499af8563d38a5c681ad2bb864ec413528778d8d8"
 )
 EXPECTED_PROOF_CONTRACT_CANONICAL_SHA256: Final = (
     "c1b8a0e882bf8a35a9d4df6bdac385bb33f129ea8684a0a00092a7feb00bd862"
@@ -109,7 +109,7 @@ EXPECTED_EMPTY_ROLLBACK_RECEIPT_SCHEMA_CANONICAL_SHA256: Final = (
     "4cf0b822c3b7c18bb1469deb8c044146982214e5ae1d0d8be8bf4a4a79e9292e"
 )
 EXPECTED_MIGRATION_VERIFIER_SOURCE_SHA256: Final = (
-    "6cc1b361363b0ef2299310b236bd4cef62a792ff211b43349cfa41fbd59ddd9b"
+    "d53cf81a1d88e338ab39e7a073805ea25d0477582e9b40a170581ad213a9e6af"
 )
 EXPECTED_MIGRATION_BINDINGS_CANONICAL_SHA256: Final = (
     "f6229283ff196e7355294f99321b92f350c4ec7909744544e9b1941e13100b42"
@@ -353,9 +353,9 @@ EXPECTED_ARTIFACTS: Final = frozenset(
         "ops/governed_memory/installation/current/postgres/roles_preflight.pgsql",
         "ops/governed_memory/installation/postgres/canonical_cluster.pgsql.in",
         "ops/governed_memory/installation/postgres/canonical_cluster_rollback.pgsql.in",
-        "ops/governed_memory/installation/store_spec.json",
+        "ops/governed_memory/installation/store_spec-v2.json",
         "ops/governed_memory/controller-requirements.lock",
-        "ops/governed_memory/installation/systemd/governed-memory-stores.service.in",
+        "ops/governed_memory/installation/systemd/governed-memory-stores-v2.service.in",
         "ops/governed_memory/qdrant_alias.create.json",
         "ops/governed_memory/qdrant_collection.create.json",
         "tools/governed_memory_install/__init__.py",
@@ -672,7 +672,7 @@ def _verify_contract(contract: dict[str, object]) -> None:
         raise PackageError("dormant_store_install_contract_semantics_invalid")
     if (
         contract.get("schema_version")
-        != "governed-memory-dormant-store-install-inactive-execution-contract-v5"
+        != "governed-memory-dormant-store-install-inactive-execution-contract-v6"
         or contract.get("state")
         != "phase9j-install-ready-closed-runtime-and-store-transports-packaged-not-installed-not-activated"
         or contract.get("server") != "seebx"
@@ -755,7 +755,9 @@ def _verify_contract(contract: dict[str, object]) -> None:
         or "image_receipt" in targets
         or "trust_anchor" in targets
         or targets.get("recovery_capsule")
-        != "/var/lib/governed-memory-controller/phase9-disposable-proof-recovery-capsule.json"
+        != "/var/lib/governed-memory-controller/phase9-disposable-proof-recovery-capsule-v3.json"
+        or targets.get("nonce_state")
+        != "/var/lib/governed-memory-controller/authority-state-v2.sqlite3"
         or targets.get("proof_supervision_lock")
         != "/run/lock/governed-memory-controller/phase9-disposable-live-proof.lock"
         or type(filesystem) is not dict
@@ -1216,7 +1218,7 @@ def _verify_contract(contract: dict[str, object]) -> None:
         )
         is not True
         or receipts.get("canonical_production_executions_root")
-        != "/var/lib/governed-memory-controller/executions"
+        != "/var/lib/governed-memory-controller/executions-v2"
         or receipts.get(
             "public_install_and_rollback_entrypoints_require_root_owned_production_receipt_store"
         )
@@ -1490,7 +1492,7 @@ def _verify_postgres_native_stage_contract(contract: dict[str, object]) -> None:
     if (
         type(endpoint) is not dict
         or endpoint.get("host") != "127.0.0.1"
-        or endpoint.get("port") != 55432
+        or endpoint.get("port") != 55433
         or endpoint.get("bootstrap_database") != "postgres"
         or endpoint.get("target_database") != "governed_memory"
         or endpoint.get("caller_dsn_host_port_database_role_or_path_allowed")
@@ -2012,7 +2014,7 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
             reject_stale_ordering=True,
         )
         or receipt.get("canonical_production_executions_root")
-        != "/var/lib/governed-memory-controller/executions"
+        != "/var/lib/governed-memory-controller/executions-v2"
         or receipt.get(
             "public_install_and_rollback_entrypoints_require_root_owned_production_receipt_store"
         )
@@ -2583,7 +2585,7 @@ def _verify_manifest(manifest: dict[str, object]) -> dict[str, str]:
         raise PackageError("dormant_store_install_package_manifest_shape_invalid")
     if (
         manifest.get("schema_version")
-        != "governed-memory-dormant-store-install-inactive-execution-package-manifest-v5"
+        != "governed-memory-dormant-store-install-inactive-execution-package-manifest-v6"
         or manifest.get("state")
         != "phase9j-install-ready-closed-runtime-and-store-transports-packaged-not-installed-not-activated"
     ):
@@ -2642,7 +2644,7 @@ def verify() -> dict[str, object]:
     migration_receipt = _verify_migration_binding(observed, migration_verifier)
 
     return {
-        "schema_version": "governed-memory-dormant-store-install-package-verification-v5",
+        "schema_version": "governed-memory-dormant-store-install-package-verification-v6",
         "state": str(manifest["state"]),
         "artifact_count": len(observed),
         "artifact_sha256": dict(sorted(observed.items())),

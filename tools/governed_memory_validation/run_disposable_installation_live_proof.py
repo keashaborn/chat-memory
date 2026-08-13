@@ -144,12 +144,12 @@ AUTHORIZED_TEXT_SHA256: Final = hashlib.sha256(
     AUTHORIZED_TEXT.encode("utf-8")
 ).hexdigest()
 RECOVERY_CAPSULE_PATH: Final = Path(
-    "/var/lib/governed-memory-controller/phase9-disposable-proof-recovery-capsule.json"
+    "/var/lib/governed-memory-controller/phase9-disposable-proof-recovery-capsule-v3.json"
 )
-RECOVERY_CAPSULE_SCHEMA: Final = "governed-memory-phase9-disposable-proof-recovery-capsule-v2"
-AUTHORIZATION_NAMESPACE: Final = "governed-memory-phase9-live-proof-v1"
-INSTALL_SCOPE_ID: Final = "phase9-disposable-live-install-000001"
-ROLLBACK_SCOPE_ID: Final = "phase9-disposable-live-rollback-000001"
+RECOVERY_CAPSULE_SCHEMA: Final = "governed-memory-phase9-disposable-proof-recovery-capsule-v3"
+AUTHORIZATION_NAMESPACE: Final = "governed-memory-phase9-live-proof-v2"
+INSTALL_SCOPE_ID: Final = "phase9-disposable-live-install-000002"
+ROLLBACK_SCOPE_ID: Final = "phase9-disposable-live-rollback-000002"
 LIVE_PROOF_RECEIPT_SCHEMA: Final = "governed-memory-phase9-live-proof-receipt-v3"
 RECOVERY_RECEIPT_SCHEMA: Final = (
     "governed-memory-phase9-disposable-proof-recovery-receipt-v1"
@@ -163,7 +163,7 @@ RECOVERY_RESERVATION_NONCE_DOMAIN: Final = (
     b"governed-memory-phase9-rollback-recovery-reservation-nonce-v1\x00"
 )
 
-EXECUTIONS_ROOT: Final = Path("/var/lib/governed-memory-controller/executions")
+EXECUTIONS_ROOT: Final = Path("/var/lib/governed-memory-controller/executions-v2")
 CONTROLLER_STATE_ROOT: Final = Path("/var/lib/governed-memory-controller")
 LOCK_ROOT: Final = Path("/run/lock/governed-memory-controller")
 LIVE_PROOF_GUARD_PATH: Final = (
@@ -173,10 +173,10 @@ LIVE_PROOF_GUARD_FD: Final = 9
 CONTROLLER_CONFIG_ROOT: Final = Path("/etc/governed-memory-controller")
 STORE_SECRET_PARENT: Final = Path("/etc/governed-memory-stores")
 STORE_SECRET_ROOT: Final = Path(
-    "/etc/governed-memory-stores/9a54cf123493-000001"
+    "/etc/governed-memory-stores/9a54cf123493-000002"
 )
 RESOLVED_STORE_SPEC_PATH: Final = Path(
-    "/etc/governed-memory-controller/store_spec.json"
+    "/etc/governed-memory-controller/store_spec-v2.json"
 )
 RUNTIME_RECEIPT_ROOT: Final = Path(
     "/var/lib/governed-memory-controller/runtime-receipts"
@@ -471,12 +471,32 @@ def _read_regular_no_follow(path: Path, *, maximum: int) -> bytes:
             os.close(descriptor)
 
 
+def _optional_root_file_size_allowed(
+    size: int,
+    maximum: int,
+    *,
+    allow_empty: bool,
+) -> bool:
+    if (
+        type(size) is not int
+        or type(maximum) is not int
+        or maximum < 1
+        or type(allow_empty) is not bool
+    ):
+        return False
+    return 0 <= size <= maximum and (allow_empty or size >= 1)
+
+
 def _read_optional_root_regular_no_follow(
     path: Path,
     *,
     maximum: int,
+    allow_empty: bool = False,
 ) -> bytes | None:
     """Read a fixed root file; None means stable leaf absence only."""
+
+    if type(allow_empty) is not bool:
+        raise LiveProofError("phase9_live_proof_optional_file_policy_invalid")
 
     parent_fd = descriptor = -1
     flags = os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
@@ -533,7 +553,11 @@ def _read_optional_root_regular_no_follow(
             or opened.st_uid != 0
             or opened.st_gid != 0
             or opened.st_nlink != 1
-            or not 1 <= opened.st_size <= maximum
+            or not _optional_root_file_size_allowed(
+                opened.st_size,
+                maximum,
+                allow_empty=allow_empty,
+            )
             or (opened.st_dev, opened.st_ino)
             != (named.st_dev, named.st_ino)
         ):
@@ -964,7 +988,7 @@ def _verify_recovery_capsule_raw(
         or auth_payload
         != {
             "schema_version": authority.AUTHORIZATION_PAYLOAD_SCHEMA_VERSION,
-            "authorization_id": "phase9-disposable-live-install-auth-000001",
+            "authorization_id": "phase9-disposable-live-install-auth-000002",
             "authorization_namespace": AUTHORIZATION_NAMESPACE,
             "thread_id": THREAD_ID,
             "scope_id": INSTALL_SCOPE_ID,
@@ -1419,7 +1443,7 @@ def _claim_recovery_reservation_before_install(
 
 def _install_prerequisites(context: ProofContext) -> InstallPrerequisites:
     store_raw = context.artifacts.get(
-        "ops/governed_memory/installation/store_spec.json"
+        "ops/governed_memory/installation/store_spec-v2.json"
     )
     if type(store_raw) is not bytes:
         raise LiveProofError("phase9_live_proof_store_spec_missing")
@@ -2237,10 +2261,13 @@ def _install_journal_compensation_complete(path: Path) -> bool:
     raw = _read_optional_root_regular_no_follow(
         path,
         maximum=16 * 1024 * 1024,
+        allow_empty=True,
     )
     if raw is None:
         return False
-    if not raw or not raw.endswith(b"\n"):
+    if raw == b"":
+        return False
+    if not raw.endswith(b"\n"):
         raise LiveProofError("phase9_live_proof_install_journal_invalid")
     records: list[dict[str, object]] = []
     for line in raw.splitlines():

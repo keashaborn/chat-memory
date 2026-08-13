@@ -24,6 +24,7 @@ if __name__ == "__main__" and not (
 
 import argparse
 import base64
+from collections.abc import Mapping as MappingABC
 from datetime import datetime, timedelta, timezone
 import errno
 import hashlib
@@ -59,6 +60,9 @@ from tools.governed_memory_install import authority
 from tools.governed_memory_install.execution_lock import (
     ExecutionLockError,
     GlobalExecutionLock,
+)
+from tools.governed_memory_validation import (
+    pre_effect_disposition,
 )
 from tools.governed_memory_validation import (
     run_disposable_installation_live_proof as runner,
@@ -288,7 +292,7 @@ def build_exact_recovery_capsule(
     )
     install_payload = {
         "schema_version": authority.AUTHORIZATION_PAYLOAD_SCHEMA_VERSION,
-        "authorization_id": "phase9-disposable-live-install-auth-000001",
+        "authorization_id": "phase9-disposable-live-install-auth-000002",
         "authorization_namespace": runner.AUTHORIZATION_NAMESPACE,
         "thread_id": runner.THREAD_ID,
         "scope_id": runner.INSTALL_SCOPE_ID,
@@ -920,8 +924,13 @@ def _runner_argv(
 ) -> tuple[str, ...]:
     if type(mode) is not runner.RunnerMode:
         raise Phase9ProofIssuerError("phase9_proof_issuer_mode_invalid")
+    runtime_python = str(
+        Path("/opt/governed-memory-controller/runtimes")
+        / inputs.controller_runtime_receipt_sha256
+        / "bin/python"
+    )
     return (
-        "python",
+        runtime_python,
         "-I",
         "-B",
         str(
@@ -1023,14 +1032,11 @@ def _spawn_exact_runner(
                     stdout_descriptor=stdout_write,
                     stderr_descriptor=stderr_write,
                 )
-                runtime_python = str(
-                    Path("/opt/governed-memory-controller/runtimes")
-                    / inputs.controller_runtime_receipt_sha256
-                    / "bin/python"
-                )
+                arguments = _runner_argv(inputs, mode)
+                runtime_python = arguments[0]
                 os.execve(
                     runtime_python,
-                    _runner_argv(inputs, mode),
+                    arguments,
                     dict(_SAFE_ENVIRONMENT),
                 )
             except BaseException:
@@ -1386,6 +1392,49 @@ def _verify_supervised_receipt(
     return kind, MappingProxyType(dict(verified))
 
 
+def _require_production_pre_effect_disposition(
+    *,
+    inputs: runner.ProofInputs,
+) -> Mapping[str, object]:
+    """Require the exact read-only v5 tombstone before v6 can mutate state."""
+
+    try:
+        receipt = pre_effect_disposition.require_production_disposition_receipt(
+            package_manifest_sha256=inputs.package_manifest_sha256,
+            controller_runtime_receipt_sha256=(
+                inputs.controller_runtime_receipt_sha256
+            ),
+        )
+        successor_identity = (
+            pre_effect_disposition.production_successor_attempt_identity_sha256(
+                package_manifest_sha256=inputs.package_manifest_sha256,
+                controller_runtime_receipt_sha256=(
+                    inputs.controller_runtime_receipt_sha256
+                ),
+            )
+        )
+    except pre_effect_disposition.PreEffectDispositionError as error:
+        raise Phase9ProofIssuerError(
+            "phase9_proof_issuer_pre_effect_disposition_required"
+        ) from error
+    if (
+        not isinstance(receipt, MappingABC)
+        or receipt.get("schema_version")
+        != pre_effect_disposition.RECEIPT_SCHEMA
+        or receipt.get("result") != pre_effect_disposition.RESULT
+        or receipt.get("contract_sha256")
+        != pre_effect_disposition.PRODUCTION_CONTRACT_SHA256
+        or receipt.get("predecessor_attempt_identity_sha256")
+        != pre_effect_disposition.PRODUCTION_PREDECESSOR_ATTEMPT_IDENTITY_SHA256
+        or receipt.get("successor_attempt_identity_sha256")
+        != successor_identity
+    ):
+        raise Phase9ProofIssuerError(
+            "phase9_proof_issuer_pre_effect_disposition_required"
+        )
+    return receipt
+
+
 def issue_and_supervise(inputs: runner.ProofInputs) -> Mapping[str, object]:
     """Issue exact authority and supervise one bounded exact runner."""
 
@@ -1418,6 +1467,7 @@ def issue_and_supervise(inputs: runner.ProofInputs) -> Mapping[str, object]:
         ) from error
     guard.retain_across_inherited_processes()
     with guard:
+        _require_production_pre_effect_disposition(inputs=inputs)
         try:
             reconciled = reconcile_capsule_publication(
                 inputs=inputs,
@@ -1531,7 +1581,9 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def parse_inputs(argv: Sequence[str]) -> runner.ProofInputs:
+def parse_inputs(
+    argv: Sequence[str],
+) -> runner.ProofInputs:
     values = _parser().parse_args(tuple(argv))
     return runner.ProofInputs(
         candidate_git_commit=values.candidate_git_commit,

@@ -2,7 +2,7 @@
   "actions": [
     {
       "create_alias": {
-        "collection_name": "governed_memory_9a54cf123493_000001",
+        "collection_name": "governed_memory_9a54cf123493_000002",
         "alias_name": "governed_memory_active"
       }
     }

@@ -85,7 +85,7 @@ class DormantStoreInstallResourceIdentitySecurityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             root.chmod(0o700)
-            path = root / "store_spec.json"
+            path = root / "store_spec-v2.json"
             path.write_bytes(b"{}\n")
             path.chmod(0o600)
             kwargs = {
@@ -249,7 +249,7 @@ class DormantStoreInstallResourceIdentitySecurityTests(unittest.TestCase):
                     ledger.append(
                         event="created",
                         resource_kind="network",
-                        resource_name="governed-memory-net-9a54cf123493-000001",
+                        resource_name="governed-memory-net-9a54cf123493-000002",
                         resource_id="network-id-001",
                         ownership_sha256=OWNERSHIP,
                     )
@@ -314,13 +314,13 @@ class DormantStoreInstallResourceIdentitySecurityTests(unittest.TestCase):
         cases = (
             ("database", "governed_memory"),
             ("migration", "0001_foundation"),
-            ("network", "governed-memory-net-9a54cf123493-000001"),
+            ("network", "governed-memory-net-9a54cf123493-000002"),
             ("qdrant_alias", "governed_memory_active"),
-            ("qdrant_collection", "governed_memory_9a54cf123493_000001"),
-            ("resolved_store_spec", "/etc/governed-memory-controller/store_spec.json"),
-            ("secret_file", "/etc/governed-memory-stores/9a54cf123493-000001/postgres.env"),
-            ("systemd_unit", "/etc/systemd/system/governed-memory-stores.service"),
-            ("volume", "governed-memory-postgres-data-9a54cf123493-000001"),
+            ("qdrant_collection", "governed_memory_9a54cf123493_000002"),
+            ("resolved_store_spec", "/etc/governed-memory-controller/store_spec-v2.json"),
+            ("secret_file", "/etc/governed-memory-stores/9a54cf123493-000002/postgres.env"),
+            ("systemd_unit", "/etc/systemd/system/governed-memory-stores-v2.service"),
+            ("volume", "governed-memory-postgres-data-9a54cf123493-000002"),
         )
         with tempfile.TemporaryDirectory() as directory:
             with _anchored_ledger(Path(directory)) as (_fixture, ledger, path):

@@ -19,7 +19,7 @@ from tools.governed_memory_install.package import (  # noqa: E402
 def generate() -> dict[str, object]:
     return {
         "schema_version": (
-            "governed-memory-dormant-store-install-inactive-execution-package-manifest-v5"
+            "governed-memory-dormant-store-install-inactive-execution-package-manifest-v6"
         ),
         "state": (
             "phase9j-install-ready-closed-runtime-and-store-transports-"

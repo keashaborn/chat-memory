@@ -35,7 +35,7 @@ class DormantStoreInstallPackageTests(unittest.TestCase):
     def test_current_members_verify_as_inactive_execution_package(self) -> None:
         receipt = self._verify_generated_manifest()
         self.assertEqual(receipt["schema_version"], (
-            "governed-memory-dormant-store-install-package-verification-v5"
+            "governed-memory-dormant-store-install-package-verification-v6"
         ))
         self.assertEqual(receipt["artifact_count"], 74)
         self.assertEqual(len(package.EXPECTED_ARTIFACTS), 74)
@@ -221,7 +221,7 @@ class DormantStoreInstallPackageTests(unittest.TestCase):
                 package.MANIFEST.read_text(encoding="utf-8")
             )["schema_version"],
             "governed-memory-dormant-store-install-inactive-execution-"
-            "package-manifest-v5",
+            "package-manifest-v6",
         )
         self.assertEqual(
             receipt["state"],
@@ -272,7 +272,11 @@ class DormantStoreInstallPackageTests(unittest.TestCase):
         self.assertNotIn("trust_anchor", targets)
         self.assertEqual(
             targets["recovery_capsule"],
-            "/var/lib/governed-memory-controller/phase9-disposable-proof-recovery-capsule.json",
+            "/var/lib/governed-memory-controller/phase9-disposable-proof-recovery-capsule-v3.json",
+        )
+        self.assertEqual(
+            targets["nonce_state"],
+            "/var/lib/governed-memory-controller/authority-state-v2.sqlite3",
         )
         self.assertEqual(
             targets["proof_supervision_lock"],

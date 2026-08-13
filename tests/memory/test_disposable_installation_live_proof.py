@@ -40,6 +40,8 @@ PACKAGE = "3" * 64
 RUNTIME = "4" * 64
 INSTALL_EXECUTION = "5" * 64
 ROLLBACK_EXECUTION = "6" * 64
+DISPOSITION_CONTRACT = "a" * 64
+PREDECESSOR_ATTEMPT = "b" * 64
 
 
 def inputs() -> proof.ProofInputs:
@@ -49,6 +51,22 @@ def inputs() -> proof.ProofInputs:
         package_manifest_sha256=PACKAGE,
         controller_runtime_receipt_sha256=RUNTIME,
     )
+
+
+def disposition_receipt() -> dict[str, object]:
+    successor = (
+        issuer.pre_effect_disposition.production_successor_attempt_identity_sha256(
+            package_manifest_sha256=PACKAGE,
+            controller_runtime_receipt_sha256=RUNTIME,
+        )
+    )
+    return {
+        "schema_version": issuer.pre_effect_disposition.RECEIPT_SCHEMA,
+        "result": issuer.pre_effect_disposition.RESULT,
+        "contract_sha256": DISPOSITION_CONTRACT,
+        "predecessor_attempt_identity_sha256": PREDECESSOR_ATTEMPT,
+        "successor_attempt_identity_sha256": successor,
+    }
 
 
 def artifacts() -> dict[str, bytes]:
@@ -89,7 +107,13 @@ def context() -> proof.ProofContext:
 class DisposableInstallationLiveProofTests(unittest.TestCase):
     def _issuer_guard_mocks(
         self,
-    ) -> tuple[mock._patch, mock._patch, mock._patch, mock._patch]:
+    ) -> tuple[
+        mock._patch,
+        mock._patch,
+        mock._patch,
+        mock._patch,
+        mock._patch,
+    ]:
         guard = mock.Mock()
         guard.__enter__ = mock.Mock(return_value=guard)
         guard.__exit__ = mock.Mock(return_value=None)
@@ -112,6 +136,11 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
                 issuer,
                 "reconcile_capsule_publication",
                 return_value=(capsule, "a" * 64, (1, 2)),
+            ),
+            mock.patch.object(
+                issuer,
+                "_require_production_pre_effect_disposition",
+                return_value=disposition_receipt(),
             ),
         )
 
@@ -177,6 +206,26 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
                     "--controller-runtime-receipt-sha256",
                     RUNTIME,
                 )
+            )
+
+    def test_issuer_cli_has_no_operator_selectable_disposition_authority(self) -> None:
+        arguments = (
+            "--candidate-git-commit",
+            COMMIT,
+            "--candidate-git-tree",
+            TREE,
+            "--package-manifest-sha256",
+            PACKAGE,
+            "--controller-runtime-receipt-sha256",
+            RUNTIME,
+        )
+        self.assertEqual(issuer.parse_inputs(arguments), inputs())
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(
+            SystemExit
+        ):
+            issuer.parse_inputs(
+                arguments
+                + ("--pre-effect-disposition-contract-sha256", DISPOSITION_CONTRACT)
             )
 
     def test_source_uses_closed_public_compositions_and_no_private_key(self) -> None:
@@ -907,6 +956,152 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
         publish.assert_not_called()
         spawn.assert_not_called()
 
+    def test_issuer_refuses_missing_disposition_before_any_v6_mutation(self) -> None:
+        with (
+            mock.patch.object(issuer, "_require_closed_issuer_runtime"),
+            mock.patch.object(os, "geteuid", return_value=0),
+            mock.patch.object(issuer, "verify_exact_clean_candidate"),
+            mock.patch.object(
+                issuer.runner,
+                "_load_release",
+                return_value=(b"manifest", {}),
+            ),
+            mock.patch.object(
+                issuer.runner,
+                "DURABLE_PRE_EFFECT_ROLLBACK_AUTHORITY_PACKAGED",
+                True,
+            ),
+            mock.patch.object(
+                issuer,
+                "_require_production_pre_effect_disposition",
+                side_effect=(
+                    issuer.Phase9ProofIssuerError(
+                        "phase9_proof_issuer_pre_effect_disposition_required"
+                    )
+                ),
+            ) as require_disposition,
+            mock.patch.object(
+                issuer, "_ensure_live_proof_guard_parent"
+            ) as create_guard_parent,
+            mock.patch.object(issuer, "GlobalExecutionLock"),
+            mock.patch.object(
+                issuer.Ed25519PrivateKey, "generate"
+            ) as generate_key,
+            mock.patch.object(
+                issuer, "publish_fixed_recovery_capsule"
+            ) as publish,
+            mock.patch.object(issuer, "_spawn_exact_runner") as spawn,
+            self.assertRaisesRegex(
+                issuer.Phase9ProofIssuerError,
+                "phase9_proof_issuer_pre_effect_disposition_required",
+            ),
+        ):
+            issuer.issue_and_supervise(inputs())
+        require_disposition.assert_called_once()
+        create_guard_parent.assert_called_once_with()
+        generate_key.assert_not_called()
+        publish.assert_not_called()
+        spawn.assert_not_called()
+
+    def test_issuer_cannot_bypass_invalid_disposition_return(self) -> None:
+        with (
+            mock.patch.object(issuer, "_require_closed_issuer_runtime"),
+            mock.patch.object(os, "geteuid", return_value=0),
+            mock.patch.object(issuer, "verify_exact_clean_candidate"),
+            mock.patch.object(
+                issuer.runner,
+                "_load_release",
+                return_value=(b"manifest", {}),
+            ),
+            mock.patch.object(
+                issuer.runner,
+                "DURABLE_PRE_EFFECT_ROLLBACK_AUTHORITY_PACKAGED",
+                True,
+            ),
+            mock.patch.multiple(
+                issuer.pre_effect_disposition,
+                PRODUCTION_CONTRACT_SHA256=DISPOSITION_CONTRACT,
+                PRODUCTION_PREDECESSOR_ATTEMPT_IDENTITY_SHA256=(
+                    PREDECESSOR_ATTEMPT
+                ),
+            ),
+            mock.patch.object(
+                issuer.pre_effect_disposition,
+                "require_production_disposition_receipt",
+                return_value=None,
+            ),
+            mock.patch.object(
+                issuer, "_ensure_live_proof_guard_parent"
+            ) as create_guard_parent,
+            mock.patch.object(issuer, "GlobalExecutionLock"),
+            mock.patch.object(
+                issuer.Ed25519PrivateKey, "generate"
+            ) as generate_key,
+            mock.patch.object(issuer, "_spawn_exact_runner") as spawn,
+            self.assertRaisesRegex(
+                issuer.Phase9ProofIssuerError,
+                "phase9_proof_issuer_pre_effect_disposition_required",
+            ),
+        ):
+            issuer.issue_and_supervise(inputs())
+        create_guard_parent.assert_called_once_with()
+        generate_key.assert_not_called()
+        spawn.assert_not_called()
+
+    def test_issuer_requires_exact_disposition_inside_held_guard(self) -> None:
+        events: list[str] = []
+        guard = mock.Mock()
+        guard.__enter__ = mock.Mock(
+            side_effect=lambda: events.append("guard-enter") or guard
+        )
+        guard.__exit__ = mock.Mock(return_value=None)
+        guard.descriptor = 9
+        with (
+            mock.patch.object(issuer, "_require_closed_issuer_runtime"),
+            mock.patch.object(os, "geteuid", return_value=0),
+            mock.patch.object(issuer, "verify_exact_clean_candidate"),
+            mock.patch.object(
+                issuer.runner,
+                "_load_release",
+                return_value=(b"manifest", {}),
+            ),
+            mock.patch.object(
+                issuer.runner,
+                "DURABLE_PRE_EFFECT_ROLLBACK_AUTHORITY_PACKAGED",
+                True,
+            ),
+            mock.patch.object(issuer, "_ensure_live_proof_guard_parent"),
+            mock.patch.object(
+                issuer,
+                "GlobalExecutionLock",
+                return_value=guard,
+            ) as construct_guard,
+            mock.patch.object(
+                issuer,
+                "_require_production_pre_effect_disposition",
+                side_effect=lambda **unused: events.append("disposition") or disposition_receipt(),
+            ) as disposition_check,
+            mock.patch.object(
+                issuer,
+                "reconcile_capsule_publication",
+                side_effect=lambda **unused: (_ for _ in ()).throw(
+                    issuer.Phase9ProofIssuerError("after-disposition")
+                ),
+            ) as reconcile,
+            self.assertRaisesRegex(
+                issuer.Phase9ProofIssuerError, "after-disposition"
+            ),
+        ):
+            issuer.issue_and_supervise(inputs())
+        disposition_check.assert_called_once_with(inputs=inputs())
+        reconcile.assert_called_once()
+        self.assertEqual(events, ["guard-enter", "disposition"])
+        construct_guard.assert_called_once_with(
+            proof.LIVE_PROOF_GUARD_PATH,
+            expected_uid=0,
+            expected_gid=0,
+        )
+
     def test_unexpected_supervision_error_kills_and_reaps_exact_group(self) -> None:
         descriptors = [os.open(os.devnull, os.O_RDONLY) for unused in range(2)]
         pid = 424242
@@ -1002,12 +1197,15 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
             "controller_runtime_receipt_sha256": RUNTIME,
             "recovery_capsule_sha256": "a" * 64,
         }
-        runtime, guard_parent, guard_lock, reconcile = self._issuer_guard_mocks()
+        runtime, guard_parent, guard_lock, reconcile, disposition = (
+            self._issuer_guard_mocks()
+        )
         with (
             runtime,
             guard_parent,
             guard_lock,
             reconcile,
+            disposition,
             mock.patch.object(os, "geteuid", return_value=0),
             mock.patch.object(
                 issuer.runner,
@@ -1063,12 +1261,15 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
             "live_proof_receipt_schema_sha256": hashlib.sha256(schema).hexdigest(),
             "recovery_capsule_sha256": "a" * 64,
         }
-        runtime, guard_parent, guard_lock, reconcile = self._issuer_guard_mocks()
+        runtime, guard_parent, guard_lock, reconcile, disposition = (
+            self._issuer_guard_mocks()
+        )
         with (
             runtime,
             guard_parent,
             guard_lock,
             reconcile,
+            disposition,
             mock.patch.object(os, "geteuid", return_value=0),
             mock.patch.object(
                 issuer.runner,
@@ -1120,12 +1321,15 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
                 issuer.issue_and_supervise(inputs())
 
     def test_runner_nonzero_invokes_recovery_once_and_retains_capsule(self) -> None:
-        runtime, guard_parent, guard_lock, reconcile = self._issuer_guard_mocks()
+        runtime, guard_parent, guard_lock, reconcile, disposition = (
+            self._issuer_guard_mocks()
+        )
         with (
             runtime,
             guard_parent,
             guard_lock,
             reconcile,
+            disposition,
             mock.patch.object(os, "geteuid", return_value=0),
             mock.patch.object(
                 issuer.runner,
@@ -1413,9 +1617,92 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
 
     def test_issuer_execs_runner_with_isolation_and_no_bytecode_writes(self) -> None:
         arguments = issuer._runner_argv(inputs())
-        self.assertEqual(arguments[:3], ("python", "-I", "-B"))
+        self.assertEqual(
+            arguments[:3],
+            (
+                "/opt/governed-memory-controller/runtimes/"
+                + RUNTIME
+                + "/bin/python",
+                "-I",
+                "-B",
+            ),
+        )
         source = Path(proof.__file__).read_text(encoding="utf-8")
         self.assertIn("phase9_live_proof_bytecode_writes_not_disabled", source)
+
+    def test_empty_pre_effect_install_journal_selects_resume(self) -> None:
+        journal = Path(
+            "/var/lib/governed-memory-controller/executions-v2/"
+            + INSTALL_EXECUTION
+            + "/journal.jsonl"
+        )
+        for raw in (None, b""):
+            with self.subTest(raw=raw), mock.patch.object(
+                proof,
+                "_read_optional_root_regular_no_follow",
+                return_value=raw,
+            ) as read:
+                self.assertFalse(
+                    proof._install_journal_compensation_complete(journal)
+                )
+            self.assertTrue(read.call_args.kwargs["allow_empty"])
+
+    def test_optional_file_empty_policy_is_narrow(self) -> None:
+        self.assertFalse(
+            proof._optional_root_file_size_allowed(
+                0, 1024, allow_empty=False
+            )
+        )
+        self.assertTrue(
+            proof._optional_root_file_size_allowed(
+                0, 1024, allow_empty=True
+            )
+        )
+        self.assertTrue(
+            proof._optional_root_file_size_allowed(
+                1, 1024, allow_empty=False
+            )
+        )
+        self.assertFalse(
+            proof._optional_root_file_size_allowed(
+                1025, 1024, allow_empty=True
+            )
+        )
+        self.assertFalse(
+            proof._optional_root_file_size_allowed(
+                0, 1024, allow_empty=1  # type: ignore[arg-type]
+            )
+        )
+
+    def test_nonempty_install_journal_remains_strict(self) -> None:
+        journal = Path(
+            "/var/lib/governed-memory-controller/executions-v2/"
+            + INSTALL_EXECUTION
+            + "/journal.jsonl"
+        )
+        for raw in (b"{}", b"not-json\n"):
+            with self.subTest(raw=raw), mock.patch.object(
+                proof,
+                "_read_optional_root_regular_no_follow",
+                return_value=raw,
+            ), self.assertRaisesRegex(
+                proof.LiveProofError,
+                "phase9_live_proof_install_journal_invalid",
+            ):
+                proof._install_journal_compensation_complete(journal)
+        terminal = json.dumps(
+            {"event": "compensation_complete", "step_id": "I00_ATTEMPT"},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("ascii") + b"\n"
+        with mock.patch.object(
+            proof,
+            "_read_optional_root_regular_no_follow",
+            return_value=terminal,
+        ):
+            self.assertTrue(
+                proof._install_journal_compensation_complete(journal)
+            )
 
 
 if __name__ == "__main__":

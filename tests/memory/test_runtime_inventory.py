@@ -199,6 +199,7 @@ EXPECTED_TEST_FILES = {
     "test_disposable_installation_live_proof.py",
     "test_linux_runtime_publication_primitives.py",
     "test_postgres_native_stages.py",
+    "test_pre_effect_disposition.py",
     "test_psycopg_postgres_adapter.py",
     "test_publish_phase9_controller_runtime.py",
     "test_runtime_input_stager.py",
@@ -603,19 +604,19 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         self.assertEqual(current["package_artifact_count"], 74)
         self.assertEqual(
             current["package_manifest_sha256"],
-            "f2169575b4bb103a1304748f3c6017f0987fad9be2e9619339e430dd84d8ddf6",
+            "caa3f789003dd2100eca7e68514fcaa114c5c2f2fc12e17871d49973cc7dad63",
         )
         self.assertEqual(
             current["contract_canonical_sha256"],
-            "82d1acb2379ba8c3cebcde8f5b819736f174572a5eb4e6932f4ea209d56ab9a0",
+            "74731a53895902096c9593fe514d4de959237f8b06013f77c3e1ce57545345ec",
         )
         self.assertEqual(
             current["controller_plan_canonical_sha256"],
-            "577ceb84d7d2a25f2386c647dcc837e237a8c644b39ba0399b9464b60e6be766",
+            "bbf65fd4435413632a2b6834b54371aa8f0c0033242339183a541bef259b90eb",
         )
         self.assertEqual(
             current["execution_contract_canonical_sha256"],
-            "f6f9657efaea3c75d4f63b2fc2a7bfaf24002d3f33691a4f2c11cfc243fa63fd",
+            "f76e1fd9116116c5282f933bfe4f3b1dcdddbf6246325ad90c39bf741bd7b856",
         )
         self.assertEqual(
             current["controller_runtime_contract_canonical_sha256"],
@@ -627,7 +628,7 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         )
         self.assertEqual(
             current["postgres_native_stage_contract_canonical_sha256"],
-            "beb37dc03b77148aa669ca0026341ada88351560c7d1f4e08d0e15d127e1e6df",
+            "82f35d96260fdef0a7ba959499af8563d38a5c681ad2bb864ec413528778d8d8",
         )
         self.assertEqual(current["store_migration_file_count"], 9)
         self.assertTrue(current["static_package_verification_complete"])
@@ -1130,6 +1131,7 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
                 "run_disposable_successor.sh",
                 "issue_disposable_installation_live_proof.py",
                 "publish_phase9_controller_runtime.py",
+                "pre_effect_disposition.py",
                 "run_disposable_installation_live_proof.py",
                 "runtime_packages.json",
                 "generate_installation_package_manifest.py",

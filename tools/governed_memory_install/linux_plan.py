@@ -444,7 +444,7 @@ def _validate_labels(
         raise LinuxPlanError("store_spec_labels_invalid")
     if (
         value["lifeswitch.governed-memory.package-generation"]
-        != "dormant-store-install-v1"
+        != "dormant-store-install-v2"
     ):
         raise LinuxPlanError("store_spec_label_generation_invalid")
     if value["lifeswitch.governed-memory.candidate"] != candidate_id:

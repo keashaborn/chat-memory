@@ -58,8 +58,8 @@ from tests.memory.resource_identity_test_support import (
 
 ROOT = Path(__file__).resolve().parents[2]
 INSTALLATION = ROOT / "ops" / "governed_memory" / "installation"
-STORE_SPEC = INSTALLATION / "store_spec.json"
-STORE_UNIT = INSTALLATION / "systemd" / "governed-memory-stores.service.in"
+STORE_SPEC = INSTALLATION / "store_spec-v2.json"
+STORE_UNIT = INSTALLATION / "systemd" / "governed-memory-stores-v2.service.in"
 BINDING = "a" * 64
 NONCE_SHA256 = "b" * 64
 EXECUTION_ID = "c" * 64
@@ -68,7 +68,7 @@ POSTGRES_ID = "1" * 64
 QDRANT_ID = "2" * 64
 POSTGRES_IMAGE_ID = "sha256:" + "3" * 64
 QDRANT_IMAGE_ID = "sha256:" + "4" * 64
-NETWORK_ID = "network-id-9a54cf123493-000001"
+NETWORK_ID = "network-id-9a54cf123493-000002"
 
 
 class _QueueRunner:
@@ -401,10 +401,10 @@ class DormantStoreInstallStorePackageTests(unittest.TestCase):
             self.assertNotIn(forbidden, rendered.lower())
         self.assertNotIn("${", rendered)
         self.assertEqual(
-            spec["candidate_id"], "governed_memory_9a54cf123493_000001"
+            spec["candidate_id"], "governed_memory_9a54cf123493_000002"
         )
         self.assertEqual(
-            spec["docker_resource_slug"], "governed-memory-9a54cf123493-000001"
+            spec["docker_resource_slug"], "governed-memory-9a54cf123493-000002"
         )
         for step in plan:
             self.assertEqual(step.argv[0], DOCKER_BINARY)
@@ -492,7 +492,7 @@ class DormantStoreInstallStorePackageTests(unittest.TestCase):
                     qdrant,
                 )
             },
-            {"dormant-store-install-v1"},
+            {"dormant-store-install-v2"},
         )
         self.assertNotIn("lifeswitch.governed-memory.phase", rendered)
         self.assertNotIn('"8B"', rendered)
@@ -511,7 +511,7 @@ class DormantStoreInstallStorePackageTests(unittest.TestCase):
         static = load_store_spec(STORE_SPEC)
         cases: list[dict[str, object]] = []
         wrong_candidate = copy.deepcopy(static)
-        wrong_candidate["candidate_id"] = "governed-memory-9a54cf123493-000001"
+        wrong_candidate["candidate_id"] = "governed-memory-9a54cf123493-000002"
         cases.append(wrong_candidate)
         shared_environment = copy.deepcopy(static)
         shared_environment["resources"]["containers"]["qdrant"][
@@ -704,7 +704,7 @@ class DormantStoreInstallStorePackageTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             root.chmod(0o700)
-            spec_path = root / "store_spec.json"
+            spec_path = root / "store_spec-v2.json"
             ledger_path = root / "identities.jsonl"
             spec_path.write_text(
                 json.dumps(spec, sort_keys=True, separators=(",", ":")) + "\n",
@@ -770,7 +770,7 @@ class DormantStoreInstallStorePackageTests(unittest.TestCase):
             "ExecStart=/opt/governed-memory-controller/runtimes/@RUNTIME_RECEIPT_SHA256@/bin/python -I -B /opt/governed-memory-controller/releases/@PACKAGE_MANIFEST_SHA256@/tools/governed_memory_install/store_supervisor_launcher.py --package-manifest-sha256 @PACKAGE_MANIFEST_SHA256@ start",
             "ExecStop=/opt/governed-memory-controller/runtimes/@RUNTIME_RECEIPT_SHA256@/bin/python -I -B /opt/governed-memory-controller/releases/@PACKAGE_MANIFEST_SHA256@/tools/governed_memory_install/store_supervisor_launcher.py --package-manifest-sha256 @PACKAGE_MANIFEST_SHA256@ stop",
             "WorkingDirectory=/opt/governed-memory-controller/releases/@PACKAGE_MANIFEST_SHA256@",
-            "executions/@EXECUTION_ID@/resources.jsonl",
+            "executions-v2/@EXECUTION_ID@/resources.jsonl",
             "ConditionPathExists=/opt/governed-memory-controller/runtimes/@RUNTIME_RECEIPT_SHA256@/bin/python",
         ):
             self.assertIn(required, unit)

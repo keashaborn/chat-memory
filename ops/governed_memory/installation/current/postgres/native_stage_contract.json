@@ -3,7 +3,7 @@
   "state": "source-closed-concrete-psycopg-transport-exact-prefix-machine-runtime-bound-terminal-catalog-disposable-selected-inactive",
   "endpoint": {
     "host": "127.0.0.1",
-    "port": 55432,
+    "port": 55433,
     "bootstrap_database": "postgres",
     "target_database": "governed_memory",
     "bootstrap_role": "governed_memory_bootstrap",
@@ -12,7 +12,7 @@
   },
   "server_version": "16.14",
   "session": {
-    "advisory_lock_key": 9054123493000001,
+    "advisory_lock_key": 9054123493000002,
     "connect_timeout_seconds": 5,
     "lock_timeout_milliseconds": 1000,
     "statement_timeout_milliseconds": 15000,
@@ -807,5 +807,5 @@
     "production_reads": 0,
     "secret_reads_or_writes": 0
   },
-  "contract_sha256": "0ab017a0cf6df613fe68e0873d6bdc0ce912054c22a4111de92abadde48ea1b9"
+  "contract_sha256": "a4972d7edf5d36be691bdb3459574cb7f5d8118719ba693eb058691e82b1faa3"
 }

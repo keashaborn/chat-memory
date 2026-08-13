@@ -41,19 +41,19 @@ if TYPE_CHECKING:
 
 MAX_ARTIFACT_BYTES: Final = 16 * 1024 * 1024
 MAX_PUBLIC_RECEIPT_BYTES: Final = 64 * 1024
-POSTGRES_BIND: Final = "127.0.0.1:55432"
-QDRANT_BIND: Final = "127.0.0.1:6343"
+POSTGRES_BIND: Final = "127.0.0.1:55433"
+QDRANT_BIND: Final = "127.0.0.1:6344"
 SYSTEMD_UNIT_PATH: Final = (
-    "/etc/systemd/system/governed-memory-stores.service"
+    "/etc/systemd/system/governed-memory-stores-v2.service"
 )
 SYSTEMD_ENABLEMENT_PATH: Final = (
     "/etc/systemd/system/multi-user.target.wants/"
-    "governed-memory-stores.service"
+    "governed-memory-stores-v2.service"
 )
 SYSTEMD_ENABLEMENT_TARGET: Final = SYSTEMD_UNIT_PATH
 CONTROLLER_CONFIG_DIRECTORY: Final = "/etc/governed-memory-controller"
 STORE_SECRET_DIRECTORY: Final = (
-    "/etc/governed-memory-stores/9a54cf123493-000001"
+    "/etc/governed-memory-stores/9a54cf123493-000002"
 )
 POSTGRES_STORE_SECRET_PATH: Final = STORE_SECRET_DIRECTORY + "/postgres.env"
 QDRANT_STORE_SECRET_PATH: Final = STORE_SECRET_DIRECTORY + "/qdrant.env"
@@ -62,7 +62,7 @@ RETAINED_ROOT_DIRECTORY_PATHS: Final = (
     STORE_SECRET_DIRECTORY,
 )
 POSTFLIGHT_TEMPLATE: Final = (
-    "/var/lib/governed-memory-controller/executions/"
+    "/var/lib/governed-memory-controller/executions-v2/"
     "{execution_id}/terminal-postflight-receipt.json"
 )
 _HASH_RE = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
@@ -123,12 +123,12 @@ def _expected_rollback_resource_names(
     return {
         "stores_supervisor": (
             "systemd_unit",
-            "/etc/systemd/system/governed-memory-stores.service",
+            "/etc/systemd/system/governed-memory-stores-v2.service",
         ),
         "qdrant_alias": ("qdrant_alias", "governed_memory_active"),
         "qdrant_collection": (
             "qdrant_collection",
-            "governed_memory_9a54cf123493_000001",
+            "governed_memory_9a54cf123493_000002",
         ),
         "migration_0004": ("migration", "0004_pilot_marker"),
         "migration_0003": ("migration", "0003_owner_claim_detail"),
@@ -136,21 +136,21 @@ def _expected_rollback_resource_names(
         "canonical_database_and_roles": ("database", "governed_memory"),
         "qdrant_container": (
             "container",
-            "governed-memory-qdrant-9a54cf123493-000001",
+            "governed-memory-qdrant-9a54cf123493-000002",
         ),
         "postgres_container": (
             "container",
-            "governed-memory-postgres-9a54cf123493-000001",
+            "governed-memory-postgres-9a54cf123493-000002",
         ),
         "qdrant_volume": (
             "volume",
-            "governed-memory-qdrant-data-9a54cf123493-000001",
+            "governed-memory-qdrant-data-9a54cf123493-000002",
         ),
         "postgres_volume": (
             "volume",
-            "governed-memory-postgres-data-9a54cf123493-000001",
+            "governed-memory-postgres-data-9a54cf123493-000002",
         ),
-        "network": ("network", "governed-memory-net-9a54cf123493-000001"),
+        "network": ("network", "governed-memory-net-9a54cf123493-000002"),
         "qdrant_store_secret": (
             "secret_file",
             QDRANT_STORE_SECRET_PATH,
@@ -161,7 +161,7 @@ def _expected_rollback_resource_names(
         ),
         "resolved_store_spec": (
             "resolved_store_spec",
-            "/etc/governed-memory-controller/store_spec.json",
+            "/etc/governed-memory-controller/store_spec-v2.json",
         ),
     }
 
@@ -657,7 +657,7 @@ class ExactInstallArtifacts:
         alias_path = "ops/governed_memory/qdrant_alias.create.json"
         unit_path = (
             "ops/governed_memory/installation/systemd/"
-            "governed-memory-stores.service.in"
+            "governed-memory-stores-v2.service.in"
         )
         collection_raw = artifacts.get(collection_path)
         alias_raw = artifacts.get(alias_path)
@@ -682,7 +682,7 @@ class ExactInstallArtifacts:
             "actions": [
                 {
                     "create_alias": {
-                        "collection_name": "governed_memory_9a54cf123493_000001",
+                        "collection_name": "governed_memory_9a54cf123493_000002",
                         "alias_name": "governed_memory_active",
                     }
                 }
