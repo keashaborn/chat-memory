@@ -89,6 +89,7 @@ class SuccessorResponseVectorIndex(Protocol):
         allowed_predicates: Sequence[str],
         limit: int,
         calibration: CalibrationDecision,
+        explicit_recall: bool,
     ) -> tuple[dict[str, object], ...]: ...
 
 
@@ -185,6 +186,46 @@ async def _await_embedding(
 
 def _sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _is_explicit_preference_recall(query: str) -> bool:
+    if not isinstance(query, str):
+        return False
+    normalized = " ".join(query.replace("’", "'").casefold().split())
+    if (
+        not normalized.endswith("?")
+        or len(normalized) > 256
+        or " or " in normalized
+    ):
+        return False
+    preference_language = any(
+        token in normalized
+        for token in (" prefer", "preferred", "favorite", "favourite")
+    )
+    if not preference_language:
+        return False
+    if normalized.startswith(("what is my ", "what's my ")):
+        return True
+    if normalized.startswith("which ") and normalized.endswith(
+        (" do i prefer?", " did i prefer?")
+    ):
+        return True
+    return normalized.startswith(("do you remember ", "can you recall ")) and (
+        " my " in normalized or " i prefer" in normalized
+    )
+
+
+def _explicit_preference_policy(policy: RetrievalPolicy) -> RetrievalPolicy:
+    if "preference.personal" not in policy.allowed_predicates:
+        raise ContractViolation("preference_recall_predicate_unavailable")
+    return RetrievalPolicy(
+        explicit_recall=True,
+        allowed_predicates=("preference.personal",),
+        domains=policy.domains,
+        intents=policy.intents,
+        max_records=policy.max_records,
+        policy_revision=policy.policy_revision,
+    )
 
 
 def _default_policy(predicate_catalog: Mapping[str, object]) -> RetrievalPolicy:
@@ -321,6 +362,8 @@ class SuccessorGovernedMemoryAssemblyProviderV1:
         policy = self._policy_factory(self._predicate_catalog)
         if not isinstance(policy, RetrievalPolicy):
             raise ContractViolation("invalid_response_memory_retrieval_policy")
+        if _is_explicit_preference_recall(query):
+            policy = _explicit_preference_policy(policy)
         self._policy = policy
         query_vector = await _await_embedding(self._embedder.embed(query))
         candidates = await self._vector_index.search_owner_candidates(
@@ -329,6 +372,7 @@ class SuccessorGovernedMemoryAssemblyProviderV1:
             allowed_predicates=policy.allowed_predicates,
             limit=policy.max_records,
             calibration=self._calibration,
+            explicit_recall=policy.explicit_recall,
         )
         if not candidates:
             return self._finish_without_selection()

@@ -424,16 +424,20 @@ class ExactQdrantAdapter:
         allowed_predicates: Sequence[str],
         limit: int,
         calibration: CalibrationDecision,
+        explicit_recall: bool = False,
     ) -> tuple[dict[str, Any], ...]:
         if not isinstance(calibration, CalibrationDecision):
             raise ContractViolation("invalid_retrieval_calibration")
+        if type(explicit_recall) is not bool:
+            raise ContractViolation("invalid_explicit_recall_flag")
         if not calibration.retrieval_enabled:
             return ()
-        threshold = require_exact_int(
+        calibrated_threshold = require_exact_int(
             calibration.threshold_micros,
             code="invalid_calibration_threshold",
             maximum=SCORE_SCALE,
         )
+        threshold = 0 if explicit_recall else calibrated_threshold
         owner = require_uuid(owner_user_id, "invalid_qdrant_search_owner")
         record_limit = require_exact_int(
             limit,
@@ -448,32 +452,36 @@ class ExactQdrantAdapter:
         for predicate in predicates:
             require_key(predicate, "invalid_qdrant_search_predicate")
         vector = normalize_embedding(query_vector)
+        must_conditions: list[dict[str, object]] = [
+            {
+                "key": "owner_user_id",
+                "match": {"value": str(owner)},
+            },
+            {
+                "key": "lifecycle_state",
+                "match": {"value": "active"},
+            },
+            {"key": "is_current", "match": {"value": True}},
+            {"key": "projectable", "match": {"value": True}},
+            {
+                "key": "predicate",
+                "match": {"any": list(predicates)},
+            },
+        ]
+        if not explicit_recall:
+            must_conditions.append(
+                {
+                    "key": "requires_explicit",
+                    "match": {"value": False},
+                }
+            )
         await self.preflight()
         response = await self._transport.request(
             "POST",
             f"/collections/{QDRANT_ALIAS}/points/search",
             {
                 "filter": {
-                    "must": [
-                        {
-                            "key": "owner_user_id",
-                            "match": {"value": str(owner)},
-                        },
-                        {
-                            "key": "lifecycle_state",
-                            "match": {"value": "active"},
-                        },
-                        {"key": "is_current", "match": {"value": True}},
-                        {"key": "projectable", "match": {"value": True}},
-                        {
-                            "key": "predicate",
-                            "match": {"any": list(predicates)},
-                        },
-                        {
-                            "key": "requires_explicit",
-                            "match": {"value": False},
-                        },
-                    ]
+                    "must": must_conditions
                 },
                 "limit": record_limit,
                 "params": {"exact": True},

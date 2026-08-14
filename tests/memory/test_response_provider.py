@@ -246,6 +246,11 @@ class SuccessorResponseProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(embedder.calls, [QUERY])
         self.assertEqual(len(vector.calls), 1)
         self.assertEqual(vector.calls[0]["owner_user_id"], OWNER_A)
+        self.assertTrue(vector.calls[0]["explicit_recall"])
+        self.assertEqual(
+            vector.calls[0]["allowed_predicates"],
+            ("preference.personal",),
+        )
         self.assertEqual(repository.reads[0][1], (CLAIM_A,))
         self.assertTrue(selected.has_selected_claims)
 
@@ -282,6 +287,7 @@ class SuccessorResponseProviderTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(persisted["binding"]["dispatch_state"], "dispatched")
         self.assertEqual(persisted["binding"]["outcome"], "exposed")
+        self.assertTrue(persisted["binding"]["explicit_recall"])
         self.assertEqual(provenance.binding_outcome, "exposed")
         self.assertEqual(
             provenance.binding_manifest_sha256,
@@ -294,6 +300,33 @@ class SuccessorResponseProviderTests(unittest.IsolatedAsyncioTestCase):
                 prompt_sha256="c" * 64,
                 outbound_request_bytes=outbound,
             )
+
+    async def test_bounded_preference_recall_detection(self) -> None:
+        for query, expected in (
+            ("What is my preferred test animal?", True),
+            ("Which synthetic interface theme do I prefer?", True),
+            ("Do you remember my favorite color?", True),
+            ("Which should I prefer, cobalt or amber?", False),
+            ("Compare my preferences with this plan.", False),
+        ):
+            vector = RecordingVectorIndex()
+            selected = provider(vector_index=vector)
+            with self.subTest(query=query):
+                await selected.prepare(
+                    request=make_response_request(current_message=query),
+                )
+                self.assertEqual(
+                    vector.calls[0]["explicit_recall"],
+                    expected,
+                )
+                self.assertEqual(
+                    vector.calls[0]["allowed_predicates"],
+                    (
+                        ("preference.personal",)
+                        if expected
+                        else tuple(sorted(PREDICATE_CATALOG["predicates"]))
+                    ),
+                )
 
     async def test_no_selection_returns_typed_receipt_without_persistence(self) -> None:
         repository = RecordingRepository()
