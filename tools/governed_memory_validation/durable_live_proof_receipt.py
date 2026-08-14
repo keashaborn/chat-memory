@@ -21,7 +21,7 @@ from typing import Final, Mapping
 
 PROMOTABLE_LIVE_PROOF_RECEIPT_PATH: Final = Path(
     "/var/lib/governed-memory-controller/"
-    "phase9-disposable-live-proof-promotable-receipt-000003.json"
+    "phase9-disposable-live-proof-promotable-receipt-000004.json"
 )
 PROMOTABLE_LIVE_PROOF_RECEIPT_STAGING_SUFFIX: Final = ".publishing"
 PROMOTABLE_LIVE_PROOF_RECEIPT_STAGING_PATH: Final = Path(
@@ -31,7 +31,7 @@ PROMOTABLE_LIVE_PROOF_RECEIPT_STAGING_PATH: Final = Path(
 LIVE_PROOF_RECEIPT_SCHEMA_RELATIVE: Final = (
     "ops/governed_memory/installation/current/live_proof_receipt.schema.json"
 )
-LIVE_PROOF_RECEIPT_SCHEMA: Final = "governed-memory-phase9-live-proof-receipt-v4"
+LIVE_PROOF_RECEIPT_SCHEMA: Final = "governed-memory-phase9-live-proof-receipt-v5"
 MAX_PROMOTABLE_LIVE_PROOF_RECEIPT_BYTES: Final = 64 * 1024
 ANONYMOUS_PUBLICATION_PREFLIGHT_BYTES: Final = (
     b"phase9-live-proof-anonymous-publication-preflight-v1\n"

@@ -73,10 +73,10 @@ EMPTY_ROLLBACK_RECEIPT_SCHEMA_RELATIVE: Final = (
 )
 
 EXPECTED_CONTRACT_CANONICAL_SHA256: Final = (
-    "fb2aed56c2447a22af849080dc159b0c46f96693887d44b29ca09f3168380898"
+    "1c93dbef0c6b72b36825087522e11639c62c9daed1c31a6f735600a57c25a03d"
 )
 EXPECTED_PLAN_CANONICAL_SHA256: Final = (
-    "d502d29682dbdf511a07d7534cec6a8f14c73e44492b08f0fad29157639e246c"
+    "fa0090fda942d875cc021e19e36cb5bfb22298c637d58a276acb9b367e164a4d"
 )
 EXPECTED_CONTROLLER_SOURCE_SHA256: Final = (
     "5a18628c85aab814360667341f685f809ac240b484a5fe6e10c727f54a752de5"
@@ -85,13 +85,13 @@ EXPECTED_CONTROLLER_MODEL_SHA256: Final = (
     "d3701a21b827da66122906e1dcc2828ce69f06e1048164df1c4d0ca0321c3de8"
 )
 EXPECTED_EXECUTION_CONTRACT_CANONICAL_SHA256: Final = (
-    "975421b4e1fe2ed9e436144f37bdd68979b90a373b48186a5a2aa646b189f09f"
+    "943defc0441b6ad888b4d1bd60e135eab178e1c9cd37f9a415f988fdd6abe0c6"
 )
 EXPECTED_CONTROLLER_RUNTIME_CONTRACT_CANONICAL_SHA256: Final = (
     "60580592361d52b6af3d57d023d7bdd3f0876d677f736e6ee00aeb85841d79ac"
 )
 EXPECTED_POSTGRES_NATIVE_STAGE_CONTRACT_CANONICAL_SHA256: Final = (
-    "bec461c1166775817dc4c3ffce7c09195f7d758942ca3d63ee3a875f8d5b9f2d"
+    "c58eb56e5c51651d0e5e66c1ff0c06a29c047824c2a6d3adeab39c3e223cfd25"
 )
 EXPECTED_PROOF_CONTRACT_CANONICAL_SHA256: Final = (
     "072ad9a0c4f10ef45e0a5287780b2f4b9334eb8741744b9bc15da74260e07d2f"
@@ -100,7 +100,7 @@ EXPECTED_SYNTHETIC_PROOF_RECEIPT_SCHEMA_CANONICAL_SHA256: Final = (
     "5fa4b98974b7c1652c931abd7b630bbca11fd92fde15ee4d099ae6132f3dfe1d"
 )
 EXPECTED_LIVE_PROOF_RECEIPT_SCHEMA_CANONICAL_SHA256: Final = (
-    "167ada117aa0a3bb69ce62c1c19469cd7cdfad0e85a338b3c891cfd33be4b3b9"
+    "9e5bb221fca5b273df3ce1841ca181246e4990ea3783902f0ba057ff7fb01987"
 )
 EXPECTED_INSTALL_RECEIPT_SCHEMA_CANONICAL_SHA256: Final = (
     "6a76bcf802ba72257bb5fa524010de5182f85c6dbee2b490d46f92faf159a395"
@@ -109,7 +109,7 @@ EXPECTED_EMPTY_ROLLBACK_RECEIPT_SCHEMA_CANONICAL_SHA256: Final = (
     "4cf0b822c3b7c18bb1469deb8c044146982214e5ae1d0d8be8bf4a4a79e9292e"
 )
 EXPECTED_MIGRATION_VERIFIER_SOURCE_SHA256: Final = (
-    "4b8ae071fb0f1a8e07e1fd78cef0a428e1a27ee44014cba5db912f05f6403931"
+    "f70b1261280cffd1cb6e6b98c7fcf09f004e5c734dbf101a32fa9acd48ede6df"
 )
 EXPECTED_MIGRATION_BINDINGS_CANONICAL_SHA256: Final = (
     "f6229283ff196e7355294f99321b92f350c4ec7909744544e9b1941e13100b42"
@@ -371,9 +371,9 @@ EXPECTED_ARTIFACTS: Final = frozenset(
         "ops/governed_memory/installation/current/postgres/roles_preflight.pgsql",
         "ops/governed_memory/installation/postgres/canonical_cluster.pgsql.in",
         "ops/governed_memory/installation/postgres/canonical_cluster_rollback.pgsql.in",
-        "ops/governed_memory/installation/store_spec-v3.json",
+        "ops/governed_memory/installation/store_spec-v4.json",
         "ops/governed_memory/controller-requirements.lock",
-        "ops/governed_memory/installation/systemd/governed-memory-stores-v3.service.in",
+        "ops/governed_memory/installation/systemd/governed-memory-stores-v4.service.in",
         "ops/governed_memory/qdrant_alias.create.json",
         "ops/governed_memory/qdrant_collection.create.json",
         "tools/governed_memory_install/__init__.py",
@@ -775,9 +775,9 @@ def _verify_contract(contract: dict[str, object]) -> None:
         or "image_receipt" in targets
         or "trust_anchor" in targets
         or targets.get("recovery_capsule")
-        != "/var/lib/governed-memory-controller/phase9-disposable-proof-recovery-capsule-v4.json"
+        != "/var/lib/governed-memory-controller/phase9-disposable-proof-recovery-capsule-v5.json"
         or targets.get("nonce_state")
-        != "/var/lib/governed-memory-controller/authority-state-v3.sqlite3"
+        != "/var/lib/governed-memory-controller/authority-state-v4.sqlite3"
         or targets.get("proof_supervision_lock")
         != "/run/lock/governed-memory-controller/phase9-disposable-live-proof.lock"
         or type(filesystem) is not dict
@@ -1267,7 +1267,7 @@ def _verify_contract(contract: dict[str, object]) -> None:
         )
         is not True
         or receipts.get("canonical_production_executions_root")
-        != "/var/lib/governed-memory-controller/executions-v3"
+        != "/var/lib/governed-memory-controller/executions-v4"
         or receipts.get(
             "public_install_and_rollback_entrypoints_require_root_owned_production_receipt_store"
         )
@@ -1563,7 +1563,7 @@ def _verify_postgres_native_stage_contract(contract: dict[str, object]) -> None:
     if (
         type(endpoint) is not dict
         or endpoint.get("host") != "127.0.0.1"
-        or endpoint.get("port") != 55434
+        or endpoint.get("port") != 55435
         or endpoint.get("bootstrap_database") != "postgres"
         or endpoint.get("target_database") != "governed_memory"
         or endpoint.get("caller_dsn_host_port_database_role_or_path_allowed")
@@ -2102,7 +2102,7 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
             reject_stale_ordering=True,
         )
         or receipt.get("canonical_production_executions_root")
-        != "/var/lib/governed-memory-controller/executions-v3"
+        != "/var/lib/governed-memory-controller/executions-v4"
         or receipt.get(
             "public_install_and_rollback_entrypoints_require_root_owned_production_receipt_store"
         )
@@ -2490,11 +2490,11 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
         != "urn:governed-memory:dormant-store-install:disposable-proof-receipt:v2"
         or live_proof_schema.get("additionalProperties") is not False
         or live_proof_schema.get("$id")
-        != "urn:governed-memory:phase9:disposable-live-proof-receipt:v4"
+        != "urn:governed-memory:phase9:disposable-live-proof-receipt:v5"
         or live_proof_schema.get("properties", {}).get(
             "schema_version", {}
         ).get("const")
-        != "governed-memory-phase9-live-proof-receipt-v4"
+        != "governed-memory-phase9-live-proof-receipt-v5"
         or live_proof_schema.get("properties", {}).get(
             "host_clock_synchronization_preflight_passed", {}
         ).get("const")

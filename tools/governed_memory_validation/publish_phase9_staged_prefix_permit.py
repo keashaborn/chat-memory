@@ -8,7 +8,7 @@ import sys
 
 
 _PREIMPORT_CONTROLLER_RUNTIME_RECEIPT_SHA256 = (
-    "9dda4d93a1bcfecf4305736feffafb578e4629cd32594cec6b2d6d72cb90a4d3"
+    "0" * 64
 )
 _PREIMPORT_CONTROLLER_PYTHON = (
     "/opt/governed-memory-controller/runtimes/"
@@ -177,26 +177,26 @@ _SOURCE_PATHS: Final = (
     _CONTRACT_RELATIVE,
 )
 _EXPECTED_CANDIDATE_REF: Final = (
-    "refs/tags/governed-memory-phase9j-pre-effect-disposition-000003"
+    "refs/tags/governed-memory-phase9j-pre-effect-disposition-000004"
 )
 if _PUBLISHER_PATH.relative_to(_REPOSITORY_ROOT).as_posix() != _PUBLISHER_RELATIVE:
     raise SystemExit("phase9_staged_prefix_permit_invocation_invalid")
 
-BASE_CANDIDATE_COMMIT: Final = "2eee4e6a2bf0b23aaca68fdbb4919b0c58d041a2"
-BASE_CANDIDATE_TREE: Final = "76f5cd6e20241523e1e3d6d1d8f4cf2c5f1de7ab"
-PACKAGE_MANIFEST_SHA256: Final = "5addc8e4ab40b6bc700fde57b67579f8caa3d21077715bcdaf61d5714b52743e"
-CONTROLLER_RUNTIME_RECEIPT_SHA256: Final = "9dda4d93a1bcfecf4305736feffafb578e4629cd32594cec6b2d6d72cb90a4d3"
-CONTRACT_SHA256: Final = "14eacc2c32492f2d76d5c7a3d145a1b0a019077fd3a880e74b5e12a658d55de8"
-PREDECESSOR_ATTEMPT_IDENTITY_SHA256: Final = "7b1a325d2441dfbdcf326ca147480df46287b66178baf9a91c82bd1ef7853b00"
-SUCCESSOR_ATTEMPT_IDENTITY_SHA256: Final = "920d4d8f0d6ed135774711127b050a3095d79e55bc7e06e02b2d80d6b0378068"
-AUTHORIZATION_TEXT_SHA256: Final = "063891fc0189b3c4a0fe393200ae50f59b04f5488800dc27a5ce3020880f3e44"
+BASE_CANDIDATE_COMMIT: Final = "0" * 40
+BASE_CANDIDATE_TREE: Final = "0" * 40
+PACKAGE_MANIFEST_SHA256: Final = "0" * 64
+CONTROLLER_RUNTIME_RECEIPT_SHA256: Final = "0" * 64
+CONTRACT_SHA256: Final = "0" * 64
+PREDECESSOR_ATTEMPT_IDENTITY_SHA256: Final = "2e3de35830821049d557ef012d526736c484f8eb8aed4bf03d0bbd662caae2ce"
+SUCCESSOR_ATTEMPT_IDENTITY_SHA256: Final = "0" * 64
+AUTHORIZATION_TEXT_SHA256: Final = "0" * 64
 THREAD_ID: Final = "019fe927-8367-7f52-86f2-e2b5b43a2390"
-PERMIT_SCHEMA: Final = "governed-memory-phase9j-staged-prefix-permit-v1"
+PERMIT_SCHEMA: Final = "governed-memory-phase9j-staged-prefix-permit-v2"
 PERMIT_RESULT: Final = (
     "exact_staged_prefix_disposition_and_disposable_proof_permitted"
 )
 STATE_ROOT: Final = Path("/var/lib/governed-memory-controller")
-PERMIT_PATH: Final = STATE_ROOT / "phase9j-pre-effect-disposition-permit-000003.json"
+PERMIT_PATH: Final = STATE_ROOT / "phase9j-pre-effect-disposition-permit-000004.json"
 PERMIT_STAGING_NAME: Final = "." + PERMIT_PATH.name + ".publishing"
 RUNTIME_RECEIPT_PATH: Final = STATE_ROOT / "runtime-receipts" / (CONTROLLER_RUNTIME_RECEIPT_SHA256 + ".json")
 ROOT_UID: Final = 0
@@ -210,6 +210,18 @@ _SAFE_ENVIRONMENT: Final = {
     "PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C",
     "PYTHONDONTWRITEBYTECODE": "1", "PYTHONNOUSERSITE": "1",
 }
+
+
+def _bindings_sealed() -> bool:
+    return bool(
+        PACKAGE_MANIFEST_SHA256 != "0" * 64
+        and CONTROLLER_RUNTIME_RECEIPT_SHA256 != "0" * 64
+        and CONTRACT_SHA256 != "0" * 64
+        and SUCCESSOR_ATTEMPT_IDENTITY_SHA256 != "0" * 64
+        and AUTHORIZATION_TEXT_SHA256 != "0" * 64
+        and BASE_CANDIDATE_COMMIT != "0" * 40
+        and BASE_CANDIDATE_TREE != "0" * 40
+    )
 
 
 class Phase9StagedPrefixPermitPublicationError(RuntimeError):
@@ -703,6 +715,10 @@ def publish_phase9_staged_prefix_permit() -> Mapping[str, object]:
         )
     if os.geteuid() != ROOT_UID or os.getegid() != ROOT_GID:
         raise Phase9StagedPrefixPermitPublicationError("phase9_staged_prefix_permit_root_required")
+    if not _bindings_sealed():
+        raise Phase9StagedPrefixPermitPublicationError(
+            "phase9_staged_prefix_permit_binding_not_sealed"
+        )
     commit, tree, blobs = _verify_selected_candidate()
     _verify_runtime_receipt()
     raw = _permit(commit, tree, blobs)

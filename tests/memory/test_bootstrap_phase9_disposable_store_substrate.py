@@ -22,10 +22,10 @@ class Phase9DisposableStoreSubstrateTests(unittest.TestCase):
         root = Path(self.temporary.name)
         self.store_parent = root / "governed-memory-stores"
         self.store_parent.mkdir(mode=0o755)
-        self.store_target = self.store_parent / "9a54cf123493-000003"
+        self.store_target = self.store_parent / "9a54cf123493-000004"
         self.execution_parent = root / "governed-memory-controller"
         self.execution_parent.mkdir(mode=0o700)
-        self.execution_target = self.execution_parent / "executions-v3"
+        self.execution_target = self.execution_parent / "executions-v4"
         self.selected = (
             subject._FixedDirectory(
                 self.store_parent, 0o755, self.store_target.name, self.store_target

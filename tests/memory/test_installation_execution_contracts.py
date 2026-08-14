@@ -374,7 +374,7 @@ class DormantStoreInstallExecutionContractTests(unittest.TestCase):
         )
         self.assertEqual(
             schema["$id"],
-            "urn:governed-memory:phase9:disposable-live-proof-receipt:v4",
+            "urn:governed-memory:phase9:disposable-live-proof-receipt:v5",
         )
         self.assertFalse(schema["additionalProperties"])
         self.assertEqual(set(schema["required"]), set(schema["properties"]))

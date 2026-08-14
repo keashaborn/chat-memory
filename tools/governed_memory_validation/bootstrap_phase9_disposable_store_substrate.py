@@ -63,10 +63,10 @@ from tools.governed_memory_install.execution_lock import (
 
 
 STORE_PARENT_PATH: Final = Path("/etc/governed-memory-stores")
-STORE_TARGET_LEAF: Final = "9a54cf123493-000003"
+STORE_TARGET_LEAF: Final = "9a54cf123493-000004"
 STORE_TARGET_PATH: Final = STORE_PARENT_PATH / STORE_TARGET_LEAF
 EXECUTION_PARENT_PATH: Final = Path("/var/lib/governed-memory-controller")
-EXECUTION_TARGET_LEAF: Final = "executions-v3"
+EXECUTION_TARGET_LEAF: Final = "executions-v4"
 EXECUTION_TARGET_PATH: Final = EXECUTION_PARENT_PATH / EXECUTION_TARGET_LEAF
 ROOT_UID: Final = 0
 ROOT_GID: Final = 0
@@ -320,9 +320,9 @@ def _directory_is_empty(descriptor: int, flags: int) -> bool:
 
 def _verify_fixed_identity() -> None:
     store_parent = PurePosixPath("/etc/governed-memory-stores")
-    store_target = store_parent / "9a54cf123493-000003"
+    store_target = store_parent / "9a54cf123493-000004"
     execution_parent = PurePosixPath("/var/lib/governed-memory-controller")
-    execution_target = execution_parent / "executions-v3"
+    execution_target = execution_parent / "executions-v4"
     if (
         PurePosixPath(STORE_PARENT_PATH) != store_parent
         or STORE_TARGET_LEAF != store_target.name
@@ -361,7 +361,7 @@ def _fixed_directories() -> tuple[_FixedDirectory, _FixedDirectory]:
 
 
 def _require_exact_staged_prefix_disposition() -> Mapping[str, object]:
-    """Require the exact failed-prefix fence before creating 000003 paths."""
+    """Require the exact failed-prefix fence before creating 000004 paths."""
 
     try:
         candidate = (

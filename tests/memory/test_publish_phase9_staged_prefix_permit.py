@@ -119,7 +119,12 @@ class CandidateSelectionTests(unittest.TestCase):
         return run
 
     def test_fixed_tag_selects_clean_descendant_and_all_exact_blobs(self) -> None:
-        with mock.patch.object(subject, "_git", side_effect=self.outputs()):
+        with (
+            mock.patch.object(subject, "_git", side_effect=self.outputs()),
+            mock.patch.object(
+                subject, "_sha", return_value=subject.CONTRACT_SHA256
+            ),
+        ):
             commit, tree, blobs = subject._verify_selected_candidate()
         self.assertEqual(commit, "a" * 40)
         self.assertEqual(tree, "b" * 40)
@@ -201,6 +206,7 @@ class PermitPublicationTests(unittest.TestCase):
             ),
             mock.patch.object(subject.os, "geteuid", return_value=0),
             mock.patch.object(subject.os, "getegid", return_value=0),
+            mock.patch.object(subject, "_bindings_sealed", return_value=True),
             mock.patch.object(
                 subject,
                 "_verify_selected_candidate",

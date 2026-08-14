@@ -101,7 +101,7 @@ FIXED_COMMAND_TIMEOUT_SECONDS: Final = 20
 MAX_COMMAND_OUTPUT_BYTES: Final = 256 * 1024
 MAX_QDRANT_RESPONSE_BYTES: Final = 1024 * 1024
 QDRANT_HTTP_HOST: Final = "127.0.0.1"
-QDRANT_HTTP_PORT: Final = 6345
+QDRANT_HTTP_PORT: Final = 6346
 QDRANT_HTTP_TIMEOUT_SECONDS: Final = 5
 ROLLBACK_CONTROLLER_AUTHORITY_MARKER_PATH_TEMPLATE: Final = ROOT_FILE_SLOTS[
     RootFileSlot.ROLLBACK_CONTROLLER_AUTHORITY_MARKER
@@ -446,7 +446,7 @@ _RETAINED_DIRECTORY_PATHS: Final[Mapping[RetainedRootDirectory, str]] = MappingP
     {
         RetainedRootDirectory.CONTROLLER_CONFIG: "/etc/governed-memory-controller",
         RetainedRootDirectory.STORE_SECRET: (
-            "/etc/governed-memory-stores/9a54cf123493-000003"
+            "/etc/governed-memory-stores/9a54cf123493-000004"
         ),
     }
 )
@@ -2083,7 +2083,7 @@ class QdrantHttpResponse:
 
 
 class BoundQdrantHttpClient(Protocol):
-    """Already bound to 127.0.0.1:6345 and its opaque API key."""
+    """Already bound to 127.0.0.1:6346 and its opaque API key."""
 
     def exchange(self, request: QdrantRequestBytes) -> QdrantHttpResponse: ...
 
@@ -2504,7 +2504,7 @@ class ClosedLinuxInvariantEffects:
     to race or replace host state and is intentionally outside this claim.
     """
 
-    _PORTS: Final = (55434, 6345)
+    _PORTS: Final = (55435, 6346)
 
     def __init__(self, held_lock: HeldExecutionLockCapability) -> None:
         try:

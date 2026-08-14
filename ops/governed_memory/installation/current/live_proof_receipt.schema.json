@@ -9,7 +9,7 @@
       "type": "string"
     }
   },
-  "$id": "urn:governed-memory:phase9:disposable-live-proof-receipt:v4",
+  "$id": "urn:governed-memory:phase9:disposable-live-proof-receipt:v5",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "Content-free evidence for one bounded disposable Linux install, durable pre-effect rollback reservation, an exact fixed host-clock synchronization preflight, controller-process death and exact resume, empty rollback, rollback-process death and exact resume, and terminal exact-absence observation. It is not evidence of host reboot recovery, continuous absence, issuer or host death cleanup, application-service installation, or activation.",
@@ -153,7 +153,7 @@
       "const": true
     },
     "schema_version": {
-      "const": "governed-memory-phase9-live-proof-receipt-v4"
+      "const": "governed-memory-phase9-live-proof-receipt-v5"
     },
     "source_postgres_read_count": {
       "const": 0

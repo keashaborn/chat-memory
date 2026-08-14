@@ -124,27 +124,20 @@ class PreimportBoundaryTests(unittest.TestCase):
             with self.subTest(marker=marker):
                 self.assertLess(source.index(marker), later_import)
 
-    def test_final_pins_are_exact_and_closed(self) -> None:
+    def test_000004_pins_are_explicitly_unsealed(self) -> None:
         self.assertEqual(
             subject._PREIMPORT_CONTROLLER_RUNTIME_RECEIPT_SHA256,
-            "9dda4d93a1bcfecf4305736feffafb578e4629cd32594cec6b2d6d72cb90a4d3",
+            "0" * 64,
         )
         self.assertEqual(
             subject.CONTROLLER_RUNTIME_RECEIPT_SHA256,
-            "9dda4d93a1bcfecf4305736feffafb578e4629cd32594cec6b2d6d72cb90a4d3",
+            "0" * 64,
         )
-        self.assertEqual(
-            subject.CONTRACT_SHA256,
-            "14eacc2c32492f2d76d5c7a3d145a1b0a019077fd3a880e74b5e12a658d55de8",
-        )
-        self.assertEqual(
-            subject.SUCCESSOR_ATTEMPT_IDENTITY_SHA256,
-            "920d4d8f0d6ed135774711127b050a3095d79e55bc7e06e02b2d80d6b0378068",
-        )
-        self.assertEqual(
-            subject.PACKAGE_MANIFEST_SHA256,
-            "5addc8e4ab40b6bc700fde57b67579f8caa3d21077715bcdaf61d5714b52743e",
-        )
+        self.assertEqual(subject.CONTRACT_SHA256, "0" * 64)
+        self.assertEqual(subject.SUCCESSOR_ATTEMPT_IDENTITY_SHA256, "0" * 64)
+        self.assertEqual(subject.PACKAGE_MANIFEST_SHA256, "0" * 64)
+        self.assertFalse(subject._bindings_sealed())
+        self.assertTrue(subject.EXPECTED_CANDIDATE_REF.endswith("000004"))
 
 
 class ContractInstallationTests(unittest.TestCase):
@@ -391,6 +384,7 @@ class ExecutionTests(unittest.TestCase):
             ),
             mock.patch.object(subject.os, "geteuid", return_value=0),
             mock.patch.object(subject.os, "getegid", return_value=0),
+            mock.patch.object(subject, "_bindings_sealed", return_value=True),
             mock.patch.object(
                 subject,
                 "_read_and_verify_permit",

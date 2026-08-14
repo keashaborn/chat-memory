@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-"""Emit the exact canonical 000002-failure to 000003-successor contract."""
+"""Emit the reviewed 000003-failure to 000004-successor contract candidate.
+
+The successor P/R pins are deliberately zero until the rebuilt package and
+controller runtime are published.  The production executor rejects those
+placeholders, so this generator is safe to use for structural review only.
+"""
 
 import sys
 from typing import Final
@@ -9,87 +14,52 @@ from typing import Final
 from tools.governed_memory_validation import staged_prefix_disposition as staged
 
 
-DISPOSITION_ID: Final = "phase9-v6-staged-to-v7-000003"
-CORRECTED_PACKAGE_MANIFEST_SHA256: Final = (
-    "5addc8e4ab40b6bc700fde57b67579f8caa3d21077715bcdaf61d5714b52743e"
-)
-CORRECTED_CONTROLLER_RUNTIME_RECEIPT_SHA256: Final = (
-    "9dda4d93a1bcfecf4305736feffafb578e4629cd32594cec6b2d6d72cb90a4d3"
-)
+DISPOSITION_ID: Final = "phase9-v7-staged-to-v8-000004"
+CORRECTED_PACKAGE_MANIFEST_SHA256: Final = "0" * 64
+CORRECTED_CONTROLLER_RUNTIME_RECEIPT_SHA256: Final = "0" * 64
+_DEVICE: Final = 66305
 
-_EVIDENCE_FILES: Final = (
-    {
-        "role": "old_contract",
-        "path": str(staged.PRODUCTION_OLD_CONTRACT_PATH),
-        "sha256": staged.PRODUCTION_OLD_CONTRACT_SHA256,
-        "size": 12495,
-        "mode": 0o400,
-        "uid": 0,
-        "gid": 0,
-        "nlink": 1,
-        "device": 66305,
-        "inode": 4010938,
-    },
-    {
-        "role": "old_permit",
-        "path": str(staged.PRODUCTION_OLD_PERMIT_PATH),
-        "sha256": staged.PRODUCTION_OLD_PERMIT_SHA256,
-        "size": 2253,
-        "mode": 0o400,
-        "uid": 0,
-        "gid": 0,
-        "nlink": 1,
-        "device": 66305,
-        "inode": 1652215,
-    },
-    {
-        "role": "old_pre_effect_receipt",
-        "path": str(staged.PRODUCTION_OLD_RECEIPT_PATH),
-        "sha256": staged.PRODUCTION_OLD_RECEIPT_SHA256,
-        "size": 1820,
-        "mode": 0o400,
-        "uid": 0,
-        "gid": 0,
-        "nlink": 1,
-        "device": 66305,
-        "inode": 4781692,
-    },
-    {
-        "role": "staged_capsule",
-        "path": str(staged.PRODUCTION_STAGED_CAPSULE_PATH),
-        "sha256": staged.PRODUCTION_STAGED_CAPSULE_SHA256,
-        "size": 6719,
-        "mode": 0o400,
-        "uid": 0,
-        "gid": 0,
-        "nlink": 1,
-        "device": 66305,
-        "inode": 1652216,
-    },
-)
 
-_EMPTY_DIRECTORIES: Final = (
-    {
-        "role": "executions_v2",
-        "path": str(staged.PRODUCTION_EXECUTIONS_ROOT),
+def _file(
+    role: str,
+    path: object,
+    sha256: str,
+    size: int,
+    mode: int,
+    inode: int,
+) -> dict[str, object]:
+    return {
+        "role": role,
+        "path": str(path),
+        "sha256": sha256,
+        "size": size,
+        "mode": mode,
+        "uid": 0,
+        "gid": 0,
+        "nlink": 1,
+        "device": _DEVICE,
+        "inode": inode,
+    }
+
+
+def _directory(
+    role: str,
+    path: object,
+    inode: int,
+    nlink: int,
+    entries: list[str],
+) -> dict[str, object]:
+    return {
+        "role": role,
+        "path": str(path),
         "mode": 0o700,
         "uid": 0,
         "gid": 0,
-        "nlink": 2,
-        "device": 66305,
-        "inode": 4010939,
-    },
-    {
-        "role": "store_secret",
-        "path": str(staged.PRODUCTION_SECRET_ROOT),
-        "mode": 0o700,
-        "uid": 0,
-        "gid": 0,
-        "nlink": 2,
-        "device": 66305,
-        "inode": 5244923,
-    },
-)
+        "nlink": nlink,
+        "device": _DEVICE,
+        "inode": inode,
+        "entries": entries,
+    }
 
 
 def expectation() -> staged.ReviewedStagedPrefixExpectation:
@@ -116,40 +86,175 @@ def expectation() -> staged.ReviewedStagedPrefixExpectation:
 
 
 def generate() -> dict[str, object]:
+    paths = staged.production_disposition_paths()
     reviewed = expectation()
+    preserved = {
+        "generation": staged.PRODUCTION_PRESERVED_GENERATION,
+        "tag": {
+            "ref": staged.PRODUCTION_PRESERVED_TAG_REF,
+            "object_type": "commit",
+            "commit": staged.PRODUCTION_PRESERVED_TAG_COMMIT,
+            "tree": staged.PRODUCTION_PRESERVED_TAG_TREE,
+        },
+        "evidence_files": [
+            _file(
+                "preserved_contract",
+                paths.preserved_contract_path,
+                staged.PRODUCTION_PRESERVED_CONTRACT_SHA256,
+                12495,
+                0o400,
+                4010938,
+            ),
+            _file(
+                "preserved_permit",
+                paths.preserved_permit_path,
+                staged.PRODUCTION_PRESERVED_PERMIT_SHA256,
+                2253,
+                0o400,
+                1652215,
+            ),
+            _file(
+                "preserved_pre_effect_receipt",
+                paths.preserved_pre_effect_receipt_path,
+                staged.PRODUCTION_PRESERVED_RECEIPT_SHA256,
+                1820,
+                0o400,
+                4781692,
+            ),
+            _file(
+                "preserved_staged_capsule",
+                paths.preserved_staged_capsule_path,
+                staged.PRODUCTION_PRESERVED_STAGED_CAPSULE_SHA256,
+                6719,
+                0o400,
+                1652216,
+            ),
+        ],
+        "evidence_directories": [
+            _directory(
+                "preserved_executions_v2",
+                paths.preserved_executions_root,
+                4010939,
+                2,
+                [],
+            ),
+            _directory(
+                "preserved_store_secret",
+                paths.preserved_secret_root,
+                5244923,
+                2,
+                [],
+            ),
+        ],
+    }
+    failed = {
+        "generation": staged.PRODUCTION_FAILED_GENERATION,
+        "tag": {
+            "ref": staged.PRODUCTION_OLD_TAG_REF,
+            "object_type": "commit",
+            "commit": staged.PRODUCTION_OLD_TAG_COMMIT,
+            "tree": staged.PRODUCTION_OLD_TAG_TREE,
+        },
+        "package_manifest_sha256": (
+            staged.PRODUCTION_FAILED_PACKAGE_MANIFEST_SHA256
+        ),
+        "controller_runtime_receipt_sha256": (
+            staged.PRODUCTION_FAILED_RUNTIME_RECEIPT_SHA256
+        ),
+        "evidence_files": [
+            _file(
+                "failed_contract",
+                paths.old_contract_path,
+                staged.PRODUCTION_OLD_CONTRACT_SHA256,
+                6572,
+                0o400,
+                4010940,
+            ),
+            _file(
+                "failed_permit",
+                paths.old_permit_path,
+                staged.PRODUCTION_OLD_PERMIT_SHA256,
+                2398,
+                0o400,
+                1652272,
+            ),
+            _file(
+                "failed_store_spec_v2_tombstone",
+                paths.old_pre_effect_receipt_path,
+                staged.PRODUCTION_OLD_RECEIPT_SHA256,
+                1734,
+                0o400,
+                4787754,
+            ),
+            _file(
+                "failed_capsule_v4",
+                paths.staged_capsule_path,
+                staged.PRODUCTION_STAGED_CAPSULE_SHA256,
+                6719,
+                0o400,
+                1652273,
+            ),
+            _file(
+                "failed_authority_state_v3",
+                paths.failed_authority_state_path,
+                staged.PRODUCTION_FAILED_AUTHORITY_STATE_SHA256,
+                28672,
+                0o600,
+                1652274,
+            ),
+            _file(
+                "failed_execution_journal",
+                paths.failed_execution_journal_path,
+                staged.PRODUCTION_EMPTY_FILE_SHA256,
+                0,
+                0o600,
+                5257381,
+            ),
+            _file(
+                "failed_execution_resources",
+                paths.failed_execution_resources_path,
+                staged.PRODUCTION_EMPTY_FILE_SHA256,
+                0,
+                0o600,
+                5257382,
+            ),
+        ],
+        "evidence_directories": [
+            _directory(
+                "failed_executions_v3",
+                paths.executions_root,
+                5257379,
+                3,
+                [staged.PRODUCTION_EXECUTION_ID],
+            ),
+            _directory(
+                "failed_execution",
+                paths.failed_execution_root,
+                5257380,
+                2,
+                ["journal.jsonl", "resources.jsonl"],
+            ),
+            _directory(
+                "failed_store_secret",
+                paths.store_secret_root,
+                5257378,
+                2,
+                [],
+            ),
+        ],
+    }
     return {
         "schema_version": staged.CONTRACT_SCHEMA,
         "disposition_id": DISPOSITION_ID,
         "repository_contract_source": (
             staged.PRODUCTION_REPOSITORY_CONTRACT_SOURCE
         ),
-        "durable_contract_path": str(
-            staged.PRODUCTION_DURABLE_CONTRACT_PATH
-        ),
+        "durable_contract_path": str(staged.PRODUCTION_DURABLE_CONTRACT_PATH),
         "tombstone_path": str(staged.PRODUCTION_TOMBSTONE_PATH),
-        "failed_attempt": {
-            "generation": staged.PRODUCTION_FAILED_GENERATION,
-            "tag": {
-                "ref": staged.PRODUCTION_OLD_TAG_REF,
-                "object_type": "commit",
-                "commit": staged.PRODUCTION_OLD_TAG_COMMIT,
-                "tree": staged.PRODUCTION_OLD_TAG_TREE,
-            },
-            "package_manifest_sha256": (
-                staged.PRODUCTION_FAILED_PACKAGE_MANIFEST_SHA256
-            ),
-            "controller_runtime_receipt_sha256": (
-                staged.PRODUCTION_FAILED_RUNTIME_RECEIPT_SHA256
-            ),
-            "evidence_files": [dict(value) for value in _EVIDENCE_FILES],
-        },
-        "corrected_successor": staged._corrected_successor_document(
-            reviewed
-        ),
-        "empty_directories": [dict(value) for value in _EMPTY_DIRECTORIES],
-        "absent_resources": staged._expected_absent_resources(
-            staged.production_disposition_paths()
-        ),
+        "preserved_predecessor": preserved,
+        "failed_attempt": failed,
+        "corrected_successor": staged._corrected_successor_document(reviewed),
+        "absent_resources": staged._expected_absent_resources(paths),
     }
 
 

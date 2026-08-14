@@ -30,10 +30,10 @@ from tools.governed_memory_install.execution_lock import (
 
 
 CONTRACT_SCHEMA: Final = (
-    "governed-memory-phase9-staged-prefix-disposition-contract-v1"
+    "governed-memory-phase9-staged-prefix-disposition-contract-v2"
 )
 TOMBSTONE_SCHEMA: Final = (
-    "governed-memory-phase9-staged-prefix-disposition-tombstone-v1"
+    "governed-memory-phase9-staged-prefix-disposition-tombstone-v2"
 )
 RESULT: Final = "failed_staged_prefix_fenced_for_corrected_successor"
 
@@ -48,24 +48,48 @@ PRODUCTION_CONTROL_ROOT: Final = Path("/etc/governed-memory-controller")
 PRODUCTION_DURABLE_CONTRACT_PATH: Final = (
     PRODUCTION_STATE_ROOT
     / "pre-effect-dispositions"
-    / "phase9-v6-staged-to-v7-000003.contract.json"
+    / "phase9-v7-staged-to-v8-000004.contract.json"
 )
-PRODUCTION_TOMBSTONE_PATH: Final = PRODUCTION_CONTROL_ROOT / "store_spec-v2.json"
-PRODUCTION_OLD_TAG_REF: Final = (
+PRODUCTION_TOMBSTONE_PATH: Final = PRODUCTION_CONTROL_ROOT / "store_spec-v3.json"
+PRODUCTION_PRESERVED_TAG_REF: Final = (
     "refs/tags/governed-memory-phase9j-pre-effect-disposition-000002"
 )
-PRODUCTION_OLD_PERMIT_PATH: Final = (
+PRODUCTION_PRESERVED_PERMIT_PATH: Final = (
     PRODUCTION_STATE_ROOT / "phase9j-pre-effect-disposition-permit-000002.json"
 )
-PRODUCTION_OLD_CONTRACT_PATH: Final = (
+PRODUCTION_PRESERVED_CONTRACT_PATH: Final = (
     PRODUCTION_STATE_ROOT
     / "pre-effect-dispositions"
     / "phase9-v5-pre-effect-to-v6-000002.contract.json"
 )
-PRODUCTION_OLD_RECEIPT_PATH: Final = PRODUCTION_CONTROL_ROOT / "store_spec.json"
-PRODUCTION_STAGED_CAPSULE_PATH: Final = (
+PRODUCTION_PRESERVED_RECEIPT_PATH: Final = (
+    PRODUCTION_CONTROL_ROOT / "store_spec.json"
+)
+PRODUCTION_PRESERVED_STAGED_CAPSULE_PATH: Final = (
     PRODUCTION_STATE_ROOT
     / "phase9-disposable-proof-recovery-capsule-v3.json.publishing"
+)
+PRODUCTION_PRESERVED_EXECUTIONS_ROOT: Final = (
+    PRODUCTION_STATE_ROOT / "executions-v2"
+)
+PRODUCTION_PRESERVED_SECRET_ROOT: Final = Path(
+    "/etc/governed-memory-stores/9a54cf123493-000002"
+)
+PRODUCTION_OLD_TAG_REF: Final = (
+    "refs/tags/governed-memory-phase9j-pre-effect-disposition-000003"
+)
+PRODUCTION_OLD_PERMIT_PATH: Final = (
+    PRODUCTION_STATE_ROOT / "phase9j-pre-effect-disposition-permit-000003.json"
+)
+PRODUCTION_OLD_CONTRACT_PATH: Final = (
+    PRODUCTION_STATE_ROOT
+    / "pre-effect-dispositions"
+    / "phase9-v6-staged-to-v7-000003.contract.json"
+)
+PRODUCTION_OLD_RECEIPT_PATH: Final = PRODUCTION_CONTROL_ROOT / "store_spec-v2.json"
+PRODUCTION_STAGED_CAPSULE_PATH: Final = (
+    PRODUCTION_STATE_ROOT
+    / "phase9-disposable-proof-recovery-capsule-v4.json"
 )
 PRODUCTION_FINAL_CAPSULE_PATH: Final = (
     PRODUCTION_STATE_ROOT / "phase9-disposable-proof-recovery-capsule-v3.json"
@@ -80,9 +104,21 @@ PRODUCTION_PROMOTABLE_RECEIPT_PATH: Final = (
 PRODUCTION_PROMOTABLE_RECEIPT_STAGING_PATH: Final = Path(
     str(PRODUCTION_PROMOTABLE_RECEIPT_PATH) + ".publishing"
 )
-PRODUCTION_EXECUTIONS_ROOT: Final = PRODUCTION_STATE_ROOT / "executions-v2"
+PRODUCTION_EXECUTIONS_ROOT: Final = PRODUCTION_STATE_ROOT / "executions-v3"
+PRODUCTION_EXECUTION_ID: Final = (
+    "6d5d30f39b4b6d89a9aec3c91b11062abc4b271acfedfba91bc4f53e0f7a8030"
+)
+PRODUCTION_EXECUTION_ROOT: Final = (
+    PRODUCTION_EXECUTIONS_ROOT / PRODUCTION_EXECUTION_ID
+)
+PRODUCTION_EXECUTION_JOURNAL_PATH: Final = (
+    PRODUCTION_EXECUTION_ROOT / "journal.jsonl"
+)
+PRODUCTION_EXECUTION_RESOURCES_PATH: Final = (
+    PRODUCTION_EXECUTION_ROOT / "resources.jsonl"
+)
 PRODUCTION_SECRET_ROOT: Final = Path(
-    "/etc/governed-memory-stores/9a54cf123493-000002"
+    "/etc/governed-memory-stores/9a54cf123493-000003"
 )
 PRODUCTION_SYSTEMD_UNIT_PATH: Final = Path(
     "/etc/systemd/system/governed-memory-stores-v2.service"
@@ -97,74 +133,99 @@ PRODUCTION_GLOBAL_LOCK_PATH: Final = Path(
 PRODUCTION_LIVE_GUARD_PATH: Final = Path(
     "/run/lock/governed-memory-controller/phase9-disposable-live-proof.lock"
 )
-PRODUCTION_FAILED_GENERATION: Final = "000002"
-PRODUCTION_CORRECTED_GENERATION: Final = "000003"
-PRODUCTION_CONTRACT_SHA256: Final[str | None] = (
-    "14eacc2c32492f2d76d5c7a3d145a1b0a019077fd3a880e74b5e12a658d55de8"
-)
+PRODUCTION_PRESERVED_GENERATION: Final = "000002"
+PRODUCTION_FAILED_GENERATION: Final = "000003"
+PRODUCTION_CORRECTED_GENERATION: Final = "000004"
+# The 000004 package/runtime closure is intentionally not yet published.
+# A production call must reject these placeholders before any filesystem write.
+PRODUCTION_CONTRACT_SHA256: Final[str | None] = None
 PRODUCTION_FAILED_PACKAGE_MANIFEST_SHA256: Final = (
-    "2e5da1091b456b705d955c5cc3a119e507116f892de0bcb92017185ca4ed2e89"
+    "5addc8e4ab40b6bc700fde57b67579f8caa3d21077715bcdaf61d5714b52743e"
 )
 PRODUCTION_FAILED_RUNTIME_RECEIPT_SHA256: Final = (
-    "7de191f42a1c14b6bc2c29b3e7b425bd1b2593f7de95e03af7d2f93ff5d4a53b"
+    "9dda4d93a1bcfecf4305736feffafb578e4629cd32594cec6b2d6d72cb90a4d3"
 )
 PRODUCTION_OLD_TAG_COMMIT: Final = (
-    "2c1bfc4afd4990323d13435f4d3c9fff90499a41"
+    "70709db3b6d5aee1032bc77f5f378a53737cce6c"
 )
 PRODUCTION_OLD_TAG_TREE: Final = (
-    "3bee80d9a0c13c6aa70628da6286077a02ab8079"
+    "0dad5c418965979372a67d65cdb6a30308fb1653"
 )
 PRODUCTION_OLD_PERMIT_SHA256: Final = (
-    "ea184d209b3dc9e0f3afb2a19eedba22393ac25a9c67a2980223cc1e12016907"
+    "ad8b822bf8bdcce239585fe0b1d27d596b630e9a912dee920f1c2936f38c702b"
 )
 PRODUCTION_OLD_CONTRACT_SHA256: Final = (
-    "758175f12c844a81c1fac2061d2a41d094034d697241545656c8ddac4e51e989"
+    "14eacc2c32492f2d76d5c7a3d145a1b0a019077fd3a880e74b5e12a658d55de8"
 )
 PRODUCTION_OLD_RECEIPT_SHA256: Final = (
-    "d61779a4b0a41dd2670134f47bfe18c2c449a208dda9e4ea01d3eeba88f950b3"
+    "57e07d7ce65e79503982e3c87297f644a347b41394a40cf56127f3536524130d"
 )
 PRODUCTION_STAGED_CAPSULE_SHA256: Final = (
+    "f2c0f28ce80da48b4d898f843914c1ee81073f7e9841b4da29c8510e65a590c4"
+)
+PRODUCTION_FAILED_AUTHORITY_STATE_SHA256: Final = (
+    "eacc24d15230fabb33d3d9a6cec823cc537f8e3335c173c32e22a05c3e20f299"
+)
+PRODUCTION_EMPTY_FILE_SHA256: Final = (
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+)
+PRODUCTION_PRESERVED_TAG_COMMIT: Final = (
+    "2c1bfc4afd4990323d13435f4d3c9fff90499a41"
+)
+PRODUCTION_PRESERVED_TAG_TREE: Final = (
+    "3bee80d9a0c13c6aa70628da6286077a02ab8079"
+)
+PRODUCTION_PRESERVED_PERMIT_SHA256: Final = (
+    "ea184d209b3dc9e0f3afb2a19eedba22393ac25a9c67a2980223cc1e12016907"
+)
+PRODUCTION_PRESERVED_CONTRACT_SHA256: Final = (
+    "758175f12c844a81c1fac2061d2a41d094034d697241545656c8ddac4e51e989"
+)
+PRODUCTION_PRESERVED_RECEIPT_SHA256: Final = (
+    "d61779a4b0a41dd2670134f47bfe18c2c449a208dda9e4ea01d3eeba88f950b3"
+)
+PRODUCTION_PRESERVED_STAGED_CAPSULE_SHA256: Final = (
     "008275ce2f3102aad10440dcb45038f7a4d4d4b60033429b7078cd1542511771"
 )
 PRODUCTION_CORRECTED_AUTHORITY_STATE_PATH: Final = (
-    PRODUCTION_STATE_ROOT / "authority-state-v3.sqlite3"
+    PRODUCTION_STATE_ROOT / "authority-state-v4.sqlite3"
 )
 PRODUCTION_CORRECTED_CAPSULE_PATH: Final = (
-    PRODUCTION_STATE_ROOT / "phase9-disposable-proof-recovery-capsule-v4.json"
+    PRODUCTION_STATE_ROOT / "phase9-disposable-proof-recovery-capsule-v5.json"
 )
 PRODUCTION_CORRECTED_CAPSULE_STAGING_PATH: Final = Path(
     str(PRODUCTION_CORRECTED_CAPSULE_PATH) + ".publishing"
 )
 PRODUCTION_CORRECTED_PROMOTABLE_RECEIPT_PATH: Final = (
     PRODUCTION_STATE_ROOT
-    / "phase9-disposable-live-proof-promotable-receipt-000003.json"
+    / "phase9-disposable-live-proof-promotable-receipt-000004.json"
 )
 PRODUCTION_CORRECTED_EXECUTIONS_ROOT: Final = (
-    PRODUCTION_STATE_ROOT / "executions-v3"
+    PRODUCTION_STATE_ROOT / "executions-v4"
 )
 PRODUCTION_CORRECTED_SECRET_ROOT: Final = Path(
-    "/etc/governed-memory-stores/9a54cf123493-000003"
+    "/etc/governed-memory-stores/9a54cf123493-000004"
 )
 PRODUCTION_CORRECTED_STORE_SPEC_PATH: Final = (
-    PRODUCTION_CONTROL_ROOT / "store_spec-v3.json"
+    PRODUCTION_CONTROL_ROOT / "store_spec-v4.json"
 )
 PRODUCTION_CORRECTED_SYSTEMD_UNIT_PATH: Final = Path(
-    "/etc/systemd/system/governed-memory-stores-v3.service"
+    "/etc/systemd/system/governed-memory-stores-v4.service"
 )
 PRODUCTION_CORRECTED_SYSTEMD_LINK_PATH: Final = Path(
     "/etc/systemd/system/multi-user.target.wants/"
-    "governed-memory-stores-v3.service"
+    "governed-memory-stores-v4.service"
 )
 PRODUCTION_CORRECTED_AUTHORIZATION_NAMESPACE: Final = (
-    "governed-memory-phase9-live-proof-v3"
+    "governed-memory-phase9-live-proof-v4"
 )
 PRODUCTION_CORRECTED_INSTALL_SCOPE_ID: Final = (
-    "phase9-disposable-live-install-000003"
+    "phase9-disposable-live-install-000004"
 )
 PRODUCTION_CORRECTED_ROLLBACK_SCOPE_ID: Final = (
-    "phase9-disposable-live-rollback-000003"
+    "phase9-disposable-live-rollback-000004"
 )
-PRODUCTION_DISPOSITION_ID: Final = "phase9-v6-staged-to-v7-000003"
+PRODUCTION_DISPOSITION_ID: Final = "phase9-v7-staged-to-v8-000004"
 
 _FAILED_PREFIX_IDENTITY_SCHEMA: Final = (
     "governed-memory-phase9-failed-staged-prefix-identity-v1"
@@ -195,13 +256,42 @@ _RESOURCE_NAME_RE: Final = re.compile(
     r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z", re.ASCII
 )
 
-_FILE_ROLES: Final = (
-    "old_contract",
-    "old_permit",
-    "old_pre_effect_receipt",
-    "staged_capsule",
+_PRESERVED_FILE_ROLES: Final = (
+    "preserved_contract",
+    "preserved_permit",
+    "preserved_pre_effect_receipt",
+    "preserved_staged_capsule",
 )
-_DIRECTORY_ROLES: Final = ("executions_v2", "store_secret")
+_PRESERVED_DIRECTORY_ROLES: Final = (
+    "preserved_executions_v2",
+    "preserved_store_secret",
+)
+_FAILED_FILE_ROLES: Final = (
+    "failed_contract",
+    "failed_permit",
+    "failed_store_spec_v2_tombstone",
+    "failed_capsule_v4",
+    "failed_authority_state_v3",
+    "failed_execution_journal",
+    "failed_execution_resources",
+)
+_FAILED_DIRECTORY_ROLES: Final = (
+    "failed_executions_v3",
+    "failed_execution",
+    "failed_store_secret",
+)
+_FILE_MODE_AND_EMPTY: Final = MappingProxyType(
+    {
+        **{role: (0o400, False) for role in _PRESERVED_FILE_ROLES},
+        "failed_contract": (0o400, False),
+        "failed_permit": (0o400, False),
+        "failed_store_spec_v2_tombstone": (0o400, False),
+        "failed_capsule_v4": (0o400, False),
+        "failed_authority_state_v3": (0o600, False),
+        "failed_execution_journal": (0o600, True),
+        "failed_execution_resources": (0o600, True),
+    }
+)
 _FILE_SPEC_KEYS: Final = {
     "role",
     "path",
@@ -223,6 +313,7 @@ _DIRECTORY_SPEC_KEYS: Final = {
     "nlink",
     "device",
     "inode",
+    "entries",
 }
 _CONTRACT_KEYS: Final = {
     "schema_version",
@@ -230,10 +321,16 @@ _CONTRACT_KEYS: Final = {
     "repository_contract_source",
     "durable_contract_path",
     "tombstone_path",
+    "preserved_predecessor",
     "failed_attempt",
     "corrected_successor",
-    "empty_directories",
     "absent_resources",
+}
+_PRESERVED_PREDECESSOR_KEYS: Final = {
+    "generation",
+    "tag",
+    "evidence_files",
+    "evidence_directories",
 }
 _FAILED_ATTEMPT_KEYS: Final = {
     "generation",
@@ -241,6 +338,7 @@ _FAILED_ATTEMPT_KEYS: Final = {
     "package_manifest_sha256",
     "controller_runtime_receipt_sha256",
     "evidence_files",
+    "evidence_directories",
 }
 _TAG_KEYS: Final = {"ref", "object_type", "commit", "tree"}
 _SUCCESSOR_KEYS: Final = {
@@ -264,16 +362,21 @@ _DOCKER_IDENTITIES: Final = MappingProxyType(
             "governed-memory-qdrant-9a54cf123493-000002",
             "governed-memory-postgres-9a54cf123493-000003",
             "governed-memory-qdrant-9a54cf123493-000003",
+            "governed-memory-postgres-9a54cf123493-000004",
+            "governed-memory-qdrant-9a54cf123493-000004",
         ),
         "docker_network": (
             "governed-memory-net-9a54cf123493-000002",
             "governed-memory-net-9a54cf123493-000003",
+            "governed-memory-net-9a54cf123493-000004",
         ),
         "docker_volume": (
             "governed-memory-postgres-data-9a54cf123493-000002",
             "governed-memory-qdrant-data-9a54cf123493-000002",
             "governed-memory-postgres-data-9a54cf123493-000003",
             "governed-memory-qdrant-data-9a54cf123493-000003",
+            "governed-memory-postgres-data-9a54cf123493-000004",
+            "governed-memory-qdrant-data-9a54cf123493-000004",
         ),
     }
 )
@@ -309,11 +412,14 @@ _TCP_IDENTITIES: Final = MappingProxyType(
         "127.0.0.1:6344@000002": "6344",
         "127.0.0.1:55434@000003": "55434",
         "127.0.0.1:6345@000003": "6345",
+        "127.0.0.1:55435@000004": "55435",
+        "127.0.0.1:6346@000004": "6346",
     }
 )
 _SYSTEMD_SERVICES: Final = (
     "governed-memory-stores-v2.service",
     "governed-memory-stores-v3.service",
+    "governed-memory-stores-v4.service",
 )
 
 
@@ -338,10 +444,25 @@ class StagedPrefixDispositionPaths:
     repository_root: Path
     durable_contract_path: Path
     tombstone_path: Path
+    preserved_permit_path: Path
+    preserved_contract_path: Path
+    preserved_pre_effect_receipt_path: Path
+    preserved_staged_capsule_path: Path
+    preserved_executions_root: Path
+    preserved_secret_root: Path
     old_permit_path: Path
     old_contract_path: Path
     old_pre_effect_receipt_path: Path
     staged_capsule_path: Path
+    failed_authority_state_path: Path
+    failed_execution_root: Path
+    failed_execution_journal_path: Path
+    failed_execution_resources_path: Path
+    failed_capsule_staging_path: Path
+    failed_promotable_receipt_path: Path
+    failed_promotable_receipt_staging_path: Path
+    failed_systemd_unit_path: Path
+    failed_systemd_link_path: Path
     final_capsule_path: Path
     authority_state_path: Path
     promotable_receipt_path: Path
@@ -396,10 +517,44 @@ class StagedPrefixDispositionPaths:
             self.repository_root != PRODUCTION_REPOSITORY_ROOT
             or self.durable_contract_path != PRODUCTION_DURABLE_CONTRACT_PATH
             or self.tombstone_path != PRODUCTION_TOMBSTONE_PATH
+            or self.preserved_permit_path
+            != PRODUCTION_PRESERVED_PERMIT_PATH
+            or self.preserved_contract_path
+            != PRODUCTION_PRESERVED_CONTRACT_PATH
+            or self.preserved_pre_effect_receipt_path
+            != PRODUCTION_PRESERVED_RECEIPT_PATH
+            or self.preserved_staged_capsule_path
+            != PRODUCTION_PRESERVED_STAGED_CAPSULE_PATH
+            or self.preserved_executions_root
+            != PRODUCTION_PRESERVED_EXECUTIONS_ROOT
+            or self.preserved_secret_root != PRODUCTION_PRESERVED_SECRET_ROOT
             or self.old_permit_path != PRODUCTION_OLD_PERMIT_PATH
             or self.old_contract_path != PRODUCTION_OLD_CONTRACT_PATH
             or self.old_pre_effect_receipt_path != PRODUCTION_OLD_RECEIPT_PATH
             or self.staged_capsule_path != PRODUCTION_STAGED_CAPSULE_PATH
+            or self.failed_authority_state_path
+            != PRODUCTION_CORRECTED_AUTHORITY_STATE_PATH.parent
+            / "authority-state-v3.sqlite3"
+            or self.failed_execution_root != PRODUCTION_EXECUTION_ROOT
+            or self.failed_execution_journal_path
+            != PRODUCTION_EXECUTION_JOURNAL_PATH
+            or self.failed_execution_resources_path
+            != PRODUCTION_EXECUTION_RESOURCES_PATH
+            or self.failed_capsule_staging_path
+            != Path(str(PRODUCTION_STAGED_CAPSULE_PATH) + ".publishing")
+            or self.failed_promotable_receipt_path
+            != PRODUCTION_STATE_ROOT
+            / "phase9-disposable-live-proof-promotable-receipt-000003.json"
+            or self.failed_promotable_receipt_staging_path
+            != PRODUCTION_STATE_ROOT
+            / "phase9-disposable-live-proof-promotable-receipt-000003.json.publishing"
+            or self.failed_systemd_unit_path
+            != Path("/etc/systemd/system/governed-memory-stores-v3.service")
+            or self.failed_systemd_link_path
+            != Path(
+                "/etc/systemd/system/multi-user.target.wants/"
+                "governed-memory-stores-v3.service"
+            )
             or self.final_capsule_path != PRODUCTION_FINAL_CAPSULE_PATH
             or self.authority_state_path != PRODUCTION_AUTHORITY_STATE_PATH
             or self.promotable_receipt_path
@@ -527,10 +682,42 @@ def production_disposition_paths() -> StagedPrefixDispositionPaths:
         repository_root=PRODUCTION_REPOSITORY_ROOT,
         durable_contract_path=PRODUCTION_DURABLE_CONTRACT_PATH,
         tombstone_path=PRODUCTION_TOMBSTONE_PATH,
+        preserved_permit_path=PRODUCTION_PRESERVED_PERMIT_PATH,
+        preserved_contract_path=PRODUCTION_PRESERVED_CONTRACT_PATH,
+        preserved_pre_effect_receipt_path=PRODUCTION_PRESERVED_RECEIPT_PATH,
+        preserved_staged_capsule_path=(
+            PRODUCTION_PRESERVED_STAGED_CAPSULE_PATH
+        ),
+        preserved_executions_root=PRODUCTION_PRESERVED_EXECUTIONS_ROOT,
+        preserved_secret_root=PRODUCTION_PRESERVED_SECRET_ROOT,
         old_permit_path=PRODUCTION_OLD_PERMIT_PATH,
         old_contract_path=PRODUCTION_OLD_CONTRACT_PATH,
         old_pre_effect_receipt_path=PRODUCTION_OLD_RECEIPT_PATH,
         staged_capsule_path=PRODUCTION_STAGED_CAPSULE_PATH,
+        failed_authority_state_path=(
+            PRODUCTION_STATE_ROOT / "authority-state-v3.sqlite3"
+        ),
+        failed_execution_root=PRODUCTION_EXECUTION_ROOT,
+        failed_execution_journal_path=PRODUCTION_EXECUTION_JOURNAL_PATH,
+        failed_execution_resources_path=PRODUCTION_EXECUTION_RESOURCES_PATH,
+        failed_capsule_staging_path=Path(
+            str(PRODUCTION_STAGED_CAPSULE_PATH) + ".publishing"
+        ),
+        failed_promotable_receipt_path=(
+            PRODUCTION_STATE_ROOT
+            / "phase9-disposable-live-proof-promotable-receipt-000003.json"
+        ),
+        failed_promotable_receipt_staging_path=(
+            PRODUCTION_STATE_ROOT
+            / "phase9-disposable-live-proof-promotable-receipt-000003.json.publishing"
+        ),
+        failed_systemd_unit_path=Path(
+            "/etc/systemd/system/governed-memory-stores-v3.service"
+        ),
+        failed_systemd_link_path=Path(
+            "/etc/systemd/system/multi-user.target.wants/"
+            "governed-memory-stores-v3.service"
+        ),
         final_capsule_path=PRODUCTION_FINAL_CAPSULE_PATH,
         authority_state_path=PRODUCTION_AUTHORITY_STATE_PATH,
         promotable_receipt_path=PRODUCTION_PROMOTABLE_RECEIPT_PATH,
@@ -587,7 +774,7 @@ def _sha(raw: bytes) -> str:
 
 
 def production_failed_prefix_identity_sha256() -> str:
-    """Bind the exact immutable 000002 failed-prefix evidence family."""
+    """Bind the exact immutable failed 000003 evidence family."""
 
     material = {
         "schema_version": _FAILED_PREFIX_IDENTITY_SCHEMA,
@@ -603,6 +790,34 @@ def production_failed_prefix_identity_sha256() -> str:
         "contract_sha256": PRODUCTION_OLD_CONTRACT_SHA256,
         "receipt_sha256": PRODUCTION_OLD_RECEIPT_SHA256,
         "staged_capsule_sha256": PRODUCTION_STAGED_CAPSULE_SHA256,
+        "authority_state_sha256": PRODUCTION_FAILED_AUTHORITY_STATE_SHA256,
+        "execution_id": PRODUCTION_EXECUTION_ID,
+        "execution_journal_sha256": PRODUCTION_EMPTY_FILE_SHA256,
+        "execution_resources_sha256": PRODUCTION_EMPTY_FILE_SHA256,
+        "preserved_predecessor_identity_sha256": (
+            production_preserved_prefix_identity_sha256()
+        ),
+    }
+    return _sha(
+        _FAILED_PREFIX_IDENTITY_DOMAIN + canonical_json_bytes(material)
+    )
+
+
+def production_preserved_prefix_identity_sha256() -> str:
+    """Bind the exact preserved 000002 evidence family."""
+
+    material = {
+        "schema_version": _FAILED_PREFIX_IDENTITY_SCHEMA,
+        "generation": PRODUCTION_PRESERVED_GENERATION,
+        "tag_ref": PRODUCTION_PRESERVED_TAG_REF,
+        "tag_commit": PRODUCTION_PRESERVED_TAG_COMMIT,
+        "tag_tree": PRODUCTION_PRESERVED_TAG_TREE,
+        "permit_sha256": PRODUCTION_PRESERVED_PERMIT_SHA256,
+        "contract_sha256": PRODUCTION_PRESERVED_CONTRACT_SHA256,
+        "receipt_sha256": PRODUCTION_PRESERVED_RECEIPT_SHA256,
+        "staged_capsule_sha256": (
+            PRODUCTION_PRESERVED_STAGED_CAPSULE_SHA256
+        ),
     }
     return _sha(
         _FAILED_PREFIX_IDENTITY_DOMAIN + canonical_json_bytes(material)
@@ -614,7 +829,7 @@ def production_corrected_attempt_identity_sha256(
     package_manifest_sha256: str,
     controller_runtime_receipt_sha256: str,
 ) -> str:
-    """Bind P/R to the distinct 000003 paths, scopes, and resources."""
+    """Bind P/R to the distinct corrected 000004 namespace."""
 
     if (
         type(package_manifest_sha256) is not str
@@ -724,6 +939,7 @@ def _read_regular(
     gid: int,
     nlink: int,
     maximum: int,
+    allow_empty: bool = False,
 ) -> _StableFile:
     parent_fd = file_fd = -1
     nofollow = getattr(os, "O_NOFOLLOW", 0)
@@ -767,7 +983,7 @@ def _read_regular(
             or before.st_uid != uid
             or before.st_gid != gid
             or before.st_nlink != nlink
-            or before.st_size <= 0
+            or (before.st_size == 0 and not allow_empty)
             or before.st_size > maximum
             or _stable_identity(before) != _stable_identity(named)
         ):
@@ -812,6 +1028,7 @@ def _file_spec_matches(
     value: _StableFile,
     uid: int,
     gid: int,
+    mode: int,
 ) -> bool:
     identity = value.identity
     return bool(
@@ -821,7 +1038,7 @@ def _file_spec_matches(
         and spec.get("path") == str(path)
         and spec.get("sha256") == _sha(value.raw)
         and spec.get("size") == len(value.raw)
-        and spec.get("mode") == 0o400
+        and spec.get("mode") == mode
         and spec.get("uid") == uid
         and spec.get("gid") == gid
         and spec.get("nlink") == 1
@@ -830,7 +1047,7 @@ def _file_spec_matches(
     )
 
 
-def _verify_empty_directory(
+def _verify_directory(
     spec: object,
     *,
     role: str,
@@ -864,10 +1081,7 @@ def _verify_empty_directory(
             raise StagedPrefixDispositionSecurityError(
                 "staged_prefix_disposition_empty_directory_invalid"
             )
-        if os.listdir(descriptor) != []:
-            raise StagedPrefixDispositionHostStateError(
-                "staged_prefix_disposition_directory_not_empty"
-            )
+        entries = sorted(os.listdir(descriptor))
         if (
             type(spec) is not dict
             or set(spec) != _DIRECTORY_SPEC_KEYS
@@ -879,9 +1093,10 @@ def _verify_empty_directory(
             or spec.get("nlink") != before.st_nlink
             or spec.get("device") != before.st_dev
             or spec.get("inode") != before.st_ino
+            or spec.get("entries") != entries
         ):
             raise StagedPrefixDispositionIntegrityError(
-                "staged_prefix_disposition_empty_directory_invalid"
+                "staged_prefix_disposition_directory_evidence_mismatch"
             )
         after = os.fstat(descriptor)
         named_after = path.stat(follow_symlinks=False)
@@ -917,6 +1132,14 @@ def _path_absence_set(paths: StagedPrefixDispositionPaths) -> tuple[Path, ...]:
         paths.promotable_receipt_staging_path,
         paths.systemd_unit_path,
         paths.systemd_link_path,
+        paths.failed_capsule_staging_path,
+        Path(str(paths.failed_authority_state_path) + "-journal"),
+        Path(str(paths.failed_authority_state_path) + "-shm"),
+        Path(str(paths.failed_authority_state_path) + "-wal"),
+        paths.failed_promotable_receipt_path,
+        paths.failed_promotable_receipt_staging_path,
+        paths.failed_systemd_unit_path,
+        paths.failed_systemd_link_path,
         paths.corrected_capsule_path,
         paths.corrected_capsule_staging_path,
         paths.corrected_authority_state_path,
@@ -994,6 +1217,22 @@ def _allowed_commands(
     return frozenset(
         {
             _git_command(paths, "rev-parse", "--show-toplevel"),
+            _git_command(paths, "cat-file", "-t", PRODUCTION_PRESERVED_TAG_REF),
+            _git_command(
+                paths, "rev-parse", "--verify", PRODUCTION_PRESERVED_TAG_REF
+            ),
+            _git_command(
+                paths,
+                "rev-parse",
+                "--verify",
+                PRODUCTION_PRESERVED_TAG_REF + "^{commit}",
+            ),
+            _git_command(
+                paths,
+                "rev-parse",
+                "--verify",
+                PRODUCTION_PRESERVED_TAG_REF + "^{tree}",
+            ),
             _git_command(paths, "cat-file", "-t", expectation.old_tag_ref),
             _git_command(
                 paths, "rev-parse", "--verify", expectation.old_tag_ref
@@ -1046,6 +1285,24 @@ def _verify_git_tag(
         _git_command(paths, "rev-parse", "--show-toplevel"): (
             str(paths.repository_root) + "\n"
         ).encode("utf-8"),
+        _git_command(
+            paths, "cat-file", "-t", PRODUCTION_PRESERVED_TAG_REF
+        ): b"commit\n",
+        _git_command(
+            paths, "rev-parse", "--verify", PRODUCTION_PRESERVED_TAG_REF
+        ): (PRODUCTION_PRESERVED_TAG_COMMIT + "\n").encode("ascii"),
+        _git_command(
+            paths,
+            "rev-parse",
+            "--verify",
+            PRODUCTION_PRESERVED_TAG_REF + "^{commit}",
+        ): (PRODUCTION_PRESERVED_TAG_COMMIT + "\n").encode("ascii"),
+        _git_command(
+            paths,
+            "rev-parse",
+            "--verify",
+            PRODUCTION_PRESERVED_TAG_REF + "^{tree}",
+        ): (PRODUCTION_PRESERVED_TAG_TREE + "\n").encode("ascii"),
         _git_command(paths, "cat-file", "-t", expectation.old_tag_ref): b"commit\n",
         _git_command(paths, "rev-parse", "--verify", expectation.old_tag_ref): (
             expectation.old_tag_commit + "\n"
@@ -1202,6 +1459,10 @@ def _load_contract(
     contract = _canonical_object(
         stable.raw, "staged_prefix_disposition_contract_invalid"
     )
+    preserved = contract.get("preserved_predecessor")
+    preserved_tag = (
+        preserved.get("tag") if type(preserved) is dict else None
+    )
     failed = contract.get("failed_attempt")
     tag = failed.get("tag") if type(failed) is dict else None
     successor = contract.get("corrected_successor")
@@ -1214,6 +1475,18 @@ def _load_contract(
         or contract.get("durable_contract_path")
         != str(paths.durable_contract_path)
         or contract.get("tombstone_path") != str(paths.tombstone_path)
+        or type(preserved) is not dict
+        or set(preserved) != _PRESERVED_PREDECESSOR_KEYS
+        or preserved.get("generation") != PRODUCTION_PRESERVED_GENERATION
+        or type(preserved_tag) is not dict
+        or set(preserved_tag) != _TAG_KEYS
+        or preserved_tag
+        != {
+            "ref": PRODUCTION_PRESERVED_TAG_REF,
+            "object_type": "commit",
+            "commit": PRODUCTION_PRESERVED_TAG_COMMIT,
+            "tree": PRODUCTION_PRESERVED_TAG_TREE,
+        }
         or type(failed) is not dict
         or set(failed) != _FAILED_ATTEMPT_KEYS
         or failed.get("generation") != PRODUCTION_FAILED_GENERATION
@@ -1241,44 +1514,69 @@ def _load_contract(
     return contract, stable
 
 
-def _evidence_paths(
+def _preserved_evidence_paths(
     paths: StagedPrefixDispositionPaths,
 ) -> Mapping[str, Path]:
     return MappingProxyType(
         {
-            "old_contract": paths.old_contract_path,
-            "old_permit": paths.old_permit_path,
-            "old_pre_effect_receipt": paths.old_pre_effect_receipt_path,
-            "staged_capsule": paths.staged_capsule_path,
+            "preserved_contract": paths.preserved_contract_path,
+            "preserved_permit": paths.preserved_permit_path,
+            "preserved_pre_effect_receipt": (
+                paths.preserved_pre_effect_receipt_path
+            ),
+            "preserved_staged_capsule": paths.preserved_staged_capsule_path,
         }
     )
 
 
-def _verify_evidence(
-    contract: Mapping[str, object],
+def _failed_evidence_paths(
     paths: StagedPrefixDispositionPaths,
+) -> Mapping[str, Path]:
+    return MappingProxyType(
+        {
+            "failed_contract": paths.old_contract_path,
+            "failed_permit": paths.old_permit_path,
+            "failed_store_spec_v2_tombstone": (
+                paths.old_pre_effect_receipt_path
+            ),
+            "failed_capsule_v4": paths.staged_capsule_path,
+            "failed_authority_state_v3": paths.failed_authority_state_path,
+            "failed_execution_journal": paths.failed_execution_journal_path,
+            "failed_execution_resources": (
+                paths.failed_execution_resources_path
+            ),
+        }
+    )
+
+
+def _verify_evidence_files(
+    attempt: Mapping[str, object],
+    paths: StagedPrefixDispositionPaths,
+    *,
+    roles: tuple[str, ...],
+    evidence_paths: Mapping[str, Path],
 ) -> Mapping[str, _StableFile]:
-    failed = contract["failed_attempt"]
-    assert isinstance(failed, dict)
-    specs = failed["evidence_files"]
+    specs = attempt["evidence_files"]
     if (
         type(specs) is not list
         or [item.get("role") if type(item) is dict else None for item in specs]
-        != list(_FILE_ROLES)
+        != list(roles)
     ):
         raise StagedPrefixDispositionIntegrityError(
             "staged_prefix_disposition_evidence_contract_invalid"
         )
     result: dict[str, _StableFile] = {}
-    for spec, role in zip(specs, _FILE_ROLES, strict=True):
-        path = _evidence_paths(paths)[role]
+    for spec, role in zip(specs, roles, strict=True):
+        path = evidence_paths[role]
+        mode, allow_empty = _FILE_MODE_AND_EMPTY[role]
         value = _read_regular(
             path,
-            mode=0o400,
+            mode=mode,
             uid=paths.expected_uid,
             gid=paths.expected_gid,
             nlink=1,
             maximum=MAX_EVIDENCE_BYTES,
+            allow_empty=allow_empty,
         )
         if not _file_spec_matches(
             spec,
@@ -1287,6 +1585,7 @@ def _verify_evidence(
             value=value,
             uid=paths.expected_uid,
             gid=paths.expected_gid,
+            mode=mode,
         ):
             raise StagedPrefixDispositionIntegrityError(
                 "staged_prefix_disposition_evidence_mismatch"
@@ -1295,34 +1594,87 @@ def _verify_evidence(
     return MappingProxyType(result)
 
 
-def _verify_empty_directories(
-    contract: Mapping[str, object],
+def _verify_evidence_directories(
+    attempt: Mapping[str, object],
     paths: StagedPrefixDispositionPaths,
+    *,
+    roles: tuple[str, ...],
+    directory_paths: Mapping[str, Path],
 ) -> Mapping[str, _StableDirectory]:
-    specs = contract["empty_directories"]
+    specs = attempt["evidence_directories"]
     if (
         type(specs) is not list
         or [item.get("role") if type(item) is dict else None for item in specs]
-        != list(_DIRECTORY_ROLES)
+        != list(roles)
     ):
         raise StagedPrefixDispositionIntegrityError(
             "staged_prefix_disposition_directory_contract_invalid"
         )
-    directory_paths = {
-        "executions_v2": paths.executions_root,
-        "store_secret": paths.store_secret_root,
-    }
     result = {
-        role: _verify_empty_directory(
+        role: _verify_directory(
             spec,
             role=role,
             path=directory_paths[role],
             uid=paths.expected_uid,
             gid=paths.expected_gid,
         )
-        for spec, role in zip(specs, _DIRECTORY_ROLES, strict=True)
+        for spec, role in zip(specs, roles, strict=True)
     }
     return MappingProxyType(result)
+
+
+def _verify_all_evidence(
+    contract: Mapping[str, object],
+    paths: StagedPrefixDispositionPaths,
+) -> tuple[
+    Mapping[str, _StableFile],
+    Mapping[str, _StableDirectory],
+    Mapping[str, _StableFile],
+    Mapping[str, _StableDirectory],
+]:
+    preserved = contract["preserved_predecessor"]
+    failed = contract["failed_attempt"]
+    assert isinstance(preserved, dict)
+    assert isinstance(failed, dict)
+    preserved_directories = MappingProxyType(
+        {
+            "preserved_executions_v2": paths.preserved_executions_root,
+            "preserved_store_secret": paths.preserved_secret_root,
+        }
+    )
+    failed_directories = MappingProxyType(
+        {
+            "failed_executions_v3": paths.executions_root,
+            "failed_execution": paths.failed_execution_root,
+            "failed_store_secret": paths.store_secret_root,
+        }
+    )
+    return (
+        _verify_evidence_files(
+            preserved,
+            paths,
+            roles=_PRESERVED_FILE_ROLES,
+            evidence_paths=_preserved_evidence_paths(paths),
+        ),
+        _verify_evidence_directories(
+            preserved,
+            paths,
+            roles=_PRESERVED_DIRECTORY_ROLES,
+            directory_paths=preserved_directories,
+        ),
+        _verify_evidence_files(
+            failed,
+            paths,
+            roles=_FAILED_FILE_ROLES,
+            evidence_paths=_failed_evidence_paths(paths),
+        ),
+        _verify_evidence_directories(
+            failed,
+            paths,
+            roles=_FAILED_DIRECTORY_ROLES,
+            directory_paths=failed_directories,
+        ),
+    )
 
 
 def _tombstone_for(
@@ -1351,11 +1703,17 @@ def _tombstone_for(
         "failed_prefix_identity_sha256": (
             production_failed_prefix_identity_sha256()
         ),
+        "preserved_predecessor_identity_sha256": (
+            production_preserved_prefix_identity_sha256()
+        ),
+        "preserved_predecessor_evidence_sha256": _sha(
+            canonical_json_bytes(contract["preserved_predecessor"])
+        ),
         "failed_evidence_files_sha256": _sha(
             canonical_json_bytes(failed["evidence_files"])
         ),
-        "empty_directories_sha256": _sha(
-            canonical_json_bytes(contract["empty_directories"])
+        "failed_evidence_directories_sha256": _sha(
+            canonical_json_bytes(failed["evidence_directories"])
         ),
         "absent_resources_sha256": _sha(
             canonical_json_bytes(contract["absent_resources"])
@@ -1543,6 +1901,10 @@ def execute_staged_prefix_disposition(
             or command_runner is not None
             or expectation.old_tag_ref != PRODUCTION_OLD_TAG_REF
             or expectation.contract_sha256 != PRODUCTION_CONTRACT_SHA256
+            or PRODUCTION_CONTRACT_SHA256 is None
+            or expectation.corrected_package_manifest_sha256 == "0" * 64
+            or expectation.corrected_controller_runtime_receipt_sha256
+            == "0" * 64
             or expectation.old_tag_commit != PRODUCTION_OLD_TAG_COMMIT
             or expectation.old_tag_tree != PRODUCTION_OLD_TAG_TREE
             or expectation.failed_package_manifest_sha256
@@ -1583,8 +1945,7 @@ def execute_staged_prefix_disposition(
             contract, contract_before = _load_contract(paths, expectation)
             expected_tombstone = _tombstone_for(contract, expectation)
             existing = _read_tombstone(paths, expected_tombstone)
-            evidence_before = _verify_evidence(contract, paths)
-            directories_before = _verify_empty_directories(contract, paths)
+            evidence_before = _verify_all_evidence(contract, paths)
             _verify_git_tag(paths, expectation, runner=selected_runner)
             absence_sha256 = _verify_absence(
                 contract["absent_resources"],
@@ -1605,15 +1966,13 @@ def execute_staged_prefix_disposition(
             contract_after_document, contract_after = _load_contract(
                 paths, expectation
             )
-            evidence_after = _verify_evidence(contract_after_document, paths)
-            directories_after = _verify_empty_directories(
+            evidence_after = _verify_all_evidence(
                 contract_after_document, paths
             )
             _verify_git_tag(paths, expectation, runner=selected_runner)
             if (
                 contract_after != contract_before
                 or evidence_after != evidence_before
-                or directories_after != directories_before
                 or _verify_absence(
                     contract_after_document["absent_resources"],
                     paths=paths,
@@ -1647,5 +2006,6 @@ __all__ = [
     "production_corrected_attempt_identity_sha256",
     "production_disposition_paths",
     "production_failed_prefix_identity_sha256",
+    "production_preserved_prefix_identity_sha256",
     "verify_staged_prefix_tombstone",
 ]

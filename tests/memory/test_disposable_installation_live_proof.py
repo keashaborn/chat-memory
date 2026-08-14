@@ -27,10 +27,15 @@ from tools.governed_memory_validation import (
 from tools.governed_memory_validation import (
     run_disposable_installation_live_proof as proof,
 )
+from tools.governed_memory_install import linux_store_effects
 from tools.governed_memory_install.execution_lock import (
     ExecutionLockBusyError,
     ExecutionLockSecurityError,
     GlobalExecutionLock,
+)
+from tools.governed_memory_install.linux_plan import (
+    ExecutionBinding,
+    bind_store_spec,
 )
 
 
@@ -67,7 +72,7 @@ def disposition_receipt() -> dict[str, object]:
         "contract_sha256": DISPOSITION_CONTRACT,
         "failed_prefix_identity_sha256": PREDECESSOR_ATTEMPT,
         "corrected_attempt_identity_sha256": successor,
-        "corrected_generation": "000003",
+        "corrected_generation": "000004",
         "failed_evidence_preserved_in_place": True,
         "no_store_or_service_effects_proven": True,
         "deletion_performed": False,
@@ -206,6 +211,56 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
                 "resume-rollback",
                 "verify-absence",
             ),
+        )
+
+    def test_resolved_store_spec_is_exact_dict_for_downstream_validator(
+        self,
+    ) -> None:
+        static_spec = json.loads(
+            (
+                Path(__file__).resolve().parents[2]
+                / "ops/governed_memory/installation/store_spec-v4.json"
+            ).read_text(encoding="ascii")
+        )
+        reconstructed = bind_store_spec(
+            static_spec,
+            ExecutionBinding(
+                binding_sha256="9" * 64,
+                authorization_id="test-authority",
+                authorization_nonce_sha256="8" * 64,
+                execution_id="7" * 64,
+                package_manifest_sha256=PACKAGE,
+            ),
+        )
+        with (
+            mock.patch.object(
+                proof,
+                "resume_dormant_store_install_execution_binding",
+                return_value=mock.sentinel.claimed_binding,
+            ),
+            mock.patch.object(
+                proof,
+                "reconstruct_resolved_store_spec_from_claimed_binding",
+                return_value=reconstructed,
+            ),
+            mock.patch.object(
+                proof,
+                "_read_optional_root_regular_no_follow",
+                return_value=None,
+            ),
+        ):
+            resolved = proof._resolved_store_spec(
+                context(),
+                state=mock.sentinel.authority_state,
+                held_lock=mock.sentinel.held_lock,
+            )
+
+        self.assertIs(type(resolved), dict)
+        self.assertEqual(
+            linux_store_effects.validate_store_spec(
+                resolved, allow_placeholders=False
+            ),
+            reconstructed,
         )
 
     def test_cooperative_boundary_stop_is_fixed_and_aborts_before_next_effect(
@@ -4976,7 +5031,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
 
     def test_empty_pre_effect_install_journal_selects_resume(self) -> None:
         journal = Path(
-            "/var/lib/governed-memory-controller/executions-v3/"
+            "/var/lib/governed-memory-controller/executions-v4/"
             + INSTALL_EXECUTION
             + "/journal.jsonl"
         )
@@ -5020,7 +5075,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
 
     def test_nonempty_install_journal_remains_strict(self) -> None:
         journal = Path(
-            "/var/lib/governed-memory-controller/executions-v3/"
+            "/var/lib/governed-memory-controller/executions-v4/"
             + INSTALL_EXECUTION
             + "/journal.jsonl"
         )

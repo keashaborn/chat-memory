@@ -655,7 +655,7 @@ def build_exact_recovery_capsule(
     )
     install_payload = {
         "schema_version": authority.AUTHORIZATION_PAYLOAD_SCHEMA_VERSION,
-        "authorization_id": "phase9-disposable-live-install-auth-000003",
+        "authorization_id": "phase9-disposable-live-install-auth-000004",
         "authorization_namespace": runner.AUTHORIZATION_NAMESPACE,
         "thread_id": runner.THREAD_ID,
         "scope_id": runner.INSTALL_SCOPE_ID,
@@ -2430,7 +2430,7 @@ def _require_production_staged_prefix_disposition(
     *,
     inputs: runner.ProofInputs,
 ) -> Mapping[str, object]:
-    """Require the exact failed-prefix fence before 000003 can mutate state."""
+    """Require the exact failed-prefix fence before 000004 can mutate state."""
 
     try:
         paths = staged_prefix_disposition.production_disposition_paths()

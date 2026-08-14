@@ -124,7 +124,7 @@ class FakePrimitive:
             raise RuntimeError("synthetic endpoint failure")
         return EndpointObservation(
             "127.0.0.1",
-            55434,
+            55435,
             "postgres",
             "governed_memory",
             "governed_memory_bootstrap",

@@ -17,7 +17,7 @@ _PREIMPORT_CONTROLLER_PYTHON = (
 )
 _PREIMPORT_GIT = "/usr/bin/git"
 _PREIMPORT_EXPECTED_CANDIDATE_REF = (
-    "refs/tags/governed-memory-phase9j-pre-effect-disposition-000003"
+    "refs/tags/governed-memory-phase9j-pre-effect-disposition-000004"
 )
 _PREIMPORT_CONTROLLER_RELATIVE = (
     "tools/governed_memory_validation/"

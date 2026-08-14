@@ -68,7 +68,7 @@ def build_verified_install_package(
     artifacts: dict[str, bytes] = {
         "ops/governed_memory/installation/current/contract.json": canonical(contract),
         "ops/governed_memory/installation/current/controller_plan.json": canonical(plan),
-        "ops/governed_memory/installation/store_spec-v3.json": canonical(
+        "ops/governed_memory/installation/store_spec-v4.json": canonical(
             {"stores": "fresh-empty"}
         ),
         "tools/governed_memory_install/resource_identity.py": b"synthetic identity implementation\n",
