@@ -10,11 +10,25 @@ import unittest
 from uuid import UUID
 
 from rag_engine.governed_memory.contracts import ContractViolation
+from rag_engine.governed_memory.response_postgres import (
+    SuccessorResponsePostgresError,
+)
+from rag_engine.governed_memory.response_provider import (
+    SuccessorResponseConfigurationError,
+)
 from rag_engine.governed_memory.response_contracts import (
     SuccessorMemoryAssemblyV1,
     SuccessorPromptReferenceContextBlockV1,
     SuccessorPromptReferenceFragmentV1,
     SuccessorResponseRequestV1,
+)
+from rag_engine.governed_memory.response_provenance import (
+    SuccessorMemoryAnswerProvenanceV1,
+    SuccessorMemoryNotApplicableReason,
+)
+from rag_engine.governed_memory.runtime.openai_adapters import (
+    OpenAIOutcomeUnknownFailure,
+    OpenAITerminalFailure,
 )
 from rag_engine.response_composition_root_v0_2 import GovernedMemoryAssemblyV1
 from rag_engine.response_conversation_snapshot_v1 import (
@@ -32,6 +46,7 @@ THREAD = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 REQUEST_ID = "successor-chat-adapter-request"
 QUERY = "Which synthetic interface theme do I prefer?"
 CONTENT = "Synthetic owner prefers the cobalt interface theme."
+ANSWER = UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
 
 
 def _canonical_model_bytes(value: object) -> bytes:
@@ -97,7 +112,45 @@ class RecordingCoreProvider:
         raise AssertionError("persistence is outside this translation test")
 
 
+class FailingCoreProvider:
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+        self.discarded = False
+        self.persist_called = False
+
+    @property
+    def has_selected_claims(self) -> bool:
+        return False
+
+    def prepare(
+        self,
+        *,
+        request: SuccessorResponseRequestV1,
+    ) -> SuccessorMemoryAssemblyV1:
+        del request
+        raise self.error
+
+    def discard_selected_state(self) -> None:
+        self.discarded = True
+
+    async def persist_dispatched_answer_binding(self, **_kwargs: object) -> object:
+        self.persist_called = True
+        raise AssertionError("degraded persistence reached unavailable provider")
+
+
 class SuccessorMemoryChatAdapterTests(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def host_input() -> tuple[object, ResponsePolicySignalsV0_2]:
+        return (
+            create_current_only_conversation_snapshot_v1(
+                authenticated_actor_user_id=ACTOR,
+                thread_id=THREAD,
+                current_request_id=REQUEST_ID,
+                current_message=QUERY,
+            ),
+            ResponsePolicySignalsV0_2(),
+        )
+
     async def test_validated_host_models_translate_to_exact_successor_wire(self) -> None:
         core = RecordingCoreProvider()
         adapter = SuccessorMemoryChatAdapterV1(core)  # type: ignore[arg-type]
@@ -158,6 +211,73 @@ class SuccessorMemoryChatAdapterTests(unittest.IsolatedAsyncioTestCase):
                 trusted_policy_signals=object(),  # type: ignore[arg-type]
             )
         self.assertEqual(core.requests, [])
+
+    async def test_runtime_dependency_failures_degrade_without_memory(self) -> None:
+        failures = (
+            SuccessorResponsePostgresError(
+                "response_memory_postgres_unavailable"
+            ),
+            SuccessorResponseConfigurationError(
+                "successor_response_postgres_unavailable"
+            ),
+            ContractViolation("qdrant_response_transport_unavailable"),
+            OpenAIOutcomeUnknownFailure("provider_timeout_after_dispatch"),
+        )
+        for failure in failures:
+            with self.subTest(failure=type(failure).__name__):
+                core = FailingCoreProvider(failure)
+                adapter = SuccessorMemoryChatAdapterV1(core)  # type: ignore[arg-type]
+                snapshot, signals = self.host_input()
+                assembly = await adapter.prepare(
+                    authenticated_actor_user_id=ACTOR,
+                    conversation_snapshot=snapshot,  # type: ignore[arg-type]
+                    trusted_policy_signals=signals,
+                )
+                self.assertIsNone(assembly.successor_memory_context_block)
+                self.assertFalse(adapter.has_selected_claims)
+                self.assertTrue(core.discarded)
+                provenance = await adapter.persist_dispatched_answer_binding(
+                    answer_id=ANSWER,
+                    prompt_sha256="c" * 64,
+                    outbound_request_bytes=b'{"messages":[]}',
+                )
+                self.assertIsInstance(
+                    provenance,
+                    SuccessorMemoryAnswerProvenanceV1,
+                )
+                self.assertEqual(provenance.binding_outcome, "not_applicable")
+                self.assertIs(
+                    provenance.not_applicable_reason,
+                    SuccessorMemoryNotApplicableReason.RUNTIME_UNAVAILABLE,
+                )
+                self.assertEqual(provenance.references, ())
+                self.assertFalse(core.persist_called)
+
+    async def test_security_and_contract_failures_remain_fail_closed(self) -> None:
+        failures = (
+            SuccessorResponsePostgresError(
+                "response_memory_owner_context_mismatch"
+            ),
+            SuccessorResponseConfigurationError(
+                "successor_response_runtime_configuration_invalid"
+            ),
+            ContractViolation("qdrant_response_transport_invalid"),
+            OpenAITerminalFailure("provider_auth_rejected"),
+        )
+        for failure in failures:
+            with self.subTest(failure=str(failure)):
+                core = FailingCoreProvider(failure)
+                adapter = SuccessorMemoryChatAdapterV1(core)  # type: ignore[arg-type]
+                snapshot, signals = self.host_input()
+                with self.assertRaises(type(failure)) as raised:
+                    await adapter.prepare(
+                        authenticated_actor_user_id=ACTOR,
+                        conversation_snapshot=snapshot,  # type: ignore[arg-type]
+                        trusted_policy_signals=signals,
+                    )
+                self.assertIs(raised.exception, failure)
+                self.assertFalse(core.discarded)
+                self.assertFalse(core.persist_called)
 
 
 class SuccessorRouterImportTests(unittest.TestCase):

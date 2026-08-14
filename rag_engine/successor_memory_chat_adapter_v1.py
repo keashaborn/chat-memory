@@ -11,17 +11,52 @@ from uuid import UUID
 from pydantic import BaseModel
 
 from rag_engine.governed_memory.contracts import ContractViolation, require_uuid
+from rag_engine.governed_memory.response_postgres import (
+    SuccessorResponsePostgresError,
+)
+from rag_engine.governed_memory.response_provider import (
+    InactiveSuccessorMemoryProviderV1,
+    SuccessorResponseConfigurationError,
+)
 from rag_engine.governed_memory.response_contracts import (
     SuccessorMemoryAssemblyV1,
     SuccessorResponseRequestV1,
 )
 from rag_engine.governed_memory.response_provenance import (
     SuccessorMemoryAnswerProvenanceV1,
+    SuccessorMemoryNotApplicableReason,
+)
+from rag_engine.governed_memory.runtime.openai_adapters import (
+    OpenAIOutcomeUnknownFailure,
 )
 from rag_engine.prompt_assembler_v1 import PromptReferenceContextBlockV1
 from rag_engine.response_composition_root_v0_2 import GovernedMemoryAssemblyV1
 from rag_engine.response_conversation_snapshot_v1 import ConversationSnapshotV1
 from rag_engine.response_policy_v0_2 import ResponsePolicySignalsV0_2
+
+
+_RUNTIME_UNAVAILABLE_CONFIGURATION_CODES = frozenset(
+    {"successor_response_postgres_unavailable"}
+)
+_RUNTIME_UNAVAILABLE_CONTRACT_CODES = frozenset(
+    {"qdrant_response_transport_unavailable"}
+)
+_RUNTIME_UNAVAILABLE_POSTGRES_CODES = frozenset(
+    {"response_memory_postgres_unavailable"}
+)
+
+
+def _is_runtime_unavailable(error: BaseException) -> bool:
+    if isinstance(error, OpenAIOutcomeUnknownFailure):
+        return True
+    if isinstance(error, SuccessorResponsePostgresError):
+        return str(error) in _RUNTIME_UNAVAILABLE_POSTGRES_CODES
+    if isinstance(error, SuccessorResponseConfigurationError):
+        return str(error) in _RUNTIME_UNAVAILABLE_CONFIGURATION_CODES
+    return (
+        isinstance(error, ContractViolation)
+        and error.code in _RUNTIME_UNAVAILABLE_CONTRACT_CODES
+    )
 
 
 def _canonical_json_bytes(value: BaseModel) -> bytes:
@@ -75,12 +110,18 @@ class SuccessorMemoryChatAdapterV1:
         if core_provider is None:
             raise ContractViolation("response_memory_adapter_required")
         self._core_provider = core_provider
+        self._degraded_provider: InactiveSuccessorMemoryProviderV1 | None = None
 
     @property
     def has_selected_claims(self) -> bool:
+        if self._degraded_provider is not None:
+            return False
         return self._core_provider.has_selected_claims
 
     def discard_selected_state(self) -> None:
+        if self._degraded_provider is not None:
+            self._degraded_provider.discard_selected_state()
+            return
         self._core_provider.discard_selected_state()
 
     async def prepare(
@@ -117,9 +158,19 @@ class SuccessorMemoryChatAdapterV1:
                 _canonical_json_bytes(policy_signals)
             ).hexdigest(),
         )
-        prepared = self._core_provider.prepare(request=request)
-        if inspect.isawaitable(prepared):
-            prepared = await prepared
+        try:
+            prepared = self._core_provider.prepare(request=request)
+            if inspect.isawaitable(prepared):
+                prepared = await prepared
+        except Exception as error:
+            if not _is_runtime_unavailable(error):
+                raise
+            self._core_provider.discard_selected_state()
+            degraded = InactiveSuccessorMemoryProviderV1(
+                SuccessorMemoryNotApplicableReason.RUNTIME_UNAVAILABLE
+            )
+            prepared = degraded.prepare(request=request)
+            self._degraded_provider = degraded
         assembly = _wire_revalidate(
             SuccessorMemoryAssemblyV1,
             prepared,
@@ -145,7 +196,8 @@ class SuccessorMemoryChatAdapterV1:
         prompt_sha256: str,
         outbound_request_bytes: bytes,
     ) -> SuccessorMemoryAnswerProvenanceV1:
-        return await self._core_provider.persist_dispatched_answer_binding(
+        provider = self._degraded_provider or self._core_provider
+        return await provider.persist_dispatched_answer_binding(
             answer_id=answer_id,
             prompt_sha256=prompt_sha256,
             outbound_request_bytes=outbound_request_bytes,

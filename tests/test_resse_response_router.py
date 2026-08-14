@@ -287,7 +287,26 @@ class ResseResponseRouterTests(unittest.TestCase):
                     expected.value,
                 )
                 self.assertEqual(result["references"], [])
-        self.assertEqual(observed, set(SuccessorMemoryNotApplicableReason))
+        self.assertEqual(
+            observed,
+            set(SuccessorMemoryNotApplicableReason)
+            - {SuccessorMemoryNotApplicableReason.RUNTIME_UNAVAILABLE},
+        )
+        degraded = build_successor_not_applicable_provenance_v1(
+            reason=SuccessorMemoryNotApplicableReason.RUNTIME_UNAVAILABLE,
+            answer_id=UUID("90000000-0000-4000-8000-000000000001"),
+            prompt_sha256="a" * 64,
+            outbound_request_bytes=b'{"messages":[]}',
+        )
+        degraded_result = response_memory_provenance_for_mode(
+            mode=EXCLUSIVE_MODE_SUCCESSOR,
+            successor_provenance=degraded,
+        )
+        self.assertEqual(degraded_result["binding_outcome"], "not_applicable")
+        self.assertEqual(
+            degraded_result["not_applicable_reason"],
+            "runtime_unavailable",
+        )
         self.assertIs(
             successor_not_applicable_reason(
                 no_store=True,

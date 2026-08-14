@@ -29,6 +29,7 @@ class SuccessorMemoryNotApplicableReason(str, Enum):
     ATTACHMENT = "attachment"
     VOICE = "voice"
     WEB_SEARCH = "web_search"
+    RUNTIME_UNAVAILABLE = "runtime_unavailable"
 
 
 class SuccessorMemoryAnswerReferenceV1(BaseModel):
