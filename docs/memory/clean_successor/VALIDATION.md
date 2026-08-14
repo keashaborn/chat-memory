@@ -34,7 +34,7 @@ PostgreSQL, Qdrant, systemd, process-crash recovery, or installation.
 
 The external Phase 9J proof is a separate, explicitly authorized operation on
 **seebx**. The lease-guarded manager is the sole public entrypoint. Do not
-invoke the permit publisher, pre-effect disposition executor, substrate
+invoke the permit publisher, staged-prefix disposition executor, substrate
 bootstrap, proof issuer, or sealed runner directly. From the exact clean tagged
 candidate, invoke the manager with the pinned Phase 9J interpreter and no arguments:
 
@@ -43,7 +43,7 @@ test -n "${CHAT_MEMORY_LEASE_ID:-}"
 test -n "${CODEX_TASK_ID:-}"
 test -n "${CODEX_THREAD_ID:-}"
 sudo --preserve-env=CHAT_MEMORY_LEASE_ID,CODEX_TASK_ID,CODEX_THREAD_ID \
-  /opt/governed-memory-controller/runtimes/7de191f42a1c14b6bc2c29b3e7b425bd1b2593f7de95e03af7d2f93ff5d4a53b/bin/python \
+  /opt/governed-memory-controller/runtimes/9dda4d93a1bcfecf4305736feffafb578e4629cd32594cec6b2d6d72cb90a4d3/bin/python \
   -I -B "$PWD/tools/governed_memory_validation/execute_phase9_disposable_live_proof_controller.py"
 ```
 
@@ -52,7 +52,8 @@ exact candidate and task. Broad `sudo -E` is not permitted.
 
 The manager validates the production change lease, publishes and rereads the
 root-owned permit, requires the fixed tagged candidate and exact source blobs,
-executes the pre-effect disposition, bootstraps only the fixed empty substrate,
+executes the corrected 000003 staged-prefix disposition, bootstraps only the
+fixed 000003 empty substrate,
 and launches the issuer for one disposable live proof. The permit authorizes
 only that disposition-plus-proof chain; it does not authorize activation,
 production-data access, provider calls, or any production, user, chat,
@@ -72,8 +73,9 @@ FD 198, active lease, and held fixed global lock immediately before mutation.
 This is not a malicious same-UID confinement boundary and must not be reused
 as Phase 10 activation authority.
 
-The short permit/disposition children may finish their crash-consistent,
-create-once root metadata write if the manager dies during that atomic step;
+The short permit/staged-prefix-disposition children may finish their
+crash-consistent, create-once root metadata write if the manager dies during
+that atomic step;
 they cannot invoke the effectful runner. If the issuer or host cannot execute
 recovery at all, the retained capsule is manual-retry evidence, not proof of
 automatic host-death cleanup. If manager-side receipt verification disagrees

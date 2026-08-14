@@ -65,7 +65,7 @@ EXPECTED_CURRENT_RUNTIME_RECEIPT_SHA256 = (
     "25ca53e683e53f79b726909ef64bc8afad30269cce3f59804cf66335667a8108"
 )
 EXPECTED_PHASE9J_CONTROLLER_RUNTIME_RELEASE_RECEIPT_SHA256 = (
-    "7de191f42a1c14b6bc2c29b3e7b425bd1b2593f7de95e03af7d2f93ff5d4a53b"
+    "9dda4d93a1bcfecf4305736feffafb578e4629cd32594cec6b2d6d72cb90a4d3"
 )
 EXPECTED_HISTORICAL_PHASE7C_RUNTIME_RECEIPT_SHA256 = (
     "210cd0fe1bdaf60089668b3d2c8d37be760ed9b867e0909d4e83ebcc204e84b2"
@@ -688,19 +688,19 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         self.assertEqual(current["package_artifact_count"], 76)
         self.assertEqual(
             current["package_manifest_sha256"],
-            "2e5da1091b456b705d955c5cc3a119e507116f892de0bcb92017185ca4ed2e89",
+            "5addc8e4ab40b6bc700fde57b67579f8caa3d21077715bcdaf61d5714b52743e",
         )
         self.assertEqual(
             current["contract_canonical_sha256"],
-            "d59c0328af94f241f4765e751bdf28a1a6c3d7c6ab841ac3a3e7d6fe3be4a9ea",
+            "fb2aed56c2447a22af849080dc159b0c46f96693887d44b29ca09f3168380898",
         )
         self.assertEqual(
             current["controller_plan_canonical_sha256"],
-            "b66fc26740e48013a4d7818442fa773baac4738ddcd06e31e3c34a777c2f8253",
+            "d502d29682dbdf511a07d7534cec6a8f14c73e44492b08f0fad29157639e246c",
         )
         self.assertEqual(
             current["execution_contract_canonical_sha256"],
-            "76e951689cb8ef77a17c01a9e3f4cbe4df69363d9d41c6afe0755be3000238c1",
+            "975421b4e1fe2ed9e436144f37bdd68979b90a373b48186a5a2aa646b189f09f",
         )
         self.assertEqual(
             current["controller_runtime_contract_canonical_sha256"],
@@ -712,7 +712,7 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         )
         self.assertEqual(
             current["postgres_native_stage_contract_canonical_sha256"],
-            "82f35d96260fdef0a7ba959499af8563d38a5c681ad2bb864ec413528778d8d8",
+            "bec461c1166775817dc4c3ffce7c09195f7d758942ca3d63ee3a875f8d5b9f2d",
         )
         self.assertEqual(current["store_migration_file_count"], 9)
         self.assertTrue(current["static_package_verification_complete"])
@@ -1198,7 +1198,23 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         self.assertEqual(_file_names(PACKAGE) & {p.name for p in PACKAGE.glob("*.py")}, EXPECTED_PACKAGE_FILES)
         self.assertEqual(_file_names(RUNTIME_PACKAGE), EXPECTED_RUNTIME_FILES)
         self.assertEqual(_file_names(PROVIDER_ASSETS), EXPECTED_PROVIDER_ASSETS)
-        self.assertEqual(_file_names(TESTS), EXPECTED_TEST_FILES)
+        test_files = _file_names(TESTS)
+        self.assertEqual(test_files, EXPECTED_TEST_FILES)
+        self.assertTrue(
+            {
+                "test_execute_phase9_staged_prefix_disposition.py",
+                "test_publish_phase9_staged_prefix_permit.py",
+                "test_staged_prefix_disposition.py",
+            }
+            <= test_files
+        )
+        self.assertTrue(
+            {
+                "test_execute_phase9_pre_effect_disposition.py",
+                "test_pre_effect_disposition.py",
+                "test_publish_phase9_pre_effect_permit.py",
+            }.isdisjoint(test_files)
+        )
         self.assertEqual(
             _file_names(INTEGRATION_TESTS),
             {
@@ -1208,8 +1224,9 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
                 "test_governed_memory_http_vertical_slice.py",
             },
         )
+        validation_tool_files = _file_names(VALIDATION_TOOLS)
         self.assertEqual(
-            _file_names(VALIDATION_TOOLS),
+            validation_tool_files,
             {
                 "bootstrap_phase9_disposable_store_substrate.py",
                 "durable_live_proof_receipt.py",
@@ -1232,6 +1249,22 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
                 "verify_store_migration_manifest.py",
                 "verify_migration_manifest.py",
             },
+        )
+        self.assertTrue(
+            {
+                "execute_phase9_staged_prefix_disposition.py",
+                "generate_staged_prefix_disposition_contract.py",
+                "publish_phase9_staged_prefix_permit.py",
+                "staged_prefix_disposition.py",
+            }
+            <= validation_tool_files
+        )
+        self.assertTrue(
+            {
+                "execute_phase9_pre_effect_disposition.py",
+                "pre_effect_disposition.py",
+                "publish_phase9_pre_effect_permit.py",
+            }.isdisjoint(validation_tool_files)
         )
         self.assertEqual(
             _file_names(RELEASE_TOOLS),
