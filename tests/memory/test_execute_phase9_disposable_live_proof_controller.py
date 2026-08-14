@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import os
 from pathlib import Path
 import signal
+import stat
 import subprocess
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -286,6 +290,240 @@ class Phase9DisposableLiveProofControllerTests(unittest.TestCase):
         for key, value in ENVIRONMENT.items():
             self.assertEqual(call.kwargs["env"][key], value)
         self.assertEqual(close.call_args_list, [mock.call(198), mock.call(199)])
+
+    def test_nonzero_step_preserves_only_closed_child_error_evidence(self) -> None:
+        error_code = "phase9_staged_prefix_disposition_contract_invalid"
+        stderr = (error_code + "\n").encode("ascii")
+        process = FakeProcess([(b"", stderr)], returncode=1)
+        command_runner = FakeCommandRunner(process)
+
+        with self.assertRaises(subject._SubordinateStepFailure) as observed:
+            subject._run_step(
+                subject.DISPOSITION_RELATIVE,
+                (),
+                timeout=120,
+                environment=ENVIRONMENT,
+                command_runner=command_runner,
+            )
+
+        failure = observed.exception
+        self.assertEqual(failure.error_code, error_code)
+        self.assertEqual(failure.exit_status, 1)
+        self.assertEqual(failure.stdout_size_bytes, 0)
+        self.assertEqual(failure.stderr_size_bytes, len(stderr))
+        self.assertEqual(failure.stderr_sha256, hashlib.sha256(stderr).hexdigest())
+        self.assertFalse(hasattr(failure, "stdout"))
+        self.assertFalse(hasattr(failure, "stderr"))
+
+    def test_zero_exit_malformed_receipt_persists_generic_bound_evidence(self) -> None:
+        stdout = b'{"result": "noncanonical"}\n'
+        process = FakeProcess([(stdout, b"")], returncode=0)
+        command_runner = FakeCommandRunner(process)
+        with (
+            mock.patch.object(
+                subject, "_read_disposition_if_present", return_value=None
+            ),
+            mock.patch.object(subject, "_persist_failure_evidence") as persist,
+            self.assertRaisesRegex(
+                subject.Phase9DisposableLiveProofControllerError,
+                "^phase9_proof_controller_step_failed$",
+            ),
+        ):
+            subject._run_evidence_bound_step(
+                subject.DISPOSITION_RELATIVE,
+                timeout=120,
+                environment=ENVIRONMENT,
+                command_runner=command_runner,
+                candidate=candidate(),
+                permit={"permit_sha256": PERMIT},
+                disposition=None,
+            )
+
+        evidence = persist.call_args.args[0]
+        self.assertEqual(
+            evidence["sanitized_error_code"],
+            subject._GENERIC_SUBORDINATE_ERROR,
+        )
+        self.assertEqual(evidence["subordinate_exit_status"], 0)
+        self.assertEqual(evidence["stdout_size_bytes"], len(stdout))
+        self.assertEqual(
+            evidence["stdout_sha256"], hashlib.sha256(stdout).hexdigest()
+        )
+        self.assertIsNone(evidence["staged_prefix_tombstone_sha256"])
+
+    def test_untrusted_child_output_is_hashed_but_never_retained(self) -> None:
+        stdout = b"private stdout"
+        stderr = b"/etc/private/secret-value\nextra\n"
+        failure = subject._sanitized_step_failure(
+            relative=subject.ISSUER_RELATIVE,
+            exit_status=2,
+            stdout=stdout,
+            stderr=stderr,
+        )
+
+        self.assertEqual(
+            failure.error_code,
+            subject._GENERIC_SUBORDINATE_ERROR,
+        )
+        self.assertEqual(failure.stdout_sha256, hashlib.sha256(stdout).hexdigest())
+        self.assertEqual(failure.stderr_sha256, hashlib.sha256(stderr).hexdigest())
+        self.assertFalse(hasattr(failure, "stdout"))
+        self.assertFalse(hasattr(failure, "stderr"))
+
+        document = subject._failure_evidence_document(
+            failure=failure,
+            candidate=candidate(),
+            permit={"permit_sha256": PERMIT},
+            disposition=full_disposition(),
+        )
+        encoded = subject._canonical(document)
+        self.assertNotIn(stdout, encoded)
+        self.assertNotIn(stderr, encoded)
+        self.assertNotIn(b"secret-value", encoded)
+        self.assertFalse(document["raw_subordinate_output_persisted"])
+        self.assertEqual(
+            subject._verify_failure_evidence_document(document)[0],
+            document,
+        )
+
+    def test_bound_failure_evidence_is_create_once_and_replay_exact(self) -> None:
+        code = "phase9_live_proof_install_execution_failed"
+        stderr = (code + "\n").encode("ascii")
+        failure = subject._sanitized_step_failure(
+            relative=subject.ISSUER_RELATIVE,
+            exit_status=1,
+            stdout=b"",
+            stderr=stderr,
+        )
+        document = subject._failure_evidence_document(
+            failure=failure,
+            candidate=candidate(),
+            permit={"permit_sha256": PERMIT},
+            disposition=full_disposition(),
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            state_root = Path(temporary) / "state"
+            state_root.mkdir(mode=0o700)
+            state_root.chmod(0o700)
+            first = subject._persist_failure_evidence_at(
+                state_root,
+                document,
+                expected_uid=os.getuid(),
+                expected_gid=os.getgid(),
+            )
+            before = first.stat()
+            self.assertEqual(stat.S_IMODE(before.st_mode), 0o400)
+            self.assertEqual(before.st_nlink, 1)
+            self.assertEqual(json.loads(first.read_bytes()), document)
+
+            replay = subject._persist_failure_evidence_at(
+                state_root,
+                document,
+                expected_uid=os.getuid(),
+                expected_gid=os.getgid(),
+            )
+            self.assertEqual(replay, first)
+            self.assertEqual(replay.stat().st_ino, before.st_ino)
+
+            first.chmod(0o600)
+            first.write_bytes(b"tampered")
+            first.chmod(0o400)
+            with self.assertRaisesRegex(
+                subject.Phase9DisposableLiveProofControllerError,
+                "phase9_proof_controller_failure_evidence_persistence_failed",
+            ):
+                subject._persist_failure_evidence_at(
+                    state_root,
+                    document,
+                    expected_uid=os.getuid(),
+                    expected_gid=os.getgid(),
+                )
+
+    def test_bound_disposition_and_issuer_failures_persist_before_refusal(self) -> None:
+        cases = (
+            (
+                subject.DISPOSITION_RELATIVE,
+                None,
+                None,
+                "phase9_staged_prefix_disposition_contract_invalid",
+            ),
+            (
+                subject.DISPOSITION_RELATIVE,
+                None,
+                full_disposition(),
+                "phase9_staged_prefix_disposition_evidence_changed",
+            ),
+            (
+                subject.ISSUER_RELATIVE,
+                full_disposition(),
+                None,
+                "phase9_live_proof_install_execution_failed",
+            ),
+        )
+        for relative, disposition, observed_disposition, code in cases:
+            with self.subTest(relative=relative):
+                failure = subject._sanitized_step_failure(
+                    relative=relative,
+                    exit_status=1,
+                    stdout=b"",
+                    stderr=(code + "\n").encode("ascii"),
+                )
+                with (
+                    mock.patch.object(
+                        subject, "_run_step", side_effect=failure
+                    ),
+                    mock.patch.object(
+                        subject, "_persist_failure_evidence"
+                    ) as persist,
+                    mock.patch.object(
+                        subject,
+                        "_read_disposition_if_present",
+                        return_value=observed_disposition,
+                    ),
+                    self.assertRaisesRegex(
+                        subject.Phase9DisposableLiveProofControllerError,
+                        "^phase9_proof_controller_step_failed$",
+                    ),
+                ):
+                    subject._run_evidence_bound_step(
+                        relative,
+                        timeout=120,
+                        environment=ENVIRONMENT,
+                        command_runner=mock.sentinel.command_runner,
+                        candidate=candidate(),
+                        permit={"permit_sha256": PERMIT},
+                        disposition=disposition,
+                    )
+                evidence = persist.call_args.args[0]
+                self.assertEqual(evidence["step_relative"], relative)
+                self.assertEqual(evidence["sanitized_error_code"], code)
+                self.assertEqual(
+                    evidence["staged_prefix_tombstone_sha256"],
+                    None
+                    if (
+                        disposition is None
+                        and observed_disposition is None
+                    )
+                    else DISPOSITION_TOMBSTONE,
+                )
+
+    def test_successful_bound_step_never_persists_failure_evidence(self) -> None:
+        with (
+            mock.patch.object(subject, "_run_step", return_value={"ok": True}),
+            mock.patch.object(subject, "_persist_failure_evidence") as persist,
+        ):
+            observed = subject._run_evidence_bound_step(
+                subject.ISSUER_RELATIVE,
+                timeout=120,
+                environment=ENVIRONMENT,
+                command_runner=mock.sentinel.command_runner,
+                candidate=candidate(),
+                permit={"permit_sha256": PERMIT},
+                disposition=full_disposition(),
+            )
+        self.assertEqual(observed, {"ok": True})
+        persist.assert_not_called()
 
     def test_periodic_lease_denial_withdraws_control_before_recovery_wait(self) -> None:
         events: list[tuple[str, object]] = []
@@ -610,26 +848,29 @@ class Phase9DisposableLiveProofControllerTests(unittest.TestCase):
             self.assertFalse(subject._preimport_exact_candidate_valid())
 
     def test_direct_execution_wrong_runtime_refuses_in_preimport_preamble(self) -> None:
-        completed = subprocess.run(
-            (
-                sys.executable,
-                "-I",
-                "-B",
-                str(Path(subject.__file__).resolve()),
-            ),
-            cwd="/",
-            env={
-                "PATH": "/usr/bin:/bin",
-                "LANG": "C",
-                "LC_ALL": "C",
-                "PYTHONDONTWRITEBYTECODE": "1",
-            },
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=30,
-            check=False,
-        )
+        with tempfile.TemporaryDirectory() as temporary:
+            wrong_python = Path(temporary) / "wrong-python"
+            wrong_python.symlink_to(Path(sys.executable).resolve(strict=True))
+            completed = subprocess.run(
+                (
+                    str(wrong_python),
+                    "-I",
+                    "-B",
+                    str(Path(subject.__file__).resolve()),
+                ),
+                cwd="/",
+                env={
+                    "PATH": "/usr/bin:/bin",
+                    "LANG": "C",
+                    "LC_ALL": "C",
+                    "PYTHONDONTWRITEBYTECODE": "1",
+                },
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=30,
+                check=False,
+            )
         self.assertEqual(completed.returncode, 1)
         self.assertEqual(completed.stdout, b"")
         self.assertEqual(

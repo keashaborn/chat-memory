@@ -1,8 +1,8 @@
 {
-  "schema_version": "governed-memory-dormant-store-install-stores-controller-plan-v5",
+  "schema_version": "governed-memory-dormant-store-install-stores-controller-plan-v6",
   "state": "phase9j-install-ready-closed-runtime-and-store-transports-packaged-not-installed-not-activated",
   "server": "seebx",
-  "candidate_id": "governed_memory_9a54cf123493_000004",
+  "candidate_id": "governed_memory_9a54cf123493_000005",
   "contract": "ops/governed_memory/installation/current/contract.json",
   "execution_invariants": {
     "ordered_steps_only": true,
@@ -93,97 +93,152 @@
     {
       "id": "I01_REVERIFY_PRECLAIMED_EXECUTION_LOCK",
       "effect": "reverify_preclaimed_execution_lock",
-      "rollback": "none"
+      "rollback": "none",
+      "observation_requires": [],
+      "proof_lifetime": "continuous"
     },
     {
       "id": "I02_VERIFY_CLAIMED_EXECUTION_BINDING",
       "effect": "verify_claimed_execution_binding",
-      "rollback": "retain_single_use_nonce_claim"
+      "rollback": "retain_single_use_nonce_claim",
+      "observation_requires": [],
+      "proof_lifetime": "continuous"
     },
     {
       "id": "I03_VERIFY_LIVE_PREFLIGHT",
       "effect": "verify_live_preflight",
-      "rollback": "none"
+      "rollback": "none",
+      "observation_requires": [],
+      "proof_lifetime": "pre_effect_barrier"
     },
     {
       "id": "I04_WRITE_RESOLVED_STORE_SPEC_AND_GENERATE_FRESH_STORE_SECRETS",
       "effect": "write_resolved_store_spec_and_generate_fresh_store_secrets",
-      "rollback": "remove_resolved_store_spec_and_fresh_store_secrets"
+      "rollback": "remove_resolved_store_spec_and_fresh_store_secrets",
+      "observation_requires": [],
+      "proof_lifetime": "mutation"
     },
     {
       "id": "I05_CREATE_EXACT_NETWORK",
       "effect": "create_exact_network",
-      "rollback": "remove_exact_unused_network"
+      "rollback": "remove_exact_unused_network",
+      "observation_requires": [],
+      "proof_lifetime": "mutation"
     },
     {
       "id": "I06_CREATE_EXACT_POSTGRES_VOLUME",
       "effect": "create_exact_postgres_volume",
-      "rollback": "remove_exact_empty_postgres_volume"
+      "rollback": "remove_exact_empty_postgres_volume",
+      "observation_requires": [],
+      "proof_lifetime": "mutation"
     },
     {
       "id": "I07_CREATE_EXACT_QDRANT_VOLUME",
       "effect": "create_exact_qdrant_volume",
-      "rollback": "remove_exact_empty_qdrant_volume"
+      "rollback": "remove_exact_empty_qdrant_volume",
+      "observation_requires": [],
+      "proof_lifetime": "mutation"
     },
     {
       "id": "I08_CREATE_EXACT_POSTGRES_CONTAINER",
       "effect": "create_exact_postgres_container",
-      "rollback": "remove_exact_postgres_container"
+      "rollback": "remove_exact_postgres_container",
+      "observation_requires": [],
+      "proof_lifetime": "mutation"
     },
     {
       "id": "I09_CREATE_EXACT_QDRANT_CONTAINER",
       "effect": "create_exact_qdrant_container",
-      "rollback": "remove_exact_qdrant_container"
+      "rollback": "remove_exact_qdrant_container",
+      "observation_requires": [],
+      "proof_lifetime": "mutation"
     },
     {
       "id": "I10_START_AND_VERIFY_EMPTY_STORES",
       "effect": "start_and_verify_empty_stores",
-      "rollback": "stop_exact_stores"
+      "rollback": "stop_exact_stores",
+      "observation_requires": [
+        "I08_CREATE_EXACT_POSTGRES_CONTAINER",
+        "I09_CREATE_EXACT_QDRANT_CONTAINER"
+      ],
+      "proof_lifetime": "mutation"
     },
     {
       "id": "I11_BOOTSTRAP_CANONICAL_DATABASE",
       "effect": "bootstrap_canonical_database",
-      "rollback": "drop_empty_canonical_database_and_roles"
+      "rollback": "drop_empty_canonical_database_and_roles",
+      "observation_requires": [
+        "I10_START_AND_VERIFY_EMPTY_STORES"
+      ],
+      "proof_lifetime": "mutation"
     },
     {
       "id": "I12_APPLY_FOUNDATION_0001",
       "effect": "apply_foundation_0001",
-      "rollback": "rollback_empty_foundation_0001"
+      "rollback": "rollback_empty_foundation_0001",
+      "observation_requires": [
+        "I10_START_AND_VERIFY_EMPTY_STORES"
+      ],
+      "proof_lifetime": "mutation"
     },
     {
       "id": "I13_APPLY_OWNER_CLAIM_DETAIL_0003",
       "effect": "apply_owner_claim_detail_0003",
-      "rollback": "rollback_owner_claim_detail_0003"
+      "rollback": "rollback_owner_claim_detail_0003",
+      "observation_requires": [
+        "I10_START_AND_VERIFY_EMPTY_STORES"
+      ],
+      "proof_lifetime": "mutation"
     },
     {
       "id": "I14_APPLY_PILOT_MARKER_0004",
       "effect": "apply_pilot_marker_0004_without_marker",
-      "rollback": "rollback_empty_pilot_marker_0004"
+      "rollback": "rollback_empty_pilot_marker_0004",
+      "observation_requires": [
+        "I10_START_AND_VERIFY_EMPTY_STORES"
+      ],
+      "proof_lifetime": "mutation"
     },
     {
       "id": "I15_CREATE_EMPTY_QDRANT_COLLECTION",
       "effect": "create_empty_qdrant_collection",
-      "rollback": "remove_exact_empty_qdrant_collection"
+      "rollback": "remove_exact_empty_qdrant_collection",
+      "observation_requires": [
+        "I10_START_AND_VERIFY_EMPTY_STORES"
+      ],
+      "proof_lifetime": "mutation"
     },
     {
       "id": "I16_CREATE_QDRANT_ALIAS",
       "effect": "create_qdrant_alias",
-      "rollback": "remove_exact_qdrant_alias"
+      "rollback": "remove_exact_qdrant_alias",
+      "observation_requires": [
+        "I10_START_AND_VERIFY_EMPTY_STORES"
+      ],
+      "proof_lifetime": "mutation"
     },
     {
       "id": "I17_VERIFY_PRE_SUPERVISOR_RESOURCE_IDENTITIES",
       "effect": "verify_pre_supervisor_resource_identities",
-      "rollback": "retain_attempt_resource_identity_ledger"
+      "rollback": "retain_attempt_resource_identity_ledger",
+      "observation_requires": [
+        "I16_CREATE_QDRANT_ALIAS"
+      ],
+      "proof_lifetime": "until_compensation"
     },
     {
       "id": "I18_INSTALL_AND_ENABLE_STORES_SUPERVISOR",
       "effect": "install_and_enable_stores_supervisor",
-      "rollback": "disable_and_remove_stores_supervisor"
+      "rollback": "disable_and_remove_stores_supervisor",
+      "observation_requires": [],
+      "proof_lifetime": "mutation"
     },
     {
       "id": "I19_COLD_RESTART_AND_VERIFY_TERMINAL_POSTFLIGHT",
       "effect": "cold_restart_and_verify_terminal_postflight",
-      "rollback": "requires_separate_signed_rollback_after_terminal_postflight"
+      "rollback": "requires_separate_signed_rollback_after_terminal_postflight",
+      "observation_requires": [],
+      "proof_lifetime": "mutation"
     }
   ],
   "same_attempt_compensation_order": [

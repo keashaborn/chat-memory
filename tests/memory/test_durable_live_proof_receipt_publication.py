@@ -182,7 +182,7 @@ class DurableLiveProofReceiptPublicationTests(unittest.TestCase):
         )
         self.assertEqual(
             durable.LIVE_PROOF_RECEIPT_SCHEMA,
-            "governed-memory-phase9-live-proof-receipt-v5",
+            "governed-memory-phase9-live-proof-receipt-v6",
         )
         verified = durable.verify_promotable_live_proof_receipt(
             inputs=inputs(),

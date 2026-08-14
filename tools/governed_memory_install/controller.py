@@ -41,6 +41,14 @@ INVARIANT_ONLY_EFFECTS: Final = frozenset(
         "verify_pre_supervisor_resource_identities",
     }
 )
+PROOF_LIFETIMES: Final = frozenset(
+    {
+        "mutation",
+        "continuous",
+        "pre_effect_barrier",
+        "until_compensation",
+    }
+)
 
 
 class ControllerError(RuntimeError):
@@ -110,6 +118,8 @@ class PlanStep:
     step_id: str
     effect: str
     rollback: str
+    observation_requires: tuple[str, ...] = ()
+    proof_lifetime: str = "mutation"
 
     @property
     def terminal_postflight(self) -> bool:
@@ -119,7 +129,7 @@ class PlanStep:
 
     @property
     def invariant_only(self) -> bool:
-        """True when APPLIED records a repeatable proof, not a host mutation."""
+        """True when APPLIED records a proof, not a host mutation."""
 
         return self.effect in INVARIANT_ONLY_EFFECTS
 
@@ -138,16 +148,19 @@ STORES_ONLY_PLAN: Final = (
         "I01_REVERIFY_PRECLAIMED_EXECUTION_LOCK",
         "reverify_preclaimed_execution_lock",
         "none",
+        proof_lifetime="continuous",
     ),
     PlanStep(
         "I02_VERIFY_CLAIMED_EXECUTION_BINDING",
         "verify_claimed_execution_binding",
         "retain_single_use_nonce_claim",
+        proof_lifetime="continuous",
     ),
     PlanStep(
         "I03_VERIFY_LIVE_PREFLIGHT",
         "verify_live_preflight",
         "none",
+        proof_lifetime="pre_effect_barrier",
     ),
     PlanStep(
         "I04_WRITE_RESOLVED_STORE_SPEC_AND_GENERATE_FRESH_STORE_SECRETS",
@@ -183,41 +196,53 @@ STORES_ONLY_PLAN: Final = (
         "I10_START_AND_VERIFY_EMPTY_STORES",
         "start_and_verify_empty_stores",
         "stop_exact_stores",
+        observation_requires=(
+            "I08_CREATE_EXACT_POSTGRES_CONTAINER",
+            "I09_CREATE_EXACT_QDRANT_CONTAINER",
+        ),
     ),
     PlanStep(
         "I11_BOOTSTRAP_CANONICAL_DATABASE",
         "bootstrap_canonical_database",
         "drop_empty_canonical_database_and_roles",
+        observation_requires=("I10_START_AND_VERIFY_EMPTY_STORES",),
     ),
     PlanStep(
         "I12_APPLY_FOUNDATION_0001",
         "apply_foundation_0001",
         "rollback_empty_foundation_0001",
+        observation_requires=("I10_START_AND_VERIFY_EMPTY_STORES",),
     ),
     PlanStep(
         "I13_APPLY_OWNER_CLAIM_DETAIL_0003",
         "apply_owner_claim_detail_0003",
         "rollback_owner_claim_detail_0003",
+        observation_requires=("I10_START_AND_VERIFY_EMPTY_STORES",),
     ),
     PlanStep(
         "I14_APPLY_PILOT_MARKER_0004",
         "apply_pilot_marker_0004_without_marker",
         "rollback_empty_pilot_marker_0004",
+        observation_requires=("I10_START_AND_VERIFY_EMPTY_STORES",),
     ),
     PlanStep(
         "I15_CREATE_EMPTY_QDRANT_COLLECTION",
         "create_empty_qdrant_collection",
         "remove_exact_empty_qdrant_collection",
+        observation_requires=("I10_START_AND_VERIFY_EMPTY_STORES",),
     ),
     PlanStep(
         "I16_CREATE_QDRANT_ALIAS",
         "create_qdrant_alias",
         "remove_exact_qdrant_alias",
+        observation_requires=("I10_START_AND_VERIFY_EMPTY_STORES",),
     ),
     PlanStep(
         "I17_VERIFY_PRE_SUPERVISOR_RESOURCE_IDENTITIES",
         "verify_pre_supervisor_resource_identities",
         "retain_attempt_resource_identity_ledger",
+        observation_requires=("I16_CREATE_QDRANT_ALIAS",),
+        proof_lifetime="until_compensation",
     ),
     PlanStep(
         "I18_INSTALL_AND_ENABLE_STORES_SUPERVISOR",
@@ -230,6 +255,40 @@ STORES_ONLY_PLAN: Final = (
         "requires_separate_signed_rollback_after_terminal_postflight",
     ),
 )
+
+EXPECTED_OBSERVATION_REQUIREMENTS: Final = {
+    "I10_START_AND_VERIFY_EMPTY_STORES": (
+        "I08_CREATE_EXACT_POSTGRES_CONTAINER",
+        "I09_CREATE_EXACT_QDRANT_CONTAINER",
+    ),
+    "I11_BOOTSTRAP_CANONICAL_DATABASE": (
+        "I10_START_AND_VERIFY_EMPTY_STORES",
+    ),
+    "I12_APPLY_FOUNDATION_0001": (
+        "I10_START_AND_VERIFY_EMPTY_STORES",
+    ),
+    "I13_APPLY_OWNER_CLAIM_DETAIL_0003": (
+        "I10_START_AND_VERIFY_EMPTY_STORES",
+    ),
+    "I14_APPLY_PILOT_MARKER_0004": (
+        "I10_START_AND_VERIFY_EMPTY_STORES",
+    ),
+    "I15_CREATE_EMPTY_QDRANT_COLLECTION": (
+        "I10_START_AND_VERIFY_EMPTY_STORES",
+    ),
+    "I16_CREATE_QDRANT_ALIAS": (
+        "I10_START_AND_VERIFY_EMPTY_STORES",
+    ),
+    "I17_VERIFY_PRE_SUPERVISOR_RESOURCE_IDENTITIES": (
+        "I16_CREATE_QDRANT_ALIAS",
+    ),
+}
+EXPECTED_PROOF_LIFETIMES: Final = {
+    "I01_REVERIFY_PRECLAIMED_EXECUTION_LOCK": "continuous",
+    "I02_VERIFY_CLAIMED_EXECUTION_BINDING": "continuous",
+    "I03_VERIFY_LIVE_PREFLIGHT": "pre_effect_barrier",
+    "I17_VERIFY_PRE_SUPERVISOR_RESOURCE_IDENTITIES": "until_compensation",
+}
 
 
 def _canonical_bytes(value: object) -> bytes:
@@ -254,6 +313,28 @@ def validate_plan(plan: tuple[PlanStep, ...]) -> str:
             raise PlanValidationError("dormant_store_install_plan_action_invalid")
         if ACTION_RE.fullmatch(step.rollback) is None:
             raise PlanValidationError("dormant_store_install_plan_compensation_invalid")
+        if (
+            type(step.observation_requires) is not tuple
+            or any(
+                type(required) is not str
+                for required in step.observation_requires
+            )
+            or len(set(step.observation_requires)) != len(step.observation_requires)
+            or any(
+                required not in {prior.step_id for prior in plan[: position - 1]}
+                for required in step.observation_requires
+            )
+        ):
+            raise PlanValidationError(
+                "dormant_store_install_plan_observation_requirements_invalid"
+            )
+        if (
+            type(step.proof_lifetime) is not str
+            or step.proof_lifetime not in PROOF_LIFETIMES
+        ):
+            raise PlanValidationError(
+                "dormant_store_install_plan_proof_lifetime_invalid"
+            )
         if position < 19 and step.terminal_postflight:
             raise PlanValidationError("dormant_store_install_plan_compensation_invalid")
         if position == 19 and not step.terminal_postflight:
@@ -288,6 +369,30 @@ def validate_plan(plan: tuple[PlanStep, ...]) -> str:
         raise PlanValidationError(
             "dormant_store_install_plan_invariant_steps_invalid"
         )
+    if {
+        step.step_id: step.observation_requires
+        for step in plan
+        if step.observation_requires
+    } != EXPECTED_OBSERVATION_REQUIREMENTS:
+        raise PlanValidationError(
+            "dormant_store_install_plan_observation_requirements_invalid"
+        )
+    if {
+        step.step_id: step.proof_lifetime
+        for step in plan
+        if step.proof_lifetime != "mutation"
+    } != EXPECTED_PROOF_LIFETIMES:
+        raise PlanValidationError(
+            "dormant_store_install_plan_proof_lifetime_invalid"
+        )
+    if any(
+        (step.invariant_only and step.proof_lifetime == "mutation")
+        or (not step.invariant_only and step.proof_lifetime != "mutation")
+        for step in plan
+    ):
+        raise PlanValidationError(
+            "dormant_store_install_plan_proof_lifetime_invalid"
+        )
     if len({step.step_id for step in plan}) != 19:
         raise PlanValidationError("dormant_store_install_plan_step_id_duplicate")
     document = plan_install_steps_projection(plan)
@@ -296,9 +401,15 @@ def validate_plan(plan: tuple[PlanStep, ...]) -> str:
 
 def plan_install_steps_projection(
     plan: tuple[PlanStep, ...],
-) -> list[dict[str, str]]:
+) -> list[dict[str, object]]:
     return [
-        {"id": step.step_id, "effect": step.effect, "rollback": step.rollback}
+        {
+            "id": step.step_id,
+            "effect": step.effect,
+            "rollback": step.rollback,
+            "observation_requires": list(step.observation_requires),
+            "proof_lifetime": step.proof_lifetime,
+        }
         for step in plan
     ]
 
@@ -456,6 +567,7 @@ class DormantStoreInstallController:
                 self._verify_known_states(history)
                 self._verify_untouched_states(history)
                 current = step
+                self._require_observation_available(step, history)
                 if history.intent_only_step_id != step.step_id:
                     fresh_state = self._probe(step)
                     expected_fresh = (
@@ -696,9 +808,104 @@ class DormantStoreInstallController:
             compensation_complete=compensation_complete,
         )
 
+    def _active_observation_step_ids(self, history: _History) -> set[str]:
+        active = set(history.applied_step_ids) - set(history.compensated_step_ids)
+        # A compensation INTENT is durable before its effect.  The effect may
+        # already have made dependent child resources unobservable when the
+        # process resumes.  Re-probe the exact parent first: AFTER keeps its
+        # children observable, while BEFORE or RECOVERABLE means the teardown
+        # may already have crossed that observation frontier.
+        if history.compensation_intent_step_id is not None:
+            step = next(
+                candidate
+                for candidate in self.plan
+                if candidate.step_id == history.compensation_intent_step_id
+            )
+            if not set(step.observation_requires) <= active:
+                raise StateDriftError(
+                    "dormant_store_install_observation_dependency_inactive:"
+                    + step.step_id
+                )
+            state = self._probe(step)
+            if state is StepState.DRIFT:
+                raise StateDriftError(
+                    "dormant_store_install_compensation_intent_state_invalid:"
+                    + step.step_id
+                )
+            if state in {StepState.BEFORE, StepState.RECOVERABLE}:
+                active.discard(history.compensation_intent_step_id)
+        return active
+
+    def _observation_available(
+        self,
+        step: PlanStep,
+        history: _History,
+        *,
+        active_observation_step_ids: set[str] | None = None,
+    ) -> bool:
+        active = (
+            self._active_observation_step_ids(history)
+            if active_observation_step_ids is None
+            else active_observation_step_ids
+        )
+        return set(step.observation_requires) <= active
+
+    def _require_observation_available(
+        self, step: PlanStep, history: _History
+    ) -> None:
+        if not self._observation_available(step, history):
+            raise StateDriftError(
+                "dormant_store_install_observation_dependency_inactive:"
+                + step.step_id
+            )
+
+    def _proof_revalidation_required(
+        self, step: PlanStep, history: _History
+    ) -> bool:
+        if step.step_id not in history.applied_step_ids:
+            return True
+        if step.proof_lifetime in {"mutation", "continuous"}:
+            return True
+        if step.proof_lifetime == "pre_effect_barrier":
+            started = set(history.applied_step_ids)
+            if history.intent_only_step_id is not None:
+                started.add(history.intent_only_step_id)
+            return not any(
+                candidate.proof_lifetime == "mutation"
+                and candidate.step_id in started
+                for candidate in self.plan
+            )
+        if step.proof_lifetime == "until_compensation":
+            return not history.compensation_started
+        raise PlanValidationError(
+            "dormant_store_install_plan_proof_lifetime_invalid"
+        )
+
     def _verify_known_states(self, history: _History) -> None:
         compensated = set(history.compensated_step_ids)
+        active = set(history.applied_step_ids) - compensated
+        active_observations = self._active_observation_step_ids(history)
         for step in self.plan:
+            if not self._proof_revalidation_required(step, history):
+                continue
+            if not self._observation_available(
+                step,
+                history,
+                active_observation_step_ids=active_observations,
+            ):
+                if (
+                    step.step_id in active
+                    or (
+                        step.step_id == history.intent_only_step_id
+                        and not history.compensation_started
+                    )
+                    or step.step_id == history.compensation_intent_step_id
+                ):
+                    raise StateDriftError(
+                        "dormant_store_install_observation_dependency_inactive:"
+                        + step.step_id
+                    )
+                continue
             state = self._probe(step)
             if state is StepState.DRIFT:
                 raise StateDriftError("dormant_store_install_step_state_drift:" + step.step_id)
@@ -773,6 +980,7 @@ class DormantStoreInstallController:
         step = next(
             item for item in self.plan if item.step_id == history.intent_only_step_id
         )
+        self._require_observation_available(step, history)
         state = self._probe(step)
         if state is StepState.AFTER:
             # Exact durable intent owns this effect.  This applies equally to
@@ -787,14 +995,41 @@ class DormantStoreInstallController:
             return history
         if state is not StepState.BEFORE:
             raise StateDriftError("dormant_store_install_intent_state_invalid:" + step.step_id)
+        # INTENT is durable before an effect starts, so it cannot by itself
+        # retire a one-time pre-effect proof.  If the first mutation is still
+        # exactly BEFORE on resume, revalidate every pre-effect barrier before
+        # allowing the controller to enter that mutation.  An AFTER or
+        # RECOVERABLE probe above means the effect may already have started,
+        # when absence-style preflight proofs are no longer observable.
+        if not any(
+            candidate.proof_lifetime == "mutation"
+            and candidate.step_id in history.applied_step_ids
+            for candidate in self.plan
+        ):
+            for candidate in self.plan:
+                if candidate.proof_lifetime != "pre_effect_barrier":
+                    continue
+                self._require_observation_available(candidate, history)
+                if self._probe(candidate) is not StepState.AFTER:
+                    raise StateDriftError(
+                        "dormant_store_install_step_state_drift:"
+                        + candidate.step_id
+                    )
         return history
 
     def _verify_untouched_states(self, history: _History) -> None:
         touched = set(history.applied_step_ids)
+        active_observations = self._active_observation_step_ids(history)
         if history.intent_only_step_id is not None:
             touched.add(history.intent_only_step_id)
         for step in self.plan:
             if step.step_id in touched:
+                continue
+            if not self._observation_available(
+                step,
+                history,
+                active_observation_step_ids=active_observations,
+            ):
                 continue
             state = self._probe(step)
             if state is StepState.DRIFT:
@@ -836,6 +1071,7 @@ class DormantStoreInstallController:
                 continue
             if step_id in compensated:
                 continue
+            self._require_observation_available(step, history)
             state = self._probe(step)
             if state is StepState.DRIFT:
                 raise CompensationBlockedError(

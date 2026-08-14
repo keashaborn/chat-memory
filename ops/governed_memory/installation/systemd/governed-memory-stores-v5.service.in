@@ -1,0 +1,40 @@
+[Unit]
+Description=Governed Memory dormant PostgreSQL and Qdrant stores
+After=docker.service
+Requires=docker.service
+ConditionPathIsReadWrite=/var/lib/governed-memory-controller
+ConditionPathExists=/etc/governed-memory-controller/store_spec-v5.json
+ConditionPathExists=/var/lib/governed-memory-controller/executions-v5/@EXECUTION_ID@/resources.jsonl
+ConditionPathExists=/opt/governed-memory-controller/runtimes/@RUNTIME_RECEIPT_SHA256@/bin/python
+ConditionPathExists=/opt/governed-memory-controller/releases/@PACKAGE_MANIFEST_SHA256@/tools/governed_memory_install/store_supervisor_launcher.py
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=root
+Group=root
+WorkingDirectory=/opt/governed-memory-controller/releases/@PACKAGE_MANIFEST_SHA256@
+ExecStart=/opt/governed-memory-controller/runtimes/@RUNTIME_RECEIPT_SHA256@/bin/python -I -B /opt/governed-memory-controller/releases/@PACKAGE_MANIFEST_SHA256@/tools/governed_memory_install/store_supervisor_launcher.py --package-manifest-sha256 @PACKAGE_MANIFEST_SHA256@ start --spec /etc/governed-memory-controller/store_spec-v5.json --ledger /var/lib/governed-memory-controller/executions-v5/@EXECUTION_ID@/resources.jsonl
+ExecStop=/opt/governed-memory-controller/runtimes/@RUNTIME_RECEIPT_SHA256@/bin/python -I -B /opt/governed-memory-controller/releases/@PACKAGE_MANIFEST_SHA256@/tools/governed_memory_install/store_supervisor_launcher.py --package-manifest-sha256 @PACKAGE_MANIFEST_SHA256@ stop --spec /etc/governed-memory-controller/store_spec-v5.json --ledger /var/lib/governed-memory-controller/executions-v5/@EXECUTION_ID@/resources.jsonl
+TimeoutStartSec=90
+TimeoutStopSec=90
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

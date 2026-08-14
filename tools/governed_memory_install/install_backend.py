@@ -438,7 +438,7 @@ class ClaimBoundInstallBackend:
                 self._binding.supervisor_launcher_sha256
             ),
             postflight_receipt_path=(
-                "/var/lib/governed-memory-controller/executions-v4/"
+                "/var/lib/governed-memory-controller/executions-v5/"
                 + self._binding.execution_id
                 + "/terminal-postflight-receipt.json"
             ),

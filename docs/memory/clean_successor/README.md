@@ -65,9 +65,9 @@ and the external Phase 9J disposable Linux proof receipt is not yet present.
 The package verifier itself never builds a runtime, runs Docker, reads secrets,
 connects to a store, installs a service, or activates a route.
 
-The current inactive store target is generation `000004`: PostgreSQL
-`127.0.0.1:55435`, Qdrant `127.0.0.1:6346`, and collection
-`governed_memory_9a54cf123493_000004`. Generation `000001` is retained only as
+The current inactive store target is generation `000005`: PostgreSQL
+`127.0.0.1:55436`, Qdrant `127.0.0.1:6347`, and collection
+`governed_memory_9a54cf123493_000005`. Generation `000001` is retained only as
 the labeled Phase 8G disposable application-validation snapshot and is not
 current store or routing authority.
 

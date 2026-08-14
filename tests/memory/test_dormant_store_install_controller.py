@@ -8,6 +8,7 @@ import tempfile
 import unittest
 
 from tools.governed_memory_install.controller import (
+    ATTEMPT_STEP_ID,
     CompletedStateError,
     CompensationFailedError,
     ControllerLockError,
@@ -48,10 +49,12 @@ class _HermeticBackend:
         self.fail_before_step: str | None = None
         self.fail_after_step: str | None = None
         self.fail_compensation_once_step: str | None = None
+        self.fail_after_compensation_once_step: str | None = None
         self.fail_after_appending_event: JournalEvent | None = None
         self.inject_after_apply: tuple[str, str] | None = None
         self.inject_after_compensate: tuple[str, str] | None = None
         self.drift_after_apply: tuple[str, str] | None = None
+        self.probe_calls: list[str] = []
 
     def journal_records(self) -> tuple[JournalRecord, ...]:
         return tuple(self.records)
@@ -67,6 +70,25 @@ class _HermeticBackend:
             raise RuntimeError("synthetic_post_journal_append_failure")
 
     def probe(self, step: PlanStep) -> StepState:
+        self.probe_calls.append(step.step_id)
+        if any(
+            self.states[required] is not StepState.AFTER
+            for required in step.observation_requires
+        ):
+            raise AssertionError(
+                "synthetic_dependency_unavailable:" + step.step_id
+            )
+        if step.proof_lifetime == "pre_effect_barrier" and any(
+            self.states[candidate.step_id] is not StepState.BEFORE
+            for candidate in STORES_ONLY_PLAN
+            if candidate.proof_lifetime == "mutation"
+        ):
+            return StepState.DRIFT
+        if step.proof_lifetime == "until_compensation" and any(
+            self.states[candidate.step_id] is not StepState.AFTER
+            for candidate in STORES_ONLY_PLAN[3:16]
+        ):
+            return StepState.DRIFT
         return self.states[step.step_id]
 
     def apply(self, step: PlanStep) -> None:
@@ -101,6 +123,9 @@ class _HermeticBackend:
             self.fail_compensation_once_step = None
             raise RuntimeError("synthetic_compensation_failure")
         self.states[step.step_id] = StepState.BEFORE
+        if self.fail_after_compensation_once_step == step.step_id:
+            self.fail_after_compensation_once_step = None
+            raise RuntimeError("synthetic_post_compensation_failure")
         if self.inject_after_compensate is not None and (
             self.inject_after_compensate[0] == step.step_id
         ):
@@ -329,12 +354,12 @@ class DormantStoreInstallControllerTests(unittest.TestCase):
         backend = _HermeticBackend()
         first = STORES_ONLY_PLAN[0].step_id
         intervening = STORES_ONLY_PLAN[1].step_id
-        later = STORES_ONLY_PLAN[9].step_id
+        later = STORES_ONLY_PLAN[17].step_id
         backend.inject_after_apply = (first, later)
         controller, backend = self._controller(backend)
         with self.assertRaisesRegex(
             StateDriftError,
-            "unowned_preexisting_effect:" + later,
+            "step_state_drift:I03_VERIFY_LIVE_PREFLIGHT",
         ):
             controller.run(attempt_id="late-unowned-effect")
         self.assertIs(backend.states[later], StepState.AFTER)
@@ -346,17 +371,229 @@ class DormantStoreInstallControllerTests(unittest.TestCase):
             [JournalEvent.INTENT.value, JournalEvent.APPLIED.value],
         )
 
+    def test_first_mutation_intent_before_effect_revalidates_preflight(self) -> None:
+        controller, backend = self._controller()
+        attempt_id = "first-mutation-intent-preflight-revalidation"
+        for step in STORES_ONLY_PLAN[:3]:
+            controller._append(attempt_id, step.step_id, JournalEvent.INTENT)
+            controller._append(attempt_id, step.step_id, JournalEvent.APPLIED)
+        first_mutation = STORES_ONLY_PLAN[3]
+        controller._append(
+            attempt_id, first_mutation.step_id, JournalEvent.INTENT
+        )
+        backend.states[STORES_ONLY_PLAN[2].step_id] = StepState.DRIFT
+        backend.probe_calls.clear()
+
+        with self.assertRaisesRegex(
+            StateDriftError,
+            "step_state_drift:I03_VERIFY_LIVE_PREFLIGHT",
+        ):
+            controller.run(attempt_id=attempt_id)
+
+        self.assertIn(STORES_ONLY_PLAN[2].step_id, backend.probe_calls)
+        self.assertNotIn(("apply", first_mutation.step_id), backend.actions)
+        self.assertEqual(
+            backend.records[-1].event,
+            JournalEvent.INTENT.value,
+        )
+
     def test_unowned_effect_during_compensation_prevents_terminal_marker(self) -> None:
         backend = _HermeticBackend()
         failed = STORES_ONLY_PLAN[5].step_id
         first_compensation = STORES_ONLY_PLAN[4].step_id
-        unowned = STORES_ONLY_PLAN[9].step_id
+        unowned = STORES_ONLY_PLAN[17].step_id
         backend.fail_before_step = failed
         backend.inject_after_compensate = (first_compensation, unowned)
         controller, backend = self._controller(backend)
         with self.assertRaises(CompensationFailedError):
             controller.run(attempt_id="mid-compensation-unowned-effect")
         self.assertIs(backend.states[unowned], StepState.AFTER)
+        self.assertFalse(
+            any(
+                record.event == JournalEvent.COMPENSATION_COMPLETE.value
+                for record in backend.records
+            )
+        )
+
+    def test_dependency_visible_unowned_logical_effect_is_never_claimed(self) -> None:
+        backend = _HermeticBackend()
+        stores_started = STORES_ONLY_PLAN[9].step_id
+        canonical_database = STORES_ONLY_PLAN[10].step_id
+        backend.inject_after_apply = (stores_started, canonical_database)
+        controller, backend = self._controller(backend)
+        with self.assertRaisesRegex(
+            StateDriftError,
+            "unowned_preexisting_effect:" + canonical_database,
+        ):
+            controller.run(attempt_id="frontier-unowned-effect")
+        self.assertNotIn(("apply", canonical_database), backend.actions)
+        self.assertNotIn(("compensate", canonical_database), backend.actions)
+        self.assertEqual(
+            backend.records[-1].step_id,
+            stores_started,
+        )
+        self.assertEqual(
+            backend.records[-1].event,
+            JournalEvent.APPLIED.value,
+        )
+
+    def test_reverse_compensation_respects_observation_dependencies(self) -> None:
+        backend = _HermeticBackend()
+        backend.fail_before_step = STORES_ONLY_PLAN[17].step_id
+        controller, backend = self._controller(backend)
+        with self.assertRaises(InstallationCompensatedError) as raised:
+            controller.run(attempt_id="dependency-aware-compensation")
+        self.assertEqual(
+            raised.exception.receipt.outcome,
+            "same_attempt_compensation_complete",
+        )
+        self.assertEqual(
+            raised.exception.receipt.compensated_step_ids,
+            tuple(
+                step.step_id
+                for step in reversed(STORES_ONLY_PLAN[:17])
+                if step.compensable
+            ),
+        )
+
+    def test_failed_dependency_bound_intent_is_safe_after_parent_compensation(
+        self,
+    ) -> None:
+        backend = _HermeticBackend()
+        failed = STORES_ONLY_PLAN[10]
+        backend.fail_before_step = failed.step_id
+        controller, backend = self._controller(backend)
+
+        with self.assertRaises(InstallationCompensatedError) as raised:
+            controller.run(attempt_id="dependency-bound-intent-compensation")
+
+        self.assertEqual(
+            raised.exception.receipt.outcome,
+            "same_attempt_compensation_complete",
+        )
+        self.assertNotIn(("compensate", failed.step_id), backend.actions)
+        self.assertEqual(
+            backend.records[-1].event,
+            JournalEvent.COMPENSATION_COMPLETE.value,
+        )
+
+    def test_compensation_intent_before_parent_effect_rechecks_failed_child(
+        self,
+    ) -> None:
+        backend = _HermeticBackend()
+        failed = STORES_ONLY_PLAN[10]
+        parent = STORES_ONLY_PLAN[9]
+        backend.fail_before_step = failed.step_id
+        backend.fail_compensation_once_step = parent.step_id
+        controller, backend = self._controller(backend)
+        with self.assertRaises(CompensationFailedError):
+            controller.run(attempt_id="parent-compensation-intent-child-drift")
+        self.assertIs(backend.states[parent.step_id], StepState.AFTER)
+        backend.states[failed.step_id] = StepState.AFTER
+        backend.actions.clear()
+
+        with self.assertRaisesRegex(
+            StateDriftError,
+            "failed_unapplied_step_not_before:" + failed.step_id,
+        ):
+            controller.run(
+                attempt_id="parent-compensation-intent-child-drift"
+            )
+
+        self.assertEqual(backend.actions, [])
+        self.assertIs(backend.states[failed.step_id], StepState.AFTER)
+        self.assertEqual(
+            backend.records[-1].event,
+            JournalEvent.COMPENSATION_INTENT.value,
+        )
+        self.assertFalse(
+            any(
+                record.event == JournalEvent.COMPENSATION_COMPLETE.value
+                for record in backend.records
+            )
+        )
+
+    def test_compensation_intent_before_parent_effect_rechecks_compensated_child(
+        self,
+    ) -> None:
+        backend = _HermeticBackend()
+        failed = STORES_ONLY_PLAN[11]
+        child = STORES_ONLY_PLAN[10]
+        parent = STORES_ONLY_PLAN[9]
+        backend.fail_before_step = failed.step_id
+        backend.fail_compensation_once_step = parent.step_id
+        controller, backend = self._controller(backend)
+        with self.assertRaises(CompensationFailedError):
+            controller.run(
+                attempt_id="parent-compensation-intent-compensated-child-drift"
+            )
+        self.assertIs(backend.states[parent.step_id], StepState.AFTER)
+        self.assertIs(backend.states[child.step_id], StepState.BEFORE)
+        backend.states[child.step_id] = StepState.AFTER
+        backend.actions.clear()
+
+        with self.assertRaisesRegex(
+            StateDriftError,
+            "compensated_step_not_before:" + child.step_id,
+        ):
+            controller.run(
+                attempt_id="parent-compensation-intent-compensated-child-drift"
+            )
+
+        self.assertEqual(backend.actions, [])
+        self.assertEqual(
+            backend.records[-1].event,
+            JournalEvent.COMPENSATION_INTENT.value,
+        )
+        self.assertFalse(
+            any(
+                record.event == JournalEvent.COMPENSATION_COMPLETE.value
+                for record in backend.records
+            )
+        )
+
+    def test_compensation_intent_resume_skips_newly_unobservable_children(
+        self,
+    ) -> None:
+        backend = _HermeticBackend()
+        backend.fail_before_step = STORES_ONLY_PLAN[17].step_id
+        backend.fail_after_compensation_once_step = STORES_ONLY_PLAN[9].step_id
+        controller, backend = self._controller(backend)
+        with self.assertRaises(CompensationFailedError):
+            controller.run(attempt_id="dependency-compensation-intent-resume")
+        receipt = controller.run(
+            attempt_id="dependency-compensation-intent-resume"
+        )
+        self.assertEqual(receipt.outcome, "same_attempt_compensation_complete")
+
+    def test_compensation_marker_resume_refuses_active_child_drift(self) -> None:
+        controller, backend = self._controller()
+        attempt_id = "compensation-marker-active-child-drift"
+        for step in STORES_ONLY_PLAN[:17]:
+            controller._append(attempt_id, step.step_id, JournalEvent.INTENT)
+            if not step.invariant_only:
+                backend.states[step.step_id] = StepState.AFTER
+            controller._append(attempt_id, step.step_id, JournalEvent.APPLIED)
+        controller._append(
+            attempt_id,
+            ATTEMPT_STEP_ID,
+            JournalEvent.COMPENSATION_STARTED,
+        )
+        drifted = STORES_ONLY_PLAN[14]
+        backend.states[drifted.step_id] = StepState.DRIFT
+        backend.actions.clear()
+
+        with self.assertRaisesRegex(
+            StateDriftError,
+            "step_state_drift:" + drifted.step_id,
+        ):
+            controller.run(attempt_id=attempt_id)
+
+        self.assertEqual(backend.actions, [])
+        self.assertEqual(
+            backend.records[-1].event,
+            JournalEvent.COMPENSATION_STARTED.value,
+        )
         self.assertFalse(
             any(
                 record.event == JournalEvent.COMPENSATION_COMPLETE.value
@@ -408,6 +645,24 @@ class DormantStoreInstallControllerTests(unittest.TestCase):
         reordered[1], reordered[2] = reordered[2], reordered[1]
         with self.assertRaises(PlanValidationError):
             validate_plan(tuple(reordered))
+
+        wrong_requirements = list(STORES_ONLY_PLAN)
+        wrong_requirements[9] = replace(
+            wrong_requirements[9], observation_requires=()
+        )
+        with self.assertRaisesRegex(
+            PlanValidationError, "observation_requirements_invalid"
+        ):
+            validate_plan(tuple(wrong_requirements))
+
+        wrong_lifetime = list(STORES_ONLY_PLAN)
+        wrong_lifetime[2] = replace(
+            wrong_lifetime[2], proof_lifetime="continuous"
+        )
+        with self.assertRaisesRegex(
+            PlanValidationError, "proof_lifetime_invalid"
+        ):
+            validate_plan(tuple(wrong_lifetime))
 
         controller, backend = self._controller()
         controller.run(attempt_id="dormant_store_install-tamper")

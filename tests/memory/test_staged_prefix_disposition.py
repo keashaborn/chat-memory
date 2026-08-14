@@ -21,7 +21,7 @@ CORRECTED_PACKAGE = "3" * 64
 CORRECTED_RUNTIME = "4" * 64
 TAG_COMMIT = "a" * 40
 TAG_TREE = "b" * 40
-DISPOSITION_ID = "phase9-v7-staged-to-v8-000004"
+DISPOSITION_ID = "phase9-v8-staged-to-v9-000005"
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 CHECKED_IN_CONTRACT = (
     REPOSITORY_ROOT
@@ -138,36 +138,36 @@ class StagedPrefixDispositionTests(unittest.TestCase):
         self.wants = self.directory("systemd/wants")
         preserved_executions = self.directory("state/executions-v2")
         preserved_secret = self.directory("secrets/000002")
-        failed_executions = self.directory("state/executions-v3")
+        failed_executions = self.directory("state/executions-v4")
         failed_execution = self.directory(
-            "state/executions-v3/" + subject.PRODUCTION_EXECUTION_ID
+            "state/executions-v4/" + subject.PRODUCTION_EXECUTION_ID
         )
-        failed_secret = self.directory("secrets/000003")
+        failed_secret = self.directory("secrets/000004")
         self.paths = subject.StagedPrefixDispositionPaths(
             repository_root=self.repository,
-            durable_contract_path=self.contract_root / "000004.contract.json",
-            tombstone_path=self.control / "store_spec-v3.json",
+            durable_contract_path=self.contract_root / "000005.contract.json",
+            tombstone_path=self.control / "store_spec-v4.json",
             preserved_permit_path=self.state / "permit-000002.json",
             preserved_contract_path=self.contract_root / "contract-000002.json",
             preserved_pre_effect_receipt_path=self.control / "store_spec.json",
             preserved_staged_capsule_path=self.state / "capsule-v3.publishing",
             preserved_executions_root=preserved_executions,
             preserved_secret_root=preserved_secret,
-            old_permit_path=self.state / "permit-000003.json",
-            old_contract_path=self.contract_root / "contract-000003.json",
-            old_pre_effect_receipt_path=self.control / "store_spec-v2.json",
-            staged_capsule_path=self.state / "capsule-v4.json",
-            failed_authority_state_path=self.state / "authority-v3.sqlite3",
+            old_permit_path=self.state / "permit-000004.json",
+            old_contract_path=self.contract_root / "contract-000004.json",
+            old_pre_effect_receipt_path=self.control / "store_spec-v3.json",
+            staged_capsule_path=self.state / "capsule-v5.json",
+            failed_authority_state_path=self.state / "authority-v4.sqlite3",
             failed_execution_root=failed_execution,
             failed_execution_journal_path=failed_execution / "journal.jsonl",
             failed_execution_resources_path=failed_execution / "resources.jsonl",
-            failed_capsule_staging_path=self.state / "capsule-v4.publishing",
-            failed_promotable_receipt_path=self.state / "promotable-000003.json",
+            failed_capsule_staging_path=self.state / "capsule-v5.publishing",
+            failed_promotable_receipt_path=self.state / "promotable-000004.json",
             failed_promotable_receipt_staging_path=(
-                self.state / "promotable-000003.json.publishing"
+                self.state / "promotable-000004.json.publishing"
             ),
-            failed_systemd_unit_path=self.systemd / "stores-v3.service",
-            failed_systemd_link_path=self.wants / "stores-v3.service",
+            failed_systemd_unit_path=self.systemd / "stores-v4.service",
+            failed_systemd_link_path=self.wants / "stores-v4.service",
             final_capsule_path=self.state / "capsule-v3.json",
             authority_state_path=self.state / "authority-v2.sqlite3",
             promotable_receipt_path=self.state / "promotable-000002.json",
@@ -178,18 +178,18 @@ class StagedPrefixDispositionTests(unittest.TestCase):
             systemd_link_path=self.wants / "stores-v2.service",
             executions_root=failed_executions,
             store_secret_root=failed_secret,
-            corrected_capsule_path=self.state / "capsule-v5.json",
-            corrected_capsule_staging_path=self.state / "capsule-v5.publishing",
-            corrected_authority_state_path=self.state / "authority-v4.sqlite3",
-            corrected_promotable_receipt_path=self.state / "promotable-000004.json",
+            corrected_capsule_path=self.state / "capsule-v6.json",
+            corrected_capsule_staging_path=self.state / "capsule-v6.publishing",
+            corrected_authority_state_path=self.state / "authority-v5.sqlite3",
+            corrected_promotable_receipt_path=self.state / "promotable-000005.json",
             corrected_promotable_receipt_staging_path=(
-                self.state / "promotable-000004.json.publishing"
+                self.state / "promotable-000005.json.publishing"
             ),
-            corrected_executions_root=self.state / "executions-v4",
-            corrected_secret_root=self.root / "secrets/000004",
-            corrected_store_spec_path=self.control / "store_spec-v4.json",
-            corrected_systemd_unit_path=self.systemd / "stores-v4.service",
-            corrected_systemd_link_path=self.wants / "stores-v4.service",
+            corrected_executions_root=self.state / "executions-v5",
+            corrected_secret_root=self.root / "secrets/000005",
+            corrected_store_spec_path=self.control / "store_spec-v5.json",
+            corrected_systemd_unit_path=self.systemd / "stores-v5.service",
+            corrected_systemd_link_path=self.wants / "stores-v5.service",
             global_lock_path=self.locks / "execution.lock",
             live_guard_path=self.locks / "live-proof.lock",
             expected_uid=self.uid,
@@ -235,7 +235,7 @@ class StagedPrefixDispositionTests(unittest.TestCase):
             old_tag_tree=TAG_TREE,
             failed_package_manifest_sha256=FAILED_PACKAGE,
             failed_controller_runtime_receipt_sha256=FAILED_RUNTIME,
-            corrected_generation="000004",
+            corrected_generation="000005",
             corrected_package_manifest_sha256=CORRECTED_PACKAGE,
             corrected_controller_runtime_receipt_sha256=CORRECTED_RUNTIME,
         )
@@ -295,7 +295,7 @@ class StagedPrefixDispositionTests(unittest.TestCase):
             old_tag_tree=TAG_TREE,
             failed_package_manifest_sha256=FAILED_PACKAGE,
             failed_controller_runtime_receipt_sha256=FAILED_RUNTIME,
-            corrected_generation="000004",
+            corrected_generation="000005",
             corrected_package_manifest_sha256=CORRECTED_PACKAGE,
             corrected_controller_runtime_receipt_sha256=CORRECTED_RUNTIME,
         )
@@ -343,7 +343,7 @@ class StagedPrefixDispositionTests(unittest.TestCase):
                 ],
             },
             "failed_attempt": {
-                "generation": "000003",
+                "generation": "000004",
                 "tag": {
                     "ref": subject.PRODUCTION_OLD_TAG_REF,
                     "object_type": "commit",
@@ -356,14 +356,14 @@ class StagedPrefixDispositionTests(unittest.TestCase):
                     self.file_spec("failed_contract", self.paths.old_contract_path),
                     self.file_spec("failed_permit", self.paths.old_permit_path),
                     self.file_spec(
-                        "failed_store_spec_v2_tombstone",
+                        "failed_store_spec_v3_tombstone",
                         self.paths.old_pre_effect_receipt_path,
                     ),
                     self.file_spec(
-                        "failed_capsule_v4", self.paths.staged_capsule_path
+                        "failed_capsule_v5", self.paths.staged_capsule_path
                     ),
                     self.file_spec(
-                        "failed_authority_state_v3",
+                        "failed_authority_state_v4",
                         self.paths.failed_authority_state_path,
                     ),
                     self.file_spec(
@@ -377,7 +377,7 @@ class StagedPrefixDispositionTests(unittest.TestCase):
                 ],
                 "evidence_directories": [
                     self.directory_spec(
-                        "failed_executions_v3", self.paths.executions_root
+                        "failed_executions_v4", self.paths.executions_root
                     ),
                     self.directory_spec(
                         "failed_execution", self.paths.failed_execution_root
@@ -411,14 +411,74 @@ class StagedPrefixDispositionTests(unittest.TestCase):
         inode = self.paths.tombstone_path.stat().st_ino
         second = self.execute()
         self.assertEqual(first, second)
-        self.assertEqual(first["failed_generation"], "000003")
-        self.assertEqual(first["corrected_generation"], "000004")
+        self.assertEqual(first["failed_generation"], "000004")
+        self.assertEqual(first["corrected_generation"], "000005")
         self.assertTrue(first["failed_evidence_preserved_in_place"])
         self.assertFalse(first["deletion_performed"])
         self.assertEqual(self.paths.tombstone_path.stat().st_ino, inode)
         self.assertEqual(stat.S_IMODE(self.paths.tombstone_path.stat().st_mode), 0o400)
         for path, identity in before.items():
             self.assertEqual((path.read_bytes(), path.stat().st_ino), identity)
+
+    def test_exact_fence_replay_allows_corrected_successor_preclaim_state(self) -> None:
+        first = self.execute()
+        tombstone_inode = self.paths.tombstone_path.stat().st_ino
+        self.write(
+            self.paths.corrected_authority_state_path,
+            b"corrected-preclaim-authority",
+            0o600,
+        )
+        self.directory("state/executions-v5")
+        corrected_container = subject._DOCKER_IDENTITIES["docker_container"][-1]
+
+        replay = self.execute(
+            ClosedRunner(
+                self.paths,
+                docker_output=(corrected_container + "\n").encode("ascii"),
+            )
+        )
+
+        self.assertEqual(replay, first)
+        self.assertEqual(self.paths.tombstone_path.stat().st_ino, tombstone_inode)
+        self.assertEqual(
+            self.paths.corrected_authority_state_path.read_bytes(),
+            b"corrected-preclaim-authority",
+        )
+
+    def test_exact_fence_replay_still_refuses_failed_evidence_drift(self) -> None:
+        first = self.execute()
+        failed = self.paths.failed_execution_journal_path
+        failed.chmod(0o600)
+        failed.write_bytes(b"drift")
+        failed.chmod(0o600)
+
+        with self.assertRaisesRegex(
+            subject.StagedPrefixDispositionError,
+            "evidence_mismatch|file_invalid",
+        ):
+            self.execute()
+
+        self.assertTrue(self.paths.tombstone_path.exists())
+        self.assertEqual(
+            subject.verify_staged_prefix_tombstone(
+                self.paths, self.expectation
+            ),
+            first,
+        )
+
+    def test_conflicting_existing_fence_never_falls_back_to_fresh_disposition(self) -> None:
+        self.execute()
+        self.paths.tombstone_path.chmod(0o600)
+        self.paths.tombstone_path.write_bytes(b"conflict")
+        self.paths.tombstone_path.chmod(0o400)
+
+        with self.assertRaisesRegex(
+            subject.StagedPrefixDispositionError,
+            "tombstone_invalid|tombstone_conflict",
+        ):
+            self.execute()
+
+        self.assertEqual(self.paths.tombstone_path.read_bytes(), b"conflict")
 
     def test_each_failed_file_hash_or_mode_drift_refuses_without_fence(self) -> None:
         for path in subject._failed_evidence_paths(self.paths).values():
@@ -484,7 +544,8 @@ class StagedPrefixDispositionTests(unittest.TestCase):
 
 
 class ProductionContractFactsTests(unittest.TestCase):
-    def test_generator_binds_exact_failed_000003_tree_and_000004_namespace(self) -> None:
+    @unittest.skip("P5/R5/C5 are intentionally unsealed")
+    def test_generator_binds_exact_failed_000004_tree_and_000005_namespace(self) -> None:
         document = generator.generate()
         generated = subject.canonical_json_bytes(document)
         self.assertEqual(CHECKED_IN_CONTRACT.read_bytes(), generated)
@@ -497,7 +558,7 @@ class ProductionContractFactsTests(unittest.TestCase):
         directories = {
             item["role"]: item for item in failed["evidence_directories"]
         }
-        self.assertEqual(failed["generation"], "000003")
+        self.assertEqual(failed["generation"], "000004")
         self.assertEqual(
             failed["package_manifest_sha256"],
             "5addc8e4ab40b6bc700fde57b67579f8caa3d21077715bcdaf61d5714b52743e",
@@ -509,10 +570,10 @@ class ProductionContractFactsTests(unittest.TestCase):
         self.assertEqual(failed["tag"]["commit"], subject.PRODUCTION_OLD_TAG_COMMIT)
         self.assertEqual(files["failed_permit"]["inode"], 1652272)
         self.assertEqual(
-            files["failed_store_spec_v2_tombstone"]["sha256"],
+            files["failed_store_spec_v3_tombstone"]["sha256"],
             "57e07d7ce65e79503982e3c87297f644a347b41394a40cf56127f3536524130d",
         )
-        self.assertEqual(files["failed_authority_state_v3"]["mode"], 0o600)
+        self.assertEqual(files["failed_authority_state_v4"]["mode"], 0o600)
         self.assertEqual(files["failed_execution_journal"]["size"], 0)
         self.assertEqual(
             files["failed_execution_journal"]["path"],
@@ -523,7 +584,7 @@ class ProductionContractFactsTests(unittest.TestCase):
             str(subject.PRODUCTION_EXECUTION_ROOT / "resources.jsonl"),
         )
         self.assertEqual(
-            directories["failed_executions_v3"]["entries"],
+            directories["failed_executions_v4"]["entries"],
             [subject.PRODUCTION_EXECUTION_ID],
         )
         self.assertEqual(
@@ -531,7 +592,7 @@ class ProductionContractFactsTests(unittest.TestCase):
             ["journal.jsonl", "resources.jsonl"],
         )
         successor = document["corrected_successor"]
-        self.assertEqual(successor["generation"], "000004")
+        self.assertEqual(successor["generation"], "000005")
         self.assertEqual(
             successor["package_manifest_sha256"],
             "634669dbca4f2ccfed929951bcdd0d555d19e53f9b736ee21b42217e8e8cd629",
@@ -545,10 +606,10 @@ class ProductionContractFactsTests(unittest.TestCase):
             "7d36e9326e1b333b4203d167f776ef75759ff295f943f79ae5838b068c3b8ba5",
         )
         self.assertEqual(
-            subject._TCP_IDENTITIES["127.0.0.1:55435@000004"], "55435"
+            subject._TCP_IDENTITIES["127.0.0.1:55436@000005"], "55436"
         )
         self.assertEqual(
-            subject._TCP_IDENTITIES["127.0.0.1:6346@000004"], "6346"
+            subject._TCP_IDENTITIES["127.0.0.1:6347@000005"], "6347"
         )
 
 

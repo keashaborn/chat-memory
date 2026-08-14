@@ -73,25 +73,25 @@ EMPTY_ROLLBACK_RECEIPT_SCHEMA_RELATIVE: Final = (
 )
 
 EXPECTED_CONTRACT_CANONICAL_SHA256: Final = (
-    "1c93dbef0c6b72b36825087522e11639c62c9daed1c31a6f735600a57c25a03d"
+    "e1c47edb4e1e4f2354563bb0842a44e4f57a96579d72cb99394be787ff78fd2a"
 )
 EXPECTED_PLAN_CANONICAL_SHA256: Final = (
-    "fa0090fda942d875cc021e19e36cb5bfb22298c637d58a276acb9b367e164a4d"
+    "f80c6de2352168242d3bfe3fdceb24051313984b813e062df322a8e7295f8603"
 )
 EXPECTED_CONTROLLER_SOURCE_SHA256: Final = (
-    "5a18628c85aab814360667341f685f809ac240b484a5fe6e10c727f54a752de5"
+    "3aecf264c6e9aa98076dc7246f1765f9490866107dc97c52d2242a3225c78f5a"
 )
 EXPECTED_CONTROLLER_MODEL_SHA256: Final = (
-    "d3701a21b827da66122906e1dcc2828ce69f06e1048164df1c4d0ca0321c3de8"
+    "b4ad0181ae31e91b26539099a76488e9172a5f140edb4654fed5d33116fa409c"
 )
 EXPECTED_EXECUTION_CONTRACT_CANONICAL_SHA256: Final = (
-    "943defc0441b6ad888b4d1bd60e135eab178e1c9cd37f9a415f988fdd6abe0c6"
+    "8fe3a1e4b03a8a2a23c4b89899288c244111f47327a3c3aa51d41599ab2d12c6"
 )
 EXPECTED_CONTROLLER_RUNTIME_CONTRACT_CANONICAL_SHA256: Final = (
     "60580592361d52b6af3d57d023d7bdd3f0876d677f736e6ee00aeb85841d79ac"
 )
 EXPECTED_POSTGRES_NATIVE_STAGE_CONTRACT_CANONICAL_SHA256: Final = (
-    "c58eb56e5c51651d0e5e66c1ff0c06a29c047824c2a6d3adeab39c3e223cfd25"
+    "da99f9e10e2ed5227d6ee743145bb6d05b8afe240cbbf3432626b63879ca7997"
 )
 EXPECTED_PROOF_CONTRACT_CANONICAL_SHA256: Final = (
     "072ad9a0c4f10ef45e0a5287780b2f4b9334eb8741744b9bc15da74260e07d2f"
@@ -100,7 +100,7 @@ EXPECTED_SYNTHETIC_PROOF_RECEIPT_SCHEMA_CANONICAL_SHA256: Final = (
     "5fa4b98974b7c1652c931abd7b630bbca11fd92fde15ee4d099ae6132f3dfe1d"
 )
 EXPECTED_LIVE_PROOF_RECEIPT_SCHEMA_CANONICAL_SHA256: Final = (
-    "9e5bb221fca5b273df3ce1841ca181246e4990ea3783902f0ba057ff7fb01987"
+    "68b4784a1de610ea3dbb67887d2e0174af7b8808372b480c8c772832ce98d1a9"
 )
 EXPECTED_INSTALL_RECEIPT_SCHEMA_CANONICAL_SHA256: Final = (
     "6a76bcf802ba72257bb5fa524010de5182f85c6dbee2b490d46f92faf159a395"
@@ -109,7 +109,7 @@ EXPECTED_EMPTY_ROLLBACK_RECEIPT_SCHEMA_CANONICAL_SHA256: Final = (
     "4cf0b822c3b7c18bb1469deb8c044146982214e5ae1d0d8be8bf4a4a79e9292e"
 )
 EXPECTED_MIGRATION_VERIFIER_SOURCE_SHA256: Final = (
-    "f70b1261280cffd1cb6e6b98c7fcf09f004e5c734dbf101a32fa9acd48ede6df"
+    "53140e6a567bd7b6d84e8393758a90ec71e6ddee44704f9276594ae84c43cab2"
 )
 EXPECTED_MIGRATION_BINDINGS_CANONICAL_SHA256: Final = (
     "f6229283ff196e7355294f99321b92f350c4ec7909744544e9b1941e13100b42"
@@ -371,9 +371,9 @@ EXPECTED_ARTIFACTS: Final = frozenset(
         "ops/governed_memory/installation/current/postgres/roles_preflight.pgsql",
         "ops/governed_memory/installation/postgres/canonical_cluster.pgsql.in",
         "ops/governed_memory/installation/postgres/canonical_cluster_rollback.pgsql.in",
-        "ops/governed_memory/installation/store_spec-v4.json",
+        "ops/governed_memory/installation/store_spec-v5.json",
         "ops/governed_memory/controller-requirements.lock",
-        "ops/governed_memory/installation/systemd/governed-memory-stores-v4.service.in",
+        "ops/governed_memory/installation/systemd/governed-memory-stores-v5.service.in",
         "ops/governed_memory/qdrant_alias.create.json",
         "ops/governed_memory/qdrant_collection.create.json",
         "tools/governed_memory_install/__init__.py",
@@ -775,9 +775,9 @@ def _verify_contract(contract: dict[str, object]) -> None:
         or "image_receipt" in targets
         or "trust_anchor" in targets
         or targets.get("recovery_capsule")
-        != "/var/lib/governed-memory-controller/phase9-disposable-proof-recovery-capsule-v5.json"
+        != "/var/lib/governed-memory-controller/phase9-disposable-proof-recovery-capsule-v6.json"
         or targets.get("nonce_state")
-        != "/var/lib/governed-memory-controller/authority-state-v4.sqlite3"
+        != "/var/lib/governed-memory-controller/authority-state-v5.sqlite3"
         or targets.get("proof_supervision_lock")
         != "/run/lock/governed-memory-controller/phase9-disposable-live-proof.lock"
         or type(filesystem) is not dict
@@ -1267,7 +1267,7 @@ def _verify_contract(contract: dict[str, object]) -> None:
         )
         is not True
         or receipts.get("canonical_production_executions_root")
-        != "/var/lib/governed-memory-controller/executions-v4"
+        != "/var/lib/governed-memory-controller/executions-v5"
         or receipts.get(
             "public_install_and_rollback_entrypoints_require_root_owned_production_receipt_store"
         )
@@ -1306,7 +1306,7 @@ def _verify_plan(plan: dict[str, object]) -> None:
         raise PackageError("dormant_store_install_plan_semantics_invalid")
     if (
         plan.get("schema_version")
-        != "governed-memory-dormant-store-install-stores-controller-plan-v5"
+        != "governed-memory-dormant-store-install-stores-controller-plan-v6"
         or plan.get("state")
         != "phase9j-install-ready-closed-runtime-and-store-transports-packaged-not-installed-not-activated"
         or plan.get("server") != "seebx"
@@ -1317,13 +1317,25 @@ def _verify_plan(plan: dict[str, object]) -> None:
         raise PackageError("dormant_store_install_plan_step_count_invalid")
     observed_ids: list[str] = []
     for expected_id, step in zip(EXPECTED_CONTROLLER_STEP_IDS, steps, strict=True):
-        if type(step) is not dict or set(step) != {"id", "effect", "rollback"}:
+        if type(step) is not dict or set(step) != {
+            "id",
+            "effect",
+            "rollback",
+            "observation_requires",
+            "proof_lifetime",
+        }:
             raise PackageError("dormant_store_install_plan_step_shape_invalid")
         if step.get("id") != expected_id:
             raise PackageError("dormant_store_install_plan_step_order_invalid")
         if any(
             type(step.get(key)) is not str or not step.get(key)
-            for key in ("effect", "rollback")
+            for key in ("effect", "rollback", "proof_lifetime")
+        ) or (
+            type(step.get("observation_requires")) is not list
+            or any(
+                type(required) is not str or not required
+                for required in step["observation_requires"]
+            )
         ):
             raise PackageError("dormant_store_install_plan_step_shape_invalid")
         observed_ids.append(expected_id)
@@ -1563,7 +1575,7 @@ def _verify_postgres_native_stage_contract(contract: dict[str, object]) -> None:
     if (
         type(endpoint) is not dict
         or endpoint.get("host") != "127.0.0.1"
-        or endpoint.get("port") != 55435
+        or endpoint.get("port") != 55436
         or endpoint.get("bootstrap_database") != "postgres"
         or endpoint.get("target_database") != "governed_memory"
         or endpoint.get("caller_dsn_host_port_database_role_or_path_allowed")
@@ -2102,7 +2114,7 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
             reject_stale_ordering=True,
         )
         or receipt.get("canonical_production_executions_root")
-        != "/var/lib/governed-memory-controller/executions-v4"
+        != "/var/lib/governed-memory-controller/executions-v5"
         or receipt.get(
             "public_install_and_rollback_entrypoints_require_root_owned_production_receipt_store"
         )
@@ -2494,7 +2506,7 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
         or live_proof_schema.get("properties", {}).get(
             "schema_version", {}
         ).get("const")
-        != "governed-memory-phase9-live-proof-receipt-v5"
+        != "governed-memory-phase9-live-proof-receipt-v6"
         or live_proof_schema.get("properties", {}).get(
             "host_clock_synchronization_preflight_passed", {}
         ).get("const")

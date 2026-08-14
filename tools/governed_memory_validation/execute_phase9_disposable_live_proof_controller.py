@@ -17,7 +17,7 @@ _PREIMPORT_CONTROLLER_PYTHON = (
 )
 _PREIMPORT_GIT = "/usr/bin/git"
 _PREIMPORT_EXPECTED_CANDIDATE_REF = (
-    "refs/tags/governed-memory-phase9j-pre-effect-disposition-000004"
+    "refs/tags/governed-memory-phase9j-pre-effect-disposition-000005"
 )
 _PREIMPORT_CONTROLLER_RELATIVE = (
     "tools/governed_memory_validation/"
@@ -213,6 +213,7 @@ import json
 from pathlib import Path
 import re
 import signal
+import stat
 import time
 from typing import Final
 
@@ -275,7 +276,53 @@ MANAGER_PID_ENVIRONMENT_KEY: Final = "GOVERNED_MEMORY_PHASE9_MANAGER_PID"
 ROOT_UID: Final = 0
 ROOT_GID: Final = 0
 RESULT_SCHEMA: Final = "governed-memory-phase9j-live-proof-controller-v1"
+FAILURE_EVIDENCE_SCHEMA: Final = (
+    "governed-memory-phase9j-subordinate-failure-evidence-v1"
+)
+FAILURE_EVIDENCE_RESULT: Final = "sanitized_subordinate_failure_preserved"
+FAILURE_EVIDENCE_STATE_ROOT: Final = Path(
+    "/var/lib/governed-memory-controller"
+)
+FAILURE_EVIDENCE_NAME_PREFIX: Final = (
+    "phase9-disposable-live-proof-failure-000005-"
+)
+MAX_FAILURE_EVIDENCE_BYTES: Final = 16 * 1024
 _ID_RE: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}\Z", re.ASCII)
+_GIT_OBJECT_RE: Final = re.compile(r"[0-9a-f]{40}\Z", re.ASCII)
+_HASH_RE: Final = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
+_SUBORDINATE_ERROR_RE: Final = re.compile(
+    r"[a-z][a-z0-9_]{1,180}\Z", re.ASCII
+)
+_GENERIC_SUBORDINATE_ERROR: Final = (
+    "phase9_proof_controller_subordinate_output_invalid"
+)
+_SUBORDINATE_ERROR_PREFIXES: Final = {
+    PUBLISHER_RELATIVE: ("phase9_staged_prefix_permit_",),
+    DISPOSITION_RELATIVE: ("phase9_staged_prefix_disposition_",),
+    ISSUER_RELATIVE: ("phase9_proof_issuer_", "phase9_live_proof_"),
+}
+_FAILURE_EVIDENCE_KEYS: Final = frozenset(
+    {
+        "schema_version",
+        "result",
+        "evidence_scope",
+        "step_relative",
+        "subordinate_exit_status",
+        "sanitized_error_code",
+        "stdout_size_bytes",
+        "stdout_sha256",
+        "stderr_size_bytes",
+        "stderr_sha256",
+        "raw_subordinate_output_persisted",
+        "candidate_git_commit",
+        "candidate_git_tree",
+        "package_manifest_sha256",
+        "controller_runtime_receipt_sha256",
+        "permit_sha256",
+        "staged_prefix_tombstone_sha256",
+        "receipt_sha256",
+    }
+)
 _STEP_RELATIVES: Final = frozenset(
     {PUBLISHER_RELATIVE, DISPOSITION_RELATIVE, ISSUER_RELATIVE}
 )
@@ -290,6 +337,28 @@ _SAFE_ENVIRONMENT: Final = {
 
 class Phase9DisposableLiveProofControllerError(RuntimeError):
     """Content-free refusal from the exact production controller."""
+
+
+class _SubordinateStepFailure(Phase9DisposableLiveProofControllerError):
+    """Sanitized bounded evidence for one exact child refusal."""
+
+    def __init__(
+        self,
+        *,
+        relative: str,
+        exit_status: int,
+        stdout: bytes,
+        stderr: bytes,
+        error_code: str,
+    ) -> None:
+        super().__init__("phase9_proof_controller_step_failed")
+        self.relative = relative
+        self.exit_status = exit_status
+        self.stdout_size_bytes = len(stdout)
+        self.stdout_sha256 = _sha(stdout)
+        self.stderr_size_bytes = len(stderr)
+        self.stderr_sha256 = _sha(stderr)
+        self.error_code = error_code
 
 
 def _canonical(value: object) -> bytes:
@@ -309,6 +378,376 @@ def _canonical(value: object) -> bytes:
 
 def _sha(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
+
+
+def _sanitized_step_failure(
+    *,
+    relative: str,
+    exit_status: int,
+    stdout: bytes,
+    stderr: bytes,
+) -> _SubordinateStepFailure:
+    code = _GENERIC_SUBORDINATE_ERROR
+    if (
+        relative in _SUBORDINATE_ERROR_PREFIXES
+        and type(exit_status) is int
+        and exit_status == 1
+        and stdout == b""
+        and stderr.endswith(b"\n")
+        and stderr.count(b"\n") == 1
+        and len(stderr) <= MAX_STEP_ERROR_BYTES
+    ):
+        try:
+            candidate = stderr[:-1].decode("ascii")
+        except UnicodeError:
+            candidate = ""
+        if (
+            _SUBORDINATE_ERROR_RE.fullmatch(candidate) is not None
+            and candidate.startswith(_SUBORDINATE_ERROR_PREFIXES[relative])
+        ):
+            code = candidate
+    return _SubordinateStepFailure(
+        relative=relative,
+        exit_status=exit_status,
+        stdout=stdout,
+        stderr=stderr,
+        error_code=code,
+    )
+
+
+def _valid_sanitized_error_code(relative: str, code: object) -> bool:
+    return bool(
+        type(code) is str
+        and _SUBORDINATE_ERROR_RE.fullmatch(code) is not None
+        and (
+            code == _GENERIC_SUBORDINATE_ERROR
+            or (
+                relative in _SUBORDINATE_ERROR_PREFIXES
+                and code.startswith(_SUBORDINATE_ERROR_PREFIXES[relative])
+            )
+        )
+    )
+
+
+def _failure_evidence_document(
+    *,
+    failure: _SubordinateStepFailure,
+    candidate: phase9_permitted_candidate.PermittedCandidateAuthority,
+    permit: Mapping[str, object],
+    disposition: Mapping[str, object] | None,
+) -> dict[str, object]:
+    permit_sha256 = permit.get("permit_sha256")
+    tombstone_sha256 = (
+        None if disposition is None else disposition.get("tombstone_sha256")
+    )
+    if (
+        type(failure) is not _SubordinateStepFailure
+        or failure.relative not in {DISPOSITION_RELATIVE, ISSUER_RELATIVE}
+        or type(candidate)
+        is not phase9_permitted_candidate.PermittedCandidateAuthority
+        or type(permit_sha256) is not str
+        or _HASH_RE.fullmatch(permit_sha256) is None
+        or (
+            disposition is not None
+            and (
+                type(tombstone_sha256) is not str
+                or _HASH_RE.fullmatch(tombstone_sha256) is None
+            )
+        )
+        or (
+            failure.relative == ISSUER_RELATIVE and disposition is None
+        )
+        or not _valid_sanitized_error_code(
+            failure.relative, failure.error_code
+        )
+    ):
+        raise Phase9DisposableLiveProofControllerError(
+            "phase9_proof_controller_failure_evidence_invalid"
+        )
+    unsigned: dict[str, object] = {
+        "schema_version": FAILURE_EVIDENCE_SCHEMA,
+        "result": FAILURE_EVIDENCE_RESULT,
+        "evidence_scope": "one_exact_subordinate_process_exit",
+        "step_relative": failure.relative,
+        "subordinate_exit_status": failure.exit_status,
+        "sanitized_error_code": failure.error_code,
+        "stdout_size_bytes": failure.stdout_size_bytes,
+        "stdout_sha256": failure.stdout_sha256,
+        "stderr_size_bytes": failure.stderr_size_bytes,
+        "stderr_sha256": failure.stderr_sha256,
+        "raw_subordinate_output_persisted": False,
+        "candidate_git_commit": candidate.candidate_git_commit,
+        "candidate_git_tree": candidate.candidate_git_tree,
+        "package_manifest_sha256": candidate.package_manifest_sha256,
+        "controller_runtime_receipt_sha256": (
+            candidate.controller_runtime_receipt_sha256
+        ),
+        "permit_sha256": permit_sha256,
+        "staged_prefix_tombstone_sha256": tombstone_sha256,
+    }
+    return {**unsigned, "receipt_sha256": _sha(_canonical(unsigned))}
+
+
+def _verify_failure_evidence_document(
+    document: Mapping[str, object],
+) -> tuple[dict[str, object], str]:
+    if type(document) is not dict or set(document) != _FAILURE_EVIDENCE_KEYS:
+        raise Phase9DisposableLiveProofControllerError(
+            "phase9_proof_controller_failure_evidence_invalid"
+        )
+    verified = dict(document)
+    step = verified.get("step_relative")
+    status = verified.get("subordinate_exit_status")
+    code = verified.get("sanitized_error_code")
+    stdout_size = verified.get("stdout_size_bytes")
+    stderr_size = verified.get("stderr_size_bytes")
+    tombstone = verified.get("staged_prefix_tombstone_sha256")
+    receipt_sha256 = verified.get("receipt_sha256")
+    hash_fields = (
+        "stdout_sha256",
+        "stderr_sha256",
+        "package_manifest_sha256",
+        "controller_runtime_receipt_sha256",
+        "permit_sha256",
+    )
+    if (
+        verified.get("schema_version") != FAILURE_EVIDENCE_SCHEMA
+        or verified.get("result") != FAILURE_EVIDENCE_RESULT
+        or verified.get("evidence_scope")
+        != "one_exact_subordinate_process_exit"
+        or step not in {DISPOSITION_RELATIVE, ISSUER_RELATIVE}
+        or type(status) is not int
+        or not -255 <= status <= 255
+        or not _valid_sanitized_error_code(str(step), code)
+        or type(stdout_size) is not int
+        or not 0 <= stdout_size <= (2**63 - 1)
+        or type(stderr_size) is not int
+        or not 0 <= stderr_size <= (2**63 - 1)
+        or verified.get("raw_subordinate_output_persisted") is not False
+        or type(verified.get("candidate_git_commit")) is not str
+        or _GIT_OBJECT_RE.fullmatch(
+            str(verified.get("candidate_git_commit"))
+        )
+        is None
+        or type(verified.get("candidate_git_tree")) is not str
+        or _GIT_OBJECT_RE.fullmatch(str(verified.get("candidate_git_tree")))
+        is None
+        or any(
+            type(verified.get(key)) is not str
+            or _HASH_RE.fullmatch(str(verified.get(key))) is None
+            for key in hash_fields
+        )
+        or (
+            tombstone is not None
+            and (
+                type(tombstone) is not str
+                or _HASH_RE.fullmatch(tombstone) is None
+            )
+        )
+        or (
+            step == ISSUER_RELATIVE
+            and tombstone is None
+        )
+        or type(receipt_sha256) is not str
+        or _HASH_RE.fullmatch(receipt_sha256) is None
+    ):
+        raise Phase9DisposableLiveProofControllerError(
+            "phase9_proof_controller_failure_evidence_invalid"
+        )
+    if code != _GENERIC_SUBORDINATE_ERROR:
+        expected_stderr = (str(code) + "\n").encode("ascii")
+        if (
+            status != 1
+            or stdout_size != 0
+            or verified.get("stdout_sha256") != _sha(b"")
+            or stderr_size != len(expected_stderr)
+            or verified.get("stderr_sha256") != _sha(expected_stderr)
+        ):
+            raise Phase9DisposableLiveProofControllerError(
+                "phase9_proof_controller_failure_evidence_invalid"
+            )
+    unsigned = dict(verified)
+    unsigned.pop("receipt_sha256")
+    if receipt_sha256 != _sha(_canonical(unsigned)):
+        raise Phase9DisposableLiveProofControllerError(
+            "phase9_proof_controller_failure_evidence_invalid"
+        )
+    return verified, receipt_sha256
+
+
+def _stable_file_identity(value: os.stat_result) -> tuple[int, ...]:
+    return (
+        value.st_dev,
+        value.st_ino,
+        value.st_mode,
+        value.st_uid,
+        value.st_gid,
+        value.st_nlink,
+        value.st_size,
+        value.st_mtime_ns,
+        value.st_ctime_ns,
+    )
+
+
+def _read_exact_failure_member(
+    parent_fd: int,
+    name: str,
+    *,
+    expected_raw: bytes,
+    expected_uid: int,
+    expected_gid: int,
+) -> tuple[int, int]:
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            name,
+            os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=parent_fd,
+        )
+        opened = os.fstat(descriptor)
+        named = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or stat.S_IMODE(opened.st_mode) != 0o400
+            or opened.st_uid != expected_uid
+            or opened.st_gid != expected_gid
+            or opened.st_nlink != 1
+            or opened.st_size != len(expected_raw)
+            or _stable_file_identity(opened) != _stable_file_identity(named)
+        ):
+            raise OSError(errno.EPERM, "metadata")
+        raw = bytearray()
+        while len(raw) < opened.st_size:
+            block = os.read(descriptor, opened.st_size - len(raw))
+            if not block:
+                break
+            raw.extend(block)
+        after = os.fstat(descriptor)
+        named_after = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        if (
+            bytes(raw) != expected_raw
+            or _stable_file_identity(after) != _stable_file_identity(opened)
+            or _stable_file_identity(named_after) != _stable_file_identity(opened)
+        ):
+            raise OSError(errno.EIO, "content")
+        return opened.st_dev, opened.st_ino
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def _persist_failure_evidence_at(
+    state_root: Path,
+    document: Mapping[str, object],
+    *,
+    expected_uid: int,
+    expected_gid: int,
+) -> Path:
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    verified, receipt_sha256 = _verify_failure_evidence_document(document)
+    raw = _canonical(verified)
+    if (
+        nofollow == 0
+        or type(state_root) is not type(Path("/"))
+        or not state_root.is_absolute()
+        or type(expected_uid) is not int
+        or type(expected_gid) is not int
+        or not 1 <= len(raw) <= MAX_FAILURE_EVIDENCE_BYTES
+    ):
+        raise Phase9DisposableLiveProofControllerError(
+            "phase9_proof_controller_failure_evidence_invalid"
+        )
+    name = FAILURE_EVIDENCE_NAME_PREFIX + receipt_sha256 + ".json"
+    parent_fd = file_fd = -1
+    try:
+        parent_fd = os.open(
+            state_root,
+            os.O_RDONLY
+            | os.O_CLOEXEC
+            | nofollow
+            | getattr(os, "O_DIRECTORY", 0),
+        )
+        parent = os.fstat(parent_fd)
+        named_parent = state_root.stat(follow_symlinks=False)
+        if (
+            not stat.S_ISDIR(parent.st_mode)
+            or stat.S_IMODE(parent.st_mode) != 0o700
+            or parent.st_uid != expected_uid
+            or parent.st_gid != expected_gid
+            or (parent.st_dev, parent.st_ino)
+            != (named_parent.st_dev, named_parent.st_ino)
+        ):
+            raise OSError(errno.EPERM, "parent")
+        try:
+            file_fd = os.open(
+                name,
+                os.O_WRONLY
+                | os.O_CREAT
+                | os.O_EXCL
+                | os.O_CLOEXEC
+                | nofollow,
+                0o400,
+                dir_fd=parent_fd,
+            )
+        except FileExistsError:
+            _read_exact_failure_member(
+                parent_fd,
+                name,
+                expected_raw=raw,
+                expected_uid=expected_uid,
+                expected_gid=expected_gid,
+            )
+            return state_root / name
+        os.fchown(file_fd, expected_uid, expected_gid)
+        os.fchmod(file_fd, 0o400)
+        view = memoryview(raw)
+        while view:
+            written = os.write(file_fd, view)
+            if written <= 0:
+                raise OSError(errno.EIO, "write")
+            view = view[written:]
+        os.fsync(file_fd)
+        created = os.fstat(file_fd)
+        named = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        if (
+            not stat.S_ISREG(created.st_mode)
+            or stat.S_IMODE(created.st_mode) != 0o400
+            or created.st_uid != expected_uid
+            or created.st_gid != expected_gid
+            or created.st_nlink != 1
+            or created.st_size != len(raw)
+            or _stable_file_identity(created) != _stable_file_identity(named)
+        ):
+            raise OSError(errno.EPERM, "created")
+        os.fsync(parent_fd)
+        _read_exact_failure_member(
+            parent_fd,
+            name,
+            expected_raw=raw,
+            expected_uid=expected_uid,
+            expected_gid=expected_gid,
+        )
+        return state_root / name
+    except Phase9DisposableLiveProofControllerError:
+        raise
+    except OSError as error:
+        raise Phase9DisposableLiveProofControllerError(
+            "phase9_proof_controller_failure_evidence_persistence_failed"
+        ) from error
+    finally:
+        if file_fd >= 0:
+            os.close(file_fd)
+        if parent_fd >= 0:
+            os.close(parent_fd)
+
+
+def _persist_failure_evidence(document: Mapping[str, object]) -> Path:
+    return _persist_failure_evidence_at(
+        FAILURE_EVIDENCE_STATE_ROOT,
+        document,
+        expected_uid=ROOT_UID,
+        expected_gid=ROOT_GID,
+    )
 
 
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -668,24 +1107,76 @@ def _run_step(
         command_runner=command_runner,
     )
     if (
-        process.returncode != 0
+        type(process.returncode) is not int
         or type(stdout) is not bytes
         or type(stderr) is not bytes
-        or stderr != b""
-        or len(stdout) > MAX_STEP_OUTPUT_BYTES
     ):
         raise Phase9DisposableLiveProofControllerError(
             "phase9_proof_controller_step_failed"
         )
-    return _strict_document(
-        stdout,
-        "phase9_proof_controller_step_receipt_invalid",
-    )
+    if (
+        process.returncode != 0
+        or stderr != b""
+        or len(stdout) > MAX_STEP_OUTPUT_BYTES
+        or len(stderr) > MAX_STEP_ERROR_BYTES
+    ):
+        raise _sanitized_step_failure(
+            relative=relative,
+            exit_status=process.returncode,
+            stdout=stdout,
+            stderr=stderr,
+        )
+    try:
+        return _strict_document(
+            stdout,
+            "phase9_proof_controller_step_receipt_invalid",
+        )
+    except Phase9DisposableLiveProofControllerError:
+        raise _sanitized_step_failure(
+            relative=relative,
+            exit_status=process.returncode,
+            stdout=stdout,
+            stderr=stderr,
+        ) from None
 
 
-def _require_disposition(
+def _run_evidence_bound_step(
+    relative: str,
+    *,
+    timeout: int,
+    environment: Mapping[str, str],
+    command_runner: object,
     candidate: phase9_permitted_candidate.PermittedCandidateAuthority,
-) -> Mapping[str, object]:
+    permit: Mapping[str, object],
+    disposition: Mapping[str, object] | None,
+) -> dict[str, object]:
+    try:
+        return _run_step(
+            relative,
+            (),
+            timeout=timeout,
+            environment=environment,
+            command_runner=command_runner,
+        )
+    except _SubordinateStepFailure as failure:
+        observed_disposition = disposition
+        if relative == DISPOSITION_RELATIVE:
+            observed_disposition = _read_disposition_if_present(candidate)
+        evidence = _failure_evidence_document(
+            failure=failure,
+            candidate=candidate,
+            permit=permit,
+            disposition=observed_disposition,
+        )
+        _persist_failure_evidence(evidence)
+        raise Phase9DisposableLiveProofControllerError(
+            "phase9_proof_controller_step_failed"
+        ) from None
+
+
+def _read_disposition_if_present(
+    candidate: phase9_permitted_candidate.PermittedCandidateAuthority,
+) -> Mapping[str, object] | None:
     try:
         expectation = disposition_entrypoint._expectation(
             staged_prefix_disposition
@@ -702,23 +1193,37 @@ def _require_disposition(
             "phase9_proof_controller_disposition_invalid"
         ) from error
     if (
-        receipt is None
-        or receipt.get("contract_sha256") != candidate.contract_sha256
-        or receipt.get("corrected_attempt_identity_sha256")
-        != candidate.successor_attempt_identity_sha256
-        or receipt.get("corrected_generation")
-        != disposition_entrypoint.CORRECTED_GENERATION
-        or receipt.get("corrected_package_manifest_sha256")
-        != candidate.package_manifest_sha256
-        or receipt.get("corrected_controller_runtime_receipt_sha256")
-        != candidate.controller_runtime_receipt_sha256
-        or receipt.get("failed_evidence_preserved_in_place") is not True
-        or receipt.get("no_store_or_service_effects_proven") is not True
-        or receipt.get("deletion_performed") is not False
-        or receipt.get("provider_calls") != 0
-        or receipt.get("production_data_read") is not False
-        or receipt.get("activation_performed") is not False
+        receipt is not None
+        and (
+            not isinstance(receipt, Mapping)
+            or receipt.get("contract_sha256") != candidate.contract_sha256
+            or receipt.get("corrected_attempt_identity_sha256")
+            != candidate.successor_attempt_identity_sha256
+            or receipt.get("corrected_generation")
+            != disposition_entrypoint.CORRECTED_GENERATION
+            or receipt.get("corrected_package_manifest_sha256")
+            != candidate.package_manifest_sha256
+            or receipt.get("corrected_controller_runtime_receipt_sha256")
+            != candidate.controller_runtime_receipt_sha256
+            or receipt.get("failed_evidence_preserved_in_place") is not True
+            or receipt.get("no_store_or_service_effects_proven") is not True
+            or receipt.get("deletion_performed") is not False
+            or receipt.get("provider_calls") != 0
+            or receipt.get("production_data_read") is not False
+            or receipt.get("activation_performed") is not False
+        )
     ):
+        raise Phase9DisposableLiveProofControllerError(
+            "phase9_proof_controller_disposition_invalid"
+        )
+    return receipt
+
+
+def _require_disposition(
+    candidate: phase9_permitted_candidate.PermittedCandidateAuthority,
+) -> Mapping[str, object]:
+    receipt = _read_disposition_if_present(candidate)
+    if receipt is None:
         raise Phase9DisposableLiveProofControllerError(
             "phase9_proof_controller_disposition_invalid"
         )
@@ -775,12 +1280,14 @@ def execute_phase9_disposable_live_proof_controller(
             "phase9_proof_controller_permit_invalid"
         )
 
-    disposition_step = _run_step(
+    disposition_step = _run_evidence_bound_step(
         DISPOSITION_RELATIVE,
-        (),
         timeout=180,
         environment=selected_environment,
         command_runner=command_runner,
+        candidate=candidate,
+        permit=permit,
+        disposition=None,
     )
     disposition = _require_disposition(candidate)
     if any(
@@ -806,12 +1313,14 @@ def execute_phase9_disposable_live_proof_controller(
             candidate.controller_runtime_receipt_sha256
         ),
     )
-    live = _run_step(
+    live = _run_evidence_bound_step(
         ISSUER_RELATIVE,
-        (),
         timeout=ISSUER_TIMEOUT_SECONDS,
         environment=selected_environment,
         command_runner=command_runner,
+        candidate=candidate,
+        permit=permit,
+        disposition=disposition,
     )
     try:
         verified_live = runner.verify_live_proof_receipt(live)

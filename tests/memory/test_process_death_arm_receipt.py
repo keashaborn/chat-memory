@@ -116,7 +116,7 @@ def synthetic_complete_staging(
 
 class ProcessDeathArmReceiptTests(unittest.TestCase):
     def temporary_store(self, temporary: str) -> tuple[Path, Path, int, int]:
-        root = Path(temporary) / "executions-v4"
+        root = Path(temporary) / "executions-v5"
         execution = root / EXECUTION
         root.mkdir(mode=0o700)
         execution.mkdir(mode=0o700)

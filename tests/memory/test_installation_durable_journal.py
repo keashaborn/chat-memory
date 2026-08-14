@@ -99,7 +99,7 @@ class _Fixture:
             json.loads(
                 (
                     REPO_ROOT
-                    / "ops/governed_memory/installation/store_spec-v4.json"
+                    / "ops/governed_memory/installation/store_spec-v5.json"
                 ).read_text(encoding="ascii")
             )
         )
@@ -115,6 +115,10 @@ class _Fixture:
                         "id": step.step_id,
                         "effect": step.effect,
                         "rollback": step.rollback,
+                        "observation_requires": list(
+                            step.observation_requires
+                        ),
+                        "proof_lifetime": step.proof_lifetime,
                     }
                     for step in STORES_ONLY_PLAN
                 ],
@@ -154,7 +158,7 @@ class _Fixture:
             "ops/governed_memory/installation/current/controller_plan.json": (
                 self.execution_plan_json
             ),
-            "ops/governed_memory/installation/store_spec-v4.json": (
+            "ops/governed_memory/installation/store_spec-v5.json": (
                 self.store_spec_json
             ),
             "ops/governed_memory/installation/current/"
@@ -420,7 +424,7 @@ class DormantStoreInstallDurableJournalTests(unittest.TestCase):
                     package_manifest_json=alternate.package_manifest_json,
                     artifact_bytes={
                         **alternate.artifact_bytes,
-                        "ops/governed_memory/installation/store_spec-v4.json": (
+                        "ops/governed_memory/installation/store_spec-v5.json": (
                             alternate.store_spec_json + b" "
                         ),
                     },

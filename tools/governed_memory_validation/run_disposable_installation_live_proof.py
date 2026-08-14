@@ -507,16 +507,16 @@ AUTHORIZED_TEXT_SHA256: Final = hashlib.sha256(
     AUTHORIZED_TEXT.encode("utf-8")
 ).hexdigest()
 RECOVERY_CAPSULE_PATH: Final = Path(
-    "/var/lib/governed-memory-controller/phase9-disposable-proof-recovery-capsule-v5.json"
+    "/var/lib/governed-memory-controller/phase9-disposable-proof-recovery-capsule-v6.json"
 )
 RECOVERY_CAPSULE_STAGING_PATH: Final = RECOVERY_CAPSULE_PATH.with_name(
     RECOVERY_CAPSULE_PATH.name + ".publishing"
 )
-RECOVERY_CAPSULE_SCHEMA: Final = "governed-memory-phase9-disposable-proof-recovery-capsule-v5"
-AUTHORIZATION_NAMESPACE: Final = "governed-memory-phase9-live-proof-v4"
-INSTALL_SCOPE_ID: Final = "phase9-disposable-live-install-000004"
-ROLLBACK_SCOPE_ID: Final = "phase9-disposable-live-rollback-000004"
-LIVE_PROOF_RECEIPT_SCHEMA: Final = "governed-memory-phase9-live-proof-receipt-v5"
+RECOVERY_CAPSULE_SCHEMA: Final = "governed-memory-phase9-disposable-proof-recovery-capsule-v6"
+AUTHORIZATION_NAMESPACE: Final = "governed-memory-phase9-live-proof-v5"
+INSTALL_SCOPE_ID: Final = "phase9-disposable-live-install-000005"
+ROLLBACK_SCOPE_ID: Final = "phase9-disposable-live-rollback-000005"
+LIVE_PROOF_RECEIPT_SCHEMA: Final = "governed-memory-phase9-live-proof-receipt-v6"
 RECOVERY_RECEIPT_SCHEMA: Final = (
     "governed-memory-phase9-disposable-proof-recovery-receipt-v1"
 )
@@ -532,7 +532,7 @@ RECOVERY_RESERVATION_NONCE_DOMAIN: Final = (
     b"governed-memory-phase9-rollback-recovery-reservation-nonce-v1\x00"
 )
 
-EXECUTIONS_ROOT: Final = Path("/var/lib/governed-memory-controller/executions-v4")
+EXECUTIONS_ROOT: Final = Path("/var/lib/governed-memory-controller/executions-v5")
 CONTROLLER_STATE_ROOT: Final = Path("/var/lib/governed-memory-controller")
 LOCK_ROOT: Final = Path("/run/lock/governed-memory-controller")
 LIVE_PROOF_GUARD_PATH: Final = (
@@ -542,10 +542,10 @@ LIVE_PROOF_GUARD_FD: Final = 9
 CONTROLLER_CONFIG_ROOT: Final = Path("/etc/governed-memory-controller")
 STORE_SECRET_PARENT: Final = Path("/etc/governed-memory-stores")
 STORE_SECRET_ROOT: Final = Path(
-    "/etc/governed-memory-stores/9a54cf123493-000004"
+    "/etc/governed-memory-stores/9a54cf123493-000005"
 )
 RESOLVED_STORE_SPEC_PATH: Final = Path(
-    "/etc/governed-memory-controller/store_spec-v4.json"
+    "/etc/governed-memory-controller/store_spec-v5.json"
 )
 RUNTIME_RECEIPT_ROOT: Final = Path(
     "/var/lib/governed-memory-controller/runtime-receipts"
@@ -692,6 +692,40 @@ _PAIR_ONLY_RECEIPT_KEYS: Final = frozenset(
 
 class LiveProofError(RuntimeError):
     """Content-free refusal from the disposable live proof runner."""
+
+
+_INTERNAL_INSTALL_FAILURE_CODE_RE: Final = re.compile(
+    r"[a-z][a-z0-9_]{1,95}\Z", re.ASCII
+)
+
+
+def _sanitized_internal_install_failure_code(
+    error: BaseException,
+) -> str | None:
+    """Return only the deepest closed install-package error code.
+
+    Host exception text can contain paths, command output, or other untrusted
+    material.  Only content-free codes emitted by the sealed installation
+    package are eligible for projection into the runner's public error token.
+    """
+
+    current: BaseException | None = error
+    selected: str | None = None
+    seen: set[int] = set()
+    for _ in range(16):
+        if current is None or id(current) in seen:
+            break
+        seen.add(id(current))
+        module = type(current).__module__
+        value = str(current)
+        if (
+            module.startswith("tools.governed_memory_install.")
+            and _INTERNAL_INSTALL_FAILURE_CODE_RE.fullmatch(value) is not None
+        ):
+            selected = value
+        cause = current.__cause__
+        current = cause if isinstance(cause, BaseException) else None
+    return selected
 
 
 class _CooperativeBoundaryStopAbort(BaseException):
@@ -1556,7 +1590,7 @@ def _verify_recovery_capsule_raw(
         or auth_payload
         != {
             "schema_version": authority.AUTHORIZATION_PAYLOAD_SCHEMA_VERSION,
-            "authorization_id": "phase9-disposable-live-install-auth-000004",
+            "authorization_id": "phase9-disposable-live-install-auth-000005",
             "authorization_namespace": AUTHORIZATION_NAMESPACE,
             "thread_id": THREAD_ID,
             "scope_id": INSTALL_SCOPE_ID,
@@ -2289,7 +2323,7 @@ def _verify_start_authority_pair_before_install(
 
 def _install_prerequisites(context: ProofContext) -> InstallPrerequisites:
     store_raw = context.artifacts.get(
-        "ops/governed_memory/installation/store_spec-v4.json"
+        "ops/governed_memory/installation/store_spec-v5.json"
     )
     if type(store_raw) is not bytes:
         raise LiveProofError("phase9_live_proof_store_spec_missing")
@@ -2393,7 +2427,11 @@ def _execute_install_locked(
     except LiveProofError:
         raise
     except Exception as error:
-        raise LiveProofError("phase9_live_proof_install_execution_failed") from error
+        internal_code = _sanitized_internal_install_failure_code(error)
+        public_code = "phase9_live_proof_install_execution_failed"
+        if internal_code is not None:
+            public_code += "_" + internal_code
+        raise LiveProofError(public_code) from error
 
 
 def _expected_install_execution_id(context: ProofContext) -> str:

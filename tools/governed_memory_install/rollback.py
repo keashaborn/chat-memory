@@ -270,12 +270,12 @@ def expected_rollback_resource_names(
     return {
         "stores_supervisor": (
             "systemd_unit",
-            "/etc/systemd/system/governed-memory-stores-v4.service",
+            "/etc/systemd/system/governed-memory-stores-v5.service",
         ),
         "qdrant_alias": ("qdrant_alias", "governed_memory_active"),
         "qdrant_collection": (
             "qdrant_collection",
-            "governed_memory_9a54cf123493_000004",
+            "governed_memory_9a54cf123493_000005",
         ),
         "migration_0004": ("migration", "0004_pilot_marker"),
         "migration_0003": ("migration", "0003_owner_claim_detail"),
@@ -283,32 +283,32 @@ def expected_rollback_resource_names(
         "canonical_database_and_roles": ("database", "governed_memory"),
         "qdrant_container": (
             "container",
-            "governed-memory-qdrant-9a54cf123493-000004",
+            "governed-memory-qdrant-9a54cf123493-000005",
         ),
         "postgres_container": (
             "container",
-            "governed-memory-postgres-9a54cf123493-000004",
+            "governed-memory-postgres-9a54cf123493-000005",
         ),
         "qdrant_volume": (
             "volume",
-            "governed-memory-qdrant-data-9a54cf123493-000004",
+            "governed-memory-qdrant-data-9a54cf123493-000005",
         ),
         "postgres_volume": (
             "volume",
-            "governed-memory-postgres-data-9a54cf123493-000004",
+            "governed-memory-postgres-data-9a54cf123493-000005",
         ),
-        "network": ("network", "governed-memory-net-9a54cf123493-000004"),
+        "network": ("network", "governed-memory-net-9a54cf123493-000005"),
         "qdrant_store_secret": (
             "secret_file",
-            "/etc/governed-memory-stores/9a54cf123493-000004/qdrant.env",
+            "/etc/governed-memory-stores/9a54cf123493-000005/qdrant.env",
         ),
         "postgres_store_secret": (
             "secret_file",
-            "/etc/governed-memory-stores/9a54cf123493-000004/postgres.env",
+            "/etc/governed-memory-stores/9a54cf123493-000005/postgres.env",
         ),
         "resolved_store_spec": (
             "resolved_store_spec",
-            "/etc/governed-memory-controller/store_spec-v4.json",
+            "/etc/governed-memory-controller/store_spec-v5.json",
         ),
     }
 

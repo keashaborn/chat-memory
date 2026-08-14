@@ -72,7 +72,7 @@ def disposition_receipt() -> dict[str, object]:
         "contract_sha256": DISPOSITION_CONTRACT,
         "failed_prefix_identity_sha256": PREDECESSOR_ATTEMPT,
         "corrected_attempt_identity_sha256": successor,
-        "corrected_generation": "000004",
+        "corrected_generation": "000005",
         "failed_evidence_preserved_in_place": True,
         "no_store_or_service_effects_proven": True,
         "deletion_performed": False,
@@ -219,7 +219,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
         static_spec = json.loads(
             (
                 Path(__file__).resolve().parents[2]
-                / "ops/governed_memory/installation/store_spec-v4.json"
+                / "ops/governed_memory/installation/store_spec-v5.json"
             ).read_text(encoding="ascii")
         )
         reconstructed = bind_store_spec(
@@ -3710,9 +3710,17 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
                 issuer,
                 "_supervise_attempt",
                 side_effect=(
-                    (1, b"", b"first\n"),
+                    (
+                        1,
+                        b"",
+                        b"phase9_live_proof_first_start_failed\n",
+                    ),
                     (0, b"pair\n", b""),
-                    (1, b"", b"retry\n"),
+                    (
+                        1,
+                        b"",
+                        b"phase9_live_proof_retry_start_failed\n",
+                    ),
                     (0, b"pair\n", b""),
                 ),
             ) as attempts,
@@ -3723,7 +3731,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
             ),
             self.assertRaisesRegex(
                 issuer.Phase9ProofIssuerError,
-                "start_not_observed_pair_only_pristine",
+                "^phase9_live_proof_retry_start_failed$",
             ),
         ):
             issuer.issue_and_supervise(inputs())
@@ -3771,6 +3779,76 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
                     "runner_output_invalid",
                 ):
                     issuer._strict_runner_receipt_payload(stdout, stderr)
+
+    def test_install_failure_projection_keeps_only_closed_internal_codes(self) -> None:
+        trusted: linux_store_effects.LinuxStoreEffectsError
+        try:
+            try:
+                raise linux_store_effects.LinuxStoreEffectsError(
+                    "linux_store_observation_failed"
+                )
+            except linux_store_effects.LinuxStoreEffectsError as inner:
+                raise linux_store_effects.LinuxStoreEffectsError(
+                    "linux_store_effect_failed"
+                ) from inner
+        except linux_store_effects.LinuxStoreEffectsError as outer:
+            trusted = outer
+            self.assertEqual(
+                proof._sanitized_internal_install_failure_code(outer),
+                "linux_store_observation_failed",
+            )
+
+        with (
+            mock.patch.object(
+                proof, "_claim_or_verify_recovery_reservation"
+            ),
+            mock.patch.object(proof.DurableReceiptStore, "production"),
+            mock.patch.object(proof, "_install_prerequisites"),
+            mock.patch.object(
+                proof,
+                "run_authorized_dormant_store_install",
+                side_effect=trusted,
+            ),
+            self.assertRaisesRegex(
+                proof.LiveProofError,
+                "^phase9_live_proof_install_execution_failed_"
+                "linux_store_observation_failed$",
+            ),
+        ):
+            proof._execute_install_locked(
+                context(),
+                state=mock.sentinel.state,
+                held_lock=mock.sentinel.held_lock,
+                resume_only=False,
+            )
+
+        untrusted = OSError("/etc/private/secret-value")
+        self.assertIsNone(
+            proof._sanitized_internal_install_failure_code(untrusted)
+        )
+        with (
+            mock.patch.object(
+                proof, "_claim_or_verify_recovery_reservation"
+            ),
+            mock.patch.object(proof.DurableReceiptStore, "production"),
+            mock.patch.object(proof, "_install_prerequisites"),
+            mock.patch.object(
+                proof,
+                "run_authorized_dormant_store_install",
+                side_effect=untrusted,
+            ),
+            self.assertRaisesRegex(
+                proof.LiveProofError,
+                "^phase9_live_proof_install_execution_failed$",
+            ) as observed,
+        ):
+            proof._execute_install_locked(
+                context(),
+                state=mock.sentinel.state,
+                held_lock=mock.sentinel.held_lock,
+                resume_only=False,
+            )
+        self.assertNotIn("secret-value", str(observed.exception))
 
     def test_online_signing_transport_is_absent(self) -> None:
         source = Path(proof.__file__).read_text(encoding="utf-8")
@@ -4994,14 +5072,23 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
         )
 
     def test_direct_issuer_requires_the_pinned_phase9j_runtime_before_imports(self) -> None:
-        completed = subprocess.run(
-            (sys.executable, "-I", "-B", str(Path(issuer.__file__)), "--help"),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-            timeout=10,
-        )
+        with tempfile.TemporaryDirectory() as temporary:
+            wrong_python = Path(temporary) / "wrong-python"
+            wrong_python.symlink_to(Path(sys.executable).resolve(strict=True))
+            completed = subprocess.run(
+                (
+                    str(wrong_python),
+                    "-I",
+                    "-B",
+                    str(Path(issuer.__file__)),
+                    "--help",
+                ),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=10,
+            )
         self.assertEqual(completed.returncode, 1)
         self.assertEqual(completed.stdout, b"")
         self.assertEqual(
@@ -5031,7 +5118,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
 
     def test_empty_pre_effect_install_journal_selects_resume(self) -> None:
         journal = Path(
-            "/var/lib/governed-memory-controller/executions-v4/"
+            "/var/lib/governed-memory-controller/executions-v5/"
             + INSTALL_EXECUTION
             + "/journal.jsonl"
         )
@@ -5075,7 +5162,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
 
     def test_nonempty_install_journal_remains_strict(self) -> None:
         journal = Path(
-            "/var/lib/governed-memory-controller/executions-v4/"
+            "/var/lib/governed-memory-controller/executions-v5/"
             + INSTALL_EXECUTION
             + "/journal.jsonl"
         )

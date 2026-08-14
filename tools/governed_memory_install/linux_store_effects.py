@@ -41,19 +41,19 @@ if TYPE_CHECKING:
 
 MAX_ARTIFACT_BYTES: Final = 16 * 1024 * 1024
 MAX_PUBLIC_RECEIPT_BYTES: Final = 64 * 1024
-POSTGRES_BIND: Final = "127.0.0.1:55435"
-QDRANT_BIND: Final = "127.0.0.1:6346"
+POSTGRES_BIND: Final = "127.0.0.1:55436"
+QDRANT_BIND: Final = "127.0.0.1:6347"
 SYSTEMD_UNIT_PATH: Final = (
-    "/etc/systemd/system/governed-memory-stores-v4.service"
+    "/etc/systemd/system/governed-memory-stores-v5.service"
 )
 SYSTEMD_ENABLEMENT_PATH: Final = (
     "/etc/systemd/system/multi-user.target.wants/"
-    "governed-memory-stores-v4.service"
+    "governed-memory-stores-v5.service"
 )
 SYSTEMD_ENABLEMENT_TARGET: Final = SYSTEMD_UNIT_PATH
 CONTROLLER_CONFIG_DIRECTORY: Final = "/etc/governed-memory-controller"
 STORE_SECRET_DIRECTORY: Final = (
-    "/etc/governed-memory-stores/9a54cf123493-000004"
+    "/etc/governed-memory-stores/9a54cf123493-000005"
 )
 POSTGRES_STORE_SECRET_PATH: Final = STORE_SECRET_DIRECTORY + "/postgres.env"
 QDRANT_STORE_SECRET_PATH: Final = STORE_SECRET_DIRECTORY + "/qdrant.env"
@@ -62,7 +62,7 @@ RETAINED_ROOT_DIRECTORY_PATHS: Final = (
     STORE_SECRET_DIRECTORY,
 )
 POSTFLIGHT_TEMPLATE: Final = (
-    "/var/lib/governed-memory-controller/executions-v4/"
+    "/var/lib/governed-memory-controller/executions-v5/"
     "{execution_id}/terminal-postflight-receipt.json"
 )
 _HASH_RE = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
@@ -123,12 +123,12 @@ def _expected_rollback_resource_names(
     return {
         "stores_supervisor": (
             "systemd_unit",
-            "/etc/systemd/system/governed-memory-stores-v4.service",
+            "/etc/systemd/system/governed-memory-stores-v5.service",
         ),
         "qdrant_alias": ("qdrant_alias", "governed_memory_active"),
         "qdrant_collection": (
             "qdrant_collection",
-            "governed_memory_9a54cf123493_000004",
+            "governed_memory_9a54cf123493_000005",
         ),
         "migration_0004": ("migration", "0004_pilot_marker"),
         "migration_0003": ("migration", "0003_owner_claim_detail"),
@@ -136,21 +136,21 @@ def _expected_rollback_resource_names(
         "canonical_database_and_roles": ("database", "governed_memory"),
         "qdrant_container": (
             "container",
-            "governed-memory-qdrant-9a54cf123493-000004",
+            "governed-memory-qdrant-9a54cf123493-000005",
         ),
         "postgres_container": (
             "container",
-            "governed-memory-postgres-9a54cf123493-000004",
+            "governed-memory-postgres-9a54cf123493-000005",
         ),
         "qdrant_volume": (
             "volume",
-            "governed-memory-qdrant-data-9a54cf123493-000004",
+            "governed-memory-qdrant-data-9a54cf123493-000005",
         ),
         "postgres_volume": (
             "volume",
-            "governed-memory-postgres-data-9a54cf123493-000004",
+            "governed-memory-postgres-data-9a54cf123493-000005",
         ),
-        "network": ("network", "governed-memory-net-9a54cf123493-000004"),
+        "network": ("network", "governed-memory-net-9a54cf123493-000005"),
         "qdrant_store_secret": (
             "secret_file",
             QDRANT_STORE_SECRET_PATH,
@@ -161,7 +161,7 @@ def _expected_rollback_resource_names(
         ),
         "resolved_store_spec": (
             "resolved_store_spec",
-            "/etc/governed-memory-controller/store_spec-v4.json",
+            "/etc/governed-memory-controller/store_spec-v5.json",
         ),
     }
 
@@ -657,7 +657,7 @@ class ExactInstallArtifacts:
         alias_path = "ops/governed_memory/qdrant_alias.create.json"
         unit_path = (
             "ops/governed_memory/installation/systemd/"
-            "governed-memory-stores-v4.service.in"
+            "governed-memory-stores-v5.service.in"
         )
         collection_raw = artifacts.get(collection_path)
         alias_raw = artifacts.get(alias_path)
@@ -682,7 +682,7 @@ class ExactInstallArtifacts:
             "actions": [
                 {
                     "create_alias": {
-                        "collection_name": "governed_memory_9a54cf123493_000004",
+                        "collection_name": "governed_memory_9a54cf123493_000005",
                         "alias_name": "governed_memory_active",
                     }
                 }
@@ -1249,6 +1249,31 @@ class LinuxStoreHostOperations:
         )
         return tuple(self._snapshot_for_resource_key(key) for key in keys)
 
+    def _pre_effect_substrate_snapshots(
+        self,
+    ) -> tuple[BoundResourceSnapshot, ...]:
+        """Observe only resources that exist before the stores are started.
+
+        PostgreSQL catalog and Qdrant API state are deliberately excluded:
+        their fixed secret files, containers, volumes, and endpoints must be
+        absent at I03, so those logical transports are not yet callable.  The
+        exact host substrate plus fixed-port preflight is the closed proof that
+        no managed logical store is reachable before the first effect.
+        """
+
+        keys = (
+            "resolved_store_spec",
+            "qdrant_store_secret",
+            "postgres_store_secret",
+            "network",
+            "postgres_volume",
+            "qdrant_volume",
+            "postgres_container",
+            "qdrant_container",
+            "stores_supervisor",
+        )
+        return tuple(self._snapshot_for_resource_key(key) for key in keys)
+
     def _retained_parent_directories_are_exact(self) -> bool:
         try:
             snapshots = (
@@ -1281,9 +1306,7 @@ class LinuxStoreHostOperations:
         if request.profile is HostOperationProfile.VERIFY_LIVE_PREFLIGHT:
             try:
                 preflight = self._transports.invariants.inspect_live_preflight()
-                resource_snapshots = self._all_pre_supervisor_snapshots() + (
-                    self._snapshot_for_resource_key("stores_supervisor"),
-                )
+                resource_snapshots = self._pre_effect_substrate_snapshots()
                 postflight = self._transports.files.read_terminal_postflight_receipt()
             except Exception:
                 return "drift", (), None

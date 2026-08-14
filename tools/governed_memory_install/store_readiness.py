@@ -14,13 +14,13 @@ from typing import Final, Protocol
 
 
 _HASH_RE: Final = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
-POSTGRES_BIND: Final = "127.0.0.1:55435"
-QDRANT_BIND: Final = "127.0.0.1:6346"
+POSTGRES_BIND: Final = "127.0.0.1:55436"
+QDRANT_BIND: Final = "127.0.0.1:6347"
 POSTGRES_SERVER_VERSION: Final = "16.14"
 QDRANT_SERVER_VERSION: Final = "1.19.0"
 DATABASE: Final = "governed_memory"
 BOOTSTRAP_DATABASE: Final = "postgres"
-COLLECTION: Final = "governed_memory_9a54cf123493_000004"
+COLLECTION: Final = "governed_memory_9a54cf123493_000005"
 ALIAS: Final = "governed_memory_active"
 REQUIRED_ROLE_NAMES: Final = (
     "governed_memory_owner",

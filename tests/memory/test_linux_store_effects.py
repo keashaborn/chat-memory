@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
+from unittest import mock
 
 from tools.governed_memory_install.controller import STORES_ONLY_PLAN
 from tools.governed_memory_install.host_boundary import (
@@ -61,11 +62,6 @@ from tools.governed_memory_install.store_readiness import (
     POSTGRES_SERVER_VERSION,
     QDRANT_SERVER_VERSION,
 )
-from tools.governed_memory_install.rollback_live_adapter import (
-    ClosedLinuxPhysicalRollbackDriver,
-    ExactPhysicalEmptyRollbackOperations,
-    LedgerBoundPhysicalTarget,
-)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -112,7 +108,7 @@ def _artifacts() -> ExactInstallArtifacts:
 
 def _resolved_spec() -> dict[str, object]:
     static = load_store_spec(
-        ROOT / "ops/governed_memory/installation/store_spec-v4.json"
+        ROOT / "ops/governed_memory/installation/store_spec-v5.json"
     )
     return bind_store_spec(
         static,
@@ -642,6 +638,12 @@ class LinuxStoreEffectsTests(unittest.TestCase):
         )
 
     def test_closed_physical_driver_revalidates_revision_and_fixed_dispatch(self) -> None:
+        from tools.governed_memory_install.rollback_live_adapter import (
+            ClosedLinuxPhysicalRollbackDriver,
+            ExactPhysicalEmptyRollbackOperations,
+            LedgerBoundPhysicalTarget,
+        )
+
         self.docker.create_network()
         exact_supervisor = ExactSystemdSupervisor.from_rendered_unit(
             self.artifacts.render_supervisor_unit(
@@ -715,7 +717,7 @@ class LinuxStoreEffectsTests(unittest.TestCase):
             supervisor_launcher_path=self.identity.supervisor_launcher_path,
             supervisor_launcher_sha256=LAUNCHER_SHA256,
             postflight_receipt_path=(
-                "/var/lib/governed-memory-controller/executions-v4/"
+                "/var/lib/governed-memory-controller/executions-v5/"
                 + EXECUTION_ID
                 + "/terminal-postflight-receipt.json"
             ),
@@ -774,6 +776,48 @@ class LinuxStoreEffectsTests(unittest.TestCase):
         )
         self.assertNotIn("p" * 43, public)
         self.assertNotIn("q" * 43, public)
+
+    def test_i03_preflight_never_calls_unavailable_logical_store_transports(
+        self,
+    ) -> None:
+        step = STORES_ONLY_PLAN[2]
+        request = self._request(step.step_id, HostOperationProfile(step.effect))
+        postgres_methods = (
+            "observe_canonical_bootstrap",
+            "observe_migration_0001",
+            "observe_migration_0003",
+            "observe_migration_0004",
+        )
+        qdrant_methods = ("observe_collection", "observe_alias")
+        patches = [
+            mock.patch.object(
+                self.postgres,
+                name,
+                side_effect=AssertionError("postgres unavailable before I04"),
+            )
+            for name in postgres_methods
+        ] + [
+            mock.patch.object(
+                self.qdrant,
+                name,
+                side_effect=AssertionError("qdrant unavailable before I04"),
+            )
+            for name in qdrant_methods
+        ]
+        mocks = [patcher.start() for patcher in patches]
+        try:
+            observed = self.operations.observe(request)
+        finally:
+            for patcher in reversed(patches):
+                patcher.stop()
+        self.assertEqual(observed.state, "after")
+        self.assertTrue(all(item.call_count == 0 for item in mocks))
+
+    def test_i03_preflight_refuses_any_managed_substrate(self) -> None:
+        step = STORES_ONLY_PLAN[2]
+        request = self._request(step.step_id, HostOperationProfile(step.effect))
+        self.docker.present.add("postgres_volume")
+        self.assertEqual(self.operations.observe(request).state, "drift")
 
     def test_partial_file_step_recovers_without_overwriting_existing_secret(self) -> None:
         self.files.qdrant = True

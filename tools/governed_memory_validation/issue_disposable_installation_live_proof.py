@@ -655,7 +655,7 @@ def build_exact_recovery_capsule(
     )
     install_payload = {
         "schema_version": authority.AUTHORIZATION_PAYLOAD_SCHEMA_VERSION,
-        "authorization_id": "phase9-disposable-live-install-auth-000004",
+        "authorization_id": "phase9-disposable-live-install-auth-000005",
         "authorization_namespace": runner.AUTHORIZATION_NAMESPACE,
         "thread_id": runner.THREAD_ID,
         "scope_id": runner.INSTALL_SCOPE_ID,
@@ -2430,7 +2430,7 @@ def _require_production_staged_prefix_disposition(
     *,
     inputs: runner.ProofInputs,
 ) -> Mapping[str, object]:
-    """Require the exact failed-prefix fence before 000004 can mutate state."""
+    """Require the exact failed-prefix fence before 000005 can mutate state."""
 
     try:
         paths = staged_prefix_disposition.production_disposition_paths()
@@ -2873,6 +2873,7 @@ def issue_and_supervise(inputs: runner.ProofInputs) -> Mapping[str, object]:
         recovery_required = False
         manager_authority_lost = False
         attempt_error: Phase9ProofIssuerError | None = None
+        first_runner_error: Phase9ProofIssuerError | None = None
         try:
             status, stdout, stderr = _supervise_attempt(
                 inputs=inputs,
@@ -2917,6 +2918,12 @@ def issue_and_supervise(inputs: runner.ProofInputs) -> Mapping[str, object]:
                 # _supervise_attempt already killed and proved absence of the
                 # failed process group. Preserve the original one-retry policy
                 # after RECOVER_ONLY proves pair-only pristine state.
+                try:
+                    first_runner_error = Phase9ProofIssuerError(
+                        _strict_runner_error(status, stdout, stderr)
+                    )
+                except Phase9ProofIssuerError as error:
+                    first_runner_error = error
                 recovery_required = True
 
         if not recovery_required:
@@ -3026,12 +3033,23 @@ def issue_and_supervise(inputs: runner.ProofInputs) -> Mapping[str, object]:
                     return retry_verified
                 if retry_kind == "recovery":
                     retry_error = Phase9ProofIssuerError(
-                    "phase9_proof_issuer_recovery_completed_live_proof_not_proven"
+                        "phase9_proof_issuer_recovery_completed_live_proof_not_proven"
                     )
                 else:
                     retry_error = Phase9ProofIssuerError(
                         "phase9_proof_issuer_recovery_receipt_invalid"
                     )
+        elif retry_error is None:
+            try:
+                retry_error = Phase9ProofIssuerError(
+                    _strict_runner_error(
+                        retry_status,
+                        retry_stdout,
+                        retry_stderr,
+                    )
+                )
+            except Phase9ProofIssuerError as error:
+                retry_error = error
         # A retry may have published success immediately before losing stdout.
         retry_durable_read_error: Phase9ProofIssuerError | None = None
         try:
@@ -3088,6 +3106,8 @@ def issue_and_supervise(inputs: runner.ProofInputs) -> Mapping[str, object]:
                 raise retry_durable_read_error
             if retry_error is not None:
                 raise retry_error
+            if first_runner_error is not None:
+                raise first_runner_error
             raise Phase9ProofIssuerError(
                 "phase9_proof_issuer_start_not_observed_pair_only_pristine"
             )

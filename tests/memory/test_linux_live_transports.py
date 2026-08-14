@@ -204,7 +204,7 @@ class DockerRequestContractTests(unittest.TestCase):
                 "/usr/bin/docker",
                 "stop",
                 "--timeout=10",
-                "governed-memory-postgres-9a54cf123493-000004",
+                "governed-memory-postgres-9a54cf123493-000005",
             ),
         )
         self.assertEqual(
@@ -213,7 +213,7 @@ class DockerRequestContractTests(unittest.TestCase):
                 "/usr/bin/docker",
                 "stop",
                 "--timeout=10",
-                "governed-memory-qdrant-9a54cf123493-000004",
+                "governed-memory-qdrant-9a54cf123493-000005",
             ),
         )
         self.assertFalse(
@@ -259,7 +259,7 @@ class RootFileContractTests(unittest.TestCase):
         )
         self.assertEqual(
             identity.path,
-            "/var/lib/governed-memory-controller/executions-v4/"
+            "/var/lib/governed-memory-controller/executions-v5/"
             f"{HASH_B}/terminal-postflight-receipt.json",
         )
         with self.assertRaises(FrozenInstanceError):
@@ -288,11 +288,11 @@ class RootFileContractTests(unittest.TestCase):
         self.assertEqual(
             enablement.path_template,
             "/etc/systemd/system/multi-user.target.wants/"
-            "governed-memory-stores-v4.service",
+            "governed-memory-stores-v5.service",
         )
         self.assertEqual(
             enablement.symlink_target,
-            "/etc/systemd/system/governed-memory-stores-v4.service",
+            "/etc/systemd/system/governed-memory-stores-v5.service",
         )
 
 
@@ -336,7 +336,7 @@ class QdrantRequestContractTests(unittest.TestCase):
         self.assertEqual(create.method, b"PUT")
         self.assertEqual(
             create.target,
-            b"/collections/governed_memory_9a54cf123493_000004",
+            b"/collections/governed_memory_9a54cf123493_000005",
         )
         self.assertEqual(
             create.body,
@@ -347,7 +347,7 @@ class QdrantRequestContractTests(unittest.TestCase):
             QDRANT_REQUESTS[QdrantRequestId.OBSERVE_ALIAS].target,
             (
                 b"/collections/"
-                b"governed_memory_9a54cf123493_000004/aliases"
+                b"governed_memory_9a54cf123493_000005/aliases"
             ),
         )
         self.assertNotIn(

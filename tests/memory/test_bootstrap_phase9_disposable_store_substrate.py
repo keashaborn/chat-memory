@@ -22,10 +22,10 @@ class Phase9DisposableStoreSubstrateTests(unittest.TestCase):
         root = Path(self.temporary.name)
         self.store_parent = root / "governed-memory-stores"
         self.store_parent.mkdir(mode=0o755)
-        self.store_target = self.store_parent / "9a54cf123493-000004"
+        self.store_target = self.store_parent / "9a54cf123493-000005"
         self.execution_parent = root / "governed-memory-controller"
         self.execution_parent.mkdir(mode=0o700)
-        self.execution_target = self.execution_parent / "executions-v4"
+        self.execution_target = self.execution_parent / "executions-v5"
         self.selected = (
             subject._FixedDirectory(
                 self.store_parent, 0o755, self.store_target.name, self.store_target
@@ -239,9 +239,11 @@ class Phase9DisposableStoreSubstrateTests(unittest.TestCase):
         bootstrap.assert_not_called()
 
     def test_direct_bootstrap_requires_pinned_phase9j_runtime_before_imports(self) -> None:
+        wrong_python = Path(self.temporary.name) / "wrong-python"
+        wrong_python.symlink_to(Path(self.test_python).resolve(strict=True))
         completed = subprocess.run(
             (
-                self.test_python,
+                str(wrong_python),
                 "-I",
                 "-B",
                 str(Path(subject.__file__)),
