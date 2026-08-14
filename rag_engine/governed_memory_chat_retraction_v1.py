@@ -205,24 +205,50 @@ def _validate_detail(
     for name in _LIST_KEYS:
         if value[name] != summary[name]:
             raise ChatRetractionError("memory_retraction_unavailable", 503)
+    kind = value["object_kind"]
     literal = value["object_literal"]
-    if (
-        value["object_kind"] != "literal"
-        or not isinstance(literal, str)
-        or not literal
-        or len(literal.encode("utf-8")) > 4_096
-        or "\x00" in literal
-    ):
+    display_name = value["object_display_name"]
+    if kind == "literal":
+        if (
+            not isinstance(literal, str)
+            or not literal
+            or len(literal.encode("utf-8")) > 4_096
+            or "\x00" in literal
+            or value["object_entity_type"] is not None
+            or value["object_entity_key"] is not None
+            or display_name is not None
+        ):
+            raise ChatRetractionError("memory_retraction_unavailable", 503)
+    elif kind == "entity":
+        if (
+            literal is not None
+            or not isinstance(value["object_entity_type"], str)
+            or not value["object_entity_type"]
+            or not isinstance(value["object_entity_key"], str)
+            or not value["object_entity_key"]
+            or not isinstance(display_name, str)
+            or not display_name
+            or len(display_name.encode("utf-8")) > 4_096
+            or "\x00" in display_name
+        ):
+            raise ChatRetractionError("memory_retraction_unavailable", 503)
+    else:
         raise ChatRetractionError("memory_retraction_unavailable", 503)
     return value
 
 
-def _target_contains_literal(*, target: str, literal: str) -> bool:
-    normalized_literal = _normalized_text(literal)
-    if not normalized_literal:
+def _claim_target_text(detail: Mapping[str, object]) -> str:
+    if detail["object_kind"] == "literal":
+        return str(detail["object_literal"])
+    return str(detail["object_display_name"])
+
+
+def _target_contains_claim_value(*, target: str, claim_value: str) -> bool:
+    normalized_value = _normalized_text(claim_value)
+    if not normalized_value:
         return False
     return re.search(
-        rf"(?<!\w){re.escape(normalized_literal)}(?!\w)",
+        rf"(?<!\w){re.escape(normalized_value)}(?!\w)",
         target,
         re.UNICODE,
     ) is not None
@@ -303,7 +329,7 @@ class ChatRetractionRuntimeV1:
             seen_ids.add(claim_id)
             if (
                 summary["predicate"] == "preference.personal"
-                and summary["object_kind"] == "literal"
+                and summary["object_kind"] in {"literal", "entity"}
                 and summary["lifecycle_state"] in {"active", "retracted"}
             ):
                 summaries.append(summary)
@@ -322,9 +348,9 @@ class ChatRetractionRuntimeV1:
                 ),
                 summary=summary,
             )
-            if not _target_contains_literal(
+            if not _target_contains_claim_value(
                 target=target,
-                literal=str(detail["object_literal"]),
+                claim_value=_claim_target_text(detail),
             ):
                 continue
             if summary["lifecycle_state"] == "active":

@@ -31,7 +31,12 @@ MESSAGE = (
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def summary(claim_id: UUID, *, state: str = "active") -> dict[str, object]:
+def summary(
+    claim_id: UUID,
+    *,
+    state: str = "active",
+    kind: str = "literal",
+) -> dict[str, object]:
     return {
         "claim_id": str(claim_id),
         "lifecycle_state": state,
@@ -43,7 +48,7 @@ def summary(claim_id: UUID, *, state: str = "active") -> dict[str, object]:
         "predicate_catalog_sha256": HASH_D,
         "selected_sha256": HASH_E,
         "selection_binding_sha256": HASH_A,
-        "object_kind": "literal",
+        "object_kind": kind,
         "predicate": "preference.personal",
         "epistemic_state": "supported",
         "sensitivity": "ordinary",
@@ -56,16 +61,18 @@ def detail(
     *,
     state: str = "active",
     literal: str = "red panda",
+    kind: str = "literal",
 ) -> dict[str, object]:
+    entity = kind == "entity"
     return {
-        **summary(claim_id, state=state),
+        **summary(claim_id, state=state, kind=kind),
         "subject_entity_type": "self",
         "subject_entity_key": "self",
         "subject_display_name": None,
-        "object_entity_type": None,
-        "object_entity_key": None,
-        "object_display_name": None,
-        "object_literal": literal,
+        "object_entity_type": "other" if entity else None,
+        "object_entity_key": "local:synthetic-red-panda" if entity else None,
+        "object_display_name": literal if entity else None,
+        "object_literal": None if entity else literal,
     }
 
 
@@ -151,6 +158,28 @@ class ChatRetractionRuntimeTests(unittest.IsolatedAsyncioTestCase):
                     )
                 ),
             },
+        )
+
+    async def test_explicit_unique_entity_preference_is_retracted(self) -> None:
+        transport = FakeTransport(
+            [
+                result([summary(CLAIM_A, kind="entity")]),
+                result(detail(CLAIM_A, kind="entity")),
+                result({"outcome": "retracted", "outbox_id": str(OUTBOX)}),
+            ]
+        )
+        receipt = await self.runtime(transport).apply_if_requested(
+            message=MESSAGE,
+            authorization=AUTHORIZATION,
+        )
+        self.assertIsNotNone(receipt)
+        assert receipt is not None
+        self.assertEqual(receipt.claim_id, CLAIM_A)
+        self.assertEqual(receipt.outcome, "retracted")
+        self.assertEqual(transport.calls[-1]["method"], "POST")
+        self.assertEqual(
+            transport.calls[-1]["path"],
+            f"/memory/claims/{CLAIM_A}/retract",
         )
 
     async def test_missing_or_ambiguous_target_fails_closed_without_post(self) -> None:
