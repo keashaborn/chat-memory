@@ -943,6 +943,14 @@ class ServiceOnTests(unittest.IsolatedAsyncioTestCase):
             "pg_catalog.has_column_privilege",
             _CONVERSATION_DML_PREFLIGHT_SQL,
         )
+        self.assertIn(
+            "pg_catalog.aclexplode(column_acl.attacl)",
+            _CONVERSATION_DML_PREFLIGHT_SQL,
+        )
+        self.assertNotIn(
+            "'{}'::pg_catalog.aclitem[]",
+            _CONVERSATION_DML_PREFLIGHT_SQL,
+        )
         self.assertIn("target_policies AS (", _CONVERSATION_BRIDGE_CATALOG_SQL)
         self.assertIn(
             "policy.polrelid IN (SELECT oid FROM target_relations)",
@@ -995,6 +1003,14 @@ class ServiceOnTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn(
             "namespace.nspname IN (SELECT nspname FROM target_relations)",
+            _CONVERSATION_BRIDGE_CATALOG_SQL,
+        )
+        self.assertIn(
+            "pg_catalog.aclexplode(attribute.attacl)",
+            _CONVERSATION_BRIDGE_CATALOG_SQL,
+        )
+        self.assertNotIn(
+            "'{}'::pg_catalog.aclitem[]",
             _CONVERSATION_BRIDGE_CATALOG_SQL,
         )
 

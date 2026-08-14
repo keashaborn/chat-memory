@@ -451,9 +451,7 @@ SELECT
   EXISTS (
     SELECT 1
     FROM application_columns AS column_acl
-    CROSS JOIN LATERAL pg_catalog.aclexplode(
-      COALESCE(column_acl.attacl, '{}'::pg_catalog.aclitem[])
-    ) AS acl
+    CROSS JOIN LATERAL pg_catalog.aclexplode(column_acl.attacl) AS acl
     WHERE acl.grantee IN (
       0,
       'governed_memory_api'::regrole::oid,
@@ -656,9 +654,7 @@ WITH target_relations AS (
             acl.privilege_type, acl.is_grantable
           ) ORDER BY acl.grantee, acl.privilege_type, acl.is_grantable
         )
-        FROM pg_catalog.aclexplode(COALESCE(
-          attribute.attacl, '{}'::pg_catalog.aclitem[]
-        )) AS acl
+        FROM pg_catalog.aclexplode(attribute.attacl) AS acl
       ), '[]'::jsonb)
     )::text AS catalog_payload
   FROM target_relations AS relation
