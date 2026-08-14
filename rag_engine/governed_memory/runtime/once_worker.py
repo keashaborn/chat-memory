@@ -32,6 +32,7 @@ WORKER_MODE_ENV = "GOVERNED_MEMORY_WORKER_MODE"
 class WorkKind(str, Enum):
     SOURCE_ERASURE = "source_erasure"
     INGEST = "ingest"
+    ADMISSION = "admission"
     EXTRACTION = "extraction"
     PROJECTION_UPSERT = "projection_upsert"
     PROJECTION_DELETE = "projection_delete"

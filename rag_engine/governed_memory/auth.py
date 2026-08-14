@@ -26,6 +26,7 @@ class ActorScope(str, Enum):
     ERASE_CONVERSATIONS = "erase_conversations"
     READ_CLAIMS = "read_claims"
     REVIEW_PROPOSALS = "review_proposals"
+    AUTO_ADMIT_PROPOSALS = "auto_admit_proposals"
     MUTATE_CLAIMS = "mutate_claims"
     PROCESS_MEMORY_INGEST = "process_memory_ingest"
     LEASE_EXTRACTION = "lease_extraction"

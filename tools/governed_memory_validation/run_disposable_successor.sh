@@ -1416,6 +1416,9 @@ apply_migrations() {
   run_migration governed_memory governed_memory_owner \
     governed_memory_pilot_marker_0004 \
     "${MIGRATIONS}/0004_pilot_marker/forward.pgsql"
+  run_migration governed_memory governed_memory_owner \
+    governed_memory_bounded_auto_admission_0005 \
+    "${MIGRATIONS}/0005_bounded_auto_admission/forward.pgsql"
   run_migration memory sage \
     governed_memory_conversation_bridge_0002 \
     "${MIGRATIONS}/0002_conversation_bridge/forward.pgsql"
@@ -1528,6 +1531,9 @@ rollback_migrations() {
   run_migration memory sage \
     governed_memory_conversation_bridge_0002 \
     "${MIGRATIONS}/0002_conversation_bridge/rollback.pgsql"
+  run_migration governed_memory governed_memory_owner \
+    governed_memory_bounded_auto_admission_0005_rollback \
+    "${MIGRATIONS}/0005_bounded_auto_admission/rollback.pgsql"
   marker_rows="$(
     docker exec "${POSTGRES_CONTAINER_ID}" psql \
       -X -A -t -v ON_ERROR_STOP=1 -U postgres -d governed_memory \

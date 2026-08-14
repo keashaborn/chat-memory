@@ -11,6 +11,7 @@ from uuid import UUID
 from ..admission import recompute_claim_state_sha256
 from ..contracts import (
     ContractViolation,
+    canonical_sha256,
     require_key,
     require_sha256,
     require_utc,
@@ -35,9 +36,12 @@ from ..projection import (
 from ..retrieval import AUTHORITATIVE_RETRIEVAL_ROW_FIELDS
 from .once_worker import (
     ExtractionWork,
+    OnceWorkerOutcome,
+    OnceWorkerReceipt,
     ProjectionDeleteWork,
     ProjectionUpsertWork,
     WorkerLocalFailure,
+    WorkKind,
     WorkerWork,
 )
 from .openai_adapters import (
@@ -73,6 +77,9 @@ _READ_PILOT_MARKER_SQL = "SELECT * FROM memory_private.read_pilot_marker()"
 _READ_PILOT_CLOCK_SQL = "SELECT pg_catalog.transaction_timestamp()"
 PILOT_MAXIMUM_DURATION = timedelta(hours=24)
 _NEXT_WORKER_LANE_SQL = "SELECT memory_private.next_worker_lane()"
+_AUTO_ADMIT_SQL = (
+    "SELECT * FROM memory_private.auto_admit_one_ordinary_proposal()"
+)
 _LEASE_EXTRACTION_SQL = (
     "SELECT * FROM memory_private.lease_extraction_jobs("
     "$1::text,1,$2::integer,'openai'::text,$3::text,$4::text,$5::text,"
@@ -273,6 +280,42 @@ class PostgresOnceWorkerRepository:
         if pilot_age < timedelta(0) or pilot_age >= PILOT_MAXIMUM_DURATION:
             raise ContractViolation("pilot_marker_outside_authorized_window")
         return True
+
+    async def auto_admit_one_ordinary_proposal(
+        self,
+    ) -> OnceWorkerReceipt | None:
+        rows = self._rows(
+            await self._connection.fetch(_AUTO_ADMIT_SQL),
+            "automatic_admission_cardinality_violation",
+        )
+        if not rows:
+            return None
+        row = rows[0]
+        if row.get("outcome") != "admitted":
+            raise ContractViolation("invalid_automatic_admission_outcome")
+        proposal_id = self._uuid(
+            row.get("proposal_id"), "invalid_automatic_admission_proposal"
+        )
+        for field in ("claim_id", "revision_id", "outbox_id"):
+            self._uuid(
+                row.get(field), f"invalid_automatic_admission_{field}"
+            )
+        material = {
+            "outcome": "admitted",
+            "proposal_id": str(proposal_id),
+            "claim_id": str(row["claim_id"]),
+            "revision_id": str(row["revision_id"]),
+            "outbox_id": str(row["outbox_id"]),
+        }
+        return OnceWorkerReceipt(
+            outcome=OnceWorkerOutcome.COMPLETED,
+            work_kind=WorkKind.ADMISSION,
+            work_id=proposal_id,
+            qdrant_preflight_sha256=None,
+            receipt_sha256=canonical_sha256(
+                "governed_memory.automatic_admission_receipt", material
+            ),
+        )
 
     async def next_worker_lane(self) -> str:
         lane = await self._connection.fetchval(_NEXT_WORKER_LANE_SQL)

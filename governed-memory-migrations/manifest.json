@@ -8,17 +8,20 @@
     "production_provider_call_authorized": false,
     "production_qdrant_change_authorized": false,
     "legacy_import_authorized": false,
-    "disposable_validation_authorized": false
+    "disposable_validation_authorized": false,
+    "bounded_automatic_admission_authorized": true
   },
   "execution_order": [
     "roles_preflight.pgsql",
     "0001_foundation/forward.pgsql",
     "0003_owner_claim_detail/forward.pgsql",
     "0004_pilot_marker/forward.pgsql",
+    "0005_bounded_auto_admission/forward.pgsql",
     "0002_conversation_bridge/forward.pgsql"
   ],
   "rollback_order": [
     "0002_conversation_bridge/rollback.pgsql",
+    "0005_bounded_auto_admission/rollback.pgsql",
     "0004_pilot_marker/rollback.pgsql",
     "0003_owner_claim_detail/rollback.pgsql",
     "0001_foundation/rollback.pgsql"
@@ -30,7 +33,7 @@
     },
     {
       "path": "schema_contract.json",
-      "sha256": "c891129570e3f1ad7e0ec82935d0abadf62fc9c30c3688c3ab14c803eba98f4a"
+      "sha256": "ce8d00393e900ba2850d12cd07107e55ca490b22f7cc9fa480fdb48255678ea0"
     },
     {
       "path": "predicate_catalog.json",
@@ -73,6 +76,18 @@
       "sha256": "01da1e6bab14009fe05ce0f644af27bc8cae48988c629f0c0308654b87e31775"
     },
     {
+      "path": "0005_bounded_auto_admission/package.json",
+      "sha256": "fe6782b152dd66b90b60901e85f81cee0b32fd9592e4d890fecf5fab6b561bc4"
+    },
+    {
+      "path": "0005_bounded_auto_admission/forward.pgsql",
+      "sha256": "4aeb257d8fb41ed9ceb78f0c626a205d67f398506b69ed1b9c42ede056e5b0a6"
+    },
+    {
+      "path": "0005_bounded_auto_admission/rollback.pgsql",
+      "sha256": "2ba0f3d98974651ac4d70a5ede821a4514f9c197e918b7664e92c4b3a9f63b68"
+    },
+    {
       "path": "0002_conversation_bridge/package.json",
       "sha256": "54da2722e568c073bd045ccda684607a0c69cad025473b0e9a6aaf12c6791f70"
     },
@@ -97,6 +112,7 @@
     "production_database_execution_performed": false,
     "production_checkout_files_changed": false,
     "production_data_read": false,
-    "provider_external_calls": 0
+    "provider_external_calls": 0,
+    "bounded_automatic_admission_live_acceptance_pending": true
   }
 }

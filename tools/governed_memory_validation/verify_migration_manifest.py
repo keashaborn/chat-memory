@@ -14,6 +14,7 @@ EXPECTED_PACKAGES = (
     "0001_foundation/package.json",
     "0003_owner_claim_detail/package.json",
     "0004_pilot_marker/package.json",
+    "0005_bounded_auto_admission/package.json",
     "0002_conversation_bridge/package.json",
 )
 EXPECTED_FILES = {
@@ -29,6 +30,9 @@ EXPECTED_FILES = {
     "0004_pilot_marker/package.json",
     "0004_pilot_marker/forward.pgsql",
     "0004_pilot_marker/rollback.pgsql",
+    "0005_bounded_auto_admission/package.json",
+    "0005_bounded_auto_admission/forward.pgsql",
+    "0005_bounded_auto_admission/rollback.pgsql",
     "0002_conversation_bridge/package.json",
     "0002_conversation_bridge/forward.pgsql",
     "0002_conversation_bridge/rollback.pgsql",
@@ -38,10 +42,12 @@ EXPECTED_EXECUTION_ORDER = [
     "0001_foundation/forward.pgsql",
     "0003_owner_claim_detail/forward.pgsql",
     "0004_pilot_marker/forward.pgsql",
+    "0005_bounded_auto_admission/forward.pgsql",
     "0002_conversation_bridge/forward.pgsql",
 ]
 EXPECTED_ROLLBACK_ORDER = [
     "0002_conversation_bridge/rollback.pgsql",
+    "0005_bounded_auto_admission/rollback.pgsql",
     "0004_pilot_marker/rollback.pgsql",
     "0003_owner_claim_detail/rollback.pgsql",
     "0001_foundation/rollback.pgsql",
@@ -79,6 +85,16 @@ EXPECTED_PACKAGE_CONTRACTS = {
             "production_database_applied": False,
             "production_services_changed": False,
             "disposable_database_validated": True,
+        },
+    },
+    "0005_bounded_auto_admission/package.json": {
+        "status": "authorized_candidate_pending_live_application",
+        "rollback_empty_only": False,
+        "activation": {
+            "production_authorized": True,
+            "production_database_applied": False,
+            "production_services_changed": False,
+            "live_acceptance_pending": True,
         },
     },
     "0002_conversation_bridge/package.json": {
@@ -182,6 +198,7 @@ def verify(root: Path) -> dict[str, object]:
         "production_qdrant_change_authorized": False,
         "legacy_import_authorized": False,
         "disposable_validation_authorized": False,
+        "bounded_automatic_admission_authorized": True,
     }
     if manifest.get("authority") != expected_authority:
         raise ValueError("unexpected migration authority contract")
@@ -202,6 +219,7 @@ def verify(root: Path) -> dict[str, object]:
         "production_checkout_files_changed": False,
         "production_data_read": False,
         "provider_external_calls": 0,
+        "bounded_automatic_admission_live_acceptance_pending": True,
     }
     if manifest.get("safety") != expected_safety:
         raise ValueError("unexpected migration safety contract")

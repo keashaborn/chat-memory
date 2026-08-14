@@ -539,6 +539,11 @@ async def run_runtime_once(
                 "governed_memory_worker_lock_contended"
             )
         try:
+            if await repository.pilot_ever_started() is not True:
+                raise WorkerRuntimeRefusal("pilot_never_started")
+            admission = await repository.auto_admit_one_ordinary_proposal()
+            if admission is not None:
+                return admission
             conversation = await conversation_connection_factory(config)
             try:
                 await _configure_connection(

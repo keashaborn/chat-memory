@@ -20,6 +20,7 @@ from rag_engine.governed_memory.projection import (
 )
 from rag_engine.governed_memory.runtime.once_worker import (
     ExtractionWork,
+    WorkKind,
     ProjectionDeleteWork,
     ProjectionUpsertWork,
 )
@@ -266,6 +267,25 @@ def pilot_marker_row(
 
 
 class ProjectionLeaseTests(unittest.IsolatedAsyncioTestCase):
+    async def test_bounded_automatic_admission_receipt(self) -> None:
+        proposal_id = UUID("40404040-4040-4040-8040-404040404040")
+        connection = FakeConnection(fetch_results=[[{
+            "outcome": "admitted", "proposal_id": proposal_id,
+            "claim_id": UUID("41414141-4141-4141-8141-414141414141"),
+            "revision_id": UUID("42424242-4242-4242-8242-424242424242"),
+            "outbox_id": UUID("43434343-4343-4343-8343-434343434343"),
+        }]])
+        receipt = await repository(connection).auto_admit_one_ordinary_proposal()
+        self.assertIsNotNone(receipt)
+        self.assertEqual(receipt.work_kind, WorkKind.ADMISSION)
+        self.assertEqual(receipt.work_id, proposal_id)
+        self.assertRegex(receipt.receipt_sha256, r"^[0-9a-f]{64}$")
+
+    async def test_bounded_automatic_admission_no_work(self) -> None:
+        connection = FakeConnection(fetch_results=[[]])
+        receipt = await repository(connection).auto_admit_one_ordinary_proposal()
+        self.assertIsNone(receipt)
+
     async def test_embedding_dispatch_is_durable_and_exactly_bound(self) -> None:
         lease = projection_lease(operation="upsert")
         connection = FakeConnection(

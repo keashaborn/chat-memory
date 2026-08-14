@@ -83,7 +83,39 @@ def review(
     )
 
 
+def automatic_actor() -> VerifiedActor:
+    return VerifiedActor(
+        owner_user_id=OWNER_A, actor_id=OWNER_A, session_id=OWNER_A,
+        role=ActorRole.WORKER, scopes=(ActorScope.AUTO_ADMIT_PROPOSALS,),
+        authentication_manifest_sha256="b" * 64, authenticated_at=NOW,
+    )
+
+
 class AdmissionTests(unittest.TestCase):
+    def test_worker_auto_admits_bounded_ordinary_owner_fact(self) -> None:
+        proposal = make_proposal()
+        value = command(
+            proposal, reason_codes=["automatic_low_risk_owner_assertion"]
+        )
+        value["actor"] = automatic_actor()
+        result = review(proposal, value)
+        self.assertEqual(result["proposal_state"], "admitted")
+
+    def test_worker_cannot_reject_or_use_owner_reason(self) -> None:
+        proposal = make_proposal()
+        for decision, reasons in (
+            ("reject", ["proposal_incorrect"]),
+            ("admit", ["explicit_owner_review"]),
+        ):
+            value = command(
+                proposal, decision=decision, reason_codes=reasons
+            )
+            value["actor"] = automatic_actor()
+            with self.subTest(decision=decision), self.assertRaises(
+                ContractViolation
+            ):
+                review(proposal, value)
+
     def test_operation_outcome_contract_has_no_unused_noop_state(self) -> None:
         self.assertEqual(
             tuple((outcome.name, outcome.value) for outcome in OperationOutcome),

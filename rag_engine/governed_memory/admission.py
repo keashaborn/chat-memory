@@ -43,7 +43,8 @@ from .extraction import (
 )
 
 
-_ADMIT_REASON_CODES = ("explicit_owner_review",)
+_OWNER_ADMIT_REASON_CODES = ("explicit_owner_review",)
+_AUTOMATIC_ADMIT_REASON_CODES = ("automatic_low_risk_owner_assertion",)
 _REJECT_REASON_CODES = frozenset(
     {"duplicate_existing", "not_durable", "proposal_incorrect"}
 )
@@ -77,7 +78,7 @@ class ReviewCommand:
     def __post_init__(self) -> None:
         if not isinstance(self.actor, VerifiedActor):
             raise ContractViolation("unverified_reviewer")
-        if self.actor.role is not ActorRole.OWNER:
+        if self.actor.role not in {ActorRole.OWNER, ActorRole.WORKER}:
             raise ContractViolation("reviewer_role_denied")
         if not isinstance(self.proposal_id, UUID) or not isinstance(
             self.operation_id, UUID
@@ -100,9 +101,13 @@ class ReviewCommand:
         ):
             require_sha256(value, code)
         valid_reasons = (
-            self.reason_codes == _ADMIT_REASON_CODES
-            if self.decision is ReviewDecision.ADMIT
-            else bool(self.reason_codes)
+            (self.actor.role is ActorRole.OWNER
+             and self.reason_codes == _OWNER_ADMIT_REASON_CODES)
+            or (self.actor.role is ActorRole.WORKER
+                and self.reason_codes == _AUTOMATIC_ADMIT_REASON_CODES)
+        ) if self.decision is ReviewDecision.ADMIT else (
+            self.actor.role is ActorRole.OWNER
+            and bool(self.reason_codes)
             and tuple(sorted(set(self.reason_codes))) == self.reason_codes
             and all(reason in _REJECT_REASON_CODES for reason in self.reason_codes)
         )
@@ -554,7 +559,12 @@ def apply_review(
     reviewed_at = require_utc(transaction_time, "invalid_review_transaction_time")
     owner = _uuid(binding["owner_user_id"], "invalid_proposal_owner")
     require_owner(review.actor, owner)
-    require_scope(review.actor, ActorScope.REVIEW_PROPOSALS)
+    require_scope(
+        review.actor,
+        ActorScope.REVIEW_PROPOSALS
+        if review.actor.role is ActorRole.OWNER
+        else ActorScope.AUTO_ADMIT_PROPOSALS,
+    )
     if reviewed_at >= expires_at:
         raise ContractViolation("proposal_expired")
     proposal_id = _uuid(item["proposal_id"], "invalid_proposal_id")
@@ -627,6 +637,16 @@ def apply_review(
             predicate=str(item["predicate"]),
         ):
             raise ContractViolation("correction_identity_change_prohibited")
+
+    if review.actor.role is ActorRole.WORKER and (
+        purpose is not ProposalPurpose.NEW_CLAIM
+        or binding["source_kind"] != "conversation_message"
+        or item["subject_entity_type"] != "self"
+        or item["subject_entity_key"] != "self"
+        or item["epistemic_state"] != "supported"
+        or item["sensitivity"] != "ordinary"
+    ):
+        raise ContractViolation("automatic_admission_policy_denied")
 
     receipt_material: dict[str, object] = {
         "owner_user_id_sha256": canonical_sha256("governed_memory.owner", str(owner)),

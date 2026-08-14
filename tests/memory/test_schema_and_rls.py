@@ -79,11 +79,13 @@ PACKAGE_DIRS = (
 ADDITIVE_PACKAGE_DIRS = (
     MIGRATIONS / "0003_owner_claim_detail",
     MIGRATIONS / "0004_pilot_marker",
+    MIGRATIONS / "0005_bounded_auto_admission",
 )
 ALL_PACKAGE_DIRS = (
     PACKAGE_DIRS[0],
     ADDITIVE_PACKAGE_DIRS[0],
     ADDITIVE_PACKAGE_DIRS[1],
+    ADDITIVE_PACKAGE_DIRS[2],
     PACKAGE_DIRS[1],
 )
 FOUNDATION_TABLES = (
@@ -1399,6 +1401,9 @@ class PackageIntegrityTests(unittest.TestCase):
             "0004_pilot_marker/forward.pgsql",
             "0004_pilot_marker/package.json",
             "0004_pilot_marker/rollback.pgsql",
+            "0005_bounded_auto_admission/forward.pgsql",
+            "0005_bounded_auto_admission/package.json",
+            "0005_bounded_auto_admission/rollback.pgsql",
         }
         observed = {
             path.relative_to(MIGRATIONS).as_posix()
@@ -1461,7 +1466,7 @@ class PackageIntegrityTests(unittest.TestCase):
         )
         self.assertEqual(
             sha256(ROOT_MANIFEST_PATH.read_bytes()).hexdigest(),
-            "831962c268fc0f0be96d19d3186f0a26e7c60cf8f49bf28e80aa5e9d63a1bf99",
+            "d8a954d048cf1df775cc614da01964348620df86eb3ed88c078812f44a655dc0",
         )
         receipt = verifier["verify"](MIGRATIONS)
         self.assertEqual(receipt["result"], "artifact_integrity_verified")

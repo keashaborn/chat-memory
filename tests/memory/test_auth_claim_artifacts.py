@@ -398,6 +398,7 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
                 "0001_foundation/forward.pgsql",
                 "0003_owner_claim_detail/forward.pgsql",
                 "0004_pilot_marker/forward.pgsql",
+                "0005_bounded_auto_admission/forward.pgsql",
                 "0002_conversation_bridge/forward.pgsql",
             ],
         )
@@ -405,6 +406,7 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
             manifest["rollback_order"],
             [
                 "0002_conversation_bridge/rollback.pgsql",
+                "0005_bounded_auto_admission/rollback.pgsql",
                 "0004_pilot_marker/rollback.pgsql",
                 "0003_owner_claim_detail/rollback.pgsql",
                 "0001_foundation/rollback.pgsql",
@@ -653,10 +655,12 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
             "0001_foundation/forward.pgsql",
             "0003_owner_claim_detail/forward.pgsql",
             "0004_pilot_marker/forward.pgsql",
+            "0005_bounded_auto_admission/forward.pgsql",
             "0002_conversation_bridge/forward.pgsql",
         ]
         rollback_paths = [
             "0002_conversation_bridge/rollback.pgsql",
+            "0005_bounded_auto_admission/rollback.pgsql",
             "0004_pilot_marker/rollback.pgsql",
             "0003_owner_claim_detail/rollback.pgsql",
             "0001_foundation/rollback.pgsql",

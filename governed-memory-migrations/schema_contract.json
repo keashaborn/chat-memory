@@ -698,6 +698,9 @@
       "eligibility_contract_violation",
       "source_binding_mismatch",
       "successor_receipt_mismatch"
+    ],
+    "automatic_admission": [
+      "automatic_low_risk_owner_assertion"
     ]
   },
   "transport_contract": {
@@ -784,6 +787,17 @@
       "frontend_candidate_71377a_undeployed_visual_qa_pending",
       "pilot_owner_and_scope_not_authorized",
       "legacy_memory_owner_scoped_read_write_shadow_quiescence_not_proved"
-    ]
+    ],
+    "automatic_admission_policy": {
+      "source_kind": "conversation_message",
+      "eligibility_decision": "send_external",
+      "proposal_purpose": "new_claim",
+      "subject": "self",
+      "epistemic_state": "supported",
+      "sensitivity": "ordinary",
+      "projectable": true,
+      "requires_explicit": false,
+      "corrections": false
+    }
   }
 }
