@@ -477,6 +477,51 @@ class SuccessorResponseRuntimeTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(len(connection.requests), 1)
 
+    async def test_qdrant_search_serializes_finite_vector_numbers(self) -> None:
+        connection = FakeHttpConnection(FakeHttpResponse({"result": []}))
+        transport = LoopbackQdrantRetrievalTransport(
+            api_key="synthetic-not-a-real-qdrant-key",
+            connection_factory=lambda _host, _port, _timeout: connection,
+        )
+
+        response = await transport.request(
+            "POST",
+            "/collections/governed_memory_active/points/search",
+            {"limit": 1, "vector": [0.25, -0.5]},
+        )
+
+        self.assertEqual(response, {"result": []})
+        self.assertEqual(len(connection.requests), 1)
+        request_kwargs = connection.requests[0][-1]
+        self.assertIsInstance(request_kwargs, dict)
+        self.assertEqual(
+            request_kwargs["body"],
+            b'{"limit":1,"vector":[0.25,-0.5]}',
+        )
+
+    async def test_qdrant_search_rejects_nonfinite_vector_before_send(
+        self,
+    ) -> None:
+        for value in (float("nan"), float("inf"), float("-inf")):
+            connection = FakeHttpConnection(FakeHttpResponse({"result": []}))
+            transport = LoopbackQdrantRetrievalTransport(
+                api_key="synthetic-not-a-real-qdrant-key",
+                connection_factory=(
+                    lambda _host, _port, _timeout: connection
+                ),
+            )
+
+            with self.subTest(value=value), self.assertRaisesRegex(
+                ContractViolation,
+                "body_invalid",
+            ):
+                await transport.request(
+                    "POST",
+                    "/collections/governed_memory_active/points/search",
+                    {"limit": 1, "vector": [value]},
+                )
+            self.assertEqual(connection.requests, [])
+
 
 if __name__ == "__main__":
     unittest.main()

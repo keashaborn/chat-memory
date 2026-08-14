@@ -20,7 +20,6 @@ from urllib.parse import urlsplit
 
 from rag_engine.governed_memory.contracts import (
     ContractViolation,
-    canonical_json_bytes,
     require_sha256,
 )
 from rag_engine.governed_memory.extraction import parse_predicate_catalog
@@ -57,6 +56,9 @@ from rag_engine.governed_memory.runtime.qdrant_adapter import (
     QDRANT_ALIAS,
     QDRANT_PHYSICAL_COLLECTION,
     ExactQdrantAdapter,
+)
+from rag_engine.governed_memory.runtime.qdrant_transport import (
+    _qdrant_wire_value,
 )
 
 
@@ -378,7 +380,20 @@ class LoopbackQdrantRetrievalTransport:
         path: str,
         body: Mapping[str, object] | None,
     ) -> Mapping[str, Any]:
-        encoded = canonical_json_bytes(body) if body is not None else None
+        encoded = None
+        if body is not None:
+            try:
+                encoded = json.dumps(
+                    _qdrant_wire_value(body),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ).encode("utf-8")
+            except (ContractViolation, TypeError, ValueError) as exc:
+                raise ContractViolation(
+                    "qdrant_response_transport_body_invalid"
+                ) from exc
         headers = {
             "Accept": "application/json",
             "api-key": self._api_key,
