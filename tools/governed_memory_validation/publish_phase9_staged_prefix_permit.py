@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-"""Publish the one root-owned Phase 9 pre-effect disposition permit."""
+"""Publish the one root-owned Phase 9 staged-prefix successor permit."""
 
 import os
 import sys
@@ -33,7 +33,7 @@ if __name__ == "__main__" and not (
     and sys.platform == "linux"
     and sys.executable == _PREIMPORT_CONTROLLER_PYTHON
 ):
-    sys.stderr.write("phase9_pre_effect_permit_runtime_isolation_required\n")
+    sys.stderr.write("phase9_staged_prefix_permit_runtime_isolation_required\n")
     raise SystemExit(1)
 
 
@@ -125,7 +125,7 @@ def _preimport_manager_lineage_valid(
 
 
 if __name__ == "__main__" and not _preimport_manager_lineage_valid():
-    sys.stderr.write("phase9_pre_effect_permit_manager_lineage_required\n")
+    sys.stderr.write("phase9_staged_prefix_permit_manager_lineage_required\n")
     raise SystemExit(1)
 
 from collections.abc import Mapping, Sequence
@@ -142,13 +142,17 @@ from typing import Final
 _PUBLISHER_PATH: Final = Path(__file__).resolve(strict=True)
 _REPOSITORY_ROOT: Final = _PUBLISHER_PATH.parents[2]
 _PUBLISHER_RELATIVE: Final = (
-    "tools/governed_memory_validation/publish_phase9_pre_effect_permit.py"
+    "tools/governed_memory_validation/publish_phase9_staged_prefix_permit.py"
 )
 _WRAPPER_RELATIVE: Final = (
-    "tools/governed_memory_validation/execute_phase9_pre_effect_disposition.py"
+    "tools/governed_memory_validation/execute_phase9_staged_prefix_disposition.py"
 )
 _CONTROLLER_RELATIVE: Final = (
-    "tools/governed_memory_validation/pre_effect_disposition.py"
+    "tools/governed_memory_validation/staged_prefix_disposition.py"
+)
+_CONTRACT_GENERATOR_RELATIVE: Final = (
+    "tools/governed_memory_validation/"
+    "generate_staged_prefix_disposition_contract.py"
 )
 _PERMITTED_CANDIDATE_RELATIVE: Final = (
     "tools/governed_memory_validation/phase9_permitted_candidate.py"
@@ -162,32 +166,37 @@ _BOOTSTRAP_RELATIVE: Final = (
 _MANAGER_RELATIVE: Final = (
     "tools/governed_memory_validation/execute_phase9_disposable_live_proof_controller.py"
 )
-_CONTRACT_RELATIVE: Final = "ops/governed_memory/pre_effect_disposition_contract.json"
+_CONTRACT_RELATIVE: Final = (
+    "ops/governed_memory/staged_prefix_disposition_contract.json"
+)
 _SOURCE_PATHS: Final = (
     _PUBLISHER_RELATIVE, _WRAPPER_RELATIVE, _CONTROLLER_RELATIVE,
+    _CONTRACT_GENERATOR_RELATIVE,
     _PERMITTED_CANDIDATE_RELATIVE, _ISSUER_RELATIVE, _BOOTSTRAP_RELATIVE,
     _MANAGER_RELATIVE,
     _CONTRACT_RELATIVE,
 )
 _EXPECTED_CANDIDATE_REF: Final = (
-    "refs/tags/governed-memory-phase9j-pre-effect-disposition-000002"
+    "refs/tags/governed-memory-phase9j-pre-effect-disposition-000003"
 )
 if _PUBLISHER_PATH.relative_to(_REPOSITORY_ROOT).as_posix() != _PUBLISHER_RELATIVE:
-    raise SystemExit("phase9_pre_effect_permit_invocation_invalid")
+    raise SystemExit("phase9_staged_prefix_permit_invocation_invalid")
 
 BASE_CANDIDATE_COMMIT: Final = "2eee4e6a2bf0b23aaca68fdbb4919b0c58d041a2"
 BASE_CANDIDATE_TREE: Final = "76f5cd6e20241523e1e3d6d1d8f4cf2c5f1de7ab"
-PACKAGE_MANIFEST_SHA256: Final = "2e5da1091b456b705d955c5cc3a119e507116f892de0bcb92017185ca4ed2e89"
-CONTROLLER_RUNTIME_RECEIPT_SHA256: Final = "7de191f42a1c14b6bc2c29b3e7b425bd1b2593f7de95e03af7d2f93ff5d4a53b"
-CONTRACT_SHA256: Final = "758175f12c844a81c1fac2061d2a41d094034d697241545656c8ddac4e51e989"
-PREDECESSOR_ATTEMPT_IDENTITY_SHA256: Final = "e814fd3ea9e10ebb2cc84f87c7a8a73f6d3d29e8da1f05944c81522b8db6efd9"
-SUCCESSOR_ATTEMPT_IDENTITY_SHA256: Final = "38cfb351b7a6c3d8c4e128d1870e307015c2e9158f85eec72058213bcc189ff3"
+PACKAGE_MANIFEST_SHA256: Final = "5addc8e4ab40b6bc700fde57b67579f8caa3d21077715bcdaf61d5714b52743e"
+CONTROLLER_RUNTIME_RECEIPT_SHA256: Final = "0000000000000000000000000000000000000000000000000000000000000000"
+CONTRACT_SHA256: Final = "242fde259c4b586a3224bfb4bbe0ccfe00bf304ae65b664fafb848ff81542d16"
+PREDECESSOR_ATTEMPT_IDENTITY_SHA256: Final = "7b1a325d2441dfbdcf326ca147480df46287b66178baf9a91c82bd1ef7853b00"
+SUCCESSOR_ATTEMPT_IDENTITY_SHA256: Final = "6213cba9c80509ebce09e640ac385ca5304edbcdfec30a1f86b2264ed5cd676f"
 AUTHORIZATION_TEXT_SHA256: Final = "063891fc0189b3c4a0fe393200ae50f59b04f5488800dc27a5ce3020880f3e44"
 THREAD_ID: Final = "019fe927-8367-7f52-86f2-e2b5b43a2390"
-PERMIT_SCHEMA: Final = "governed-memory-phase9j-pre-effect-disposition-permit-v1"
-PERMIT_RESULT: Final = "exact_pre_effect_disposition_execution_permitted"
+PERMIT_SCHEMA: Final = "governed-memory-phase9j-staged-prefix-permit-v1"
+PERMIT_RESULT: Final = (
+    "exact_staged_prefix_disposition_and_disposable_proof_permitted"
+)
 STATE_ROOT: Final = Path("/var/lib/governed-memory-controller")
-PERMIT_PATH: Final = STATE_ROOT / "phase9j-pre-effect-disposition-permit-000002.json"
+PERMIT_PATH: Final = STATE_ROOT / "phase9j-pre-effect-disposition-permit-000003.json"
 PERMIT_STAGING_NAME: Final = "." + PERMIT_PATH.name + ".publishing"
 RUNTIME_RECEIPT_PATH: Final = STATE_ROOT / "runtime-receipts" / (CONTROLLER_RUNTIME_RECEIPT_SHA256 + ".json")
 ROOT_UID: Final = 0
@@ -203,7 +212,7 @@ _SAFE_ENVIRONMENT: Final = {
 }
 
 
-class Phase9PreEffectPermitPublicationError(RuntimeError):
+class Phase9StagedPrefixPermitPublicationError(RuntimeError):
     """Content-free refusal from permit publication."""
 
 
@@ -216,7 +225,7 @@ def _canonical(value: object) -> bytes:
         return json.dumps(value, sort_keys=True, separators=(",", ":"),
                           ensure_ascii=True, allow_nan=False).encode("ascii")
     except (TypeError, ValueError, UnicodeError) as error:
-        raise Phase9PreEffectPermitPublicationError("phase9_pre_effect_permit_document_invalid") from error
+        raise Phase9StagedPrefixPermitPublicationError("phase9_staged_prefix_permit_document_invalid") from error
 
 
 def _unique(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -232,15 +241,15 @@ def _document(raw: bytes, code: str) -> dict[str, object]:
     try:
         value = json.loads(raw.decode("ascii"), object_pairs_hook=_unique)
     except (ValueError, UnicodeError) as error:
-        raise Phase9PreEffectPermitPublicationError(code) from error
+        raise Phase9StagedPrefixPermitPublicationError(code) from error
     if type(value) is not dict or _canonical(value) != raw:
-        raise Phase9PreEffectPermitPublicationError(code)
+        raise Phase9StagedPrefixPermitPublicationError(code)
     return value
 
 
 def _git(*arguments: str, allow_status: int = 0) -> bytes:
     if not arguments or allow_status not in {0, 1}:
-        raise Phase9PreEffectPermitPublicationError("phase9_pre_effect_permit_git_failed")
+        raise Phase9StagedPrefixPermitPublicationError("phase9_staged_prefix_permit_git_failed")
     try:
         completed = subprocess.run(
             (GIT_BINARY, "-c", "safe.directory=" + str(_REPOSITORY_ROOT),
@@ -249,9 +258,9 @@ def _git(*arguments: str, allow_status: int = 0) -> bytes:
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20, check=False,
         )
     except (OSError, subprocess.SubprocessError) as error:
-        raise Phase9PreEffectPermitPublicationError("phase9_pre_effect_permit_git_failed") from error
+        raise Phase9StagedPrefixPermitPublicationError("phase9_staged_prefix_permit_git_failed") from error
     if completed.returncode != allow_status or completed.stderr != b"" or len(completed.stdout) > MAX_GIT_OUTPUT_BYTES:
-        raise Phase9PreEffectPermitPublicationError("phase9_pre_effect_permit_git_failed")
+        raise Phase9StagedPrefixPermitPublicationError("phase9_staged_prefix_permit_git_failed")
     return bytes(completed.stdout)
 
 
@@ -259,9 +268,9 @@ def _git_object(raw: bytes) -> str:
     try:
         value = raw.decode("ascii").rstrip("\n")
     except UnicodeError as error:
-        raise Phase9PreEffectPermitPublicationError("phase9_pre_effect_permit_candidate_invalid") from error
+        raise Phase9StagedPrefixPermitPublicationError("phase9_staged_prefix_permit_candidate_invalid") from error
     if raw != (value + "\n").encode("ascii") or _GIT_RE.fullmatch(value) is None:
-        raise Phase9PreEffectPermitPublicationError("phase9_pre_effect_permit_candidate_invalid")
+        raise Phase9StagedPrefixPermitPublicationError("phase9_staged_prefix_permit_candidate_invalid")
     return value
 
 
@@ -269,9 +278,9 @@ def _verify_selected_candidate() -> tuple[str, str, dict[str, str]]:
     try:
         top = _git("rev-parse", "--show-toplevel").decode("utf-8").rstrip("\n")
     except UnicodeError as error:
-        raise Phase9PreEffectPermitPublicationError("phase9_pre_effect_permit_candidate_invalid") from error
+        raise Phase9StagedPrefixPermitPublicationError("phase9_staged_prefix_permit_candidate_invalid") from error
     if top != str(_REPOSITORY_ROOT) or _git("status", "--porcelain=v1", "--untracked-files=all") != b"":
-        raise Phase9PreEffectPermitPublicationError("phase9_pre_effect_permit_candidate_not_clean")
+        raise Phase9StagedPrefixPermitPublicationError("phase9_staged_prefix_permit_candidate_not_clean")
     _git("ls-files", "--error-unmatch", "--stage", "--", *_SOURCE_PATHS)
     tag_commit = _git_object(_git("rev-parse", "--verify", _EXPECTED_CANDIDATE_REF + "^{commit}"))
     tag_tree = _git_object(_git("rev-parse", "--verify", _EXPECTED_CANDIDATE_REF + "^{tree}"))
@@ -280,19 +289,19 @@ def _verify_selected_candidate() -> tuple[str, str, dict[str, str]]:
     base_tree = _git_object(_git("rev-parse", "--verify", BASE_CANDIDATE_COMMIT + "^{tree}"))
     _git("merge-base", "--is-ancestor", BASE_CANDIDATE_COMMIT, "HEAD")
     if commit != tag_commit or tree != tag_tree or base_tree != BASE_CANDIDATE_TREE:
-        raise Phase9PreEffectPermitPublicationError("phase9_pre_effect_permit_candidate_invalid")
+        raise Phase9StagedPrefixPermitPublicationError("phase9_staged_prefix_permit_candidate_invalid")
     blobs: dict[str, str] = {}
     for relative in _SOURCE_PATHS:
         committed = _git_object(_git("rev-parse", "HEAD:" + relative))
         observed = _git_object(_git("hash-object", str(_REPOSITORY_ROOT / relative)))
         if committed != observed:
-            raise Phase9PreEffectPermitPublicationError("phase9_pre_effect_permit_candidate_not_clean")
+            raise Phase9StagedPrefixPermitPublicationError("phase9_staged_prefix_permit_candidate_not_clean")
         blobs[relative] = committed
     contract_sha256 = CONTRACT_SHA256
     if type(contract_sha256) is not str or _HASH_RE.fullmatch(contract_sha256) is None:
-        raise Phase9PreEffectPermitPublicationError("phase9_pre_effect_permit_binding_not_sealed")
+        raise Phase9StagedPrefixPermitPublicationError("phase9_staged_prefix_permit_binding_not_sealed")
     if _sha((_REPOSITORY_ROOT / _CONTRACT_RELATIVE).read_bytes()) != contract_sha256:
-        raise Phase9PreEffectPermitPublicationError("phase9_pre_effect_permit_contract_invalid")
+        raise Phase9StagedPrefixPermitPublicationError("phase9_staged_prefix_permit_contract_invalid")
     return commit, tree, blobs
 
 
@@ -315,15 +324,15 @@ def _read_root_file(path: Path, code: str) -> bytes:
             raise OSError(errno.EIO, "changed")
         return raw
     except OSError as error:
-        raise Phase9PreEffectPermitPublicationError(code) from error
+        raise Phase9StagedPrefixPermitPublicationError(code) from error
     finally:
         if descriptor >= 0:
             os.close(descriptor)
 
 
 def _verify_runtime_receipt() -> None:
-    raw = _read_root_file(RUNTIME_RECEIPT_PATH, "phase9_pre_effect_permit_runtime_receipt_invalid")
-    document = _document(raw, "phase9_pre_effect_permit_runtime_receipt_invalid")
+    raw = _read_root_file(RUNTIME_RECEIPT_PATH, "phase9_staged_prefix_permit_runtime_receipt_invalid")
+    document = _document(raw, "phase9_staged_prefix_permit_runtime_receipt_invalid")
     if (
         _sha(raw) != CONTROLLER_RUNTIME_RECEIPT_SHA256
         or document.get("package_manifest_sha256") != PACKAGE_MANIFEST_SHA256
@@ -331,13 +340,13 @@ def _verify_runtime_receipt() -> None:
         or document.get("production_data_read") is not False
         or document.get("provider_calls") != 0
     ):
-        raise Phase9PreEffectPermitPublicationError("phase9_pre_effect_permit_runtime_receipt_invalid")
+        raise Phase9StagedPrefixPermitPublicationError("phase9_staged_prefix_permit_runtime_receipt_invalid")
 
 
 def _permit(commit: str, tree: str, blobs: Mapping[str, str]) -> bytes:
     contract_sha256 = CONTRACT_SHA256
     if type(contract_sha256) is not str:
-        raise Phase9PreEffectPermitPublicationError("phase9_pre_effect_permit_binding_not_sealed")
+        raise Phase9StagedPrefixPermitPublicationError("phase9_staged_prefix_permit_binding_not_sealed")
     unsigned: dict[str, object] = {
         "schema_version": PERMIT_SCHEMA, "result": PERMIT_RESULT,
         "candidate_git_commit": commit, "candidate_git_tree": tree,
@@ -351,7 +360,7 @@ def _permit(commit: str, tree: str, blobs: Mapping[str, str]) -> bytes:
         "authorization_text_sha256": AUTHORIZATION_TEXT_SHA256,
         "thread_id": THREAD_ID, "source_blobs": dict(blobs),
         "authorized_action": (
-            "execute_pre_effect_disposition_and_disposable_live_proof_only"
+            "execute_staged_prefix_disposition_and_disposable_live_proof_only"
         ),
         "activation_performed": False, "provider_calls": 0,
         "production_data_read": False, "deletion_performed": False,
@@ -385,8 +394,8 @@ def _read_publish_member(
     except FileNotFoundError:
         return None
     except OSError as error:
-        raise Phase9PreEffectPermitPublicationError(
-            "phase9_pre_effect_permit_publication_conflict"
+        raise Phase9StagedPrefixPermitPublicationError(
+            "phase9_staged_prefix_permit_publication_conflict"
         ) from error
     try:
         before = os.fstat(descriptor)
@@ -401,8 +410,8 @@ def _read_publish_member(
             or before.st_size > MAX_DOCUMENT_BYTES
             or (before.st_dev, before.st_ino) != (named.st_dev, named.st_ino)
         ):
-            raise Phase9PreEffectPermitPublicationError(
-                "phase9_pre_effect_permit_publication_conflict"
+            raise Phase9StagedPrefixPermitPublicationError(
+                "phase9_staged_prefix_permit_publication_conflict"
             )
         raw = bytearray()
         while len(raw) <= MAX_DOCUMENT_BYTES:
@@ -437,8 +446,8 @@ def _read_publish_member(
             or stable_after != stable_before
             or stable_named != stable_before
         ):
-            raise Phase9PreEffectPermitPublicationError(
-                "phase9_pre_effect_permit_publication_conflict"
+            raise Phase9StagedPrefixPermitPublicationError(
+                "phase9_staged_prefix_permit_publication_conflict"
             )
         return bytes(raw), (before.st_dev, before.st_ino)
     finally:
@@ -450,16 +459,16 @@ def _unlink_owned_staging(parent_fd: int, expected_inode: tuple[int, int]) -> No
     try:
         named = os.stat(PERMIT_STAGING_NAME, dir_fd=parent_fd, follow_symlinks=False)
         if (named.st_dev, named.st_ino) != expected_inode:
-            raise Phase9PreEffectPermitPublicationError(
-                "phase9_pre_effect_permit_publication_conflict"
+            raise Phase9StagedPrefixPermitPublicationError(
+                "phase9_staged_prefix_permit_publication_conflict"
             )
         os.unlink(PERMIT_STAGING_NAME, dir_fd=parent_fd)
         os.fsync(parent_fd)
-    except Phase9PreEffectPermitPublicationError:
+    except Phase9StagedPrefixPermitPublicationError:
         raise
     except OSError as error:
-        raise Phase9PreEffectPermitPublicationError(
-            "phase9_pre_effect_permit_publication_failed"
+        raise Phase9StagedPrefixPermitPublicationError(
+            "phase9_staged_prefix_permit_publication_failed"
         ) from error
 
 
@@ -489,8 +498,8 @@ def _fsync_publish_member(
             or (before.st_dev, before.st_ino) != expected_inode
             or (named.st_dev, named.st_ino) != expected_inode
         ):
-            raise Phase9PreEffectPermitPublicationError(
-                "phase9_pre_effect_permit_publication_conflict"
+            raise Phase9StagedPrefixPermitPublicationError(
+                "phase9_staged_prefix_permit_publication_conflict"
             )
         os.fsync(descriptor)
         after = os.fstat(descriptor)
@@ -512,17 +521,17 @@ def _fsync_publish_member(
             named_after.st_ctime_ns,
         )
         if stable_after != stable_before or stable_named != stable_before:
-            raise Phase9PreEffectPermitPublicationError(
-                "phase9_pre_effect_permit_publication_conflict"
+            raise Phase9StagedPrefixPermitPublicationError(
+                "phase9_staged_prefix_permit_publication_conflict"
             )
         closing_fd = descriptor
         descriptor = -1
         os.close(closing_fd)
-    except Phase9PreEffectPermitPublicationError:
+    except Phase9StagedPrefixPermitPublicationError:
         raise
     except OSError as error:
-        raise Phase9PreEffectPermitPublicationError(
-            "phase9_pre_effect_permit_publication_failed"
+        raise Phase9StagedPrefixPermitPublicationError(
+            "phase9_staged_prefix_permit_publication_failed"
         ) from error
     finally:
         if descriptor >= 0:
@@ -550,19 +559,19 @@ def _publish_create_once(raw: bytes) -> None:
         if final is not None:
             final_raw, final_inode = final
             if final_raw != raw:
-                raise Phase9PreEffectPermitPublicationError(
-                    "phase9_pre_effect_permit_replay_mismatch"
+                raise Phase9StagedPrefixPermitPublicationError(
+                    "phase9_staged_prefix_permit_replay_mismatch"
                 )
             if staging is None:
                 if os.stat(PERMIT_PATH.name, dir_fd=parent_fd, follow_symlinks=False).st_nlink != 1:
-                    raise Phase9PreEffectPermitPublicationError(
-                        "phase9_pre_effect_permit_publication_conflict"
+                    raise Phase9StagedPrefixPermitPublicationError(
+                        "phase9_staged_prefix_permit_publication_conflict"
                     )
                 return
             staging_raw, staging_inode = staging
             if staging_raw != raw or staging_inode != final_inode:
-                raise Phase9PreEffectPermitPublicationError(
-                    "phase9_pre_effect_permit_publication_conflict"
+                raise Phase9StagedPrefixPermitPublicationError(
+                    "phase9_staged_prefix_permit_publication_conflict"
                 )
             _fsync_publish_member(
                 parent_fd,
@@ -575,15 +584,15 @@ def _publish_create_once(raw: bytes) -> None:
             if _read_publish_member(
                 parent_fd, PERMIT_PATH.name, allowed_link_counts=frozenset({1})
             ) != (raw, final_inode):
-                raise Phase9PreEffectPermitPublicationError(
-                    "phase9_pre_effect_permit_publication_failed"
+                raise Phase9StagedPrefixPermitPublicationError(
+                    "phase9_staged_prefix_permit_publication_failed"
                 )
             return
         if staging is not None:
             staging_raw, staging_inode = staging
             if staging_raw != raw:
-                raise Phase9PreEffectPermitPublicationError(
-                    "phase9_pre_effect_permit_publication_conflict"
+                raise Phase9StagedPrefixPermitPublicationError(
+                    "phase9_staged_prefix_permit_publication_conflict"
                 )
             _fsync_publish_member(
                 parent_fd,
@@ -601,23 +610,23 @@ def _publish_create_once(raw: bytes) -> None:
                     follow_symlinks=False,
                 )
             except FileExistsError as error:
-                raise Phase9PreEffectPermitPublicationError(
-                    "phase9_pre_effect_permit_publication_conflict"
+                raise Phase9StagedPrefixPermitPublicationError(
+                    "phase9_staged_prefix_permit_publication_conflict"
                 ) from error
             os.fsync(parent_fd)
             linked = _read_publish_member(
                 parent_fd, PERMIT_PATH.name, allowed_link_counts=frozenset({2})
             )
             if linked != (raw, staging_inode):
-                raise Phase9PreEffectPermitPublicationError(
-                    "phase9_pre_effect_permit_publication_failed"
+                raise Phase9StagedPrefixPermitPublicationError(
+                    "phase9_staged_prefix_permit_publication_failed"
                 )
             _unlink_owned_staging(parent_fd, staging_inode)
             if _read_publish_member(
                 parent_fd, PERMIT_PATH.name, allowed_link_counts=frozenset({1})
             ) != (raw, staging_inode):
-                raise Phase9PreEffectPermitPublicationError(
-                    "phase9_pre_effect_permit_publication_failed"
+                raise Phase9StagedPrefixPermitPublicationError(
+                    "phase9_staged_prefix_permit_publication_failed"
                 )
             return
         leaf_fd = os.open(
@@ -640,8 +649,8 @@ def _publish_create_once(raw: bytes) -> None:
         if _read_publish_member(
             parent_fd, PERMIT_STAGING_NAME, allowed_link_counts=frozenset({1})
         ) != (raw, staging_inode):
-            raise Phase9PreEffectPermitPublicationError(
-                "phase9_pre_effect_permit_publication_failed"
+            raise Phase9StagedPrefixPermitPublicationError(
+                "phase9_staged_prefix_permit_publication_failed"
             )
         try:
             os.link(
@@ -652,27 +661,27 @@ def _publish_create_once(raw: bytes) -> None:
                 follow_symlinks=False,
             )
         except FileExistsError as error:
-            raise Phase9PreEffectPermitPublicationError(
-                "phase9_pre_effect_permit_publication_conflict"
+            raise Phase9StagedPrefixPermitPublicationError(
+                "phase9_staged_prefix_permit_publication_conflict"
             ) from error
         os.fsync(parent_fd)
         if _read_publish_member(
             parent_fd, PERMIT_PATH.name, allowed_link_counts=frozenset({2})
         ) != (raw, staging_inode):
-            raise Phase9PreEffectPermitPublicationError(
-                "phase9_pre_effect_permit_publication_failed"
+            raise Phase9StagedPrefixPermitPublicationError(
+                "phase9_staged_prefix_permit_publication_failed"
             )
         _unlink_owned_staging(parent_fd, staging_inode)
         if _read_publish_member(
             parent_fd, PERMIT_PATH.name, allowed_link_counts=frozenset({1})
         ) != (raw, staging_inode):
-            raise Phase9PreEffectPermitPublicationError(
-                "phase9_pre_effect_permit_publication_failed"
+            raise Phase9StagedPrefixPermitPublicationError(
+                "phase9_staged_prefix_permit_publication_failed"
             )
-    except Phase9PreEffectPermitPublicationError:
+    except Phase9StagedPrefixPermitPublicationError:
         raise
     except OSError as error:
-        raise Phase9PreEffectPermitPublicationError("phase9_pre_effect_permit_publication_failed") from error
+        raise Phase9StagedPrefixPermitPublicationError("phase9_staged_prefix_permit_publication_failed") from error
     finally:
         if leaf_fd >= 0:
             os.close(leaf_fd)
@@ -680,34 +689,34 @@ def _publish_create_once(raw: bytes) -> None:
             os.close(parent_fd)
 
 
-def publish_phase9_pre_effect_permit() -> Mapping[str, object]:
+def publish_phase9_staged_prefix_permit() -> Mapping[str, object]:
     if (
         not _ISOLATED_RUNTIME_AT_START
         or not _DONT_WRITE_BYTECODE_AT_START
         or sys.platform != "linux"
         or sys.executable != _PREIMPORT_CONTROLLER_PYTHON
     ):
-        raise Phase9PreEffectPermitPublicationError("phase9_pre_effect_permit_runtime_isolation_required")
+        raise Phase9StagedPrefixPermitPublicationError("phase9_staged_prefix_permit_runtime_isolation_required")
     if not _preimport_manager_lineage_valid():
-        raise Phase9PreEffectPermitPublicationError(
-            "phase9_pre_effect_permit_manager_lineage_required"
+        raise Phase9StagedPrefixPermitPublicationError(
+            "phase9_staged_prefix_permit_manager_lineage_required"
         )
     if os.geteuid() != ROOT_UID or os.getegid() != ROOT_GID:
-        raise Phase9PreEffectPermitPublicationError("phase9_pre_effect_permit_root_required")
+        raise Phase9StagedPrefixPermitPublicationError("phase9_staged_prefix_permit_root_required")
     commit, tree, blobs = _verify_selected_candidate()
     _verify_runtime_receipt()
     raw = _permit(commit, tree, blobs)
     # Reprove tag selection and source bytes immediately before publication.
     if _verify_selected_candidate() != (commit, tree, blobs):
-        raise Phase9PreEffectPermitPublicationError("phase9_pre_effect_permit_candidate_changed")
+        raise Phase9StagedPrefixPermitPublicationError("phase9_staged_prefix_permit_candidate_changed")
     _publish_create_once(raw)
-    return _document(raw, "phase9_pre_effect_permit_publication_failed")
+    return _document(raw, "phase9_staged_prefix_permit_publication_failed")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     if tuple(sys.argv[1:] if argv is None else argv):
-        raise Phase9PreEffectPermitPublicationError("phase9_pre_effect_permit_arguments_refused")
-    value = publish_phase9_pre_effect_permit()
+        raise Phase9StagedPrefixPermitPublicationError("phase9_staged_prefix_permit_arguments_refused")
+    value = publish_phase9_staged_prefix_permit()
     sys.stdout.buffer.write(_canonical(value) + b"\n")
     return 0
 
@@ -715,6 +724,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except Phase9PreEffectPermitPublicationError as error:
+    except Phase9StagedPrefixPermitPublicationError as error:
         sys.stderr.write(str(error) + "\n")
         raise SystemExit(1) from None

@@ -22,10 +22,10 @@ class Phase9DisposableStoreSubstrateTests(unittest.TestCase):
         root = Path(self.temporary.name)
         self.store_parent = root / "governed-memory-stores"
         self.store_parent.mkdir(mode=0o755)
-        self.store_target = self.store_parent / "9a54cf123493-000002"
+        self.store_target = self.store_parent / "9a54cf123493-000003"
         self.execution_parent = root / "governed-memory-controller"
         self.execution_parent.mkdir(mode=0o700)
-        self.execution_target = self.execution_parent / "executions-v2"
+        self.execution_target = self.execution_parent / "executions-v3"
         self.selected = (
             subject._FixedDirectory(
                 self.store_parent, 0o755, self.store_target.name, self.store_target
@@ -87,7 +87,7 @@ class Phase9DisposableStoreSubstrateTests(unittest.TestCase):
         with (
             mock.patch.object(subject.os, "geteuid", return_value=os.getuid()),
             mock.patch.object(subject.os, "getegid", return_value=os.getgid()),
-            mock.patch.object(subject, "_require_exact_pre_effect_disposition"),
+            mock.patch.object(subject, "_require_exact_staged_prefix_disposition"),
         ):
             return dict(
                 subject.bootstrap_phase9_disposable_store_substrate(
@@ -286,7 +286,7 @@ class Phase9DisposableStoreSubstrateTests(unittest.TestCase):
             mock.patch.object(subject.os, "getegid", return_value=os.getgid()),
             mock.patch.object(
                 subject,
-                "_require_exact_pre_effect_disposition",
+                "_require_exact_staged_prefix_disposition",
                 side_effect=refusal,
             ) as require_disposition,
             mock.patch.object(subject, "_bootstrap_directories") as bootstrap,

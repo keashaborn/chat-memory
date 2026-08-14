@@ -274,7 +274,7 @@ def verify() -> dict[str, object]:
     if (
         manifest.get("schema_version")
         != "governed-memory-dormant-store-install-store-migration-manifest-v2"
-        or manifest.get("candidate_id") != "governed_memory_9a54cf123493_000002"
+        or manifest.get("candidate_id") != "governed_memory_9a54cf123493_000003"
         or manifest.get("state")
         != "repository-only-current-stores-only-migration-set-not-installed-not-authorized"
         or manifest.get("execution_order") != EXECUTION_ORDER

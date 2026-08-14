@@ -80,10 +80,10 @@ GLOBAL_LOCK_PATH: Final = Path(
     "/run/lock/governed-memory-controller/execution.lock"
 )
 AUTHORITY_STATE_PATH: Final = Path(
-    "/var/lib/governed-memory-controller/authority-state-v2.sqlite3"
+    "/var/lib/governed-memory-controller/authority-state-v3.sqlite3"
 )
 ROLLBACK_JOURNAL_TEMPLATE: Final = (
-    "/var/lib/governed-memory-controller/executions-v2/"
+    "/var/lib/governed-memory-controller/executions-v3/"
     "{execution_id}/rollback.jsonl"
 )
 ROLLBACK_JOURNAL_SCHEMA: Final = "governed-memory-empty-store-rollback-journal-v3"

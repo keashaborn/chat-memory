@@ -4,12 +4,12 @@ import unittest
 from unittest import mock
 
 from tools.governed_memory_validation import (
-    execute_phase9_pre_effect_disposition as disposition_entrypoint,
+    execute_phase9_staged_prefix_disposition as disposition_entrypoint,
 )
 from tools.governed_memory_validation import phase9_permitted_candidate as subject
-from tools.governed_memory_validation import pre_effect_disposition
+from tools.governed_memory_validation import staged_prefix_disposition
 from tools.governed_memory_validation import (
-    publish_phase9_pre_effect_permit as permit_publisher,
+    publish_phase9_staged_prefix_permit as permit_publisher,
 )
 
 
@@ -18,7 +18,7 @@ TREE = "b" * 40
 PACKAGE = disposition_entrypoint.PACKAGE_MANIFEST_SHA256
 RUNTIME = disposition_entrypoint.CONTROLLER_RUNTIME_RECEIPT_SHA256
 BLOBS = {path: f"{index + 1:x}" * 40 for index, path in enumerate(disposition_entrypoint._SOURCE_PATHS)}
-SUCCESSOR = pre_effect_disposition.production_successor_attempt_identity_sha256(
+SUCCESSOR = staged_prefix_disposition.production_corrected_attempt_identity_sha256(
     package_manifest_sha256=PACKAGE,
     controller_runtime_receipt_sha256=RUNTIME,
 )
@@ -30,18 +30,18 @@ def permit(**changes: object) -> dict[str, object]:
         "candidate_git_tree": TREE,
         "package_manifest_sha256": PACKAGE,
         "controller_runtime_receipt_sha256": RUNTIME,
-        "contract_sha256": pre_effect_disposition.PRODUCTION_CONTRACT_SHA256,
+        "contract_sha256": staged_prefix_disposition.PRODUCTION_CONTRACT_SHA256,
         "predecessor_attempt_identity_sha256": (
-            pre_effect_disposition.PRODUCTION_PREDECESSOR_ATTEMPT_IDENTITY_SHA256
+            staged_prefix_disposition.production_failed_prefix_identity_sha256()
         ),
         "successor_attempt_identity_sha256": SUCCESSOR,
         "authorization_text_sha256": (
-            pre_effect_disposition.PRODUCTION_AUTHORIZATION_TEXT_SHA256
+            permit_publisher.AUTHORIZATION_TEXT_SHA256
         ),
         "thread_id": disposition_entrypoint.THREAD_ID,
         "source_blobs": dict(BLOBS),
         "authorized_action": (
-            "execute_pre_effect_disposition_and_disposable_live_proof_only"
+            "execute_staged_prefix_disposition_and_disposable_live_proof_only"
         ),
     }
     value.update(changes)
@@ -195,7 +195,7 @@ class Phase9PermittedCandidateTests(unittest.TestCase):
             )
 
     def test_upstream_permit_refusal_is_content_free(self) -> None:
-        failure = disposition_entrypoint.Phase9PreEffectDispositionEntrypointError(
+        failure = disposition_entrypoint.Phase9StagedPrefixDispositionEntrypointError(
             "private detail"
         )
         with (

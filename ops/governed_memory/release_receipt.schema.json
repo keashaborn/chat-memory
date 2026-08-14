@@ -70,10 +70,10 @@
       ],
       "properties": {
         "container": {
-          "const": "governed-memory-postgres-9a54cf123493-000002"
+          "const": "governed-memory-postgres-9a54cf123493-000003"
         },
         "volume": {
-          "const": "governed-memory-postgres-data-9a54cf123493-000002"
+          "const": "governed-memory-postgres-data-9a54cf123493-000003"
         },
         "database": {
           "const": "governed_memory"
@@ -96,13 +96,13 @@
       ],
       "properties": {
         "container": {
-          "const": "governed-memory-qdrant-9a54cf123493-000002"
+          "const": "governed-memory-qdrant-9a54cf123493-000003"
         },
         "volume": {
-          "const": "governed-memory-qdrant-data-9a54cf123493-000002"
+          "const": "governed-memory-qdrant-data-9a54cf123493-000003"
         },
         "collection": {
-          "const": "governed_memory_9a54cf123493_000002"
+          "const": "governed_memory_9a54cf123493_000003"
         },
         "alias": {
           "const": "governed_memory_active"

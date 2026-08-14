@@ -75,7 +75,7 @@ QDRANT_IMAGE_ID = "sha256:" + "2" * 64
 
 def _bound_spec() -> dict[str, object]:
     static = json.loads(
-        (ROOT / "ops/governed_memory/installation/store_spec-v2.json").read_text(
+        (ROOT / "ops/governed_memory/installation/store_spec-v3.json").read_text(
             encoding="ascii"
         )
     )
@@ -104,7 +104,7 @@ def _artifacts() -> ExactInstallArtifacts:
         "governed-memory-migrations/0004_pilot_marker/rollback.pgsql",
         "ops/governed_memory/qdrant_collection.create.json",
         "ops/governed_memory/qdrant_alias.create.json",
-        "ops/governed_memory/installation/systemd/governed-memory-stores-v2.service.in",
+        "ops/governed_memory/installation/systemd/governed-memory-stores-v3.service.in",
     )
     return ExactInstallArtifacts.from_verified_mapping(
         {path: (ROOT / path).read_bytes() for path in paths}
@@ -236,7 +236,7 @@ class FakeRootFilesystem:
     ) -> DescriptorDirectoryObservation:
         path = {
             RetainedRootDirectory.CONTROLLER_CONFIG: "/etc/governed-memory-controller",
-            RetainedRootDirectory.STORE_SECRET: "/etc/governed-memory-stores/9a54cf123493-000002",
+            RetainedRootDirectory.STORE_SECRET: "/etc/governed-memory-stores/9a54cf123493-000003",
         }[slot]
         self.calls.append(("observe_retained_directory", slot, path))
         return DescriptorDirectoryObservation(slot, path, 7, 10, 0, 0, 0o700)
@@ -715,7 +715,7 @@ class QdrantAdapterTests(unittest.TestCase):
         )
         self.assertEqual(
             QDRANT_REQUESTS[QdrantRequestId.CREATE_COLLECTION].target,
-            b"/collections/governed_memory_9a54cf123493_000002",
+            b"/collections/governed_memory_9a54cf123493_000003",
         )
 
     def test_create_alias_accepts_exact_empty_collection_alias_result(self) -> None:
@@ -762,7 +762,7 @@ class QdrantAdapterTests(unittest.TestCase):
             200,
             (
                 b'{"result":{"aliases":[{"alias_name":"governed_memory_active",'
-                b'"collection_name":"governed_memory_9a54cf123493_000002",'
+                b'"collection_name":"governed_memory_9a54cf123493_000003",'
                 b'"unexpected":true}]}}'
             ),
         )
@@ -878,7 +878,7 @@ class QdrantAdapterTests(unittest.TestCase):
                     "aliases": [
                         {
                             "alias_name": "governed_memory_active",
-                            "collection_name": "governed_memory_9a54cf123493_000002",
+                            "collection_name": "governed_memory_9a54cf123493_000003",
                         }
                     ]
                 }
@@ -890,7 +890,7 @@ class QdrantAdapterTests(unittest.TestCase):
             {
                 "result": {
                     "collections": [
-                        {"name": "governed_memory_9a54cf123493_000002"},
+                        {"name": "governed_memory_9a54cf123493_000003"},
                         {"name": "unrelated_collection"},
                     ]
                 }
@@ -919,7 +919,7 @@ class QdrantAdapterTests(unittest.TestCase):
                     "aliases": [
                         {
                             "alias_name": "governed_memory_active",
-                            "collection_name": "governed_memory_9a54cf123493_000002",
+                            "collection_name": "governed_memory_9a54cf123493_000003",
                         }
                     ]
                 }
@@ -931,7 +931,7 @@ class QdrantAdapterTests(unittest.TestCase):
             {
                 "result": {
                     "collections": [
-                        {"name": "governed_memory_9a54cf123493_000002"}
+                        {"name": "governed_memory_9a54cf123493_000003"}
                     ]
                 }
             },
@@ -972,7 +972,7 @@ class FactoryBoundaryTests(unittest.TestCase):
                     )
                     self.assertEqual(
                         [call.args[0] for call in probe.call_args_list],
-                        [55433, 6344],
+                        [55434, 6345],
                     )
             with self.assertRaisesRegex(
                 LinuxLiveAdapterError, "execution_lock_not_held"
@@ -1014,7 +1014,7 @@ class FactoryBoundaryTests(unittest.TestCase):
         self.assertEqual(runner.calls, [])
         self.assertEqual(fs.calls, [])
         self.assertEqual(qdrant.calls, [])
-        self.assertEqual(adapters.qdrant.bind, "127.0.0.1:6344")
+        self.assertEqual(adapters.qdrant.bind, "127.0.0.1:6345")
 
     def test_production_factory_selects_complete_closed_transport_set(self) -> None:
         class ReceiptSink:
@@ -1083,8 +1083,8 @@ class FactoryBoundaryTests(unittest.TestCase):
                 self.assertIsInstance(
                     transports.postgres, PsycopgPostgreSQLAdapter
                 )
-                self.assertEqual(transports.postgres.bind, "127.0.0.1:55433")
-                self.assertEqual(transports.qdrant.bind, "127.0.0.1:6344")
+                self.assertEqual(transports.postgres.bind, "127.0.0.1:55434")
+                self.assertEqual(transports.qdrant.bind, "127.0.0.1:6345")
 
 
 if __name__ == "__main__":

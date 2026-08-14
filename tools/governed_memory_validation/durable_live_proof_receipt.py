@@ -21,7 +21,7 @@ from typing import Final, Mapping
 
 PROMOTABLE_LIVE_PROOF_RECEIPT_PATH: Final = Path(
     "/var/lib/governed-memory-controller/"
-    "phase9-disposable-live-proof-promotable-receipt-000002.json"
+    "phase9-disposable-live-proof-promotable-receipt-000003.json"
 )
 PROMOTABLE_LIVE_PROOF_RECEIPT_STAGING_SUFFIX: Final = ".publishing"
 PROMOTABLE_LIVE_PROOF_RECEIPT_STAGING_PATH: Final = Path(

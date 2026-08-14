@@ -6,18 +6,18 @@ from dataclasses import dataclass
 from typing import Final
 
 from tools.governed_memory_validation import (
-    execute_phase9_pre_effect_disposition as disposition_entrypoint,
+    execute_phase9_staged_prefix_disposition as disposition_entrypoint,
 )
-from tools.governed_memory_validation import pre_effect_disposition
+from tools.governed_memory_validation import staged_prefix_disposition
 from tools.governed_memory_validation import (
-    publish_phase9_pre_effect_permit as permit_publisher,
+    publish_phase9_staged_prefix_permit as permit_publisher,
 )
 
 
 _HASH_LENGTH: Final = 64
 _GIT_LENGTH: Final = 40
 _PERMITTED_AUTHORIZED_ACTION: Final = (
-    "execute_pre_effect_disposition_and_disposable_live_proof_only"
+    "execute_staged_prefix_disposition_and_disposable_live_proof_only"
 )
 
 
@@ -73,7 +73,7 @@ def require_exact_permitted_candidate(
             permit_publisher._verify_selected_candidate()
         )
         successor = (
-            pre_effect_disposition.production_successor_attempt_identity_sha256(
+            staged_prefix_disposition.production_corrected_attempt_identity_sha256(
                 package_manifest_sha256=str(
                     permit["package_manifest_sha256"]
                 ),
@@ -86,9 +86,9 @@ def require_exact_permitted_candidate(
         permit_snapshot = disposition_entrypoint._canonical(dict(permit))
         tag_blob_snapshot = tuple(sorted(tag_blobs.items()))
     except (
-        disposition_entrypoint.Phase9PreEffectDispositionEntrypointError,
-        permit_publisher.Phase9PreEffectPermitPublicationError,
-        pre_effect_disposition.PreEffectDispositionError,
+        disposition_entrypoint.Phase9StagedPrefixDispositionEntrypointError,
+        permit_publisher.Phase9StagedPrefixPermitPublicationError,
+        staged_prefix_disposition.StagedPrefixDispositionError,
         KeyError,
     ) as error:
         raise Phase9PermittedCandidateError(
@@ -97,12 +97,12 @@ def require_exact_permitted_candidate(
 
     current_blobs = dict(current.source_blobs)
     exact = {
-        "contract_sha256": pre_effect_disposition.PRODUCTION_CONTRACT_SHA256,
+        "contract_sha256": staged_prefix_disposition.PRODUCTION_CONTRACT_SHA256,
         "predecessor_attempt_identity_sha256": (
-            pre_effect_disposition.PRODUCTION_PREDECESSOR_ATTEMPT_IDENTITY_SHA256
+            staged_prefix_disposition.production_failed_prefix_identity_sha256()
         ),
         "authorization_text_sha256": (
-            pre_effect_disposition.PRODUCTION_AUTHORIZATION_TEXT_SHA256
+            permit_publisher.AUTHORIZATION_TEXT_SHA256
         ),
         "successor_attempt_identity_sha256": successor,
         "authorized_action": _PERMITTED_AUTHORIZED_ACTION,
@@ -159,7 +159,7 @@ def require_exact_permitted_candidate(
             permit_publisher._verify_selected_candidate()
         )
         final_successor = (
-            pre_effect_disposition.production_successor_attempt_identity_sha256(
+            staged_prefix_disposition.production_corrected_attempt_identity_sha256(
                 package_manifest_sha256=str(
                     final_permit["package_manifest_sha256"]
                 ),
@@ -176,9 +176,9 @@ def require_exact_permitted_candidate(
         )
         final_tag_blob_snapshot = tuple(sorted(final_tag_blobs.items()))
     except (
-        disposition_entrypoint.Phase9PreEffectDispositionEntrypointError,
-        permit_publisher.Phase9PreEffectPermitPublicationError,
-        pre_effect_disposition.PreEffectDispositionError,
+        disposition_entrypoint.Phase9StagedPrefixDispositionEntrypointError,
+        permit_publisher.Phase9StagedPrefixPermitPublicationError,
+        staged_prefix_disposition.StagedPrefixDispositionError,
         KeyError,
     ) as error:
         raise Phase9PermittedCandidateError(

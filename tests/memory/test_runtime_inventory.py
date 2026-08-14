@@ -209,10 +209,9 @@ EXPECTED_TEST_FILES = {
     "test_linux_runtime_publication_primitives.py",
     "test_postgres_native_stages.py",
     "test_process_death_arm_receipt.py",
-    "test_pre_effect_disposition.py",
     "test_psycopg_postgres_adapter.py",
     "test_publish_phase9_controller_runtime.py",
-    "test_publish_phase9_pre_effect_permit.py",
+    "test_publish_phase9_staged_prefix_permit.py",
     "test_runtime_input_stager.py",
     "test_standalone_cpython_inspector.py",
     "test_execution_authority_state.py",
@@ -229,7 +228,8 @@ EXPECTED_TEST_FILES = {
     "test_empty_rollback_authority.py",
     "test_empty_rollback_execution.py",
     "test_empty_rollback_plan.py",
-    "test_execute_phase9_pre_effect_disposition.py",
+    "test_execute_phase9_staged_prefix_disposition.py",
+    "test_staged_prefix_disposition.py",
     "test_projection.py",
     "test_prompt_and_binding.py",
     "test_qdrant_adapter.py",
@@ -536,13 +536,13 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         phase9j_target = authority["phase9j_inactive_store_target"]
         self.assertEqual(
             phase9j_target["candidate_id"],
-            "governed_memory_9a54cf123493_000002",
+            "governed_memory_9a54cf123493_000003",
         )
-        self.assertEqual(phase9j_target["database_target"], "127.0.0.1:55433")
-        self.assertEqual(phase9j_target["qdrant_target"], "127.0.0.1:6344")
+        self.assertEqual(phase9j_target["database_target"], "127.0.0.1:55434")
+        self.assertEqual(phase9j_target["qdrant_target"], "127.0.0.1:6345")
         self.assertEqual(
             phase9j_target["qdrant_collection"],
-            "governed_memory_9a54cf123493_000002",
+            "governed_memory_9a54cf123493_000003",
         )
         self.assertFalse(phase9j_target["store_installation_performed"])
         self.assertFalse(phase9j_target["current_route_installed"])
@@ -1215,13 +1215,14 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
                 "durable_live_proof_receipt.py",
                 "execute_phase9_disposable_live_proof_controller.py",
                 "postgres_bootstrap.pgsql",
-                "execute_phase9_pre_effect_disposition.py",
+                "execute_phase9_staged_prefix_disposition.py",
+                "generate_staged_prefix_disposition_contract.py",
                 "run_disposable_successor.sh",
                 "issue_disposable_installation_live_proof.py",
                 "publish_phase9_controller_runtime.py",
-                "publish_phase9_pre_effect_permit.py",
+                "publish_phase9_staged_prefix_permit.py",
                 "phase9_permitted_candidate.py",
-                "pre_effect_disposition.py",
+                "staged_prefix_disposition.py",
                 "process_death_arm_receipt.py",
                 "run_disposable_installation_live_proof.py",
                 "run_memory_unit_tests.py",

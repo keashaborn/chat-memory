@@ -24,7 +24,7 @@ RUNTIME = "d" * 64
 CONTRACT = "e" * 64
 SUCCESSOR = "f" * 64
 PERMIT = "1" * 64
-DISPOSITION_RECEIPT = "2" * 64
+DISPOSITION_TOMBSTONE = "2" * 64
 CAPSULE = "4" * 64
 SCHEMA = b"exact-live-proof-schema"
 ENVIRONMENT = {
@@ -44,6 +44,26 @@ def candidate() -> phase9_permitted_candidate.PermittedCandidateAuthority:
         successor_attempt_identity_sha256=SUCCESSOR,
         source_blobs=(("fixed.py", "5" * 40),),
     )
+
+
+def full_disposition() -> dict[str, object]:
+    return {
+        "result": subject.staged_prefix_disposition.RESULT,
+        "contract_sha256": CONTRACT,
+        "corrected_generation": (
+            subject.disposition_entrypoint.CORRECTED_GENERATION
+        ),
+        "corrected_package_manifest_sha256": PACKAGE,
+        "corrected_controller_runtime_receipt_sha256": RUNTIME,
+        "corrected_attempt_identity_sha256": SUCCESSOR,
+        "failed_evidence_preserved_in_place": True,
+        "no_store_or_service_effects_proven": True,
+        "deletion_performed": False,
+        "provider_calls": 0,
+        "production_data_read": False,
+        "activation_performed": False,
+        "tombstone_sha256": DISPOSITION_TOMBSTONE,
+    }
 
 
 def full_live_receipt() -> dict[str, object]:
@@ -617,6 +637,63 @@ class Phase9DisposableLiveProofControllerTests(unittest.TestCase):
             b"phase9_proof_controller_runtime_isolation_required\n",
         )
 
+    def test_require_disposition_reverifies_exact_staged_prefix_tombstone(self) -> None:
+        selected = candidate()
+        expected_paths = object()
+        expected_expectation = object()
+        disposition = full_disposition()
+        with (
+            mock.patch.object(
+                subject.staged_prefix_disposition,
+                "production_disposition_paths",
+                return_value=expected_paths,
+            ) as paths,
+            mock.patch.object(
+                subject.disposition_entrypoint,
+                "_expectation",
+                return_value=expected_expectation,
+            ) as expectation,
+            mock.patch.object(
+                subject.staged_prefix_disposition,
+                "verify_staged_prefix_tombstone",
+                return_value=disposition,
+            ) as verify,
+        ):
+            observed = subject._require_disposition(selected)
+        self.assertEqual(observed, disposition)
+        paths.assert_called_once_with()
+        expectation.assert_called_once_with(subject.staged_prefix_disposition)
+        verify.assert_called_once_with(expected_paths, expected_expectation)
+
+    def test_require_disposition_refuses_missing_or_unpreserved_tombstone(self) -> None:
+        selected = candidate()
+        invalid = full_disposition()
+        invalid["failed_evidence_preserved_in_place"] = False
+        for receipt in (None, invalid):
+            with (
+                self.subTest(receipt=receipt),
+                mock.patch.object(
+                    subject.disposition_entrypoint,
+                    "_expectation",
+                    return_value=object(),
+                ),
+                mock.patch.object(
+                    subject.staged_prefix_disposition,
+                    "production_disposition_paths",
+                    return_value=object(),
+                ),
+                mock.patch.object(
+                    subject.staged_prefix_disposition,
+                    "verify_staged_prefix_tombstone",
+                    return_value=receipt,
+                ),
+                self.assertRaisesRegex(
+                    subject.Phase9DisposableLiveProofControllerError,
+                    "phase9_proof_controller_disposition_invalid",
+                ),
+            ):
+                subject._require_disposition(selected)
+
     def test_exact_chain_has_no_standalone_bootstrap_and_uses_real_v4_verifiers(self) -> None:
         selected = candidate()
         permit = {
@@ -626,13 +703,17 @@ class Phase9DisposableLiveProofControllerTests(unittest.TestCase):
             "package_manifest_sha256": PACKAGE,
             "controller_runtime_receipt_sha256": RUNTIME,
         }
+        disposition = full_disposition()
         disposition_step = {
-            "contract_sha256": CONTRACT,
-            "receipt_sha256": DISPOSITION_RECEIPT,
-        }
-        disposition = {
-            **disposition_step,
-            "successor_attempt_identity_sha256": SUCCESSOR,
+            key: disposition[key]
+            for key in (
+                "contract_sha256",
+                "corrected_controller_runtime_receipt_sha256",
+                "corrected_generation",
+                "corrected_package_manifest_sha256",
+                "result",
+                "tombstone_sha256",
+            )
         }
         live = full_live_receipt()
         artifacts = {durable.LIVE_PROOF_RECEIPT_SCHEMA_RELATIVE: SCHEMA}
@@ -703,6 +784,9 @@ class Phase9DisposableLiveProofControllerTests(unittest.TestCase):
         self.assertEqual(calls[-1][1], ())
         self.assertEqual(guard.call_count, 2)
         self.assertEqual(result["result"], "exact_disposable_live_proof_completed")
+        self.assertEqual(
+            result["staged_prefix_tombstone_sha256"], DISPOSITION_TOMBSTONE
+        )
         self.assertTrue(result["exact_resources_absent"])
         self.assertFalse(result["activation_performed"])
 
@@ -727,7 +811,7 @@ class Phase9DisposableLiveProofControllerTests(unittest.TestCase):
                 }
             return {
                 "contract_sha256": CONTRACT,
-                "receipt_sha256": DISPOSITION_RECEIPT,
+                "tombstone_sha256": DISPOSITION_TOMBSTONE,
             }
 
         isolation, platform, executable, geteuid, getegid = self.runtime()

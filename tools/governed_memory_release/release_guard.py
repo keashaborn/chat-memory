@@ -227,13 +227,13 @@ EXPECTED_ACTIVATION_BLOCKER_COUNT = 41
 CURRENT_CREATE_REFUSAL_CODE = "inactive_installation_package_not_authorized"
 
 EXACT_TARGETS = {
-    "postgres_container": "governed-memory-postgres-9a54cf123493-000002",
-    "qdrant_container": "governed-memory-qdrant-9a54cf123493-000002",
-    "postgres_volume": "governed-memory-postgres-data-9a54cf123493-000002",
-    "qdrant_volume": "governed-memory-qdrant-data-9a54cf123493-000002",
-    "network": "governed-memory-net-9a54cf123493-000002",
+    "postgres_container": "governed-memory-postgres-9a54cf123493-000003",
+    "qdrant_container": "governed-memory-qdrant-9a54cf123493-000003",
+    "postgres_volume": "governed-memory-postgres-data-9a54cf123493-000003",
+    "qdrant_volume": "governed-memory-qdrant-data-9a54cf123493-000003",
+    "network": "governed-memory-net-9a54cf123493-000003",
     "database": "governed_memory",
-    "collection": "governed_memory_9a54cf123493_000002",
+    "collection": "governed_memory_9a54cf123493_000003",
     "alias": "governed_memory_active",
 }
 
@@ -1272,14 +1272,14 @@ def _verify_runtime_manifest(
         and phase9j_target.get("source_contract")
         == "ops/governed_memory/installation/current/contract.json"
         and phase9j_target.get("source_store_spec")
-        == "ops/governed_memory/installation/store_spec-v2.json"
+        == "ops/governed_memory/installation/store_spec-v3.json"
         and phase9j_target.get("candidate_id")
-        == "governed_memory_9a54cf123493_000002"
+        == "governed_memory_9a54cf123493_000003"
         and phase9j_target.get("database") == "governed_memory"
-        and phase9j_target.get("database_target") == "127.0.0.1:55433"
-        and phase9j_target.get("qdrant_target") == "127.0.0.1:6344"
+        and phase9j_target.get("database_target") == "127.0.0.1:55434"
+        and phase9j_target.get("qdrant_target") == "127.0.0.1:6345"
         and phase9j_target.get("qdrant_collection")
-        == "governed_memory_9a54cf123493_000002"
+        == "governed_memory_9a54cf123493_000003"
         and phase9j_target.get("qdrant_alias") == "governed_memory_active"
         and phase9j_target.get("store_installation_performed") is False
         and phase9j_target.get("current_route_installed") is False

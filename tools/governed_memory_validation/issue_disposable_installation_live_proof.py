@@ -272,7 +272,7 @@ from tools.governed_memory_validation import (
     durable_live_proof_receipt,
 )
 from tools.governed_memory_validation import (
-    pre_effect_disposition,
+    staged_prefix_disposition,
 )
 from tools.governed_memory_validation import phase9_permitted_candidate
 from tools.governed_memory_validation import (
@@ -655,7 +655,7 @@ def build_exact_recovery_capsule(
     )
     install_payload = {
         "schema_version": authority.AUTHORIZATION_PAYLOAD_SCHEMA_VERSION,
-        "authorization_id": "phase9-disposable-live-install-auth-000002",
+        "authorization_id": "phase9-disposable-live-install-auth-000003",
         "authorization_namespace": runner.AUTHORIZATION_NAMESPACE,
         "thread_id": runner.THREAD_ID,
         "scope_id": runner.INSTALL_SCOPE_ID,
@@ -1238,41 +1238,53 @@ def _verify_pristine_authority_state() -> None:
             )
 
 
+def _production_staged_prefix_expectation(
+    inputs: runner.ProofInputs,
+) -> staged_prefix_disposition.ReviewedStagedPrefixExpectation:
+    return staged_prefix_disposition.ReviewedStagedPrefixExpectation(
+        contract_sha256=str(
+            staged_prefix_disposition.PRODUCTION_CONTRACT_SHA256
+        ),
+        disposition_id=staged_prefix_disposition.PRODUCTION_DISPOSITION_ID,
+        old_tag_ref=staged_prefix_disposition.PRODUCTION_OLD_TAG_REF,
+        old_tag_commit=staged_prefix_disposition.PRODUCTION_OLD_TAG_COMMIT,
+        old_tag_tree=staged_prefix_disposition.PRODUCTION_OLD_TAG_TREE,
+        failed_package_manifest_sha256=(
+            staged_prefix_disposition.PRODUCTION_FAILED_PACKAGE_MANIFEST_SHA256
+        ),
+        failed_controller_runtime_receipt_sha256=(
+            staged_prefix_disposition.PRODUCTION_FAILED_RUNTIME_RECEIPT_SHA256
+        ),
+        corrected_generation=(
+            staged_prefix_disposition.PRODUCTION_CORRECTED_GENERATION
+        ),
+        corrected_package_manifest_sha256=inputs.package_manifest_sha256,
+        corrected_controller_runtime_receipt_sha256=(
+            inputs.controller_runtime_receipt_sha256
+        ),
+    )
+
+
 def _verified_production_disposition_contract(
     inputs: runner.ProofInputs,
 ) -> Mapping[str, object]:
-    paths = pre_effect_disposition.production_disposition_paths()
-    expectation = pre_effect_disposition.ReviewedDispositionExpectation(
-        contract_sha256=str(pre_effect_disposition.PRODUCTION_CONTRACT_SHA256),
-        disposition_id=pre_effect_disposition.PRODUCTION_DISPOSITION_ID,
-        authorization_text_sha256=(
-            pre_effect_disposition.PRODUCTION_AUTHORIZATION_TEXT_SHA256
-        ),
-        predecessor_attempt_identity_sha256=str(
-            pre_effect_disposition.PRODUCTION_PREDECESSOR_ATTEMPT_IDENTITY_SHA256
-        ),
-        successor_attempt_identity_sha256=(
-            pre_effect_disposition.production_successor_attempt_identity_sha256(
-                package_manifest_sha256=inputs.package_manifest_sha256,
-                controller_runtime_receipt_sha256=(
-                    inputs.controller_runtime_receipt_sha256
-                ),
-            )
-        ),
-        successor_generation=(
-            pre_effect_disposition.PRODUCTION_SUCCESSOR_GENERATION
-        ),
-    )
+    paths = staged_prefix_disposition.production_disposition_paths()
+    expectation = _production_staged_prefix_expectation(inputs)
     try:
-        contract, unused_expected = (
-            pre_effect_disposition._load_contract_and_expected_receipt(
-                paths, expectation
-            )
+        tombstone = staged_prefix_disposition.verify_staged_prefix_tombstone(
+            paths, expectation
         )
-    except pre_effect_disposition.PreEffectDispositionError as error:
+        contract, unused_stable = staged_prefix_disposition._load_contract(
+            paths, expectation
+        )
+    except staged_prefix_disposition.StagedPrefixDispositionError as error:
         raise Phase9ProofIssuerError(
             "phase9_proof_issuer_staged_cleanup_not_pristine"
         ) from error
+    if tombstone is None:
+        raise Phase9ProofIssuerError(
+            "phase9_proof_issuer_staged_cleanup_not_pristine"
+        )
     return MappingProxyType(contract)
 
 
@@ -1298,7 +1310,7 @@ def _require_pristine_staged_cleanup_state(
     _verify_exact_empty_directory(runner.EXECUTIONS_ROOT, 0o700)
     _verify_exact_empty_directory(runner.STORE_SECRET_ROOT, 0o700)
     contract = _verified_production_disposition_contract(inputs)
-    resources = contract.get("host_resources")
+    resources = contract.get("absent_resources")
     if type(resources) is not list:
         raise Phase9ProofIssuerError(
             "phase9_proof_issuer_staged_cleanup_not_pristine"
@@ -1306,7 +1318,9 @@ def _require_pristine_staged_cleanup_state(
     allowed_present_paths = {
         str(runner.AUTHORITY_STATE_PATH),
         str(runner.EXECUTIONS_ROOT),
+        str(runner.STORE_SECRET_ROOT),
         str(runner.RECOVERY_CAPSULE_PATH),
+        str(runner.RECOVERY_CAPSULE_STAGING_PATH),
     }
     checked = [
         item
@@ -1318,11 +1332,18 @@ def _require_pristine_staged_cleanup_state(
         )
     ]
     try:
-        pre_effect_disposition._verify_host_absence(
+        disposition_paths = staged_prefix_disposition.production_disposition_paths()
+        expectation = _production_staged_prefix_expectation(inputs)
+        staged_prefix_disposition._verify_resource_subset_absence(
             checked,
-            runner=pre_effect_disposition._ClosedHostCommandRunner(),
+            paths=disposition_paths,
+            runner=staged_prefix_disposition._ClosedCommandRunner(
+                staged_prefix_disposition._allowed_commands(
+                    disposition_paths, expectation
+                )
+            ),
         )
-    except pre_effect_disposition.PreEffectDispositionError as error:
+    except staged_prefix_disposition.StagedPrefixDispositionError as error:
         raise Phase9ProofIssuerError(
             "phase9_proof_issuer_staged_cleanup_not_pristine"
         ) from error
@@ -2405,45 +2426,53 @@ def _verify_supervised_receipt(
     return kind, MappingProxyType(dict(verified))
 
 
-def _require_production_pre_effect_disposition(
+def _require_production_staged_prefix_disposition(
     *,
     inputs: runner.ProofInputs,
 ) -> Mapping[str, object]:
-    """Require the exact read-only v5 tombstone before v6 can mutate state."""
+    """Require the exact failed-prefix fence before 000003 can mutate state."""
 
     try:
-        receipt = pre_effect_disposition.require_production_disposition_receipt(
-            package_manifest_sha256=inputs.package_manifest_sha256,
-            controller_runtime_receipt_sha256=(
-                inputs.controller_runtime_receipt_sha256
-            ),
+        paths = staged_prefix_disposition.production_disposition_paths()
+        expectation = _production_staged_prefix_expectation(inputs)
+        receipt = staged_prefix_disposition.verify_staged_prefix_tombstone(
+            paths,
+            expectation,
         )
         successor_identity = (
-            pre_effect_disposition.production_successor_attempt_identity_sha256(
+            staged_prefix_disposition.production_corrected_attempt_identity_sha256(
                 package_manifest_sha256=inputs.package_manifest_sha256,
                 controller_runtime_receipt_sha256=(
                     inputs.controller_runtime_receipt_sha256
                 ),
             )
         )
-    except pre_effect_disposition.PreEffectDispositionError as error:
+    except staged_prefix_disposition.StagedPrefixDispositionError as error:
         raise Phase9ProofIssuerError(
-            "phase9_proof_issuer_pre_effect_disposition_required"
+            "phase9_proof_issuer_staged_prefix_disposition_required"
         ) from error
     if (
         not isinstance(receipt, MappingABC)
         or receipt.get("schema_version")
-        != pre_effect_disposition.RECEIPT_SCHEMA
-        or receipt.get("result") != pre_effect_disposition.RESULT
+        != staged_prefix_disposition.TOMBSTONE_SCHEMA
+        or receipt.get("result") != staged_prefix_disposition.RESULT
         or receipt.get("contract_sha256")
-        != pre_effect_disposition.PRODUCTION_CONTRACT_SHA256
-        or receipt.get("predecessor_attempt_identity_sha256")
-        != pre_effect_disposition.PRODUCTION_PREDECESSOR_ATTEMPT_IDENTITY_SHA256
-        or receipt.get("successor_attempt_identity_sha256")
+        != staged_prefix_disposition.PRODUCTION_CONTRACT_SHA256
+        or receipt.get("failed_prefix_identity_sha256")
+        != staged_prefix_disposition.production_failed_prefix_identity_sha256()
+        or receipt.get("corrected_attempt_identity_sha256")
         != successor_identity
+        or receipt.get("corrected_generation")
+        != staged_prefix_disposition.PRODUCTION_CORRECTED_GENERATION
+        or receipt.get("failed_evidence_preserved_in_place") is not True
+        or receipt.get("no_store_or_service_effects_proven") is not True
+        or receipt.get("deletion_performed") is not False
+        or receipt.get("provider_calls") != 0
+        or receipt.get("production_data_read") is not False
+        or receipt.get("activation_performed") is not False
     ):
         raise Phase9ProofIssuerError(
-            "phase9_proof_issuer_pre_effect_disposition_required"
+            "phase9_proof_issuer_staged_prefix_disposition_required"
         )
     return receipt
 
@@ -2666,7 +2695,7 @@ def issue_and_supervise(inputs: runner.ProofInputs) -> Mapping[str, object]:
     with guard:
         _require_active_manager_authority()
         verify_exact_clean_candidate(inputs)
-        _require_production_pre_effect_disposition(inputs=inputs)
+        _require_production_staged_prefix_disposition(inputs=inputs)
         verify_exact_clean_candidate(inputs)
         _require_active_manager_authority()
         try:

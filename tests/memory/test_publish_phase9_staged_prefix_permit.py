@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from tools.governed_memory_validation import publish_phase9_pre_effect_permit as subject
+from tools.governed_memory_validation import publish_phase9_staged_prefix_permit as subject
 
 
 class CandidateSelectionTests(unittest.TestCase):
@@ -79,7 +79,7 @@ class CandidateSelectionTests(unittest.TestCase):
             "not _preimport_manager_lineage_valid()",
             "/proc/{manager_pid}/exe",
             "/proc/{manager_pid}/cmdline",
-            "phase9_pre_effect_permit_manager_lineage_required",
+            "phase9_staged_prefix_permit_manager_lineage_required",
         ):
             with self.subTest(marker=marker):
                 self.assertLess(source.index(marker), later_import)
@@ -144,7 +144,7 @@ class CandidateSelectionTests(unittest.TestCase):
             with (
                 self.subTest(values=values),
                 mock.patch.object(subject, "_git", side_effect=self.outputs(**values)),
-                self.assertRaises(subject.Phase9PreEffectPermitPublicationError),
+                self.assertRaises(subject.Phase9StagedPrefixPermitPublicationError),
             ):
                 subject._verify_selected_candidate()
 
@@ -153,8 +153,8 @@ class CandidateSelectionTests(unittest.TestCase):
         with (
             mock.patch.object(subject.subprocess, "run", return_value=completed),
             self.assertRaisesRegex(
-                subject.Phase9PreEffectPermitPublicationError,
-                "phase9_pre_effect_permit_git_failed",
+                subject.Phase9StagedPrefixPermitPublicationError,
+                "phase9_staged_prefix_permit_git_failed",
             ),
         ):
             subject._git("rev-parse", "--show-toplevel")
@@ -209,11 +209,11 @@ class PermitPublicationTests(unittest.TestCase):
             mock.patch.object(subject, "_verify_runtime_receipt"),
             mock.patch.object(subject, "_publish_create_once") as publish,
             self.assertRaisesRegex(
-                subject.Phase9PreEffectPermitPublicationError,
-                "phase9_pre_effect_permit_candidate_changed",
+                subject.Phase9StagedPrefixPermitPublicationError,
+                "phase9_staged_prefix_permit_candidate_changed",
             ),
         ):
-            subject.publish_phase9_pre_effect_permit()
+            subject.publish_phase9_staged_prefix_permit()
         publish.assert_not_called()
 
     def test_import_callable_publication_rechecks_exact_runtime_and_manager(self) -> None:
@@ -227,11 +227,11 @@ class PermitPublicationTests(unittest.TestCase):
             mock.patch.object(subject.sys, "executable", "/usr/bin/python3"),
             mock.patch.object(subject, "_verify_selected_candidate") as verify,
             self.assertRaisesRegex(
-                subject.Phase9PreEffectPermitPublicationError,
-                "phase9_pre_effect_permit_runtime_isolation_required",
+                subject.Phase9StagedPrefixPermitPublicationError,
+                "phase9_staged_prefix_permit_runtime_isolation_required",
             ),
         ):
-            subject.publish_phase9_pre_effect_permit()
+            subject.publish_phase9_staged_prefix_permit()
         verify.assert_not_called()
 
         with (
@@ -251,11 +251,11 @@ class PermitPublicationTests(unittest.TestCase):
             ),
             mock.patch.object(subject, "_verify_selected_candidate") as verify,
             self.assertRaisesRegex(
-                subject.Phase9PreEffectPermitPublicationError,
-                "phase9_pre_effect_permit_manager_lineage_required",
+                subject.Phase9StagedPrefixPermitPublicationError,
+                "phase9_staged_prefix_permit_manager_lineage_required",
             ),
         ):
-            subject.publish_phase9_pre_effect_permit()
+            subject.publish_phase9_staged_prefix_permit()
         verify.assert_not_called()
 
     def test_permit_binds_exact_authority_and_action_only_boundary(self) -> None:
@@ -270,7 +270,7 @@ class PermitPublicationTests(unittest.TestCase):
         self.assertEqual(value["contract_sha256"], subject.CONTRACT_SHA256)
         self.assertEqual(
             value["authorized_action"],
-            "execute_pre_effect_disposition_and_disposable_live_proof_only",
+            "execute_staged_prefix_disposition_and_disposable_live_proof_only",
         )
         self.assertIs(value["activation_performed"], False)
         self.assertEqual(value["provider_calls"], 0)
@@ -286,8 +286,8 @@ class PermitPublicationTests(unittest.TestCase):
                 self.assertEqual(path.stat().st_ino, inode)
                 self.assertEqual(path.stat().st_mode & 0o777, 0o400)
                 with self.assertRaisesRegex(
-                    subject.Phase9PreEffectPermitPublicationError,
-                    "phase9_pre_effect_permit_replay_mismatch",
+                    subject.Phase9StagedPrefixPermitPublicationError,
+                    "phase9_staged_prefix_permit_replay_mismatch",
                 ):
                     subject._publish_create_once(raw + b"x")
 
@@ -319,7 +319,7 @@ class PermitPublicationTests(unittest.TestCase):
                 selected.chmod(0o400)
                 inode = selected.stat().st_ino
                 before = selected.read_bytes()
-                with self.assertRaises(subject.Phase9PreEffectPermitPublicationError):
+                with self.assertRaises(subject.Phase9StagedPrefixPermitPublicationError):
                     subject._publish_create_once(raw)
                 self.assertEqual(selected.read_bytes(), before)
                 self.assertEqual(selected.stat().st_ino, inode)
@@ -336,7 +336,7 @@ class PermitPublicationTests(unittest.TestCase):
             os.link(staging, foreign_link)
             inode = staging.stat().st_ino
             with self.assertRaises(
-                subject.Phase9PreEffectPermitPublicationError
+                subject.Phase9StagedPrefixPermitPublicationError
             ):
                 subject._publish_create_once(raw)
             self.assertFalse(path.exists())
@@ -351,7 +351,7 @@ class PermitPublicationTests(unittest.TestCase):
             os.mkfifo(staging, 0o400)
             inode = staging.stat().st_ino
             with self.assertRaises(
-                subject.Phase9PreEffectPermitPublicationError
+                subject.Phase9StagedPrefixPermitPublicationError
             ):
                 subject._publish_create_once(raw)
             self.assertFalse(path.exists())
@@ -383,7 +383,7 @@ class PermitPublicationTests(unittest.TestCase):
                 return original_write(descriptor, memoryview(value)[:11])
             raise OSError(errno.ENOSPC, "full")
         with temporary, patcher, mock.patch.object(subject.os, "write", side_effect=fail_after_prefix):
-            with self.assertRaises(subject.Phase9PreEffectPermitPublicationError):
+            with self.assertRaises(subject.Phase9StagedPrefixPermitPublicationError):
                 subject._publish_create_once(raw)
             self.assertFalse(path.exists())
             staging = root / subject.PERMIT_STAGING_NAME
@@ -401,7 +401,7 @@ class PermitPublicationTests(unittest.TestCase):
             original_fsync(descriptor)
         with temporary, patcher:
             with mock.patch.object(subject.os, "fsync", side_effect=fail_first):
-                with self.assertRaises(subject.Phase9PreEffectPermitPublicationError):
+                with self.assertRaises(subject.Phase9StagedPrefixPermitPublicationError):
                     subject._publish_create_once(raw)
                 self.assertFalse(path.exists())
                 self.assertEqual((root / subject.PERMIT_STAGING_NAME).read_bytes(), raw)
@@ -421,7 +421,7 @@ class PermitPublicationTests(unittest.TestCase):
                 raise OSError(errno.EIO, "close")
         with temporary, patcher:
             with mock.patch.object(subject.os, "close", side_effect=fail_regular_once):
-                with self.assertRaises(subject.Phase9PreEffectPermitPublicationError):
+                with self.assertRaises(subject.Phase9StagedPrefixPermitPublicationError):
                     subject._publish_create_once(raw)
                 self.assertFalse(path.exists())
                 self.assertEqual((root / subject.PERMIT_STAGING_NAME).read_bytes(), raw)
@@ -445,7 +445,7 @@ class PermitPublicationTests(unittest.TestCase):
                 subject.os, "fsync", side_effect=fail_after_link
             ):
                 with self.assertRaises(
-                    subject.Phase9PreEffectPermitPublicationError
+                    subject.Phase9StagedPrefixPermitPublicationError
                 ):
                     subject._publish_create_once(raw)
                 staging = root / subject.PERMIT_STAGING_NAME
@@ -458,8 +458,8 @@ class PermitPublicationTests(unittest.TestCase):
 
     def test_no_operational_arguments(self) -> None:
         with self.assertRaisesRegex(
-            subject.Phase9PreEffectPermitPublicationError,
-            "phase9_pre_effect_permit_arguments_refused",
+            subject.Phase9StagedPrefixPermitPublicationError,
+            "phase9_staged_prefix_permit_arguments_refused",
         ):
             subject.main(("--candidate", "foreign"))
 

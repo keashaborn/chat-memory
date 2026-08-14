@@ -101,11 +101,11 @@ _SEMANTIC_EMPTY_STATE_DOMAIN: Final = (
 )
 _AUDIT_ANCHOR_DOMAIN: Final = b"governed-memory-retained-audit-anchor-v1\x00"
 _INSTALL_JOURNAL_TEMPLATE: Final = (
-    "/var/lib/governed-memory-controller/executions-v2/"
+    "/var/lib/governed-memory-controller/executions-v3/"
     "{execution_id}/journal.jsonl"
 )
 _RESOURCE_LEDGER_TEMPLATE: Final = (
-    "/var/lib/governed-memory-controller/executions-v2/"
+    "/var/lib/governed-memory-controller/executions-v3/"
     "{execution_id}/resources.jsonl"
 )
 _APPLICATION_WRITER_PATHS: Final = (
@@ -1356,8 +1356,8 @@ class ClosedLinuxLiveEmptyEligibilityProbe:
             signed_eligibility
         )
         if (
-            getattr(postgres, "bind", None) != "127.0.0.1:55433"
-            or getattr(qdrant, "bind", None) != "127.0.0.1:6344"
+            getattr(postgres, "bind", None) != "127.0.0.1:55434"
+            or getattr(qdrant, "bind", None) != "127.0.0.1:6345"
             or not callable(getattr(postgres, "inspect_terminal", None))
             or not callable(getattr(qdrant, "inspect_terminal", None))
         ):

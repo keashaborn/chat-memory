@@ -73,10 +73,10 @@ EMPTY_ROLLBACK_RECEIPT_SCHEMA_RELATIVE: Final = (
 )
 
 EXPECTED_CONTRACT_CANONICAL_SHA256: Final = (
-    "d59c0328af94f241f4765e751bdf28a1a6c3d7c6ab841ac3a3e7d6fe3be4a9ea"
+    "fb2aed56c2447a22af849080dc159b0c46f96693887d44b29ca09f3168380898"
 )
 EXPECTED_PLAN_CANONICAL_SHA256: Final = (
-    "b66fc26740e48013a4d7818442fa773baac4738ddcd06e31e3c34a777c2f8253"
+    "d502d29682dbdf511a07d7534cec6a8f14c73e44492b08f0fad29157639e246c"
 )
 EXPECTED_CONTROLLER_SOURCE_SHA256: Final = (
     "5a18628c85aab814360667341f685f809ac240b484a5fe6e10c727f54a752de5"
@@ -85,13 +85,13 @@ EXPECTED_CONTROLLER_MODEL_SHA256: Final = (
     "d3701a21b827da66122906e1dcc2828ce69f06e1048164df1c4d0ca0321c3de8"
 )
 EXPECTED_EXECUTION_CONTRACT_CANONICAL_SHA256: Final = (
-    "76e951689cb8ef77a17c01a9e3f4cbe4df69363d9d41c6afe0755be3000238c1"
+    "975421b4e1fe2ed9e436144f37bdd68979b90a373b48186a5a2aa646b189f09f"
 )
 EXPECTED_CONTROLLER_RUNTIME_CONTRACT_CANONICAL_SHA256: Final = (
     "60580592361d52b6af3d57d023d7bdd3f0876d677f736e6ee00aeb85841d79ac"
 )
 EXPECTED_POSTGRES_NATIVE_STAGE_CONTRACT_CANONICAL_SHA256: Final = (
-    "82f35d96260fdef0a7ba959499af8563d38a5c681ad2bb864ec413528778d8d8"
+    "bec461c1166775817dc4c3ffce7c09195f7d758942ca3d63ee3a875f8d5b9f2d"
 )
 EXPECTED_PROOF_CONTRACT_CANONICAL_SHA256: Final = (
     "072ad9a0c4f10ef45e0a5287780b2f4b9334eb8741744b9bc15da74260e07d2f"
@@ -109,7 +109,7 @@ EXPECTED_EMPTY_ROLLBACK_RECEIPT_SCHEMA_CANONICAL_SHA256: Final = (
     "4cf0b822c3b7c18bb1469deb8c044146982214e5ae1d0d8be8bf4a4a79e9292e"
 )
 EXPECTED_MIGRATION_VERIFIER_SOURCE_SHA256: Final = (
-    "d53cf81a1d88e338ab39e7a073805ea25d0477582e9b40a170581ad213a9e6af"
+    "4b8ae071fb0f1a8e07e1fd78cef0a428e1a27ee44014cba5db912f05f6403931"
 )
 EXPECTED_MIGRATION_BINDINGS_CANONICAL_SHA256: Final = (
     "f6229283ff196e7355294f99321b92f350c4ec7909744544e9b1941e13100b42"
@@ -371,9 +371,9 @@ EXPECTED_ARTIFACTS: Final = frozenset(
         "ops/governed_memory/installation/current/postgres/roles_preflight.pgsql",
         "ops/governed_memory/installation/postgres/canonical_cluster.pgsql.in",
         "ops/governed_memory/installation/postgres/canonical_cluster_rollback.pgsql.in",
-        "ops/governed_memory/installation/store_spec-v2.json",
+        "ops/governed_memory/installation/store_spec-v3.json",
         "ops/governed_memory/controller-requirements.lock",
-        "ops/governed_memory/installation/systemd/governed-memory-stores-v2.service.in",
+        "ops/governed_memory/installation/systemd/governed-memory-stores-v3.service.in",
         "ops/governed_memory/qdrant_alias.create.json",
         "ops/governed_memory/qdrant_collection.create.json",
         "tools/governed_memory_install/__init__.py",
@@ -775,9 +775,9 @@ def _verify_contract(contract: dict[str, object]) -> None:
         or "image_receipt" in targets
         or "trust_anchor" in targets
         or targets.get("recovery_capsule")
-        != "/var/lib/governed-memory-controller/phase9-disposable-proof-recovery-capsule-v3.json"
+        != "/var/lib/governed-memory-controller/phase9-disposable-proof-recovery-capsule-v4.json"
         or targets.get("nonce_state")
-        != "/var/lib/governed-memory-controller/authority-state-v2.sqlite3"
+        != "/var/lib/governed-memory-controller/authority-state-v3.sqlite3"
         or targets.get("proof_supervision_lock")
         != "/run/lock/governed-memory-controller/phase9-disposable-live-proof.lock"
         or type(filesystem) is not dict
@@ -1267,7 +1267,7 @@ def _verify_contract(contract: dict[str, object]) -> None:
         )
         is not True
         or receipts.get("canonical_production_executions_root")
-        != "/var/lib/governed-memory-controller/executions-v2"
+        != "/var/lib/governed-memory-controller/executions-v3"
         or receipts.get(
             "public_install_and_rollback_entrypoints_require_root_owned_production_receipt_store"
         )
@@ -1563,7 +1563,7 @@ def _verify_postgres_native_stage_contract(contract: dict[str, object]) -> None:
     if (
         type(endpoint) is not dict
         or endpoint.get("host") != "127.0.0.1"
-        or endpoint.get("port") != 55433
+        or endpoint.get("port") != 55434
         or endpoint.get("bootstrap_database") != "postgres"
         or endpoint.get("target_database") != "governed_memory"
         or endpoint.get("caller_dsn_host_port_database_role_or_path_allowed")
@@ -2102,7 +2102,7 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
             reject_stale_ordering=True,
         )
         or receipt.get("canonical_production_executions_root")
-        != "/var/lib/governed-memory-controller/executions-v2"
+        != "/var/lib/governed-memory-controller/executions-v3"
         or receipt.get(
             "public_install_and_rollback_entrypoints_require_root_owned_production_receipt_store"
         )

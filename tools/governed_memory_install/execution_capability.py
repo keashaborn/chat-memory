@@ -504,7 +504,7 @@ def _dormant_store_install_execution_binding(
     try:
         static_store_spec = _parse_json_document(
             package_artifacts[
-                "ops/governed_memory/installation/store_spec-v2.json"
+                "ops/governed_memory/installation/store_spec-v3.json"
             ],
             "claimed_execution_store_spec_invalid",
         )
@@ -654,7 +654,7 @@ def reconstruct_resolved_store_spec_from_claimed_binding(
         )
     try:
         static_store_spec = _parse_json_document(
-            artifacts["ops/governed_memory/installation/store_spec-v2.json"],
+            artifacts["ops/governed_memory/installation/store_spec-v3.json"],
             "claimed_execution_store_spec_invalid",
         )
         resolved = bind_store_spec(

@@ -272,11 +272,11 @@ class DormantStoreInstallPackageTests(unittest.TestCase):
         self.assertNotIn("trust_anchor", targets)
         self.assertEqual(
             targets["recovery_capsule"],
-            "/var/lib/governed-memory-controller/phase9-disposable-proof-recovery-capsule-v3.json",
+            "/var/lib/governed-memory-controller/phase9-disposable-proof-recovery-capsule-v4.json",
         )
         self.assertEqual(
             targets["nonce_state"],
-            "/var/lib/governed-memory-controller/authority-state-v2.sqlite3",
+            "/var/lib/governed-memory-controller/authority-state-v3.sqlite3",
         )
         self.assertEqual(
             targets["proof_supervision_lock"],

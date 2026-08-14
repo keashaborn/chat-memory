@@ -56,17 +56,24 @@ def inputs() -> proof.ProofInputs:
 
 def disposition_receipt() -> dict[str, object]:
     successor = (
-        issuer.pre_effect_disposition.production_successor_attempt_identity_sha256(
+        issuer.staged_prefix_disposition.production_corrected_attempt_identity_sha256(
             package_manifest_sha256=PACKAGE,
             controller_runtime_receipt_sha256=RUNTIME,
         )
     )
     return {
-        "schema_version": issuer.pre_effect_disposition.RECEIPT_SCHEMA,
-        "result": issuer.pre_effect_disposition.RESULT,
+        "schema_version": issuer.staged_prefix_disposition.TOMBSTONE_SCHEMA,
+        "result": issuer.staged_prefix_disposition.RESULT,
         "contract_sha256": DISPOSITION_CONTRACT,
-        "predecessor_attempt_identity_sha256": PREDECESSOR_ATTEMPT,
-        "successor_attempt_identity_sha256": successor,
+        "failed_prefix_identity_sha256": PREDECESSOR_ATTEMPT,
+        "corrected_attempt_identity_sha256": successor,
+        "corrected_generation": "000003",
+        "failed_evidence_preserved_in_place": True,
+        "no_store_or_service_effects_proven": True,
+        "deletion_performed": False,
+        "provider_calls": 0,
+        "production_data_read": False,
+        "activation_performed": False,
     }
 
 
@@ -159,7 +166,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
             ),
             mock.patch.object(
                 issuer,
-                "_require_production_pre_effect_disposition",
+                "_require_production_staged_prefix_disposition",
                 return_value=disposition_receipt(),
             ),
             mock.patch.object(
@@ -1254,6 +1261,61 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
             set(parsed["rollback_delegation"]),
             {"schema_version", "payload", "signature"},
         )
+
+    def test_fixed_capsule_concrete_path_type_passes_policy_gate(self) -> None:
+        fixed_members = (
+            (proof.RECOVERY_CAPSULE_PATH, frozenset({1})),
+            (proof.RECOVERY_CAPSULE_STAGING_PATH, frozenset({1, 2})),
+        )
+        for path, allowed_link_counts in fixed_members:
+            with self.subTest(path=path, allowed_link_counts=allowed_link_counts):
+                with mock.patch.object(
+                    proof.os,
+                    "open",
+                    side_effect=FileNotFoundError,
+                ) as open_member:
+                    with self.assertRaisesRegex(
+                        proof.LiveProofError,
+                        "recovery_capsule_unavailable",
+                    ):
+                        proof._load_verified_recovery_capsule_member(
+                            inputs(),
+                            {},
+                            path=path,
+                            allowed_link_counts=allowed_link_counts,
+                            require_current=False,
+                        )
+                open_member.assert_called_once()
+
+        class PosixPathSubclass(type(proof.RECOVERY_CAPSULE_PATH)):
+            pass
+
+        invalid_members = (
+            (
+                str(proof.RECOVERY_CAPSULE_STAGING_PATH),
+                frozenset({1, 2}),
+            ),
+            (
+                PosixPathSubclass(proof.RECOVERY_CAPSULE_PATH),
+                frozenset({1}),
+            ),
+        )
+        for path, allowed_link_counts in invalid_members:
+            with self.subTest(path=path, allowed_link_counts=allowed_link_counts):
+                with mock.patch.object(proof.os, "open") as open_member:
+                    with self.assertRaisesRegex(
+                        proof.LiveProofError,
+                        "recovery_capsule_policy_invalid",
+                    ):
+                        proof._load_verified_recovery_capsule_member(
+                            inputs(),
+                            {},
+                            path=path,  # type: ignore[arg-type]
+                            allowed_link_counts=allowed_link_counts,
+                            require_current=False,
+                        )
+                open_member.assert_not_called()
+
         source = Path(proof.__file__).read_text(encoding="utf-8")
         self.assertNotIn(
             "issue_disposable_installation_live_proof_permit",
@@ -2281,10 +2343,10 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
             ),
             mock.patch.object(
                 issuer,
-                "_require_production_pre_effect_disposition",
+                "_require_production_staged_prefix_disposition",
                 side_effect=(
                     issuer.Phase9ProofIssuerError(
-                        "phase9_proof_issuer_pre_effect_disposition_required"
+                        "phase9_proof_issuer_staged_prefix_disposition_required"
                     )
                 ),
             ) as require_disposition,
@@ -2301,7 +2363,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
             mock.patch.object(issuer, "_spawn_exact_runner") as spawn,
             self.assertRaisesRegex(
                 issuer.Phase9ProofIssuerError,
-                "phase9_proof_issuer_pre_effect_disposition_required",
+                "phase9_proof_issuer_staged_prefix_disposition_required",
             ),
         ):
             issuer.issue_and_supervise(inputs())
@@ -2328,15 +2390,12 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
                 True,
             ),
             mock.patch.multiple(
-                issuer.pre_effect_disposition,
+                issuer.staged_prefix_disposition,
                 PRODUCTION_CONTRACT_SHA256=DISPOSITION_CONTRACT,
-                PRODUCTION_PREDECESSOR_ATTEMPT_IDENTITY_SHA256=(
-                    PREDECESSOR_ATTEMPT
-                ),
             ),
             mock.patch.object(
-                issuer.pre_effect_disposition,
-                "require_production_disposition_receipt",
+                issuer.staged_prefix_disposition,
+                "verify_staged_prefix_tombstone",
                 return_value=None,
             ),
             mock.patch.object(
@@ -2349,7 +2408,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
             mock.patch.object(issuer, "_spawn_exact_runner") as spawn,
             self.assertRaisesRegex(
                 issuer.Phase9ProofIssuerError,
-                "phase9_proof_issuer_pre_effect_disposition_required",
+                "phase9_proof_issuer_staged_prefix_disposition_required",
             ),
         ):
             issuer.issue_and_supervise(inputs())
@@ -2388,7 +2447,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
             ) as construct_guard,
             mock.patch.object(
                 issuer,
-                "_require_production_pre_effect_disposition",
+                "_require_production_staged_prefix_disposition",
                 side_effect=lambda **unused: events.append("disposition") or disposition_receipt(),
             ) as disposition_check,
             mock.patch.object(
@@ -2457,7 +2516,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
             ),
             mock.patch.object(
                 issuer,
-                "_require_production_pre_effect_disposition",
+                "_require_production_staged_prefix_disposition",
                 return_value=disposition_receipt(),
             ),
             mock.patch.object(
@@ -2525,7 +2584,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
             mock.patch.object(issuer, "GlobalExecutionLock", return_value=guard),
             mock.patch.object(
                 issuer,
-                "_require_production_pre_effect_disposition",
+                "_require_production_staged_prefix_disposition",
                 return_value=disposition_receipt(),
             ),
             mock.patch.object(
@@ -2589,7 +2648,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
             mock.patch.object(issuer, "GlobalExecutionLock", return_value=guard),
             mock.patch.object(
                 issuer,
-                "_require_production_pre_effect_disposition",
+                "_require_production_staged_prefix_disposition",
                 return_value=disposition_receipt(),
             ),
             mock.patch.object(
@@ -4786,7 +4845,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
         self.assertIn("verify_exact_clean_candidate(inputs)", source)
         held_guard = source.split("with guard:", 1)[1]
         disposition = held_guard.index(
-            "_require_production_pre_effect_disposition(inputs=inputs)"
+            "_require_production_staged_prefix_disposition(inputs=inputs)"
         )
         checks = [
             index
@@ -4917,7 +4976,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
 
     def test_empty_pre_effect_install_journal_selects_resume(self) -> None:
         journal = Path(
-            "/var/lib/governed-memory-controller/executions-v2/"
+            "/var/lib/governed-memory-controller/executions-v3/"
             + INSTALL_EXECUTION
             + "/journal.jsonl"
         )
@@ -4961,7 +5020,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
 
     def test_nonempty_install_journal_remains_strict(self) -> None:
         journal = Path(
-            "/var/lib/governed-memory-controller/executions-v2/"
+            "/var/lib/governed-memory-controller/executions-v3/"
             + INSTALL_EXECUTION
             + "/journal.jsonl"
         )

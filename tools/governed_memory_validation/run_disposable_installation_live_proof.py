@@ -507,15 +507,15 @@ AUTHORIZED_TEXT_SHA256: Final = hashlib.sha256(
     AUTHORIZED_TEXT.encode("utf-8")
 ).hexdigest()
 RECOVERY_CAPSULE_PATH: Final = Path(
-    "/var/lib/governed-memory-controller/phase9-disposable-proof-recovery-capsule-v3.json"
+    "/var/lib/governed-memory-controller/phase9-disposable-proof-recovery-capsule-v4.json"
 )
 RECOVERY_CAPSULE_STAGING_PATH: Final = RECOVERY_CAPSULE_PATH.with_name(
     RECOVERY_CAPSULE_PATH.name + ".publishing"
 )
-RECOVERY_CAPSULE_SCHEMA: Final = "governed-memory-phase9-disposable-proof-recovery-capsule-v3"
-AUTHORIZATION_NAMESPACE: Final = "governed-memory-phase9-live-proof-v2"
-INSTALL_SCOPE_ID: Final = "phase9-disposable-live-install-000002"
-ROLLBACK_SCOPE_ID: Final = "phase9-disposable-live-rollback-000002"
+RECOVERY_CAPSULE_SCHEMA: Final = "governed-memory-phase9-disposable-proof-recovery-capsule-v4"
+AUTHORIZATION_NAMESPACE: Final = "governed-memory-phase9-live-proof-v3"
+INSTALL_SCOPE_ID: Final = "phase9-disposable-live-install-000003"
+ROLLBACK_SCOPE_ID: Final = "phase9-disposable-live-rollback-000003"
 LIVE_PROOF_RECEIPT_SCHEMA: Final = "governed-memory-phase9-live-proof-receipt-v4"
 RECOVERY_RECEIPT_SCHEMA: Final = (
     "governed-memory-phase9-disposable-proof-recovery-receipt-v1"
@@ -532,7 +532,7 @@ RECOVERY_RESERVATION_NONCE_DOMAIN: Final = (
     b"governed-memory-phase9-rollback-recovery-reservation-nonce-v1\x00"
 )
 
-EXECUTIONS_ROOT: Final = Path("/var/lib/governed-memory-controller/executions-v2")
+EXECUTIONS_ROOT: Final = Path("/var/lib/governed-memory-controller/executions-v3")
 CONTROLLER_STATE_ROOT: Final = Path("/var/lib/governed-memory-controller")
 LOCK_ROOT: Final = Path("/run/lock/governed-memory-controller")
 LIVE_PROOF_GUARD_PATH: Final = (
@@ -542,10 +542,10 @@ LIVE_PROOF_GUARD_FD: Final = 9
 CONTROLLER_CONFIG_ROOT: Final = Path("/etc/governed-memory-controller")
 STORE_SECRET_PARENT: Final = Path("/etc/governed-memory-stores")
 STORE_SECRET_ROOT: Final = Path(
-    "/etc/governed-memory-stores/9a54cf123493-000002"
+    "/etc/governed-memory-stores/9a54cf123493-000003"
 )
 RESOLVED_STORE_SPEC_PATH: Final = Path(
-    "/etc/governed-memory-controller/store_spec-v2.json"
+    "/etc/governed-memory-controller/store_spec-v3.json"
 )
 RUNTIME_RECEIPT_ROOT: Final = Path(
     "/var/lib/governed-memory-controller/runtime-receipts"
@@ -1351,7 +1351,7 @@ def _load_verified_recovery_capsule_member(
 ) -> tuple[VerifiedRecoveryCapsule, tuple[int, int]]:
     if (
         type(require_current) is not bool
-        or type(path) is not Path
+        or type(path) is not type(RECOVERY_CAPSULE_PATH)
         or path not in {RECOVERY_CAPSULE_PATH, RECOVERY_CAPSULE_STAGING_PATH}
         or not allowed_link_counts
         or not allowed_link_counts.issubset({1, 2})
@@ -1556,7 +1556,7 @@ def _verify_recovery_capsule_raw(
         or auth_payload
         != {
             "schema_version": authority.AUTHORIZATION_PAYLOAD_SCHEMA_VERSION,
-            "authorization_id": "phase9-disposable-live-install-auth-000002",
+            "authorization_id": "phase9-disposable-live-install-auth-000003",
             "authorization_namespace": AUTHORIZATION_NAMESPACE,
             "thread_id": THREAD_ID,
             "scope_id": INSTALL_SCOPE_ID,
@@ -2289,7 +2289,7 @@ def _verify_start_authority_pair_before_install(
 
 def _install_prerequisites(context: ProofContext) -> InstallPrerequisites:
     store_raw = context.artifacts.get(
-        "ops/governed_memory/installation/store_spec-v2.json"
+        "ops/governed_memory/installation/store_spec-v3.json"
     )
     if type(store_raw) is not bytes:
         raise LiveProofError("phase9_live_proof_store_spec_missing")

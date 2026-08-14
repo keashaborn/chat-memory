@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-"""Execute the exact Phase 9 v5-to-v6 pre-effect disposition."""
+"""Execute the exact Phase 9 v6 staged-prefix-to-v7 disposition."""
 
 import os
 import sys
 
 
 _PREIMPORT_CONTROLLER_RUNTIME_RECEIPT_SHA256 = (
-    "7de191f42a1c14b6bc2c29b3e7b425bd1b2593f7de95e03af7d2f93ff5d4a53b"
+    # PHASE9L_PIN_PENDING: replace after the corrected runtime is published.
+    "0000000000000000000000000000000000000000000000000000000000000000"
 )
 _PREIMPORT_CONTROLLER_PYTHON = (
     "/opt/governed-memory-controller/runtimes/"
@@ -33,7 +34,7 @@ if __name__ == "__main__" and not (
     and sys.platform == "linux"
     and sys.executable == _PREIMPORT_CONTROLLER_PYTHON
 ):
-    sys.stderr.write("phase9_pre_effect_disposition_runtime_isolation_required\n")
+    sys.stderr.write("phase9_staged_prefix_disposition_runtime_isolation_required\n")
     raise SystemExit(1)
 
 
@@ -125,7 +126,7 @@ def _preimport_manager_lineage_valid(
 
 
 if __name__ == "__main__" and not _preimport_manager_lineage_valid():
-    sys.stderr.write("phase9_pre_effect_disposition_manager_lineage_required\n")
+    sys.stderr.write("phase9_staged_prefix_disposition_manager_lineage_required\n")
     raise SystemExit(1)
 
 from collections.abc import Mapping, Sequence
@@ -145,13 +146,17 @@ from typing import Final
 _ENTRYPOINT_PATH: Final = Path(__file__).resolve(strict=True)
 _REPOSITORY_ROOT: Final = _ENTRYPOINT_PATH.parents[2]
 _ENTRYPOINT_RELATIVE: Final = (
-    "tools/governed_memory_validation/execute_phase9_pre_effect_disposition.py"
+    "tools/governed_memory_validation/execute_phase9_staged_prefix_disposition.py"
 )
 _PUBLISHER_RELATIVE: Final = (
-    "tools/governed_memory_validation/publish_phase9_pre_effect_permit.py"
+    "tools/governed_memory_validation/publish_phase9_staged_prefix_permit.py"
 )
 _CONTROLLER_RELATIVE: Final = (
-    "tools/governed_memory_validation/pre_effect_disposition.py"
+    "tools/governed_memory_validation/staged_prefix_disposition.py"
+)
+_CONTRACT_GENERATOR_RELATIVE: Final = (
+    "tools/governed_memory_validation/"
+    "generate_staged_prefix_disposition_contract.py"
 )
 _PERMITTED_CANDIDATE_RELATIVE: Final = (
     "tools/governed_memory_validation/phase9_permitted_candidate.py"
@@ -165,11 +170,12 @@ _BOOTSTRAP_RELATIVE: Final = (
 _MANAGER_RELATIVE: Final = (
     "tools/governed_memory_validation/execute_phase9_disposable_live_proof_controller.py"
 )
-_CONTRACT_RELATIVE: Final = "ops/governed_memory/pre_effect_disposition_contract.json"
+_CONTRACT_RELATIVE: Final = "ops/governed_memory/staged_prefix_disposition_contract.json"
 _SOURCE_PATHS: Final = (
     _PUBLISHER_RELATIVE,
     _ENTRYPOINT_RELATIVE,
     _CONTROLLER_RELATIVE,
+    _CONTRACT_GENERATOR_RELATIVE,
     _PERMITTED_CANDIDATE_RELATIVE,
     _ISSUER_RELATIVE,
     _BOOTSTRAP_RELATIVE,
@@ -177,22 +183,24 @@ _SOURCE_PATHS: Final = (
     _CONTRACT_RELATIVE,
 )
 if _ENTRYPOINT_PATH.relative_to(_REPOSITORY_ROOT).as_posix() != _ENTRYPOINT_RELATIVE:
-    raise SystemExit("phase9_pre_effect_disposition_invocation_invalid")
+    raise SystemExit("phase9_staged_prefix_disposition_invocation_invalid")
 
 PACKAGE_MANIFEST_SHA256: Final = (
-    "2e5da1091b456b705d955c5cc3a119e507116f892de0bcb92017185ca4ed2e89"
+    # Preliminary corrected package; regenerate and repin if closure changes.
+    "5addc8e4ab40b6bc700fde57b67579f8caa3d21077715bcdaf61d5714b52743e"
 )
 CONTROLLER_RUNTIME_RECEIPT_SHA256: Final = (
-    "7de191f42a1c14b6bc2c29b3e7b425bd1b2593f7de95e03af7d2f93ff5d4a53b"
+    # PHASE9L_PIN_PENDING: replace after the corrected runtime is published.
+    "0000000000000000000000000000000000000000000000000000000000000000"
 )
 CONTRACT_SHA256: Final = (
-    "758175f12c844a81c1fac2061d2a41d094034d697241545656c8ddac4e51e989"
+    "242fde259c4b586a3224bfb4bbe0ccfe00bf304ae65b664fafb848ff81542d16"
 )
 PREDECESSOR_ATTEMPT_IDENTITY_SHA256: Final = (
-    "e814fd3ea9e10ebb2cc84f87c7a8a73f6d3d29e8da1f05944c81522b8db6efd9"
+    "7b1a325d2441dfbdcf326ca147480df46287b66178baf9a91c82bd1ef7853b00"
 )
 SUCCESSOR_ATTEMPT_IDENTITY_SHA256: Final = (
-    "38cfb351b7a6c3d8c4e128d1870e307015c2e9158f85eec72058213bcc189ff3"
+    "6213cba9c80509ebce09e640ac385ca5304edbcdfec30a1f86b2264ed5cd676f"
 )
 AUTHORIZATION_TEXT_SHA256: Final = (
     "063891fc0189b3c4a0fe393200ae50f59b04f5488800dc27a5ce3020880f3e44"
@@ -200,15 +208,35 @@ AUTHORIZATION_TEXT_SHA256: Final = (
 THREAD_ID: Final = "019fe927-8367-7f52-86f2-e2b5b43a2390"
 BASE_CANDIDATE_COMMIT: Final = "2eee4e6a2bf0b23aaca68fdbb4919b0c58d041a2"
 BASE_CANDIDATE_TREE: Final = "76f5cd6e20241523e1e3d6d1d8f4cf2c5f1de7ab"
-PERMIT_SCHEMA: Final = "governed-memory-phase9j-pre-effect-disposition-permit-v1"
-PERMIT_RESULT: Final = "exact_pre_effect_disposition_execution_permitted"
+PERMIT_SCHEMA: Final = "governed-memory-phase9j-staged-prefix-permit-v1"
+PERMIT_RESULT: Final = (
+    "exact_staged_prefix_disposition_and_disposable_proof_permitted"
+)
+EXPECTED_CANDIDATE_REF: Final = (
+    "refs/tags/governed-memory-phase9j-pre-effect-disposition-000003"
+)
 PERMIT_PATH: Final = Path(
-    "/var/lib/governed-memory-controller/phase9j-pre-effect-disposition-permit-000002.json"
+    "/var/lib/governed-memory-controller/phase9j-pre-effect-disposition-permit-000003.json"
 )
 STATE_ROOT: Final = Path("/var/lib/governed-memory-controller")
 CONTRACT_ROOT: Final = STATE_ROOT / "pre-effect-dispositions"
-CONTRACT_PATH: Final = CONTRACT_ROOT / "phase9-v5-pre-effect-to-v6-000002.contract.json"
+CONTRACT_PATH: Final = (
+    CONTRACT_ROOT / "phase9-v6-staged-to-v7-000003.contract.json"
+)
 CONTRACT_STAGING_NAME: Final = "." + CONTRACT_PATH.name + ".publishing"
+DISPOSITION_ID: Final = "phase9-v6-staged-to-v7-000003"
+FAILED_TAG_REF: Final = (
+    "refs/tags/governed-memory-phase9j-pre-effect-disposition-000002"
+)
+FAILED_TAG_COMMIT: Final = "2c1bfc4afd4990323d13435f4d3c9fff90499a41"
+FAILED_TAG_TREE: Final = "3bee80d9a0c13c6aa70628da6286077a02ab8079"
+FAILED_PACKAGE_MANIFEST_SHA256: Final = (
+    "2e5da1091b456b705d955c5cc3a119e507116f892de0bcb92017185ca4ed2e89"
+)
+FAILED_CONTROLLER_RUNTIME_RECEIPT_SHA256: Final = (
+    "7de191f42a1c14b6bc2c29b3e7b425bd1b2593f7de95e03af7d2f93ff5d4a53b"
+)
+CORRECTED_GENERATION: Final = "000003"
 ROOT_UID: Final = 0
 ROOT_GID: Final = 0
 MAX_DOCUMENT_BYTES: Final = 256 * 1024
@@ -234,7 +262,7 @@ _PERMIT_KEYS: Final = {
 }
 
 
-class Phase9PreEffectDispositionEntrypointError(RuntimeError):
+class Phase9StagedPrefixDispositionEntrypointError(RuntimeError):
     """Content-free refusal from the exact production entrypoint."""
 
 
@@ -256,8 +284,8 @@ def _canonical(value: object) -> bytes:
             allow_nan=False,
         ).encode("ascii")
     except (TypeError, ValueError, UnicodeError) as error:
-        raise Phase9PreEffectDispositionEntrypointError(
-            "phase9_pre_effect_disposition_document_invalid"
+        raise Phase9StagedPrefixDispositionEntrypointError(
+            "phase9_staged_prefix_disposition_document_invalid"
         ) from error
 
 
@@ -274,12 +302,12 @@ def _document(raw: bytes) -> dict[str, object]:
     try:
         value = json.loads(raw.decode("ascii"), object_pairs_hook=_unique)
     except (ValueError, UnicodeError) as error:
-        raise Phase9PreEffectDispositionEntrypointError(
-            "phase9_pre_effect_disposition_permit_invalid"
+        raise Phase9StagedPrefixDispositionEntrypointError(
+            "phase9_staged_prefix_disposition_permit_invalid"
         ) from error
     if type(value) is not dict or _canonical(value) != raw:
-        raise Phase9PreEffectDispositionEntrypointError(
-            "phase9_pre_effect_disposition_permit_invalid"
+        raise Phase9StagedPrefixDispositionEntrypointError(
+            "phase9_staged_prefix_disposition_permit_invalid"
         )
     return value
 
@@ -322,8 +350,8 @@ def _read_root_file(path: Path, *, maximum: int) -> bytes:
             raise OSError(errno.EIO, "changed")
         return bytes(raw)
     except OSError as error:
-        raise Phase9PreEffectDispositionEntrypointError(
-            "phase9_pre_effect_disposition_permit_invalid"
+        raise Phase9StagedPrefixDispositionEntrypointError(
+            "phase9_staged_prefix_disposition_permit_invalid"
         ) from error
     finally:
         if descriptor >= 0:
@@ -333,8 +361,8 @@ def _read_root_file(path: Path, *, maximum: int) -> bytes:
 def _read_and_verify_permit() -> Mapping[str, object]:
     document = _document(_read_root_file(PERMIT_PATH, maximum=MAX_DOCUMENT_BYTES))
     if set(document) != _PERMIT_KEYS:
-        raise Phase9PreEffectDispositionEntrypointError(
-            "phase9_pre_effect_disposition_permit_invalid"
+        raise Phase9StagedPrefixDispositionEntrypointError(
+            "phase9_staged_prefix_disposition_permit_invalid"
         )
     unsigned = dict(document)
     permit_sha256 = unsigned.pop("permit_sha256", None)
@@ -351,7 +379,7 @@ def _read_and_verify_permit() -> Mapping[str, object]:
         "authorization_text_sha256": AUTHORIZATION_TEXT_SHA256,
         "thread_id": THREAD_ID,
         "authorized_action": (
-            "execute_pre_effect_disposition_and_disposable_live_proof_only"
+            "execute_staged_prefix_disposition_and_disposable_live_proof_only"
         ),
         "activation_performed": False,
         "provider_calls": 0,
@@ -370,15 +398,15 @@ def _read_and_verify_permit() -> Mapping[str, object]:
         or type(permit_sha256) is not str or _HASH_RE.fullmatch(permit_sha256) is None
         or permit_sha256 != _sha(_canonical(unsigned))
     ):
-        raise Phase9PreEffectDispositionEntrypointError(
-            "phase9_pre_effect_disposition_permit_invalid"
+        raise Phase9StagedPrefixDispositionEntrypointError(
+            "phase9_staged_prefix_disposition_permit_invalid"
         )
     return document
 
 
 def _git(*arguments: str, maximum: int = MAX_GIT_OUTPUT_BYTES) -> bytes:
     if not arguments or any(type(value) is not str or not value for value in arguments):
-        raise Phase9PreEffectDispositionEntrypointError("phase9_pre_effect_disposition_git_failed")
+        raise Phase9StagedPrefixDispositionEntrypointError("phase9_staged_prefix_disposition_git_failed")
     try:
         completed = subprocess.run(
             (GIT_BINARY, "-c", "safe.directory=" + str(_REPOSITORY_ROOT),
@@ -387,12 +415,12 @@ def _git(*arguments: str, maximum: int = MAX_GIT_OUTPUT_BYTES) -> bytes:
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20, check=False,
         )
     except (OSError, subprocess.SubprocessError) as error:
-        raise Phase9PreEffectDispositionEntrypointError("phase9_pre_effect_disposition_git_failed") from error
+        raise Phase9StagedPrefixDispositionEntrypointError("phase9_staged_prefix_disposition_git_failed") from error
     if (
         completed.returncode != 0 or completed.stderr != b""
         or type(completed.stdout) is not bytes or len(completed.stdout) > maximum
     ):
-        raise Phase9PreEffectDispositionEntrypointError("phase9_pre_effect_disposition_git_failed")
+        raise Phase9StagedPrefixDispositionEntrypointError("phase9_staged_prefix_disposition_git_failed")
     return completed.stdout
 
 
@@ -400,12 +428,12 @@ def _git_object(raw: bytes) -> str:
     try:
         value = raw.decode("ascii").rstrip("\n")
     except UnicodeError as error:
-        raise Phase9PreEffectDispositionEntrypointError(
-            "phase9_pre_effect_disposition_candidate_identity_invalid"
+        raise Phase9StagedPrefixDispositionEntrypointError(
+            "phase9_staged_prefix_disposition_candidate_identity_invalid"
         ) from error
     if raw != (value + "\n").encode("ascii") or _GIT_RE.fullmatch(value) is None:
-        raise Phase9PreEffectDispositionEntrypointError(
-            "phase9_pre_effect_disposition_candidate_identity_invalid"
+        raise Phase9StagedPrefixDispositionEntrypointError(
+            "phase9_staged_prefix_disposition_candidate_identity_invalid"
         )
     return value
 
@@ -416,34 +444,45 @@ def _verified_candidate_identity(permit: Mapping[str, object]) -> CandidateIdent
             raise OSError(errno.EPERM, "path")
         top = _git("rev-parse", "--show-toplevel").decode("utf-8").rstrip("\n")
     except (OSError, UnicodeError) as error:
-        raise Phase9PreEffectDispositionEntrypointError(
-            "phase9_pre_effect_disposition_candidate_path_invalid"
+        raise Phase9StagedPrefixDispositionEntrypointError(
+            "phase9_staged_prefix_disposition_candidate_path_invalid"
         ) from error
     if top != str(_REPOSITORY_ROOT):
-        raise Phase9PreEffectDispositionEntrypointError("phase9_pre_effect_disposition_candidate_path_invalid")
+        raise Phase9StagedPrefixDispositionEntrypointError("phase9_staged_prefix_disposition_candidate_path_invalid")
     if _git("status", "--porcelain=v1", "--untracked-files=all") != b"":
-        raise Phase9PreEffectDispositionEntrypointError("phase9_pre_effect_disposition_candidate_not_clean")
+        raise Phase9StagedPrefixDispositionEntrypointError("phase9_staged_prefix_disposition_candidate_not_clean")
     _git("ls-files", "--error-unmatch", "--stage", "--", *_SOURCE_PATHS)
     commit = _git_object(_git("rev-parse", "--verify", "HEAD^{commit}"))
     tree = _git_object(_git("rev-parse", "--verify", "HEAD^{tree}"))
+    tag_commit = _git_object(
+        _git("rev-parse", "--verify", EXPECTED_CANDIDATE_REF + "^{commit}")
+    )
+    tag_tree = _git_object(
+        _git("rev-parse", "--verify", EXPECTED_CANDIDATE_REF + "^{tree}")
+    )
     blobs = permit.get("source_blobs")
     if type(blobs) is not dict:
-        raise Phase9PreEffectDispositionEntrypointError("phase9_pre_effect_disposition_permit_invalid")
+        raise Phase9StagedPrefixDispositionEntrypointError("phase9_staged_prefix_disposition_permit_invalid")
     observed: list[tuple[str, str]] = []
     for relative in _SOURCE_PATHS:
         committed = _git_object(_git("rev-parse", "HEAD:" + relative))
         filesystem = _git_object(_git("hash-object", str(_REPOSITORY_ROOT / relative)))
         if committed != filesystem or committed != blobs.get(relative):
-            raise Phase9PreEffectDispositionEntrypointError("phase9_pre_effect_disposition_candidate_identity_invalid")
+            raise Phase9StagedPrefixDispositionEntrypointError("phase9_staged_prefix_disposition_candidate_identity_invalid")
         observed.append((relative, committed))
-    if commit != permit.get("candidate_git_commit") or tree != permit.get("candidate_git_tree"):
-        raise Phase9PreEffectDispositionEntrypointError("phase9_pre_effect_disposition_candidate_identity_invalid")
+    if (
+        commit != tag_commit
+        or tree != tag_tree
+        or commit != permit.get("candidate_git_commit")
+        or tree != permit.get("candidate_git_tree")
+    ):
+        raise Phase9StagedPrefixDispositionEntrypointError("phase9_staged_prefix_disposition_candidate_identity_invalid")
     return CandidateIdentity(commit, tree, tuple(observed))
 
 
 def _reverify_candidate(permit: Mapping[str, object], expected: CandidateIdentity) -> None:
     if type(expected) is not CandidateIdentity or _verified_candidate_identity(permit) != expected:
-        raise Phase9PreEffectDispositionEntrypointError("phase9_pre_effect_disposition_candidate_changed")
+        raise Phase9StagedPrefixDispositionEntrypointError("phase9_staged_prefix_disposition_candidate_changed")
 
 
 def _read_repository_contract() -> bytes:
@@ -465,8 +504,8 @@ def _read_repository_contract() -> bytes:
             raise OSError(errno.EIO, "content")
         return raw
     except OSError as error:
-        raise Phase9PreEffectDispositionEntrypointError(
-            "phase9_pre_effect_disposition_repository_contract_invalid"
+        raise Phase9StagedPrefixDispositionEntrypointError(
+            "phase9_staged_prefix_disposition_repository_contract_invalid"
         ) from error
     finally:
         if descriptor >= 0:
@@ -499,8 +538,8 @@ def _read_contract_member(
     except FileNotFoundError:
         return None
     except OSError as error:
-        raise Phase9PreEffectDispositionEntrypointError(
-            "phase9_pre_effect_disposition_contract_publication_conflict"
+        raise Phase9StagedPrefixDispositionEntrypointError(
+            "phase9_staged_prefix_disposition_contract_publication_conflict"
         ) from error
     try:
         before = os.fstat(descriptor)
@@ -515,8 +554,8 @@ def _read_contract_member(
             or before.st_size > MAX_DOCUMENT_BYTES
             or (before.st_dev, before.st_ino) != (named.st_dev, named.st_ino)
         ):
-            raise Phase9PreEffectDispositionEntrypointError(
-                "phase9_pre_effect_disposition_contract_publication_conflict"
+            raise Phase9StagedPrefixDispositionEntrypointError(
+                "phase9_staged_prefix_disposition_contract_publication_conflict"
             )
         raw = bytearray()
         while len(raw) <= MAX_DOCUMENT_BYTES:
@@ -546,8 +585,8 @@ def _read_contract_member(
             named_after.st_ctime_ns,
         )
         if len(raw) != before.st_size or stable_after != stable_before or stable_named != stable_before:
-            raise Phase9PreEffectDispositionEntrypointError(
-                "phase9_pre_effect_disposition_contract_publication_conflict"
+            raise Phase9StagedPrefixDispositionEntrypointError(
+                "phase9_staged_prefix_disposition_contract_publication_conflict"
             )
         return bytes(raw), (before.st_dev, before.st_ino)
     finally:
@@ -559,16 +598,16 @@ def _unlink_contract_staging(parent_fd: int, expected_inode: tuple[int, int]) ->
     try:
         named = os.stat(CONTRACT_STAGING_NAME, dir_fd=parent_fd, follow_symlinks=False)
         if (named.st_dev, named.st_ino) != expected_inode:
-            raise Phase9PreEffectDispositionEntrypointError(
-                "phase9_pre_effect_disposition_contract_publication_conflict"
+            raise Phase9StagedPrefixDispositionEntrypointError(
+                "phase9_staged_prefix_disposition_contract_publication_conflict"
             )
         os.unlink(CONTRACT_STAGING_NAME, dir_fd=parent_fd)
         os.fsync(parent_fd)
-    except Phase9PreEffectDispositionEntrypointError:
+    except Phase9StagedPrefixDispositionEntrypointError:
         raise
     except OSError as error:
-        raise Phase9PreEffectDispositionEntrypointError(
-            "phase9_pre_effect_disposition_contract_install_invalid"
+        raise Phase9StagedPrefixDispositionEntrypointError(
+            "phase9_staged_prefix_disposition_contract_install_invalid"
         ) from error
 
 
@@ -598,8 +637,8 @@ def _fsync_contract_member(
             or (before.st_dev, before.st_ino) != expected_inode
             or (named.st_dev, named.st_ino) != expected_inode
         ):
-            raise Phase9PreEffectDispositionEntrypointError(
-                "phase9_pre_effect_disposition_contract_publication_conflict"
+            raise Phase9StagedPrefixDispositionEntrypointError(
+                "phase9_staged_prefix_disposition_contract_publication_conflict"
             )
         os.fsync(descriptor)
         after = os.fstat(descriptor)
@@ -621,17 +660,17 @@ def _fsync_contract_member(
             named_after.st_ctime_ns,
         )
         if stable_after != stable_before or stable_named != stable_before:
-            raise Phase9PreEffectDispositionEntrypointError(
-                "phase9_pre_effect_disposition_contract_publication_conflict"
+            raise Phase9StagedPrefixDispositionEntrypointError(
+                "phase9_staged_prefix_disposition_contract_publication_conflict"
             )
         closing_fd = descriptor
         descriptor = -1
         os.close(closing_fd)
-    except Phase9PreEffectDispositionEntrypointError:
+    except Phase9StagedPrefixDispositionEntrypointError:
         raise
     except OSError as error:
-        raise Phase9PreEffectDispositionEntrypointError(
-            "phase9_pre_effect_disposition_contract_install_invalid"
+        raise Phase9StagedPrefixDispositionEntrypointError(
+            "phase9_staged_prefix_disposition_contract_install_invalid"
         ) from error
     finally:
         if descriptor >= 0:
@@ -642,7 +681,7 @@ def _install_create_once(*, state_root: Path, contract_path: Path, raw: bytes,
                          expected_uid: int, expected_gid: int) -> None:
     contract_root = contract_path.parent
     if contract_root.parent != state_root or not raw or len(raw) > MAX_DOCUMENT_BYTES:
-        raise Phase9PreEffectDispositionEntrypointError("phase9_pre_effect_disposition_contract_install_invalid")
+        raise Phase9StagedPrefixDispositionEntrypointError("phase9_staged_prefix_disposition_contract_install_invalid")
     flags = os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_DIRECTORY", 0)
     state_fd = root_fd = leaf_fd = -1
     try:
@@ -672,14 +711,14 @@ def _install_create_once(*, state_root: Path, contract_path: Path, raw: bytes,
         if final is not None:
             final_raw, final_inode = final
             if final_raw != raw:
-                raise Phase9PreEffectDispositionEntrypointError("phase9_pre_effect_disposition_contract_replay_mismatch")
+                raise Phase9StagedPrefixDispositionEntrypointError("phase9_staged_prefix_disposition_contract_replay_mismatch")
             if staging is None:
                 if os.stat(contract_path.name, dir_fd=root_fd, follow_symlinks=False).st_nlink != 1:
-                    raise Phase9PreEffectDispositionEntrypointError("phase9_pre_effect_disposition_contract_publication_conflict")
+                    raise Phase9StagedPrefixDispositionEntrypointError("phase9_staged_prefix_disposition_contract_publication_conflict")
                 return
             staging_raw, staging_inode = staging
             if staging_raw != raw or staging_inode != final_inode:
-                raise Phase9PreEffectDispositionEntrypointError("phase9_pre_effect_disposition_contract_publication_conflict")
+                raise Phase9StagedPrefixDispositionEntrypointError("phase9_staged_prefix_disposition_contract_publication_conflict")
             _fsync_contract_member(
                 root_fd,
                 contract_path.name,
@@ -689,12 +728,12 @@ def _install_create_once(*, state_root: Path, contract_path: Path, raw: bytes,
             os.fsync(root_fd)
             _unlink_contract_staging(root_fd, staging_inode)
             if _read_contract_member(root_fd, contract_path.name, allowed_link_counts=frozenset({1})) != (raw, final_inode):
-                raise Phase9PreEffectDispositionEntrypointError("phase9_pre_effect_disposition_contract_install_invalid")
+                raise Phase9StagedPrefixDispositionEntrypointError("phase9_staged_prefix_disposition_contract_install_invalid")
             return
         if staging is not None:
             staging_raw, staging_inode = staging
             if staging_raw != raw:
-                raise Phase9PreEffectDispositionEntrypointError("phase9_pre_effect_disposition_contract_publication_conflict")
+                raise Phase9StagedPrefixDispositionEntrypointError("phase9_staged_prefix_disposition_contract_publication_conflict")
             _fsync_contract_member(
                 root_fd,
                 CONTRACT_STAGING_NAME,
@@ -706,13 +745,13 @@ def _install_create_once(*, state_root: Path, contract_path: Path, raw: bytes,
                 os.link(CONTRACT_STAGING_NAME, contract_path.name, src_dir_fd=root_fd,
                         dst_dir_fd=root_fd, follow_symlinks=False)
             except FileExistsError as error:
-                raise Phase9PreEffectDispositionEntrypointError("phase9_pre_effect_disposition_contract_publication_conflict") from error
+                raise Phase9StagedPrefixDispositionEntrypointError("phase9_staged_prefix_disposition_contract_publication_conflict") from error
             os.fsync(root_fd)
             if _read_contract_member(root_fd, contract_path.name, allowed_link_counts=frozenset({2})) != (raw, staging_inode):
-                raise Phase9PreEffectDispositionEntrypointError("phase9_pre_effect_disposition_contract_install_invalid")
+                raise Phase9StagedPrefixDispositionEntrypointError("phase9_staged_prefix_disposition_contract_install_invalid")
             _unlink_contract_staging(root_fd, staging_inode)
             if _read_contract_member(root_fd, contract_path.name, allowed_link_counts=frozenset({1})) != (raw, staging_inode):
-                raise Phase9PreEffectDispositionEntrypointError("phase9_pre_effect_disposition_contract_install_invalid")
+                raise Phase9StagedPrefixDispositionEntrypointError("phase9_staged_prefix_disposition_contract_install_invalid")
             return
         leaf_fd = os.open(
             CONTRACT_STAGING_NAME,
@@ -732,22 +771,22 @@ def _install_create_once(*, state_root: Path, contract_path: Path, raw: bytes,
         os.close(closing_fd)
         os.fsync(root_fd)
         if _read_contract_member(root_fd, CONTRACT_STAGING_NAME, allowed_link_counts=frozenset({1})) != (raw, staging_inode):
-            raise Phase9PreEffectDispositionEntrypointError("phase9_pre_effect_disposition_contract_install_invalid")
+            raise Phase9StagedPrefixDispositionEntrypointError("phase9_staged_prefix_disposition_contract_install_invalid")
         try:
             os.link(CONTRACT_STAGING_NAME, contract_path.name, src_dir_fd=root_fd,
                     dst_dir_fd=root_fd, follow_symlinks=False)
         except FileExistsError as error:
-            raise Phase9PreEffectDispositionEntrypointError("phase9_pre_effect_disposition_contract_publication_conflict") from error
+            raise Phase9StagedPrefixDispositionEntrypointError("phase9_staged_prefix_disposition_contract_publication_conflict") from error
         os.fsync(root_fd)
         if _read_contract_member(root_fd, contract_path.name, allowed_link_counts=frozenset({2})) != (raw, staging_inode):
-            raise Phase9PreEffectDispositionEntrypointError("phase9_pre_effect_disposition_contract_install_invalid")
+            raise Phase9StagedPrefixDispositionEntrypointError("phase9_staged_prefix_disposition_contract_install_invalid")
         _unlink_contract_staging(root_fd, staging_inode)
         if _read_contract_member(root_fd, contract_path.name, allowed_link_counts=frozenset({1})) != (raw, staging_inode):
-            raise Phase9PreEffectDispositionEntrypointError("phase9_pre_effect_disposition_contract_install_invalid")
-    except Phase9PreEffectDispositionEntrypointError:
+            raise Phase9StagedPrefixDispositionEntrypointError("phase9_staged_prefix_disposition_contract_install_invalid")
+    except Phase9StagedPrefixDispositionEntrypointError:
         raise
     except OSError as error:
-        raise Phase9PreEffectDispositionEntrypointError("phase9_pre_effect_disposition_contract_install_invalid") from error
+        raise Phase9StagedPrefixDispositionEntrypointError("phase9_staged_prefix_disposition_contract_install_invalid") from error
     finally:
         for descriptor in (leaf_fd, root_fd, state_fd):
             if descriptor >= 0:
@@ -758,31 +797,50 @@ def _load_disposition() -> ModuleType:
     if str(_REPOSITORY_ROOT) not in sys.path:
         sys.path.insert(0, str(_REPOSITORY_ROOT))
     try:
-        return importlib.import_module("tools.governed_memory_validation.pre_effect_disposition")
+        return importlib.import_module("tools.governed_memory_validation.staged_prefix_disposition")
     except Exception as error:
-        raise Phase9PreEffectDispositionEntrypointError("phase9_pre_effect_disposition_controller_import_invalid") from error
+        raise Phase9StagedPrefixDispositionEntrypointError("phase9_staged_prefix_disposition_controller_import_invalid") from error
 
 
 def _expectation(disposition: ModuleType) -> object:
     if (
-        disposition.PRODUCTION_CONTRACT_SHA256 != CONTRACT_SHA256
-        or disposition.PRODUCTION_PREDECESSOR_ATTEMPT_IDENTITY_SHA256 != PREDECESSOR_ATTEMPT_IDENTITY_SHA256
-        or disposition.PRODUCTION_AUTHORIZATION_TEXT_SHA256 != AUTHORIZATION_TEXT_SHA256
+        disposition.PRODUCTION_REPOSITORY_ROOT != _REPOSITORY_ROOT
+        or disposition.PRODUCTION_REPOSITORY_CONTRACT_SOURCE
+        != _CONTRACT_RELATIVE
+        or disposition.PRODUCTION_DURABLE_CONTRACT_PATH != CONTRACT_PATH
+        or disposition.PRODUCTION_STATE_ROOT != STATE_ROOT
+        or disposition.PRODUCTION_OLD_TAG_REF != FAILED_TAG_REF
+        or disposition.PRODUCTION_FAILED_PACKAGE_MANIFEST_SHA256
+        != FAILED_PACKAGE_MANIFEST_SHA256
+        or disposition.PRODUCTION_FAILED_RUNTIME_RECEIPT_SHA256
+        != FAILED_CONTROLLER_RUNTIME_RECEIPT_SHA256
+        or disposition.PRODUCTION_CORRECTED_GENERATION != CORRECTED_GENERATION
+        or disposition.production_failed_prefix_identity_sha256()
+        != PREDECESSOR_ATTEMPT_IDENTITY_SHA256
+        or disposition.production_corrected_attempt_identity_sha256(
+            package_manifest_sha256=PACKAGE_MANIFEST_SHA256,
+            controller_runtime_receipt_sha256=(
+                CONTROLLER_RUNTIME_RECEIPT_SHA256
+            ),
+        )
+        != SUCCESSOR_ATTEMPT_IDENTITY_SHA256
     ):
-        raise Phase9PreEffectDispositionEntrypointError("phase9_pre_effect_disposition_production_binding_not_sealed")
-    successor = disposition.production_successor_attempt_identity_sha256(
-        package_manifest_sha256=PACKAGE_MANIFEST_SHA256,
-        controller_runtime_receipt_sha256=CONTROLLER_RUNTIME_RECEIPT_SHA256,
-    )
-    if successor != SUCCESSOR_ATTEMPT_IDENTITY_SHA256:
-        raise Phase9PreEffectDispositionEntrypointError("phase9_pre_effect_disposition_production_binding_not_sealed")
-    return disposition.ReviewedDispositionExpectation(
+        raise Phase9StagedPrefixDispositionEntrypointError("phase9_staged_prefix_disposition_production_binding_not_sealed")
+    return disposition.ReviewedStagedPrefixExpectation(
         contract_sha256=CONTRACT_SHA256,
-        disposition_id=disposition.PRODUCTION_DISPOSITION_ID,
-        authorization_text_sha256=AUTHORIZATION_TEXT_SHA256,
-        predecessor_attempt_identity_sha256=PREDECESSOR_ATTEMPT_IDENTITY_SHA256,
-        successor_attempt_identity_sha256=SUCCESSOR_ATTEMPT_IDENTITY_SHA256,
-        successor_generation=disposition.PRODUCTION_SUCCESSOR_GENERATION,
+        disposition_id=DISPOSITION_ID,
+        old_tag_ref=FAILED_TAG_REF,
+        old_tag_commit=FAILED_TAG_COMMIT,
+        old_tag_tree=FAILED_TAG_TREE,
+        failed_package_manifest_sha256=FAILED_PACKAGE_MANIFEST_SHA256,
+        failed_controller_runtime_receipt_sha256=(
+            FAILED_CONTROLLER_RUNTIME_RECEIPT_SHA256
+        ),
+        corrected_generation=CORRECTED_GENERATION,
+        corrected_package_manifest_sha256=PACKAGE_MANIFEST_SHA256,
+        corrected_controller_runtime_receipt_sha256=(
+            CONTROLLER_RUNTIME_RECEIPT_SHA256
+        ),
     )
 
 
@@ -793,41 +851,52 @@ def execute_exact_production_disposition() -> Mapping[str, object]:
         or sys.platform != "linux"
         or sys.executable != _PREIMPORT_CONTROLLER_PYTHON
     ):
-        raise Phase9PreEffectDispositionEntrypointError("phase9_pre_effect_disposition_runtime_isolation_required")
+        raise Phase9StagedPrefixDispositionEntrypointError("phase9_staged_prefix_disposition_runtime_isolation_required")
     if not _preimport_manager_lineage_valid():
-        raise Phase9PreEffectDispositionEntrypointError(
-            "phase9_pre_effect_disposition_manager_lineage_required"
+        raise Phase9StagedPrefixDispositionEntrypointError(
+            "phase9_staged_prefix_disposition_manager_lineage_required"
         )
     if os.geteuid() != ROOT_UID or os.getegid() != ROOT_GID:
-        raise Phase9PreEffectDispositionEntrypointError("phase9_pre_effect_disposition_root_required")
+        raise Phase9StagedPrefixDispositionEntrypointError("phase9_staged_prefix_disposition_root_required")
     permit = _read_and_verify_permit()  # Authority precedes controller import.
     candidate = _verified_candidate_identity(permit)
     disposition = _load_disposition()
     expectation = _expectation(disposition)
-    if disposition.PRODUCTION_CONTRACT_PATH != CONTRACT_PATH or disposition.PRODUCTION_STATE_ROOT != STATE_ROOT:
-        raise Phase9PreEffectDispositionEntrypointError("phase9_pre_effect_disposition_production_path_invalid")
+    if (
+        disposition.PRODUCTION_DURABLE_CONTRACT_PATH != CONTRACT_PATH
+        or disposition.PRODUCTION_STATE_ROOT != STATE_ROOT
+    ):
+        raise Phase9StagedPrefixDispositionEntrypointError("phase9_staged_prefix_disposition_production_path_invalid")
     raw = _read_repository_contract()
     _reverify_candidate(permit, candidate)
     _install_create_once(state_root=STATE_ROOT, contract_path=CONTRACT_PATH, raw=raw,
                          expected_uid=ROOT_UID, expected_gid=ROOT_GID)
     _reverify_candidate(permit, candidate)
     try:
-        return disposition.execute_pre_effect_disposition(
+        receipt = disposition.execute_staged_prefix_disposition(
             disposition.production_disposition_paths(), expectation
         )
-    except disposition.PreEffectDispositionError as error:
-        raise Phase9PreEffectDispositionEntrypointError("phase9_pre_effect_disposition_refused") from error
+    except disposition.StagedPrefixDispositionError as error:
+        raise Phase9StagedPrefixDispositionEntrypointError("phase9_staged_prefix_disposition_refused") from error
+    _reverify_candidate(permit, candidate)
+    return receipt
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     if tuple(sys.argv[1:] if argv is None else argv):
-        raise Phase9PreEffectDispositionEntrypointError("phase9_pre_effect_disposition_arguments_refused")
+        raise Phase9StagedPrefixDispositionEntrypointError("phase9_staged_prefix_disposition_arguments_refused")
     receipt = execute_exact_production_disposition()
     sys.stdout.buffer.write(_canonical({
         "contract_sha256": receipt.get("contract_sha256"),
-        "receipt_sha256": receipt.get("receipt_sha256"),
+        "corrected_controller_runtime_receipt_sha256": receipt.get(
+            "corrected_controller_runtime_receipt_sha256"
+        ),
+        "corrected_generation": receipt.get("corrected_generation"),
+        "corrected_package_manifest_sha256": receipt.get(
+            "corrected_package_manifest_sha256"
+        ),
         "result": receipt.get("result"),
-        "successor_attempt_identity_sha256": receipt.get("successor_attempt_identity_sha256"),
+        "tombstone_sha256": receipt.get("tombstone_sha256"),
     }) + b"\n")
     return 0
 
@@ -835,6 +904,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except Phase9PreEffectDispositionEntrypointError as error:
+    except Phase9StagedPrefixDispositionEntrypointError as error:
         sys.stderr.write(str(error) + "\n")
         raise SystemExit(1) from None

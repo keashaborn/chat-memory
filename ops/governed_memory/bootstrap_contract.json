@@ -1,7 +1,7 @@
 {
   "schema_version": "governed-memory-bootstrap-contract-v1",
   "state": "inactive_candidate_no_resources_created",
-  "candidate_id": "governed_memory_9a54cf123493_000002",
+  "candidate_id": "governed_memory_9a54cf123493_000003",
   "host": {
     "hostname": "ip-172-31-32-171",
     "private_ipv4": "172.31.32.171"
@@ -22,9 +22,9 @@
   "postgresql": {
     "authority": "canonical",
     "image": "postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777",
-    "container": "governed-memory-postgres-9a54cf123493-000002",
-    "volume": "governed-memory-postgres-data-9a54cf123493-000002",
-    "host_bind": "127.0.0.1:55433",
+    "container": "governed-memory-postgres-9a54cf123493-000003",
+    "volume": "governed-memory-postgres-data-9a54cf123493-000003",
+    "host_bind": "127.0.0.1:55434",
     "container_port": 5432,
     "database": "governed_memory",
     "encoding": "UTF8",
@@ -75,11 +75,11 @@
     "persistent_pilot_digest_status": "v1_19_0_digest_pinned_disposable_verified_persistent_pilot_unapproved",
     "real_disposable_compatibility_verified": true,
     "persistent_pilot_approved": false,
-    "container": "governed-memory-qdrant-9a54cf123493-000002",
-    "volume": "governed-memory-qdrant-data-9a54cf123493-000002",
-    "host_bind": "127.0.0.1:6344",
+    "container": "governed-memory-qdrant-9a54cf123493-000003",
+    "volume": "governed-memory-qdrant-data-9a54cf123493-000003",
+    "host_bind": "127.0.0.1:6345",
     "container_port": 6333,
-    "collection": "governed_memory_9a54cf123493_000002",
+    "collection": "governed_memory_9a54cf123493_000003",
     "alias": "governed_memory_active",
     "vectors": {
       "size": 3072,
@@ -338,11 +338,11 @@
     "wildcard_target_allowed": false,
     "prefix_target_allowed": false,
     "exact_targets": [
-      "governed-memory-postgres-9a54cf123493-000002",
-      "governed-memory-qdrant-9a54cf123493-000002",
-      "governed-memory-postgres-data-9a54cf123493-000002",
-      "governed-memory-qdrant-data-9a54cf123493-000002",
-      "governed-memory-net-9a54cf123493-000002"
+      "governed-memory-postgres-9a54cf123493-000003",
+      "governed-memory-qdrant-9a54cf123493-000003",
+      "governed-memory-postgres-data-9a54cf123493-000003",
+      "governed-memory-qdrant-data-9a54cf123493-000003",
+      "governed-memory-net-9a54cf123493-000003"
     ]
   },
   "production_state_changed": false

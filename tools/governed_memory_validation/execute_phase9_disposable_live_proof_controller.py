@@ -17,21 +17,23 @@ _PREIMPORT_CONTROLLER_PYTHON = (
 )
 _PREIMPORT_GIT = "/usr/bin/git"
 _PREIMPORT_EXPECTED_CANDIDATE_REF = (
-    "refs/tags/governed-memory-phase9j-pre-effect-disposition-000002"
+    "refs/tags/governed-memory-phase9j-pre-effect-disposition-000003"
 )
 _PREIMPORT_CONTROLLER_RELATIVE = (
     "tools/governed_memory_validation/"
     "execute_phase9_disposable_live_proof_controller.py"
 )
 _PREIMPORT_SOURCE_PATHS = (
-    "tools/governed_memory_validation/publish_phase9_pre_effect_permit.py",
-    "tools/governed_memory_validation/execute_phase9_pre_effect_disposition.py",
-    "tools/governed_memory_validation/pre_effect_disposition.py",
+    "tools/governed_memory_validation/publish_phase9_staged_prefix_permit.py",
+    "tools/governed_memory_validation/execute_phase9_staged_prefix_disposition.py",
+    "tools/governed_memory_validation/staged_prefix_disposition.py",
+    "tools/governed_memory_validation/"
+    "generate_staged_prefix_disposition_contract.py",
     "tools/governed_memory_validation/phase9_permitted_candidate.py",
     "tools/governed_memory_validation/issue_disposable_installation_live_proof.py",
     "tools/governed_memory_validation/bootstrap_phase9_disposable_store_substrate.py",
     _PREIMPORT_CONTROLLER_RELATIVE,
-    "ops/governed_memory/pre_effect_disposition_contract.json",
+    "ops/governed_memory/staged_prefix_disposition_contract.json",
 )
 _PREIMPORT_GIT_ENVIRONMENT = {
     "PATH": "/usr/bin:/bin",
@@ -228,10 +230,13 @@ sys.path.insert(0, str(_REPOSITORY_ROOT))
 from tools.governed_memory_validation import (
     durable_live_proof_receipt,
 )
-from tools.governed_memory_validation import phase9_permitted_candidate
-from tools.governed_memory_validation import pre_effect_disposition
 from tools.governed_memory_validation import (
-    publish_phase9_pre_effect_permit as permit_publisher,
+    execute_phase9_staged_prefix_disposition as disposition_entrypoint,
+)
+from tools.governed_memory_validation import phase9_permitted_candidate
+from tools.governed_memory_validation import staged_prefix_disposition
+from tools.governed_memory_validation import (
+    publish_phase9_staged_prefix_permit as permit_publisher,
 )
 from tools.governed_memory_validation import (
     run_disposable_installation_live_proof as runner,
@@ -250,10 +255,10 @@ LEASE_GUARD: Final = (
 LEASE_GUARD_UID: Final = 1000
 LEASE_GUARD_GID: Final = 1000
 PUBLISHER_RELATIVE: Final = (
-    "tools/governed_memory_validation/publish_phase9_pre_effect_permit.py"
+    "tools/governed_memory_validation/publish_phase9_staged_prefix_permit.py"
 )
 DISPOSITION_RELATIVE: Final = (
-    "tools/governed_memory_validation/execute_phase9_pre_effect_disposition.py"
+    "tools/governed_memory_validation/execute_phase9_staged_prefix_disposition.py"
 )
 ISSUER_RELATIVE: Final = (
     "tools/governed_memory_validation/"
@@ -682,22 +687,33 @@ def _require_disposition(
     candidate: phase9_permitted_candidate.PermittedCandidateAuthority,
 ) -> Mapping[str, object]:
     try:
-        receipt = pre_effect_disposition.require_production_disposition_receipt(
-            package_manifest_sha256=candidate.package_manifest_sha256,
-            controller_runtime_receipt_sha256=(
-                candidate.controller_runtime_receipt_sha256
-            ),
+        expectation = disposition_entrypoint._expectation(
+            staged_prefix_disposition
         )
-    except pre_effect_disposition.PreEffectDispositionError as error:
+        receipt = staged_prefix_disposition.verify_staged_prefix_tombstone(
+            staged_prefix_disposition.production_disposition_paths(),
+            expectation,
+        )
+    except (
+        disposition_entrypoint.Phase9StagedPrefixDispositionEntrypointError,
+        staged_prefix_disposition.StagedPrefixDispositionError,
+    ) as error:
         raise Phase9DisposableLiveProofControllerError(
             "phase9_proof_controller_disposition_invalid"
         ) from error
     if (
-        receipt.get("contract_sha256") != candidate.contract_sha256
-        or receipt.get("successor_attempt_identity_sha256")
+        receipt is None
+        or receipt.get("contract_sha256") != candidate.contract_sha256
+        or receipt.get("corrected_attempt_identity_sha256")
         != candidate.successor_attempt_identity_sha256
-        or receipt.get("no_host_effects_proven") is not True
-        or receipt.get("predecessor_state_mutated") is not False
+        or receipt.get("corrected_generation")
+        != disposition_entrypoint.CORRECTED_GENERATION
+        or receipt.get("corrected_package_manifest_sha256")
+        != candidate.package_manifest_sha256
+        or receipt.get("corrected_controller_runtime_receipt_sha256")
+        != candidate.controller_runtime_receipt_sha256
+        or receipt.get("failed_evidence_preserved_in_place") is not True
+        or receipt.get("no_store_or_service_effects_proven") is not True
         or receipt.get("deletion_performed") is not False
         or receipt.get("provider_calls") != 0
         or receipt.get("production_data_read") is not False
@@ -767,11 +783,16 @@ def execute_phase9_disposable_live_proof_controller(
         command_runner=command_runner,
     )
     disposition = _require_disposition(candidate)
-    if (
-        disposition_step.get("contract_sha256")
-        != disposition.get("contract_sha256")
-        or disposition_step.get("receipt_sha256")
-        != disposition.get("receipt_sha256")
+    if any(
+        disposition_step.get(key) != disposition.get(key)
+        for key in (
+            "contract_sha256",
+            "corrected_controller_runtime_receipt_sha256",
+            "corrected_generation",
+            "corrected_package_manifest_sha256",
+            "result",
+            "tombstone_sha256",
+        )
     ):
         raise Phase9DisposableLiveProofControllerError(
             "phase9_proof_controller_disposition_invalid"
@@ -847,7 +868,7 @@ def execute_phase9_disposable_live_proof_controller(
             candidate.controller_runtime_receipt_sha256
         ),
         "permit_sha256": permit["permit_sha256"],
-        "disposition_receipt_sha256": disposition["receipt_sha256"],
+        "staged_prefix_tombstone_sha256": disposition["tombstone_sha256"],
         "live_proof_receipt_sha256": verified_live["receipt_sha256"],
         "exact_resources_absent": True,
         "activation_performed": False,
@@ -873,8 +894,9 @@ if __name__ == "__main__":
         sys.stderr.write(str(error) + "\n")
         raise SystemExit(1) from None
     except (
-        permit_publisher.Phase9PreEffectPermitPublicationError,
-        pre_effect_disposition.PreEffectDispositionError,
+        permit_publisher.Phase9StagedPrefixPermitPublicationError,
+        disposition_entrypoint.Phase9StagedPrefixDispositionEntrypointError,
+        staged_prefix_disposition.StagedPrefixDispositionError,
         phase9_permitted_candidate.Phase9PermittedCandidateError,
         runner.LiveProofError,
         durable_live_proof_receipt.DurableLiveProofReceiptError,

@@ -54,7 +54,7 @@ if (
 sys.path.insert(0, str(_REPOSITORY_ROOT))
 
 from tools.governed_memory_validation import phase9_permitted_candidate
-from tools.governed_memory_validation import pre_effect_disposition
+from tools.governed_memory_validation import staged_prefix_disposition
 from tools.governed_memory_install.execution_lock import (
     ExecutionLockError,
     HeldExecutionLockCapability,
@@ -63,10 +63,10 @@ from tools.governed_memory_install.execution_lock import (
 
 
 STORE_PARENT_PATH: Final = Path("/etc/governed-memory-stores")
-STORE_TARGET_LEAF: Final = "9a54cf123493-000002"
+STORE_TARGET_LEAF: Final = "9a54cf123493-000003"
 STORE_TARGET_PATH: Final = STORE_PARENT_PATH / STORE_TARGET_LEAF
 EXECUTION_PARENT_PATH: Final = Path("/var/lib/governed-memory-controller")
-EXECUTION_TARGET_LEAF: Final = "executions-v2"
+EXECUTION_TARGET_LEAF: Final = "executions-v3"
 EXECUTION_TARGET_PATH: Final = EXECUTION_PARENT_PATH / EXECUTION_TARGET_LEAF
 ROOT_UID: Final = 0
 ROOT_GID: Final = 0
@@ -320,9 +320,9 @@ def _directory_is_empty(descriptor: int, flags: int) -> bool:
 
 def _verify_fixed_identity() -> None:
     store_parent = PurePosixPath("/etc/governed-memory-stores")
-    store_target = store_parent / "9a54cf123493-000002"
+    store_target = store_parent / "9a54cf123493-000003"
     execution_parent = PurePosixPath("/var/lib/governed-memory-controller")
-    execution_target = execution_parent / "executions-v2"
+    execution_target = execution_parent / "executions-v3"
     if (
         PurePosixPath(STORE_PARENT_PATH) != store_parent
         or STORE_TARGET_LEAF != store_target.name
@@ -360,21 +360,43 @@ def _fixed_directories() -> tuple[_FixedDirectory, _FixedDirectory]:
     )
 
 
-def _require_exact_pre_effect_disposition() -> Mapping[str, object]:
-    """Require the tagged permit and completed read-only tombstone."""
+def _require_exact_staged_prefix_disposition() -> Mapping[str, object]:
+    """Require the exact failed-prefix fence before creating 000003 paths."""
 
     try:
         candidate = (
             phase9_permitted_candidate.require_exact_permitted_candidate()
         )
-        receipt = pre_effect_disposition.require_production_disposition_receipt(
-            package_manifest_sha256=candidate.package_manifest_sha256,
-            controller_runtime_receipt_sha256=(
+        expectation = staged_prefix_disposition.ReviewedStagedPrefixExpectation(
+            contract_sha256=candidate.contract_sha256,
+            disposition_id=(
+                staged_prefix_disposition.PRODUCTION_DISPOSITION_ID
+            ),
+            old_tag_ref=staged_prefix_disposition.PRODUCTION_OLD_TAG_REF,
+            old_tag_commit=staged_prefix_disposition.PRODUCTION_OLD_TAG_COMMIT,
+            old_tag_tree=staged_prefix_disposition.PRODUCTION_OLD_TAG_TREE,
+            failed_package_manifest_sha256=(
+                staged_prefix_disposition.PRODUCTION_FAILED_PACKAGE_MANIFEST_SHA256
+            ),
+            failed_controller_runtime_receipt_sha256=(
+                staged_prefix_disposition.PRODUCTION_FAILED_RUNTIME_RECEIPT_SHA256
+            ),
+            corrected_generation=(
+                staged_prefix_disposition.PRODUCTION_CORRECTED_GENERATION
+            ),
+            corrected_package_manifest_sha256=(
+                candidate.package_manifest_sha256
+            ),
+            corrected_controller_runtime_receipt_sha256=(
                 candidate.controller_runtime_receipt_sha256
             ),
         )
+        receipt = staged_prefix_disposition.verify_staged_prefix_tombstone(
+            staged_prefix_disposition.production_disposition_paths(),
+            expectation,
+        )
         successor = (
-            pre_effect_disposition.production_successor_attempt_identity_sha256(
+            staged_prefix_disposition.production_corrected_attempt_identity_sha256(
                 package_manifest_sha256=candidate.package_manifest_sha256,
                 controller_runtime_receipt_sha256=(
                     candidate.controller_runtime_receipt_sha256
@@ -383,20 +405,28 @@ def _require_exact_pre_effect_disposition() -> Mapping[str, object]:
         )
     except (
         phase9_permitted_candidate.Phase9PermittedCandidateError,
-        pre_effect_disposition.PreEffectDispositionError,
+        staged_prefix_disposition.StagedPrefixDispositionError,
     ) as error:
         raise Phase9DisposableStoreSubstrateError(
             "phase9_store_substrate_disposition_required"
         ) from error
     if (
-        receipt.get("schema_version") != pre_effect_disposition.RECEIPT_SCHEMA
-        or receipt.get("result") != pre_effect_disposition.RESULT
+        not isinstance(receipt, Mapping)
+        or receipt.get("schema_version")
+        != staged_prefix_disposition.TOMBSTONE_SCHEMA
+        or receipt.get("result") != staged_prefix_disposition.RESULT
         or receipt.get("contract_sha256") != candidate.contract_sha256
-        or receipt.get("predecessor_attempt_identity_sha256")
-        != pre_effect_disposition.PRODUCTION_PREDECESSOR_ATTEMPT_IDENTITY_SHA256
-        or receipt.get("successor_attempt_identity_sha256") != successor
-        or receipt.get("no_host_effects_proven") is not True
-        or receipt.get("predecessor_state_mutated") is not False
+        or receipt.get("failed_prefix_identity_sha256")
+        != staged_prefix_disposition.production_failed_prefix_identity_sha256()
+        or receipt.get("corrected_attempt_identity_sha256") != successor
+        or receipt.get("corrected_generation")
+        != staged_prefix_disposition.PRODUCTION_CORRECTED_GENERATION
+        or receipt.get("corrected_package_manifest_sha256")
+        != candidate.package_manifest_sha256
+        or receipt.get("corrected_controller_runtime_receipt_sha256")
+        != candidate.controller_runtime_receipt_sha256
+        or receipt.get("failed_evidence_preserved_in_place") is not True
+        or receipt.get("no_store_or_service_effects_proven") is not True
         or receipt.get("deletion_performed") is not False
         or receipt.get("provider_calls") != 0
         or receipt.get("production_data_read") is not False
@@ -566,7 +596,7 @@ def bootstrap_phase9_disposable_store_substrate(
             "phase9_store_substrate_root_required"
         )
     _require_exact_held_lock(held_lock)
-    _require_exact_pre_effect_disposition()
+    _require_exact_staged_prefix_disposition()
     _verify_fixed_identity()
     outcomes = _bootstrap_directories(
         _fixed_directories(), held_lock=held_lock

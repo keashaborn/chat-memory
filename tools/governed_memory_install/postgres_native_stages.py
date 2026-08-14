@@ -26,13 +26,13 @@ from typing import Final, Mapping, Protocol, TypeAlias
 
 
 POSTGRES_HOST: Final = "127.0.0.1"
-POSTGRES_PORT: Final = 55433
+POSTGRES_PORT: Final = 55434
 POSTGRES_SERVER_VERSION: Final = "16.14"
 BOOTSTRAP_DATABASE: Final = "postgres"
 TARGET_DATABASE: Final = "governed_memory"
 BOOTSTRAP_ROLE: Final = "governed_memory_bootstrap"
 OWNER_ROLE: Final = "governed_memory_owner"
-ADVISORY_LOCK_KEY: Final = 9_054_123_493_000_002
+ADVISORY_LOCK_KEY: Final = 9_054_123_493_000_003
 CONNECT_TIMEOUT_SECONDS: Final = 5
 LOCK_TIMEOUT_MILLISECONDS: Final = 1_000
 STATEMENT_TIMEOUT_MILLISECONDS: Final = 15_000

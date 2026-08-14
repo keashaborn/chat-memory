@@ -71,7 +71,7 @@ IMAGE_INSPECT_TEMPLATE: Final = (
     "[{{json .Id}},{{json .RepoDigests}},{{json .Os}},"
     "{{json .Architecture}}]"
 )
-SUPERVISOR_NETWORK_NAME: Final = "governed-memory-net-9a54cf123493-000002"
+SUPERVISOR_NETWORK_NAME: Final = "governed-memory-net-9a54cf123493-000003"
 SUPERVISOR_POSTGRES_PORT_KEY: Final = "5432/tcp"
 SUPERVISOR_QDRANT_PORT_KEY: Final = "6333/tcp"
 SUPERVISOR_LABEL_KEYS: Final = (
@@ -410,7 +410,7 @@ class HostOperationRequest:
             + "/tools/governed_memory_install/store_supervisor_launcher.py"
             or self.postflight_receipt_path
             != (
-                "/var/lib/governed-memory-controller/executions-v2/"
+                "/var/lib/governed-memory-controller/executions-v3/"
                 + self.execution_id
                 + "/terminal-postflight-receipt.json"
             )
