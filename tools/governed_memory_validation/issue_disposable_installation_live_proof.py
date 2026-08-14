@@ -8,21 +8,223 @@ controller release.  It creates one fixed durable root-owned public recovery
 capsule with pre-signed install documents and a transitive empty-rollback
 delegation, then discards the private key before execution.  The exact sealed
 runner can recover from only that public capsule and its durable reservation.
-No path, command, SQL, URL, resource, signer, nonce, approval text, or
-environment input is accepted.
+No operator-selectable path, command, SQL, URL, resource, signer, nonce,
+approval text, or proof identity is accepted.  The fixed manager pipe and
+lease identity environment are mandatory authority inputs, not proof inputs.
 """
 
 import sys
+import ctypes
+import fcntl
+import os
+import select
+import signal
+import stat
 
 _ISOLATED_RUNTIME_AT_START = bool(sys.flags.isolated)
 _DONT_WRITE_BYTECODE_AT_START = bool(sys.dont_write_bytecode)
+_PINNED_R7_RUNTIME_RECEIPT_SHA256 = (
+    "c9b6721985c4840f555d583d77fcfb82c4f20d609c0af651a7171744d58c9a11"
+)
+_PINNED_R7_INTERPRETER = (
+    "/opt/governed-memory-controller/runtimes/"
+    + _PINNED_R7_RUNTIME_RECEIPT_SHA256
+    + "/bin/python"
+)
+MANAGER_CONTROL_FD = 198
+MANAGER_PID_ENVIRONMENT_KEY = "GOVERNED_MEMORY_PHASE9_MANAGER_PID"
+PR_SET_PDEATHSIG = 1
+_MANAGER_CONTROL_LOST = False
+_DIRECT_MANAGER_PID: int | None = None
+_DIRECT_MANAGER_PIPE_ID: tuple[int, int] | None = None
+_PREIMPORT_ISSUER_RELATIVE = (
+    "tools/governed_memory_validation/"
+    "issue_disposable_installation_live_proof.py"
+)
+_PREIMPORT_MANAGER_RELATIVE = (
+    "tools/governed_memory_validation/"
+    "execute_phase9_disposable_live_proof_controller.py"
+)
+
+
+def _mark_manager_control_lost(
+    unused_signum: int,
+    unused_frame: object,
+) -> None:
+    """Record parent loss without performing unsafe work in a signal handler."""
+
+    del unused_signum, unused_frame
+    global _MANAGER_CONTROL_LOST
+    _MANAGER_CONTROL_LOST = True
+
+
+def _preimport_manager_pid() -> int:
+    raw = os.environ.get(MANAGER_PID_ENVIRONMENT_KEY)
+    if (
+        type(raw) is not str
+        or not raw.isascii()
+        or not raw.isdecimal()
+        or raw.startswith("0")
+    ):
+        raise RuntimeError("phase9_proof_issuer_manager_control_required")
+    value = int(raw)
+    if value <= 1 or str(value) != raw or value != os.getppid():
+        raise RuntimeError("phase9_proof_issuer_manager_control_required")
+    return value
+
+
+def _preimport_proc_cmdline(pid: int) -> tuple[str, ...]:
+    with open(f"/proc/{pid}/cmdline", "rb", buffering=0) as source:
+        raw = source.read(16 * 1024 + 1)
+    if not raw or len(raw) > 16 * 1024 or not raw.endswith(b"\x00"):
+        raise RuntimeError("cmdline")
+    try:
+        values = tuple(item.decode("utf-8") for item in raw[:-1].split(b"\x00"))
+    except UnicodeError as error:
+        raise RuntimeError("cmdline") from error
+    if not values or any(not value for value in values):
+        raise RuntimeError("cmdline")
+    return values
+
+
+def _preimport_manager_holds_control_writer(
+    manager_pid: int,
+    control_identity: tuple[int, int],
+) -> bool:
+    for entry in os.listdir(f"/proc/{manager_pid}/fd"):
+        if not entry.isascii() or not entry.isdecimal():
+            continue
+        descriptor = int(entry)
+        try:
+            opened = os.stat(f"/proc/{manager_pid}/fd/{descriptor}")
+            if (
+                not stat.S_ISFIFO(opened.st_mode)
+                or (opened.st_dev, opened.st_ino) != control_identity
+            ):
+                continue
+            with open(
+                f"/proc/{manager_pid}/fdinfo/{descriptor}",
+                "rb",
+                buffering=0,
+            ) as source:
+                raw = source.read(4097)
+            if len(raw) > 4096:
+                raise RuntimeError("fdinfo")
+            flag_lines = [
+                line for line in raw.splitlines() if line.startswith(b"flags:\t")
+            ]
+            if len(flag_lines) != 1:
+                continue
+            flags = int(flag_lines[0][len(b"flags:\t") :], 8)
+            if flags & os.O_ACCMODE == os.O_WRONLY:
+                return True
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+    return False
+
+
+def _preimport_validate_manager_lineage(
+    manager_pid: int,
+    control_identity: tuple[int, int],
+) -> None:
+    issuer_path = os.path.realpath(__file__)
+    repository_root = os.path.dirname(
+        os.path.dirname(os.path.dirname(issuer_path))
+    )
+    manager_path = os.path.join(repository_root, _PREIMPORT_MANAGER_RELATIVE)
+    if (
+        not os.path.isabs(__file__)
+        or issuer_path != __file__
+        or os.path.relpath(issuer_path, repository_root)
+        != _PREIMPORT_ISSUER_RELATIVE
+        or tuple(sys.argv) != (issuer_path,)
+        or os.path.realpath(manager_path) != manager_path
+        or os.readlink(f"/proc/{manager_pid}/exe")
+        != _PINNED_R7_INTERPRETER
+        or _preimport_proc_cmdline(manager_pid)
+        != (
+            _PINNED_R7_INTERPRETER,
+            "-I",
+            "-B",
+            manager_path,
+        )
+        or not _preimport_manager_holds_control_writer(
+            manager_pid,
+            control_identity,
+        )
+    ):
+        raise RuntimeError("manager")
+
+
+def _preimport_require_manager_control() -> int:
+    """Bind direct execution to one live manager and fixed read-only pipe."""
+
+    try:
+        opened = os.fstat(MANAGER_CONTROL_FD)
+        flags = fcntl.fcntl(MANAGER_CONTROL_FD, fcntl.F_GETFL)
+        if (
+            not stat.S_ISFIFO(opened.st_mode)
+            or flags & os.O_ACCMODE != os.O_RDONLY
+        ):
+            raise OSError("manager control descriptor")
+        os.set_blocking(MANAGER_CONTROL_FD, False)
+        ready, unused_write, unused_exception = select.select(
+            [MANAGER_CONTROL_FD], [], [], 0
+        )
+        if ready or unused_write or unused_exception:
+            raise OSError("manager control descriptor closed")
+        manager_pid = _preimport_manager_pid()
+        _preimport_validate_manager_lineage(
+            manager_pid,
+            (opened.st_dev, opened.st_ino),
+        )
+        signal.signal(signal.SIGTERM, _mark_manager_control_lost)
+        library = ctypes.CDLL(None, use_errno=True)
+        prctl = library.prctl
+        prctl.argtypes = (
+            ctypes.c_int,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+        )
+        prctl.restype = ctypes.c_int
+        if prctl(
+            PR_SET_PDEATHSIG,
+            int(signal.SIGCONT),
+            0,
+            0,
+            0,
+        ) != 0:
+            raise OSError("manager parent-death signal")
+        if os.getppid() != manager_pid or _MANAGER_CONTROL_LOST:
+            raise OSError("manager parent changed")
+        ready, unused_write, unused_exception = select.select(
+            [MANAGER_CONTROL_FD], [], [], 0
+        )
+        if ready or unused_write or unused_exception:
+            raise OSError("manager control descriptor closed")
+        global _DIRECT_MANAGER_PIPE_ID
+        _DIRECT_MANAGER_PIPE_ID = (opened.st_dev, opened.st_ino)
+        return manager_pid
+    except (OSError, RuntimeError, ValueError, AttributeError, TypeError):
+        sys.stderr.write("phase9_proof_issuer_manager_control_required\n")
+        raise SystemExit(1) from None
+
+
 if __name__ == "__main__" and not (
     _ISOLATED_RUNTIME_AT_START and _DONT_WRITE_BYTECODE_AT_START
 ):
     sys.stderr.write("phase9_proof_issuer_runtime_isolation_required\n")
     raise SystemExit(1)
+if __name__ == "__main__" and (
+    sys.platform != "linux" or sys.executable != _PINNED_R7_INTERPRETER
+):
+    sys.stderr.write("phase9_proof_issuer_pinned_runtime_required\n")
+    raise SystemExit(1)
+if __name__ == "__main__":
+    _DIRECT_MANAGER_PID = _preimport_require_manager_control()
 
-import argparse
 import base64
 from collections.abc import Mapping as MappingABC
 from dataclasses import dataclass
@@ -30,13 +232,9 @@ from datetime import datetime, timedelta, timezone
 import errno
 import hashlib
 import json
-import os
 from pathlib import Path
 import re
-import signal
-import select
 import sqlite3
-import stat
 import subprocess
 import time
 from types import MappingProxyType
@@ -68,11 +266,15 @@ from tools.governed_memory_install.execution_lock import (
     GlobalExecutionLock,
 )
 from tools.governed_memory_validation import (
+    bootstrap_phase9_disposable_store_substrate as substrate_bootstrap,
+)
+from tools.governed_memory_validation import (
     durable_live_proof_receipt,
 )
 from tools.governed_memory_validation import (
     pre_effect_disposition,
 )
+from tools.governed_memory_validation import phase9_permitted_candidate
 from tools.governed_memory_validation import (
     run_disposable_installation_live_proof as runner,
 )
@@ -100,6 +302,23 @@ _ERROR_RE: Final = re.compile(
     r"phase9_live_proof_[a-z0-9_]{1,140}\Z", re.ASCII
 )
 _GIT: Final = "/usr/bin/git"
+LEASE_GUARD_PYTHON: Final = "/usr/bin/python3.12"
+LEASE_GUARD: Final = (
+    "/var/lib/chat-memory-change-leases-v1/control/bin/"
+    "chat_memory_lease_guard.py"
+)
+LEASE_GUARD_UID: Final = 1000
+LEASE_GUARD_GID: Final = 1000
+MANAGER_AUTHORITY_RECHECK_SECONDS: Final = 30.0
+_LEASE_ID_RE: Final = re.compile(
+    r"[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}\Z", re.ASCII
+)
+_MANAGER_LOSS_CODES: Final = frozenset(
+    {
+        "phase9_proof_issuer_manager_control_lost",
+        "phase9_proof_issuer_production_write_lease_denied",
+    }
+)
 
 
 class Phase9ProofIssuerError(RuntimeError):
@@ -123,6 +342,104 @@ def _require_closed_issuer_runtime() -> None:
         raise Phase9ProofIssuerError(
             "phase9_proof_issuer_runtime_isolation_required"
         )
+
+
+def _selected_lease_environment(
+    environment: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    source = os.environ if environment is None else environment
+    selected: dict[str, str] = {}
+    for key in ("CHAT_MEMORY_LEASE_ID", "CODEX_TASK_ID", "CODEX_THREAD_ID"):
+        value = source.get(key)
+        if type(value) is not str or _LEASE_ID_RE.fullmatch(value) is None:
+            raise Phase9ProofIssuerError(
+                "phase9_proof_issuer_production_write_lease_denied"
+            )
+        selected[key] = value
+    return selected
+
+
+def _require_production_write_lease(
+    environment: Mapping[str, str] | None = None,
+    *,
+    command_runner: object = subprocess,
+) -> None:
+    selected = _selected_lease_environment(environment)
+    guard_environment = {
+        "PATH": "/usr/bin:/bin",
+        "LANG": "C",
+        "LC_ALL": "C",
+        **selected,
+    }
+    try:
+        completed = command_runner.run(
+            (
+                LEASE_GUARD_PYTHON,
+                LEASE_GUARD,
+                "--operation",
+                "production-write",
+                "--worktree",
+                str(_ISSUER_REPOSITORY_ROOT),
+            ),
+            cwd="/",
+            env=guard_environment,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=90,
+            check=False,
+            user=LEASE_GUARD_UID,
+            group=LEASE_GUARD_GID,
+            extra_groups=(),
+        )
+    except (OSError, subprocess.SubprocessError, AttributeError) as error:
+        raise Phase9ProofIssuerError(
+            "phase9_proof_issuer_production_write_lease_denied"
+        ) from error
+    if (
+        completed.returncode != 0
+        or completed.stdout != b""
+        or completed.stderr != b""
+    ):
+        raise Phase9ProofIssuerError(
+            "phase9_proof_issuer_production_write_lease_denied"
+        )
+
+
+def _require_manager_control_health() -> None:
+    """Require the original manager parent and its exact open control pipe."""
+
+    try:
+        manager_pid = _preimport_manager_pid()
+        opened = os.fstat(MANAGER_CONTROL_FD)
+        flags = fcntl.fcntl(MANAGER_CONTROL_FD, fcntl.F_GETFL)
+        ready, unused_write, unused_exception = select.select(
+            [MANAGER_CONTROL_FD], [], [], 0
+        )
+    except (OSError, RuntimeError, ValueError, AttributeError, TypeError) as error:
+        raise Phase9ProofIssuerError(
+            "phase9_proof_issuer_manager_control_lost"
+        ) from error
+    if (
+        _MANAGER_CONTROL_LOST
+        or manager_pid != _DIRECT_MANAGER_PID
+        or _DIRECT_MANAGER_PIPE_ID != (opened.st_dev, opened.st_ino)
+        or not stat.S_ISFIFO(opened.st_mode)
+        or flags & os.O_ACCMODE != os.O_RDONLY
+        or ready
+        or unused_write
+        or unused_exception
+    ):
+        raise Phase9ProofIssuerError(
+            "phase9_proof_issuer_manager_control_lost"
+        )
+
+
+def _require_active_manager_authority() -> None:
+    """Require live manager lineage and the current fixed production lease."""
+
+    _require_manager_control_health()
+    _require_production_write_lease()
 
 
 def verify_exact_clean_candidate(inputs: runner.ProofInputs) -> None:
@@ -202,6 +519,33 @@ def verify_exact_clean_candidate(inputs: runner.ProofInputs) -> None:
         raise Phase9ProofIssuerError(
             "phase9_proof_issuer_candidate_git_mismatch"
         )
+    _require_exact_permitted_candidate(inputs)
+
+
+def _require_exact_permitted_candidate(
+    inputs: runner.ProofInputs,
+) -> phase9_permitted_candidate.PermittedCandidateAuthority:
+    """Bind caller inputs to the root permit, fixed tag, and current sources."""
+
+    try:
+        return phase9_permitted_candidate.require_exact_permitted_candidate(
+            expected_candidate_git_commit=inputs.candidate_git_commit,
+            expected_candidate_git_tree=inputs.candidate_git_tree,
+            expected_package_manifest_sha256=(
+                inputs.package_manifest_sha256
+            ),
+            expected_controller_runtime_receipt_sha256=(
+                inputs.controller_runtime_receipt_sha256
+            ),
+            expected_thread_id=runner.THREAD_ID,
+            expected_authorization_text_sha256=(
+                runner.AUTHORIZED_TEXT_SHA256
+            ),
+        )
+    except phase9_permitted_candidate.Phase9PermittedCandidateError as error:
+        raise Phase9ProofIssuerError(
+            "phase9_proof_issuer_candidate_permit_required"
+        ) from error
 
 
 def _canonical(value: object) -> bytes:
@@ -1059,6 +1403,7 @@ def reconcile_capsule_publication(
                     ) from error
                 _require_pristine_staged_cleanup_state(inputs=inputs)
                 inode = (temp.st_dev, temp.st_ino)
+                _require_active_manager_authority()
                 _unlink_exact_member(parent_fd, temp_name, inode)
                 if _read_optional_capsule_member(
                     parent_fd,
@@ -1145,6 +1490,7 @@ def prepare_fixed_recovery_capsule(
             | getattr(os, "O_NOFOLLOW", 0)
         )
         try:
+            _require_active_manager_authority()
             file_fd = os.open(
                 _recovery_capsule_temp_name(), flags, 0o400, dir_fd=parent_fd
             )
@@ -1256,6 +1602,7 @@ def complete_linked_capsule_publication(
             raise Phase9ProofIssuerError(
                 "phase9_proof_issuer_capsule_publication_drift"
             )
+        _require_active_manager_authority()
         _unlink_exact_member(
             parent_fd, _recovery_capsule_temp_name(), expected_inode
         )
@@ -1308,6 +1655,7 @@ def commit_preclaimed_recovery_capsule(
             raise Phase9ProofIssuerError(
                 "phase9_proof_issuer_existing_recovery_capsule_refused"
             )
+        _require_active_manager_authority()
         _publish_temp_link(parent_fd, temp_inode=expected_inode)
     finally:
         try:
@@ -1352,10 +1700,19 @@ def _runner_argv(
     )
 
 
-def _close_unintended_runner_descriptors() -> None:
-    """Leave only inert stdin, output pipes, and the fixed inherited guard."""
+def _close_unintended_runner_descriptors(
+    *,
+    retain_manager_control: bool,
+) -> None:
+    """Leave only inert I/O and the mode's exact inherited capabilities."""
 
-    retained = frozenset({0, 1, 2, runner.LIVE_PROOF_GUARD_FD})
+    if type(retain_manager_control) is not bool:
+        raise Phase9ProofIssuerError(
+            "phase9_proof_issuer_runner_descriptor_seal_failed"
+        )
+    retained = {0, 1, 2, runner.LIVE_PROOF_GUARD_FD}
+    if retain_manager_control:
+        retained.add(MANAGER_CONTROL_FD)
     try:
         entries = os.listdir("/proc/self/fd")
     except OSError as error:
@@ -1386,6 +1743,7 @@ def _seal_exact_runner_process(
     guard_descriptor: int,
     stdout_descriptor: int,
     stderr_descriptor: int,
+    mode: runner.RunnerMode,
 ) -> None:
     """Install the exact inherited process surface immediately before exec."""
 
@@ -1396,6 +1754,7 @@ def _seal_exact_runner_process(
         or stdout_descriptor < 0
         or type(stderr_descriptor) is not int
         or stderr_descriptor < 0
+        or type(mode) is not runner.RunnerMode
     ):
         raise Phase9ProofIssuerError("phase9_proof_issuer_guard_invalid")
     stdin_descriptor = os.open(
@@ -1406,9 +1765,101 @@ def _seal_exact_runner_process(
     os.dup2(stdout_descriptor, 1)
     os.dup2(stderr_descriptor, 2)
     os.dup2(guard_descriptor, runner.LIVE_PROOF_GUARD_FD)
-    for descriptor in (0, 1, 2, runner.LIVE_PROOF_GUARD_FD):
+    retained_descriptors = [0, 1, 2, runner.LIVE_PROOF_GUARD_FD]
+    retain_manager_control = mode is not runner.RunnerMode.RECOVER_ONLY
+    if retain_manager_control:
+        try:
+            opened = os.fstat(MANAGER_CONTROL_FD)
+            flags = fcntl.fcntl(MANAGER_CONTROL_FD, fcntl.F_GETFL)
+        except OSError as error:
+            raise Phase9ProofIssuerError(
+                "phase9_proof_issuer_runner_descriptor_seal_failed"
+            ) from error
+        if (
+            not stat.S_ISFIFO(opened.st_mode)
+            or flags & os.O_ACCMODE != os.O_RDONLY
+        ):
+            raise Phase9ProofIssuerError(
+                "phase9_proof_issuer_runner_descriptor_seal_failed"
+            )
+        retained_descriptors.append(MANAGER_CONTROL_FD)
+    for descriptor in retained_descriptors:
         os.set_inheritable(descriptor, True)
-    _close_unintended_runner_descriptors()
+    _close_unintended_runner_descriptors(
+        retain_manager_control=retain_manager_control,
+    )
+
+
+def _runner_environment(
+    mode: runner.RunnerMode,
+    *,
+    issuer_pid: int,
+) -> dict[str, str]:
+    if type(mode) is not runner.RunnerMode or issuer_pid <= 1:
+        raise Phase9ProofIssuerError(
+            "phase9_proof_issuer_runner_environment_invalid"
+        )
+    environment = dict(_SAFE_ENVIRONMENT)
+    if mode is runner.RunnerMode.RECOVER_ONLY:
+        return environment
+    manager_pid = _preimport_manager_pid()
+    environment.update(_selected_lease_environment())
+    environment.update(
+        {
+            "GOVERNED_MEMORY_PHASE9_ISSUER_PID": str(issuer_pid),
+            MANAGER_PID_ENVIRONMENT_KEY: str(manager_pid),
+            "GOVERNED_MEMORY_PHASE9_ISSUER_REPOSITORY_ROOT": str(
+                _ISSUER_REPOSITORY_ROOT
+            ),
+        }
+    )
+    return environment
+
+
+def _arm_runner_parent_death(expected_parent_pid: int) -> None:
+    """Kill an orphaned Linux runner before it can create a new session."""
+
+    if (
+        sys.platform != "linux"
+        or type(expected_parent_pid) is not int
+        or expected_parent_pid <= 1
+    ):
+        raise Phase9ProofIssuerError(
+            "phase9_proof_issuer_runner_parent_fence_invalid"
+        )
+    try:
+        library = ctypes.CDLL(None, use_errno=True)
+        prctl = library.prctl
+        prctl.argtypes = (
+            ctypes.c_int,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+        )
+        prctl.restype = ctypes.c_int
+        result = prctl(
+            PR_SET_PDEATHSIG,
+            int(signal.SIGKILL),
+            0,
+            0,
+            0,
+        )
+    except (AttributeError, OSError, TypeError, ValueError) as error:
+        raise Phase9ProofIssuerError(
+            "phase9_proof_issuer_runner_parent_fence_invalid"
+        ) from error
+    if result != 0:
+        raise Phase9ProofIssuerError(
+            "phase9_proof_issuer_runner_parent_fence_invalid"
+        )
+    # PR_SET_PDEATHSIG is not retroactive when the parent exits between fork
+    # and prctl. Refuse that race before setsid or exec can detach the runner.
+    if os.getppid() != expected_parent_pid:
+        try:
+            os.kill(os.getpid(), signal.SIGKILL)
+        finally:
+            os._exit(1)
 
 
 def _spawn_exact_runner(
@@ -1425,21 +1876,28 @@ def _spawn_exact_runner(
         owned.update((stdout_read, stdout_write))
         stderr_read, stderr_write = os.pipe()
         owned.update((stderr_read, stderr_write))
+        expected_parent_pid = os.getpid()
+        runner_environment = _runner_environment(
+            mode,
+            issuer_pid=expected_parent_pid,
+        )
         pid = os.fork()
         if pid == 0:
             try:
+                _arm_runner_parent_death(expected_parent_pid)
                 os.setsid()
                 _seal_exact_runner_process(
                     guard_descriptor=guard_descriptor,
                     stdout_descriptor=stdout_write,
                     stderr_descriptor=stderr_write,
+                    mode=mode,
                 )
                 arguments = _runner_argv(inputs, mode)
                 runtime_python = arguments[0]
                 os.execve(
                     runtime_python,
                     arguments,
-                    dict(_SAFE_ENVIRONMENT),
+                    runner_environment,
                 )
             except BaseException:
                 os._exit(127)
@@ -1471,6 +1929,39 @@ def _spawn_exact_runner(
         ) from error
 
 
+def _require_process_group_absent_after_reap(
+    pid: int,
+    *,
+    deadline: float,
+) -> None:
+    """Prove post-reap group absence without signaling a reusable PGID."""
+
+    if type(pid) is not int or pid <= 0 or type(deadline) is not float:
+        raise Phase9ProofIssuerError(
+            "phase9_proof_issuer_runner_cleanup_failed"
+        )
+    while True:
+        try:
+            os.killpg(pid, 0)
+        except ProcessLookupError:
+            return
+        except OSError as error:
+            raise Phase9ProofIssuerError(
+                "phase9_proof_issuer_runner_cleanup_failed"
+            ) from error
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise Phase9ProofIssuerError(
+                "phase9_proof_issuer_runner_cleanup_failed"
+            )
+        select.select(
+            [],
+            [],
+            [],
+            min(remaining, RUNNER_REAP_POLL_SECONDS),
+        )
+
+
 def _terminate_and_reap_exact_runner(pid: int) -> None:
     """Race-safely terminate one forked runner and bound exact-child reaping."""
 
@@ -1479,6 +1970,7 @@ def _terminate_and_reap_exact_runner(pid: int) -> None:
             "phase9_proof_issuer_runner_cleanup_failed"
         )
     deadline = time.monotonic() + RUNNER_REAP_TIMEOUT_SECONDS
+
     group_signal_error: OSError | None = None
     while True:
         try:
@@ -1495,6 +1987,10 @@ def _terminate_and_reap_exact_runner(pid: int) -> None:
                 raise Phase9ProofIssuerError(
                     "phase9_proof_issuer_runner_cleanup_failed"
                 ) from group_signal_error
+            _require_process_group_absent_after_reap(
+                pid,
+                deadline=deadline,
+            )
             return
         except OSError as error:
             raise Phase9ProofIssuerError(
@@ -1505,6 +2001,10 @@ def _terminate_and_reap_exact_runner(pid: int) -> None:
                 raise Phase9ProofIssuerError(
                     "phase9_proof_issuer_runner_cleanup_failed"
                 ) from group_signal_error
+            _require_process_group_absent_after_reap(
+                pid,
+                deadline=deadline,
+            )
             return
         try:
             os.kill(pid, signal.SIGKILL)
@@ -1539,6 +2039,14 @@ def _supervise_attempt(
     guard_descriptor: int,
     mode: runner.RunnerMode = runner.RunnerMode.START_OR_RECOVER,
 ) -> tuple[int, bytes, bytes]:
+    requires_manager_authority = mode is not runner.RunnerMode.RECOVER_ONLY
+    if requires_manager_authority:
+        _require_active_manager_authority()
+        next_authority_recheck = (
+            time.monotonic() + MANAGER_AUTHORITY_RECHECK_SECONDS
+        )
+    else:
+        next_authority_recheck = float("inf")
     pid, stdout_fd, stderr_fd = _spawn_exact_runner(
         inputs,
         guard_descriptor,
@@ -1554,7 +2062,15 @@ def _supervise_attempt(
         stdout_buffer = bytearray()
         stderr_buffer = bytearray()
         while status is None or open_reads:
-            if time.monotonic() >= deadline:
+            now = time.monotonic()
+            if requires_manager_authority:
+                _require_manager_control_health()
+                if now >= next_authority_recheck:
+                    _require_production_write_lease()
+                    next_authority_recheck = (
+                        now + MANAGER_AUTHORITY_RECHECK_SECONDS
+                    )
+            if now >= deadline:
                 raise Phase9ProofIssuerError("phase9_proof_issuer_runner_timeout")
             if status is None:
                 waited, observed_status = os.waitpid(pid, os.WNOHANG)
@@ -1588,7 +2104,13 @@ def _supervise_attempt(
     except BaseException as error:
         cleanup_error: BaseException | None = None
         try:
-            _terminate_and_reap_exact_runner(pid)
+            if status is None:
+                _terminate_and_reap_exact_runner(pid)
+            else:
+                _require_process_group_absent_after_reap(
+                    pid,
+                    deadline=time.monotonic() + RUNNER_REAP_TIMEOUT_SECONDS,
+                )
         except BaseException as observed:
             cleanup_error = observed
         if cleanup_error is not None:
@@ -1610,6 +2132,17 @@ def _supervise_attempt(
             except OSError:
                 pass
     assert status is not None
+    # The direct child was already reaped above. Its numeric PID/PGID can now
+    # be reused, so never signal it. Require bounded signal-0 absence for every
+    # status before accepting success or allowing any later RECOVER_ONLY path.
+    _require_process_group_absent_after_reap(
+        pid,
+        deadline=time.monotonic() + RUNNER_REAP_TIMEOUT_SECONDS,
+    )
+    if requires_manager_authority:
+        # Close the race between the final loop observation and any caller
+        # publishing or consuming an effectful runner result.
+        _require_active_manager_authority()
     if os.WIFEXITED(status):
         return os.WEXITSTATUS(status), bytes(stdout_buffer), bytes(stderr_buffer)
     return 128 + os.WTERMSIG(status), bytes(stdout_buffer), bytes(stderr_buffer)
@@ -1753,6 +2286,7 @@ def _ensure_live_proof_guard_parent() -> None:
                 "phase9_proof_issuer_guard_parent_invalid"
             )
         try:
+            _require_active_manager_authority()
             os.mkdir(leaf, 0o700, dir_fd=parent_fd)
         except FileExistsError:
             created = False
@@ -1936,6 +2470,7 @@ def _remove_exact_staged_capsule_after_pristine_proof(
             raise Phase9ProofIssuerError(
                 "phase9_proof_issuer_capsule_publication_drift"
             )
+        _require_active_manager_authority()
         _unlink_exact_member(
             parent_fd,
             _recovery_capsule_temp_name(),
@@ -2100,6 +2635,7 @@ def issue_and_supervise(inputs: runner.ProofInputs) -> Mapping[str, object]:
     _require_closed_issuer_runtime()
     if os.geteuid() != 0:
         raise Phase9ProofIssuerError("phase9_proof_issuer_root_required")
+    _require_active_manager_authority()
     verify_exact_clean_candidate(inputs)
     try:
         unused_manifest, artifacts = runner._load_release(inputs)
@@ -2113,7 +2649,9 @@ def issue_and_supervise(inputs: runner.ProofInputs) -> Mapping[str, object]:
         raise Phase9ProofIssuerError(
             "phase9_proof_issuer_durable_recovery_authority_required"
         )
+    _require_active_manager_authority()
     _ensure_live_proof_guard_parent()
+    _require_active_manager_authority()
     try:
         guard = GlobalExecutionLock(
             runner.LIVE_PROOF_GUARD_PATH,
@@ -2126,13 +2664,27 @@ def issue_and_supervise(inputs: runner.ProofInputs) -> Mapping[str, object]:
         ) from error
     guard.retain_across_inherited_processes()
     with guard:
+        _require_active_manager_authority()
+        verify_exact_clean_candidate(inputs)
         _require_production_pre_effect_disposition(inputs=inputs)
+        verify_exact_clean_candidate(inputs)
+        _require_active_manager_authority()
+        try:
+            substrate_bootstrap.bootstrap_phase9_disposable_store_substrate(
+                held_lock=guard.held_capability()
+            )
+        except substrate_bootstrap.Phase9DisposableStoreSubstrateError as error:
+            raise Phase9ProofIssuerError(
+                "phase9_proof_issuer_substrate_bootstrap_failed"
+            ) from error
+        _require_active_manager_authority()
         try:
             runner._prepare_fixed_substrate()
         except runner.LiveProofError as error:
             raise Phase9ProofIssuerError(
                 "phase9_proof_issuer_substrate_invalid"
             ) from error
+        _require_active_manager_authority()
         try:
             observation = reconcile_capsule_publication(
                 inputs=inputs,
@@ -2290,6 +2842,8 @@ def issue_and_supervise(inputs: runner.ProofInputs) -> Mapping[str, object]:
             )
 
         recovery_required = False
+        manager_authority_lost = False
+        attempt_error: Phase9ProofIssuerError | None = None
         try:
             status, stdout, stderr = _supervise_attempt(
                 inputs=inputs,
@@ -2297,28 +2851,44 @@ def issue_and_supervise(inputs: runner.ProofInputs) -> Mapping[str, object]:
                 mode=runner.RunnerMode.START_OR_RECOVER,
             )
         except Phase9ProofIssuerError as error:
-            if str(error) != "phase9_proof_issuer_runner_timeout":
+            if str(error) == "phase9_proof_issuer_runner_cleanup_failed":
+                # The prior process group may still be live and shares this
+                # inherited flock open description. Never overlap recovery.
                 raise
+            if str(error) in _MANAGER_LOSS_CODES:
+                manager_authority_lost = True
+            attempt_error = error
             recovery_required = True
         else:
             if status == 0:
-                kind, verified = _verify_supervised_receipt(
-                    inputs=inputs,
-                    artifacts=artifacts,
-                    capsule_sha256=capsule_sha256,
-                    stdout=stdout,
-                    stderr=stderr,
-                )
-                if kind == "recovery":
-                    raise Phase9ProofIssuerError(
+                try:
+                    kind, verified = _verify_supervised_receipt(
+                        inputs=inputs,
+                        artifacts=artifacts,
+                        capsule_sha256=capsule_sha256,
+                        stdout=stdout,
+                        stderr=stderr,
+                    )
+                except Phase9ProofIssuerError as error:
+                    attempt_error = error
+                    recovery_required = True
+                else:
+                    if kind == "live":
+                        return verified
+                    if kind == "recovery":
+                        attempt_error = Phase9ProofIssuerError(
                         "phase9_proof_issuer_recovery_completed_live_proof_not_proven"
-                    )
-                if kind != "live":
-                    raise Phase9ProofIssuerError(
+                        )
+                    else:
+                        attempt_error = Phase9ProofIssuerError(
                         "phase9_proof_issuer_recovery_receipt_invalid"
-                    )
-                return verified
-            recovery_required = True
+                        )
+                    recovery_required = True
+            else:
+                # _supervise_attempt already killed and proved absence of the
+                # failed process group. Preserve the original one-retry policy
+                # after RECOVER_ONLY proves pair-only pristine state.
+                recovery_required = True
 
         if not recovery_required:
             raise Phase9ProofIssuerError(
@@ -2327,6 +2897,7 @@ def issue_and_supervise(inputs: runner.ProofInputs) -> Mapping[str, object]:
         # A killed runner may have durably published verified success before
         # stdout was observed.  Re-read that create-once evidence and require a
         # fresh exact-absence recovery before returning the original receipt.
+        durable_read_error: Phase9ProofIssuerError | None = None
         try:
             durable_after_failure = (
                 durable_live_proof_receipt.read_verified_promotable_live_receipt_if_present(
@@ -2336,9 +2907,11 @@ def issue_and_supervise(inputs: runner.ProofInputs) -> Mapping[str, object]:
                 )
             )
         except durable_live_proof_receipt.DurableLiveProofReceiptError as error:
-            raise Phase9ProofIssuerError(
+            durable_after_failure = None
+            durable_read_error = Phase9ProofIssuerError(
                 "phase9_proof_issuer_durable_receipt_invalid"
-            ) from error
+            )
+            durable_read_error.__cause__ = error
         if durable_after_failure is not None:
             return _adopt_durable_success_after_fresh_absence_recheck(
                 inputs=inputs,
@@ -2377,10 +2950,22 @@ def issue_and_supervise(inputs: runner.ProofInputs) -> Mapping[str, object]:
             raise Phase9ProofIssuerError(
                 "phase9_proof_issuer_recovery_receipt_invalid"
             )
+        if manager_authority_lost:
+            raise Phase9ProofIssuerError(
+                "phase9_proof_issuer_authority_lost_before_install_effect"
+            )
+        if durable_read_error is not None:
+            raise durable_read_error
+        if (
+            attempt_error is not None
+            and str(attempt_error) != "phase9_proof_issuer_runner_timeout"
+        ):
+            raise attempt_error
 
         # The first runner died after atomically claiming its exact pair but
         # before creating the expected execution directory.  Retry that same
         # pair once; never mint another claim and never loop.
+        retry_error: Phase9ProofIssuerError | None = None
         try:
             retry_status, retry_stdout, retry_stderr = _supervise_attempt(
                 inputs=inputs,
@@ -2388,30 +2973,38 @@ def issue_and_supervise(inputs: runner.ProofInputs) -> Mapping[str, object]:
                 mode=runner.RunnerMode.START_OR_RECOVER,
             )
         except Phase9ProofIssuerError as error:
-            if str(error) != "phase9_proof_issuer_runner_timeout":
+            if str(error) == "phase9_proof_issuer_runner_cleanup_failed":
                 raise
+            if str(error) in _MANAGER_LOSS_CODES:
+                manager_authority_lost = True
+            retry_error = error
             retry_status = -1
             retry_stdout = b""
             retry_stderr = b""
         if retry_status == 0:
-            retry_kind, retry_verified = _verify_supervised_receipt(
-                inputs=inputs,
-                artifacts=artifacts,
-                capsule_sha256=capsule_sha256,
-                stdout=retry_stdout,
-                stderr=retry_stderr,
-            )
-            if retry_kind == "live":
-                return retry_verified
-            if retry_kind == "recovery":
-                raise Phase9ProofIssuerError(
-                    "phase9_proof_issuer_recovery_completed_live_proof_not_proven"
+            try:
+                retry_kind, retry_verified = _verify_supervised_receipt(
+                    inputs=inputs,
+                    artifacts=artifacts,
+                    capsule_sha256=capsule_sha256,
+                    stdout=retry_stdout,
+                    stderr=retry_stderr,
                 )
-            raise Phase9ProofIssuerError(
-                "phase9_proof_issuer_recovery_receipt_invalid"
-            )
-
+            except Phase9ProofIssuerError as error:
+                retry_error = error
+            else:
+                if retry_kind == "live":
+                    return retry_verified
+                if retry_kind == "recovery":
+                    retry_error = Phase9ProofIssuerError(
+                    "phase9_proof_issuer_recovery_completed_live_proof_not_proven"
+                    )
+                else:
+                    retry_error = Phase9ProofIssuerError(
+                        "phase9_proof_issuer_recovery_receipt_invalid"
+                    )
         # A retry may have published success immediately before losing stdout.
+        retry_durable_read_error: Phase9ProofIssuerError | None = None
         try:
             durable_after_retry = (
                 durable_live_proof_receipt.read_verified_promotable_live_receipt_if_present(
@@ -2421,9 +3014,11 @@ def issue_and_supervise(inputs: runner.ProofInputs) -> Mapping[str, object]:
                 )
             )
         except durable_live_proof_receipt.DurableLiveProofReceiptError as error:
-            raise Phase9ProofIssuerError(
+            durable_after_retry = None
+            retry_durable_read_error = Phase9ProofIssuerError(
                 "phase9_proof_issuer_durable_receipt_invalid"
-            ) from error
+            )
+            retry_durable_read_error.__cause__ = error
         if durable_after_retry is not None:
             return _adopt_durable_success_after_fresh_absence_recheck(
                 inputs=inputs,
@@ -2456,6 +3051,14 @@ def issue_and_supervise(inputs: runner.ProofInputs) -> Mapping[str, object]:
                 "phase9_proof_issuer_recovery_completed_live_proof_not_proven"
             )
         if final_kind == "pair_only":
+            if manager_authority_lost:
+                raise Phase9ProofIssuerError(
+                    "phase9_proof_issuer_authority_lost_before_install_effect"
+                )
+            if retry_durable_read_error is not None:
+                raise retry_durable_read_error
+            if retry_error is not None:
+                raise retry_error
             raise Phase9ProofIssuerError(
                 "phase9_proof_issuer_start_not_observed_pair_only_pristine"
             )
@@ -2464,34 +3067,33 @@ def issue_and_supervise(inputs: runner.ProofInputs) -> Mapping[str, object]:
         )
 
 
-def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="issue_disposable_installation_live_proof.py",
-        allow_abbrev=False,
-    )
-    parser.add_argument("--candidate-git-commit", required=True)
-    parser.add_argument("--candidate-git-tree", required=True)
-    parser.add_argument("--package-manifest-sha256", required=True)
-    parser.add_argument("--controller-runtime-receipt-sha256", required=True)
-    return parser
+def _proof_inputs_from_verified_permit() -> runner.ProofInputs:
+    """Derive the only permitted proof inputs; accept no operator identities."""
 
-
-def parse_inputs(
-    argv: Sequence[str],
-) -> runner.ProofInputs:
-    values = _parser().parse_args(tuple(argv))
+    try:
+        candidate = phase9_permitted_candidate.require_exact_permitted_candidate(
+            expected_thread_id=runner.THREAD_ID,
+            expected_authorization_text_sha256=runner.AUTHORIZED_TEXT_SHA256,
+        )
+    except phase9_permitted_candidate.Phase9PermittedCandidateError as error:
+        raise Phase9ProofIssuerError(
+            "phase9_proof_issuer_candidate_permit_required"
+        ) from error
     return runner.ProofInputs(
-        candidate_git_commit=values.candidate_git_commit,
-        candidate_git_tree=values.candidate_git_tree,
-        package_manifest_sha256=values.package_manifest_sha256,
+        candidate_git_commit=candidate.candidate_git_commit,
+        candidate_git_tree=candidate.candidate_git_tree,
+        package_manifest_sha256=candidate.package_manifest_sha256,
         controller_runtime_receipt_sha256=(
-            values.controller_runtime_receipt_sha256
+            candidate.controller_runtime_receipt_sha256
         ),
     )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    inputs = parse_inputs(sys.argv[1:] if argv is None else argv)
+    if tuple(sys.argv[1:] if argv is None else argv):
+        raise Phase9ProofIssuerError("phase9_proof_issuer_arguments_refused")
+    _require_active_manager_authority()
+    inputs = _proof_inputs_from_verified_permit()
     receipt = issue_and_supervise(inputs)
     sys.stdout.buffer.write(_canonical(dict(receipt)) + b"\n")
     return 0

@@ -61,6 +61,9 @@ class Phase9JReleaseArtifactTests(unittest.TestCase):
             result["historical_phase7c_runtime_build_evidence_verified"]
         )
         self.assertTrue(result["current_runtime_build_evidence_verified"])
+        self.assertTrue(result["controller_runtime_release_receipt_verified"])
+        self.assertTrue(result["controller_runtime_substrate_published_dormant"])
+        self.assertFalse(result["persistent_store_resources_created"])
         self.assertFalse(result["current_runtime_rebuild_required"])
         self.assertTrue(
             result["historical_phase7c_application_proof_verified"]
@@ -83,7 +86,7 @@ class Phase9JReleaseArtifactTests(unittest.TestCase):
         self.assertTrue(
             result["current_store_package_static_verification_complete"]
         )
-        self.assertEqual(result["current_store_package_artifact_count"], 74)
+        self.assertEqual(result["current_store_package_artifact_count"], 76)
         self.assertTrue(result["synthetic_proof_harness_packaged"])
         self.assertFalse(result["current_store_synthetic_proof_complete"])
         self.assertFalse(
@@ -107,7 +110,7 @@ class Phase9JReleaseArtifactTests(unittest.TestCase):
             "exact_locked_controller_distribution_set_verification_packaged",
             "full_release_tree_sha256_bound_through_claim_journal_host_ownership_and_install_receipt",
             "empty_rollback_full_runtime_and_release_identity_bound_through_authority_claim_journal_requests_observations_controller_marker_and_receipt",
-            "controller_runtime_and_release_require_separate_future_build_and_install_authority",
+            "controller_runtime_and_release_required_separate_publication_authority",
             "supervisor_launcher_source_packaged",
             "resolved_store_spec_and_exact_docker_labels_bound",
             "resource_identity_ledger_v2_packaged",
@@ -141,8 +144,14 @@ class Phase9JReleaseArtifactTests(unittest.TestCase):
             "independent_standalone_cpython_payload_tree_proof_packaged",
         ):
             self.assertTrue(result[field], field)
-        self.assertFalse(result["controller_runtime_built_or_installed"])
-        self.assertFalse(result["controller_release_staged"])
+        self.assertFalse(
+            result[
+                "sealed_package_controller_runtime_built_or_installed_at_package_sealing"
+            ]
+        )
+        self.assertFalse(
+            result["sealed_package_controller_release_staged_at_package_sealing"]
+        )
         self.assertFalse(result["stores_install_owns_or_removes_controller_substrate"])
         for field in (
             "physical_postgresql_qdrant_writer_exclusion_packaged",
@@ -175,6 +184,12 @@ class Phase9JReleaseArtifactTests(unittest.TestCase):
         self.assertIn(
             "ops/governed_memory/runtime_build_receipt.json",
             result["artifact_sha256"],
+        )
+        self.assertEqual(
+            result["artifact_sha256"][
+                "ops/governed_memory/phase9j_controller_runtime_release_receipt.json"
+            ],
+            release_guard.EXPECTED_PHASE9J_CONTROLLER_RUNTIME_RELEASE_RECEIPT_SHA256,
         )
         self.assertEqual(
             {
@@ -223,6 +238,30 @@ class Phase9JReleaseArtifactTests(unittest.TestCase):
                 lambda value: value["disposable_validation"].update(
                     {"reusable_as_live_proof": True}
                 ),
+            ),
+            (
+                "controller_runtime_publication_receipt",
+                lambda value: value["controller_runtime_publication"].update(
+                    {"receipt_sha256": "0" * 64}
+                ),
+            ),
+            (
+                "controller_runtime_publication_store_creation",
+                lambda value: value["controller_runtime_publication"].update(
+                    {"persistent_store_resources_created": True}
+                ),
+            ),
+            (
+                "phase9j_current_target_generation",
+                lambda value: value["authority"][
+                    "phase9j_inactive_store_target"
+                ].update({"qdrant_collection": "governed_memory_9a54cf123493_000001"}),
+            ),
+            (
+                "phase8g_snapshot_claimed_current",
+                lambda value: value["authority"][
+                    "phase8g_application_validation_snapshot"
+                ].update({"evidence_role": "current_store_authority"}),
             ),
             (
                 "phase8g_proof_regression",
@@ -544,57 +583,63 @@ class Phase9JReleaseArtifactTests(unittest.TestCase):
         )
         release_guard._verify_current_component_disposition(original)
         mutations = (
-            lambda value: value["current_dormant_store_controller"].update(
+            lambda value: value["sealed_dormant_store_package"].update(
                 {"installation_performed": True}
             ),
-            lambda value: value["current_dormant_store_controller"].update(
+            lambda value: value["sealed_dormant_store_package"].update(
                 {"activation_entrypoint_packaged": True}
             ),
-            lambda value: value["current_dormant_store_controller"].update(
+            lambda value: value["sealed_dormant_store_package"].update(
                 {"production_state_changed": True}
             ),
-            lambda value: value["current_dormant_store_controller"].update(
-                {"controller_runtime_built_or_installed": True}
+            lambda value: value["sealed_dormant_store_package"].update(
+                {"controller_runtime_built_or_installed_at_package_sealing": True}
             ),
-            lambda value: value["current_dormant_store_controller"].update(
+            lambda value: value["sealed_dormant_store_package"].update(
                 {
                     "empty_rollback_full_runtime_and_release_identity_bound_through_authority_claim_journal_requests_observations_controller_marker_and_receipt": False
                 }
             ),
-            lambda value: value["current_dormant_store_controller"].update(
+            lambda value: value["sealed_dormant_store_package"].update(
                 {"physical_postgresql_qdrant_writer_exclusion_packaged": True}
             ),
-            lambda value: value["current_dormant_store_controller"].update(
+            lambda value: value["sealed_dormant_store_package"].update(
                 {
                     "physical_postgresql_qdrant_writer_exclusion_transport_packaged": True
                 }
             ),
-            lambda value: value["current_dormant_store_controller"].update(
+            lambda value: value["sealed_dormant_store_package"].update(
                 {"durable_controller_rollback_marker_transport_packaged": False}
             ),
-            lambda value: value["current_dormant_store_controller"].update(
+            lambda value: value["sealed_dormant_store_package"].update(
                 {
                     "runtime_publication_durable_intent_before_first_rename_packaged": False
                 }
             ),
-            lambda value: value["current_dormant_store_controller"].update(
+            lambda value: value["sealed_dormant_store_package"].update(
                 {"runtime_publication_post_intent_generic_cleanup_forbidden": False}
             ),
-            lambda value: value["current_dormant_store_controller"].update(
+            lambda value: value["sealed_dormant_store_package"].update(
                 {
                     "runtime_publication_crash_prefix_manual_review_fence_packaged": False
                 }
             ),
-            lambda value: value["current_dormant_store_controller"].update(
+            lambda value: value["sealed_dormant_store_package"].update(
                 {"runtime_publication_same_device_rename_precondition_packaged": False}
             ),
-            lambda value: value["current_dormant_store_controller"].update(
+            lambda value: value["sealed_dormant_store_package"].update(
                 {
                     "runtime_publication_exact_terminal_replay_with_renewed_fsyncs_packaged": False
                 }
             ),
             lambda value: value["historical_only"].update(
                 {"may_be_used_as_current_release_authority": True}
+            ),
+            lambda value: value["published_controller_substrate"].update(
+                {"receipt_sha256": "0" * 64}
+            ),
+            lambda value: value["published_controller_substrate"].update(
+                {"persistent_store_resources_created": True}
             ),
             lambda value: value["safety"].update(
                 {"activation_authorized": True}

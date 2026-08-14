@@ -27,8 +27,13 @@ def permit(**changes: object) -> dict[str, object]:
         "successor_attempt_identity_sha256": subject.SUCCESSOR_ATTEMPT_IDENTITY_SHA256,
         "authorization_text_sha256": subject.AUTHORIZATION_TEXT_SHA256,
         "thread_id": subject.THREAD_ID,
-        "source_blobs": {path: chr(99 + index) * 40 for index, path in enumerate(subject._SOURCE_PATHS)},
-        "authorized_action": "execute_pre_effect_disposition_only",
+        "source_blobs": {
+            path: f"{index + 1:x}" * 40
+            for index, path in enumerate(subject._SOURCE_PATHS)
+        },
+        "authorized_action": (
+            "execute_pre_effect_disposition_and_disposable_live_proof_only"
+        ),
         "activation_performed": False,
         "provider_calls": 0,
         "production_data_read": False,
@@ -36,6 +41,80 @@ def permit(**changes: object) -> dict[str, object]:
     }
     unsigned.update(changes)
     return {**unsigned, "permit_sha256": subject._sha(subject._canonical(unsigned))}
+
+
+class PreimportLineageTests(unittest.TestCase):
+    def test_exact_r7_manager_and_lease_lineage_is_required(self) -> None:
+        manager_pid = 4242
+        environment = {
+            subject._PREIMPORT_MANAGER_PID_KEY: str(manager_pid),
+            "CHAT_MEMORY_LEASE_ID": "lease-1",
+            "CODEX_TASK_ID": "task-1",
+            "CODEX_THREAD_ID": "thread-1",
+        }
+        manager_path = str(
+            subject._REPOSITORY_ROOT / subject._PREIMPORT_MANAGER_RELATIVE
+        )
+        command_line = b"\0".join(
+            value.encode("utf-8")
+            for value in (
+                subject._PREIMPORT_CONTROLLER_PYTHON,
+                "-I",
+                "-B",
+                manager_path,
+            )
+        ) + b"\0"
+        self.assertTrue(
+            subject._preimport_manager_lineage_valid(
+                environment,
+                observed_parent_pid=manager_pid,
+                observed_parent_executable=subject._PREIMPORT_CONTROLLER_PYTHON,
+                observed_parent_command_line=command_line,
+            )
+        )
+        cases = (
+            {"observed_parent_pid": manager_pid + 1},
+            {"observed_parent_executable": "/usr/bin/python3"},
+            {"observed_parent_command_line": command_line + b"foreign\0"},
+        )
+        for changes in cases:
+            values = {
+                "observed_parent_pid": manager_pid,
+                "observed_parent_executable": (
+                    subject._PREIMPORT_CONTROLLER_PYTHON
+                ),
+                "observed_parent_command_line": command_line,
+                **changes,
+            }
+            with self.subTest(changes=changes):
+                self.assertFalse(
+                    subject._preimport_manager_lineage_valid(
+                        environment, **values
+                    )
+                )
+        missing_lease = dict(environment)
+        del missing_lease["CODEX_THREAD_ID"]
+        self.assertFalse(
+            subject._preimport_manager_lineage_valid(
+                missing_lease,
+                observed_parent_pid=manager_pid,
+                observed_parent_executable=subject._PREIMPORT_CONTROLLER_PYTHON,
+                observed_parent_command_line=command_line,
+            )
+        )
+
+    def test_runtime_and_manager_lineage_gates_precede_later_imports(self) -> None:
+        source = Path(subject.__file__).read_text(encoding="utf-8")
+        later_import = source.index("from collections.abc import")
+        for marker in (
+            "sys.executable == _PREIMPORT_CONTROLLER_PYTHON",
+            "not _preimport_manager_lineage_valid()",
+            "/proc/{manager_pid}/exe",
+            "/proc/{manager_pid}/cmdline",
+            "phase9_pre_effect_disposition_manager_lineage_required",
+        ):
+            with self.subTest(marker=marker):
+                self.assertLess(source.index(marker), later_import)
 
 
 class ContractInstallationTests(unittest.TestCase):
@@ -389,6 +468,14 @@ class CandidateAndExecutionTests(unittest.TestCase):
         with (
             mock.patch.multiple(subject, _ISOLATED_RUNTIME_AT_START=True, _DONT_WRITE_BYTECODE_AT_START=True),
             mock.patch.object(subject.sys, "platform", "linux"),
+            mock.patch.object(
+                subject.sys,
+                "executable",
+                subject._PREIMPORT_CONTROLLER_PYTHON,
+            ),
+            mock.patch.object(
+                subject, "_preimport_manager_lineage_valid", return_value=True
+            ),
             mock.patch.object(subject.os, "geteuid", return_value=0),
             mock.patch.object(subject.os, "getegid", return_value=0),
             mock.patch.object(subject, "_read_and_verify_permit", side_effect=lambda: events.append("permit") or document),
@@ -403,6 +490,48 @@ class CandidateAndExecutionTests(unittest.TestCase):
             observed = subject.execute_exact_production_disposition()
         self.assertIs(observed, receipt)
         self.assertEqual(events[:4], ["permit", "candidate", "import", "install"])
+
+    def test_import_callable_disposition_rechecks_exact_runtime_and_manager(self) -> None:
+        with (
+            mock.patch.multiple(
+                subject,
+                _ISOLATED_RUNTIME_AT_START=True,
+                _DONT_WRITE_BYTECODE_AT_START=True,
+            ),
+            mock.patch.object(subject.sys, "platform", "linux"),
+            mock.patch.object(subject.sys, "executable", "/usr/bin/python3"),
+            mock.patch.object(subject, "_read_and_verify_permit") as read_permit,
+            self.assertRaisesRegex(
+                subject.Phase9PreEffectDispositionEntrypointError,
+                "phase9_pre_effect_disposition_runtime_isolation_required",
+            ),
+        ):
+            subject.execute_exact_production_disposition()
+        read_permit.assert_not_called()
+
+        with (
+            mock.patch.multiple(
+                subject,
+                _ISOLATED_RUNTIME_AT_START=True,
+                _DONT_WRITE_BYTECODE_AT_START=True,
+            ),
+            mock.patch.object(subject.sys, "platform", "linux"),
+            mock.patch.object(
+                subject.sys,
+                "executable",
+                subject._PREIMPORT_CONTROLLER_PYTHON,
+            ),
+            mock.patch.object(
+                subject, "_preimport_manager_lineage_valid", return_value=False
+            ),
+            mock.patch.object(subject, "_read_and_verify_permit") as read_permit,
+            self.assertRaisesRegex(
+                subject.Phase9PreEffectDispositionEntrypointError,
+                "phase9_pre_effect_disposition_manager_lineage_required",
+            ),
+        ):
+            subject.execute_exact_production_disposition()
+        read_permit.assert_not_called()
 
     def test_no_operational_arguments(self) -> None:
         with self.assertRaisesRegex(

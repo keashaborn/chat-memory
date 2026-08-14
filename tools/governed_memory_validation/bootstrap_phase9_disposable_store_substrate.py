@@ -8,20 +8,58 @@ import sys
 
 _ISOLATED_RUNTIME_AT_START = bool(sys.flags.isolated)
 _DONT_WRITE_BYTECODE_AT_START = bool(sys.dont_write_bytecode)
+_PINNED_R7_RUNTIME_RECEIPT_SHA256 = (
+    "c9b6721985c4840f555d583d77fcfb82c4f20d609c0af651a7171744d58c9a11"
+)
+_PINNED_R7_INTERPRETER = (
+    "/opt/governed-memory-controller/runtimes/"
+    + _PINNED_R7_RUNTIME_RECEIPT_SHA256
+    + "/bin/python"
+)
 if __name__ == "__main__" and not (
     _ISOLATED_RUNTIME_AT_START and _DONT_WRITE_BYTECODE_AT_START
 ):
     sys.stderr.write("phase9_store_substrate_runtime_isolation_required\n")
     raise SystemExit(1)
+if __name__ == "__main__" and (
+    sys.platform != "linux" or sys.executable != _PINNED_R7_INTERPRETER
+):
+    sys.stderr.write("phase9_store_substrate_pinned_runtime_required\n")
+    raise SystemExit(1)
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import errno
+import fcntl
 import json
 import os
 from pathlib import Path, PurePosixPath
+import select
 import stat
+import subprocess
 from typing import Final
+
+
+_BOOTSTRAP_PATH: Final = Path(__file__).resolve(strict=True)
+_REPOSITORY_ROOT: Final = _BOOTSTRAP_PATH.parents[2]
+_BOOTSTRAP_RELATIVE: Final = (
+    "tools/governed_memory_validation/"
+    "bootstrap_phase9_disposable_store_substrate.py"
+)
+if (
+    _BOOTSTRAP_PATH.relative_to(_REPOSITORY_ROOT).as_posix()
+    != _BOOTSTRAP_RELATIVE
+):
+    raise SystemExit("phase9_store_substrate_invocation_invalid")
+sys.path.insert(0, str(_REPOSITORY_ROOT))
+
+from tools.governed_memory_validation import phase9_permitted_candidate
+from tools.governed_memory_validation import pre_effect_disposition
+from tools.governed_memory_install.execution_lock import (
+    ExecutionLockError,
+    HeldExecutionLockCapability,
+    validate_held_execution_lock,
+)
 
 
 STORE_PARENT_PATH: Final = Path("/etc/governed-memory-stores")
@@ -36,6 +74,31 @@ STORE_PARENT_MODE: Final = 0o755
 EXECUTION_PARENT_MODE: Final = 0o700
 TARGET_MODE: Final = 0o700
 RESULT_SCHEMA: Final = "governed-memory-phase9-disposable-store-substrate-v1"
+LIVE_PROOF_GUARD_PATH: Final = Path(
+    "/run/lock/governed-memory-controller/phase9-disposable-live-proof.lock"
+)
+MANAGER_CONTROL_FD: Final = 198
+MANAGER_PID_ENVIRONMENT_KEY: Final = "GOVERNED_MEMORY_PHASE9_MANAGER_PID"
+MANAGER_RELATIVE: Final = (
+    "tools/governed_memory_validation/"
+    "execute_phase9_disposable_live_proof_controller.py"
+)
+ISSUER_RELATIVE: Final = (
+    "tools/governed_memory_validation/"
+    "issue_disposable_installation_live_proof.py"
+)
+LEASE_GUARD_PYTHON: Final = "/usr/bin/python3.12"
+LEASE_GUARD: Final = (
+    "/var/lib/chat-memory-change-leases-v1/control/bin/"
+    "chat_memory_lease_guard.py"
+)
+LEASE_GUARD_UID: Final = 1000
+LEASE_GUARD_GID: Final = 1000
+LEASE_ID_KEYS: Final = (
+    "CHAT_MEMORY_LEASE_ID",
+    "CODEX_TASK_ID",
+    "CODEX_THREAD_ID",
+)
 
 
 class Phase9DisposableStoreSubstrateError(RuntimeError):
@@ -48,6 +111,154 @@ class _FixedDirectory:
     parent_mode: int
     leaf: str
     target: Path
+
+
+def _identifier_valid(value: object) -> bool:
+    return bool(
+        type(value) is str
+        and 1 <= len(value) <= 128
+        and value.isascii()
+        and value[0].isalnum()
+        and all(character.isalnum() or character in "._:@-" for character in value)
+    )
+
+
+def _read_exact_cmdline(pid: str) -> bytes:
+    with open(f"/proc/{pid}/cmdline", "rb") as stream:
+        value = stream.read(4097)
+    if len(value) > 4096:
+        raise OSError("command line")
+    return value
+
+
+def _issuer_control_snapshot() -> tuple[int, tuple[int, int]]:
+    """Reprove the exact issuer, manager, and inherited live control pipe."""
+
+    environment = os.environ
+    manager_raw = environment.get(MANAGER_PID_ENVIRONMENT_KEY)
+    if (
+        type(manager_raw) is not str
+        or not manager_raw.isascii()
+        or not manager_raw.isdecimal()
+        or manager_raw.startswith("0")
+    ):
+        raise OSError("manager")
+    manager_pid = int(manager_raw)
+    if (
+        manager_pid <= 1
+        or str(manager_pid) != manager_raw
+        or manager_pid != os.getppid()
+        or any(not _identifier_valid(environment.get(key)) for key in LEASE_ID_KEYS)
+    ):
+        raise OSError("manager")
+    opened = os.fstat(MANAGER_CONTROL_FD)
+    flags = fcntl.fcntl(MANAGER_CONTROL_FD, fcntl.F_GETFL)
+    ready, unused_write, unused_exception = select.select(
+        [MANAGER_CONTROL_FD], [], [], 0
+    )
+    if (
+        not stat.S_ISFIFO(opened.st_mode)
+        or flags & os.O_ACCMODE != os.O_RDONLY
+        or ready
+        or unused_write
+        or unused_exception
+    ):
+        raise OSError("manager control")
+    issuer_path = str(_REPOSITORY_ROOT / ISSUER_RELATIVE)
+    manager_path = str(_REPOSITORY_ROOT / MANAGER_RELATIVE)
+    expected_issuer = b"\0".join(
+        value.encode("utf-8")
+        for value in (_PINNED_R7_INTERPRETER, "-I", "-B", issuer_path)
+    ) + b"\0"
+    expected_manager = b"\0".join(
+        value.encode("utf-8")
+        for value in (_PINNED_R7_INTERPRETER, "-I", "-B", manager_path)
+    ) + b"\0"
+    if (
+        os.path.realpath(os.readlink("/proc/self/exe"))
+        != os.path.realpath(_PINNED_R7_INTERPRETER)
+        or os.path.realpath(os.readlink(f"/proc/{manager_pid}/exe"))
+        != os.path.realpath(_PINNED_R7_INTERPRETER)
+        or _read_exact_cmdline("self") != expected_issuer
+        or _read_exact_cmdline(manager_raw) != expected_manager
+    ):
+        raise OSError("lineage")
+    return manager_pid, (opened.st_dev, opened.st_ino)
+
+
+def _require_issuer_invocation_authority() -> None:
+    """Require the exact R7 issuer, live manager pipe, and active lease."""
+
+    if (
+        not _ISOLATED_RUNTIME_AT_START
+        or not _DONT_WRITE_BYTECODE_AT_START
+        or sys.platform != "linux"
+        or sys.executable != _PINNED_R7_INTERPRETER
+    ):
+        raise Phase9DisposableStoreSubstrateError(
+            "phase9_store_substrate_issuer_authority_required"
+        )
+    try:
+        before = _issuer_control_snapshot()
+        guard_environment = {
+            key: str(os.environ[key]) for key in LEASE_ID_KEYS
+        }
+        guard_environment.update(
+            {
+                "PATH": "/usr/bin:/bin",
+                "LANG": "C",
+                "LC_ALL": "C",
+                "PYTHONDONTWRITEBYTECODE": "1",
+                "PYTHONNOUSERSITE": "1",
+            }
+        )
+        completed = subprocess.run(
+            (
+                LEASE_GUARD_PYTHON,
+                LEASE_GUARD,
+                "--operation",
+                "production-write",
+                "--worktree",
+                str(_REPOSITORY_ROOT),
+            ),
+            cwd="/",
+            env=guard_environment,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=90,
+            check=False,
+            user=LEASE_GUARD_UID,
+            group=LEASE_GUARD_GID,
+            extra_groups=(),
+        )
+        if (
+            completed.returncode != 0
+            or completed.stdout != b""
+            or completed.stderr != b""
+            or _issuer_control_snapshot() != before
+        ):
+            raise OSError("lease")
+    except (OSError, subprocess.SubprocessError, KeyError, ValueError, TypeError) as error:
+        raise Phase9DisposableStoreSubstrateError(
+            "phase9_store_substrate_issuer_authority_required"
+        ) from error
+
+
+def _require_exact_held_lock(held_lock: HeldExecutionLockCapability) -> None:
+    try:
+        validate_held_execution_lock(held_lock)
+        owner = held_lock._owner
+        if (
+            owner.path != LIVE_PROOF_GUARD_PATH
+            or owner.expected_uid != ROOT_UID
+            or owner.expected_gid != ROOT_GID
+        ):
+            raise ExecutionLockError("execution_lock_capability_invalid")
+    except (ExecutionLockError, AttributeError, TypeError) as error:
+        raise Phase9DisposableStoreSubstrateError(
+            "phase9_store_substrate_held_lock_required"
+        ) from error
 
 
 def _canonical(value: object) -> bytes:
@@ -149,10 +360,63 @@ def _fixed_directories() -> tuple[_FixedDirectory, _FixedDirectory]:
     )
 
 
+def _require_exact_pre_effect_disposition() -> Mapping[str, object]:
+    """Require the tagged permit and completed read-only tombstone."""
+
+    try:
+        candidate = (
+            phase9_permitted_candidate.require_exact_permitted_candidate()
+        )
+        receipt = pre_effect_disposition.require_production_disposition_receipt(
+            package_manifest_sha256=candidate.package_manifest_sha256,
+            controller_runtime_receipt_sha256=(
+                candidate.controller_runtime_receipt_sha256
+            ),
+        )
+        successor = (
+            pre_effect_disposition.production_successor_attempt_identity_sha256(
+                package_manifest_sha256=candidate.package_manifest_sha256,
+                controller_runtime_receipt_sha256=(
+                    candidate.controller_runtime_receipt_sha256
+                ),
+            )
+        )
+    except (
+        phase9_permitted_candidate.Phase9PermittedCandidateError,
+        pre_effect_disposition.PreEffectDispositionError,
+    ) as error:
+        raise Phase9DisposableStoreSubstrateError(
+            "phase9_store_substrate_disposition_required"
+        ) from error
+    if (
+        receipt.get("schema_version") != pre_effect_disposition.RECEIPT_SCHEMA
+        or receipt.get("result") != pre_effect_disposition.RESULT
+        or receipt.get("contract_sha256") != candidate.contract_sha256
+        or receipt.get("predecessor_attempt_identity_sha256")
+        != pre_effect_disposition.PRODUCTION_PREDECESSOR_ATTEMPT_IDENTITY_SHA256
+        or receipt.get("successor_attempt_identity_sha256") != successor
+        or receipt.get("no_host_effects_proven") is not True
+        or receipt.get("predecessor_state_mutated") is not False
+        or receipt.get("deletion_performed") is not False
+        or receipt.get("provider_calls") != 0
+        or receipt.get("production_data_read") is not False
+        or receipt.get("activation_performed") is not False
+    ):
+        raise Phase9DisposableStoreSubstrateError(
+            "phase9_store_substrate_disposition_required"
+        )
+    return receipt
+
+
 def _bootstrap_directories(
     selected: tuple[_FixedDirectory, ...],
+    *,
+    held_lock: HeldExecutionLockCapability,
 ) -> tuple[tuple[str, str], ...]:
     """Open all parents and preflight all existing leaves before creation."""
+
+    _require_issuer_invocation_authority()
+    _require_exact_held_lock(held_lock)
 
     if (
         not selected
@@ -282,13 +546,17 @@ def _bootstrap_directories(
     return tuple(results)
 
 
-def bootstrap_phase9_disposable_store_substrate() -> Mapping[str, object]:
+def bootstrap_phase9_disposable_store_substrate(
+    *,
+    held_lock: HeldExecutionLockCapability,
+) -> Mapping[str, object]:
     """Create the two fixed leaves, or verify exact empty existing leaves."""
 
     if (
         not _ISOLATED_RUNTIME_AT_START
         or not _DONT_WRITE_BYTECODE_AT_START
         or sys.platform != "linux"
+        or sys.executable != _PINNED_R7_INTERPRETER
     ):
         raise Phase9DisposableStoreSubstrateError(
             "phase9_store_substrate_runtime_isolation_required"
@@ -297,8 +565,12 @@ def bootstrap_phase9_disposable_store_substrate() -> Mapping[str, object]:
         raise Phase9DisposableStoreSubstrateError(
             "phase9_store_substrate_root_required"
         )
+    _require_exact_held_lock(held_lock)
+    _require_exact_pre_effect_disposition()
     _verify_fixed_identity()
-    outcomes = _bootstrap_directories(_fixed_directories())
+    outcomes = _bootstrap_directories(
+        _fixed_directories(), held_lock=held_lock
+    )
     states = {state for _, state in outcomes}
     overall = next(iter(states)) if len(states) == 1 else "created_and_replayed"
     return {
@@ -313,9 +585,10 @@ def bootstrap_phase9_disposable_store_substrate() -> Mapping[str, object]:
             "database_or_vector_store_access": False,
             "docker_access": False,
             "provider_calls": 0,
-            "repository_imports": False,
+            "fixed_candidate_authority_imports": True,
             "secret_access": False,
             "service_changes": False,
+            "untrusted_repository_imports": False,
         },
     }
 
@@ -325,9 +598,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise Phase9DisposableStoreSubstrateError(
             "phase9_store_substrate_arguments_refused"
         )
-    result = bootstrap_phase9_disposable_store_substrate()
-    sys.stdout.buffer.write(_canonical(result) + b"\n")
-    return 0
+    raise Phase9DisposableStoreSubstrateError(
+        "phase9_store_substrate_manager_required"
+    )
 
 
 if __name__ == "__main__":

@@ -12,6 +12,78 @@ from tools.governed_memory_validation import publish_phase9_pre_effect_permit as
 
 
 class CandidateSelectionTests(unittest.TestCase):
+    def test_preimport_gate_binds_exact_r7_manager_and_lease_lineage(self) -> None:
+        manager_pid = 4242
+        environment = {
+            subject._PREIMPORT_MANAGER_PID_KEY: str(manager_pid),
+            "CHAT_MEMORY_LEASE_ID": "lease-1",
+            "CODEX_TASK_ID": "task-1",
+            "CODEX_THREAD_ID": "thread-1",
+        }
+        manager_path = str(
+            subject._REPOSITORY_ROOT / subject._PREIMPORT_MANAGER_RELATIVE
+        )
+        command_line = b"\0".join(
+            value.encode("utf-8")
+            for value in (
+                subject._PREIMPORT_CONTROLLER_PYTHON,
+                "-I",
+                "-B",
+                manager_path,
+            )
+        ) + b"\0"
+        self.assertTrue(
+            subject._preimport_manager_lineage_valid(
+                environment,
+                observed_parent_pid=manager_pid,
+                observed_parent_executable=subject._PREIMPORT_CONTROLLER_PYTHON,
+                observed_parent_command_line=command_line,
+            )
+        )
+        cases = (
+            {"observed_parent_pid": manager_pid + 1},
+            {"observed_parent_executable": "/usr/bin/python3"},
+            {"observed_parent_command_line": command_line + b"foreign\0"},
+        )
+        for changes in cases:
+            values = {
+                "observed_parent_pid": manager_pid,
+                "observed_parent_executable": (
+                    subject._PREIMPORT_CONTROLLER_PYTHON
+                ),
+                "observed_parent_command_line": command_line,
+                **changes,
+            }
+            with self.subTest(changes=changes):
+                self.assertFalse(
+                    subject._preimport_manager_lineage_valid(
+                        environment, **values
+                    )
+                )
+        missing_lease = dict(environment)
+        del missing_lease["CODEX_THREAD_ID"]
+        self.assertFalse(
+            subject._preimport_manager_lineage_valid(
+                missing_lease,
+                observed_parent_pid=manager_pid,
+                observed_parent_executable=subject._PREIMPORT_CONTROLLER_PYTHON,
+                observed_parent_command_line=command_line,
+            )
+        )
+
+    def test_runtime_and_manager_lineage_gates_precede_later_imports(self) -> None:
+        source = Path(subject.__file__).read_text(encoding="utf-8")
+        later_import = source.index("from collections.abc import")
+        for marker in (
+            "sys.executable == _PREIMPORT_CONTROLLER_PYTHON",
+            "not _preimport_manager_lineage_valid()",
+            "/proc/{manager_pid}/exe",
+            "/proc/{manager_pid}/cmdline",
+            "phase9_pre_effect_permit_manager_lineage_required",
+        ):
+            with self.subTest(marker=marker):
+                self.assertLess(source.index(marker), later_import)
+
     @staticmethod
     def outputs(*, status: bytes = b"", tag_commit: str = "a" * 40,
                 tag_tree: str = "b" * 40, head_commit: str = "a" * 40,
@@ -36,7 +108,7 @@ class CandidateSelectionTests(unittest.TestCase):
             if arguments in values:
                 return (values[arguments] + "\n").encode()
             for index, relative in enumerate(subject._SOURCE_PATHS):
-                value = chr(99 + index) * 40
+                value = f"{index + 1:x}" * 40
                 if arguments == ("rev-parse", "HEAD:" + relative):
                     return (value + "\n").encode()
                 if arguments == ("hash-object", str(subject._REPOSITORY_ROOT / relative)):
@@ -46,12 +118,20 @@ class CandidateSelectionTests(unittest.TestCase):
             raise AssertionError(arguments)
         return run
 
-    def test_fixed_tag_selects_clean_descendant_and_four_exact_blobs(self) -> None:
+    def test_fixed_tag_selects_clean_descendant_and_all_exact_blobs(self) -> None:
         with mock.patch.object(subject, "_git", side_effect=self.outputs()):
             commit, tree, blobs = subject._verify_selected_candidate()
         self.assertEqual(commit, "a" * 40)
         self.assertEqual(tree, "b" * 40)
         self.assertEqual(set(blobs), set(subject._SOURCE_PATHS))
+        self.assertTrue(
+            {
+                subject._PERMITTED_CANDIDATE_RELATIVE,
+                subject._ISSUER_RELATIVE,
+                subject._BOOTSTRAP_RELATIVE,
+                subject._MANAGER_RELATIVE,
+            }.issubset(blobs)
+        )
 
     def test_moved_tag_dirty_candidate_or_blob_drift_is_refused(self) -> None:
         cases = (
@@ -88,7 +168,7 @@ class PermitPublicationTests(unittest.TestCase):
         path = root / subject.PERMIT_PATH.name
         raw = subject._permit(
             "a" * 40, "b" * 40,
-            {path: chr(99 + index) * 40 for index, path in enumerate(subject._SOURCE_PATHS)},
+            {path: f"{index + 1:x}" * 40 for index, path in enumerate(subject._SOURCE_PATHS)},
         )
         patcher = mock.patch.multiple(
             subject, STATE_ROOT=root, PERMIT_PATH=path,
@@ -101,7 +181,7 @@ class PermitPublicationTests(unittest.TestCase):
         first = (
             "a" * 40,
             "b" * 40,
-            {path: chr(99 + index) * 40 for index, path in enumerate(subject._SOURCE_PATHS)},
+            {path: f"{index + 1:x}" * 40 for index, path in enumerate(subject._SOURCE_PATHS)},
         )
         changed = ("e" * 40, first[1], first[2])
         with (
@@ -111,6 +191,14 @@ class PermitPublicationTests(unittest.TestCase):
                 _DONT_WRITE_BYTECODE_AT_START=True,
             ),
             mock.patch.object(subject.sys, "platform", "linux"),
+            mock.patch.object(
+                subject.sys,
+                "executable",
+                subject._PREIMPORT_CONTROLLER_PYTHON,
+            ),
+            mock.patch.object(
+                subject, "_preimport_manager_lineage_valid", return_value=True
+            ),
             mock.patch.object(subject.os, "geteuid", return_value=0),
             mock.patch.object(subject.os, "getegid", return_value=0),
             mock.patch.object(
@@ -128,14 +216,62 @@ class PermitPublicationTests(unittest.TestCase):
             subject.publish_phase9_pre_effect_permit()
         publish.assert_not_called()
 
+    def test_import_callable_publication_rechecks_exact_runtime_and_manager(self) -> None:
+        with (
+            mock.patch.multiple(
+                subject,
+                _ISOLATED_RUNTIME_AT_START=True,
+                _DONT_WRITE_BYTECODE_AT_START=True,
+            ),
+            mock.patch.object(subject.sys, "platform", "linux"),
+            mock.patch.object(subject.sys, "executable", "/usr/bin/python3"),
+            mock.patch.object(subject, "_verify_selected_candidate") as verify,
+            self.assertRaisesRegex(
+                subject.Phase9PreEffectPermitPublicationError,
+                "phase9_pre_effect_permit_runtime_isolation_required",
+            ),
+        ):
+            subject.publish_phase9_pre_effect_permit()
+        verify.assert_not_called()
+
+        with (
+            mock.patch.multiple(
+                subject,
+                _ISOLATED_RUNTIME_AT_START=True,
+                _DONT_WRITE_BYTECODE_AT_START=True,
+            ),
+            mock.patch.object(subject.sys, "platform", "linux"),
+            mock.patch.object(
+                subject.sys,
+                "executable",
+                subject._PREIMPORT_CONTROLLER_PYTHON,
+            ),
+            mock.patch.object(
+                subject, "_preimport_manager_lineage_valid", return_value=False
+            ),
+            mock.patch.object(subject, "_verify_selected_candidate") as verify,
+            self.assertRaisesRegex(
+                subject.Phase9PreEffectPermitPublicationError,
+                "phase9_pre_effect_permit_manager_lineage_required",
+            ),
+        ):
+            subject.publish_phase9_pre_effect_permit()
+        verify.assert_not_called()
+
     def test_permit_binds_exact_authority_and_action_only_boundary(self) -> None:
-        blobs = {path: chr(99 + index) * 40 for index, path in enumerate(subject._SOURCE_PATHS)}
+        blobs = {
+            path: f"{index + 1:x}" * 40
+            for index, path in enumerate(subject._SOURCE_PATHS)
+        }
         raw = subject._permit("a" * 40, "b" * 40, blobs)
         value = subject._document(raw, "invalid")
         self.assertEqual(value["base_candidate_git_commit"], subject.BASE_CANDIDATE_COMMIT)
         self.assertEqual(value["package_manifest_sha256"], subject.PACKAGE_MANIFEST_SHA256)
         self.assertEqual(value["contract_sha256"], subject.CONTRACT_SHA256)
-        self.assertEqual(value["authorized_action"], "execute_pre_effect_disposition_only")
+        self.assertEqual(
+            value["authorized_action"],
+            "execute_pre_effect_disposition_and_disposable_live_proof_only",
+        )
         self.assertIs(value["activation_performed"], False)
         self.assertEqual(value["provider_calls"], 0)
         self.assertIs(value["production_data_read"], False)

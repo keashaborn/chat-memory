@@ -1025,10 +1025,10 @@ class PreEffectDispositionTests(unittest.TestCase):
         successor_identity = (
             disposition.production_successor_attempt_identity_sha256(
                 package_manifest_sha256=(
-                    "caa3f789003dd2100eca7e68514fcaa114c5c2f2fc12e17871d49973cc7dad63"
+                    "062ea00564e5edfb138dca9240fd5d70cec2c640563d6ad02e1e89de15d7db39"
                 ),
                 controller_runtime_receipt_sha256=(
-                    "24b081b9eb48699b1242bc435a6f4bce756aee242a23a63c60e7ce79802d86ec"
+                    "c9b6721985c4840f555d583d77fcfb82c4f20d609c0af651a7171744d58c9a11"
                 ),
             )
         )

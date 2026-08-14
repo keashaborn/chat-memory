@@ -42,6 +42,7 @@ INSTALL_EXECUTION = "5" * 64
 ROLLBACK_EXECUTION = "6" * 64
 DISPOSITION_CONTRACT = "a" * 64
 PREDECESSOR_ATTEMPT = "b" * 64
+REAL_RUNNER_AUTHORITY_CHECK = proof._require_runner_process_authority
 
 
 def inputs() -> proof.ProofInputs:
@@ -105,9 +106,19 @@ def context() -> proof.ProofContext:
 
 
 class DisposableInstallationLiveProofTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._runner_authority_patcher = mock.patch.object(
+            proof,
+            "_require_runner_process_authority",
+        )
+        self._runner_authority_patcher.start()
+        self.addCleanup(self._runner_authority_patcher.stop)
+
     def _issuer_guard_mocks(
         self,
     ) -> tuple[
+        mock._patch,
+        mock._patch,
         mock._patch,
         mock._patch,
         mock._patch,
@@ -133,6 +144,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
         )
         return (
             mock.patch.object(issuer, "_require_closed_issuer_runtime"),
+            mock.patch.object(issuer, "_require_active_manager_authority"),
             mock.patch.object(issuer, "_ensure_live_proof_guard_parent"),
             mock.patch.object(issuer, "GlobalExecutionLock", return_value=guard),
             mock.patch.object(
@@ -149,6 +161,10 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
                 issuer,
                 "_require_production_pre_effect_disposition",
                 return_value=disposition_receipt(),
+            ),
+            mock.patch.object(
+                issuer.substrate_bootstrap,
+                "bootstrap_phase9_disposable_store_substrate",
             ),
             mock.patch.object(issuer.runner, "_prepare_fixed_substrate"),
             mock.patch.object(
@@ -419,7 +435,332 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
                 )
             )
 
-    def test_issuer_cli_has_no_operator_selectable_disposition_authority(self) -> None:
+    def test_imported_operational_entrypoints_refuse_without_sealed_state(
+        self,
+    ) -> None:
+        calls = (
+            proof.preclaim_staged_start_authority_pair,
+            proof.verify_published_start_authority_pair,
+            proof.start_or_recover_live_proof,
+            proof.recover_live_proof,
+            proof.run_live_proof,
+        )
+        with (
+            mock.patch.object(
+                proof,
+                "_require_runner_process_authority",
+                REAL_RUNNER_AUTHORITY_CHECK,
+            ),
+            mock.patch.object(proof, "_PREIMPORT_RUNNER_AUTHORITY", None),
+        ):
+            for call in calls:
+                with (
+                    self.subTest(entrypoint=call.__name__),
+                    self.assertRaisesRegex(
+                        proof.LiveProofError,
+                        "^phase9_live_proof_runner_authority_invalid$",
+                    ),
+                ):
+                    call(inputs())
+
+    def test_programmatic_start_main_refuses_public_ids_without_sealed_state(
+        self,
+    ) -> None:
+        arguments = (
+            "start-or-recover",
+            "--candidate-git-commit",
+            COMMIT,
+            "--candidate-git-tree",
+            TREE,
+            "--package-manifest-sha256",
+            PACKAGE,
+            "--controller-runtime-receipt-sha256",
+            RUNTIME,
+        )
+        with (
+            mock.patch.object(
+                proof,
+                "_require_runner_process_authority",
+                REAL_RUNNER_AUTHORITY_CHECK,
+            ),
+            mock.patch.object(proof, "_PREIMPORT_RUNNER_AUTHORITY", None),
+            self.assertRaisesRegex(
+                proof.LiveProofError,
+                "^phase9_live_proof_runner_authority_invalid$",
+            ),
+        ):
+            proof.main(arguments)
+
+    def test_recovery_mode_requires_sealed_cli_but_not_live_issuer_lease(
+        self,
+    ) -> None:
+        release_root = "/opt/governed-memory-controller/releases/" + PACKAGE
+        runtime_python = (
+            "/opt/governed-memory-controller/runtimes/"
+            + RUNTIME
+            + "/bin/python"
+        )
+        state = (
+            proof.RunnerMode.RECOVER_ONLY.value,
+            COMMIT,
+            TREE,
+            PACKAGE,
+            RUNTIME,
+            release_root,
+            runtime_python,
+            0,
+            0,
+            0,
+            0,
+            "",
+            "",
+            "",
+            "",
+        )
+        with (
+            mock.patch.object(proof, "_PREIMPORT_RUNNER_AUTHORITY", state),
+            mock.patch.object(
+                proof,
+                "_preimport_validate_sealed_invocation",
+                return_value=(release_root, runtime_python),
+            ) as validate,
+            mock.patch.object(proof.subprocess, "run") as lease_guard,
+        ):
+            REAL_RUNNER_AUTHORITY_CHECK(proof.RunnerMode.RECOVER_ONLY)
+        validate.assert_called_once_with(
+            proof.RunnerMode.RECOVER_ONLY.value,
+            PACKAGE,
+            RUNTIME,
+        )
+        lease_guard.assert_not_called()
+
+    def test_start_mode_reproves_seal_lineage_control_and_live_lease(
+        self,
+    ) -> None:
+        release_root = "/opt/governed-memory-controller/releases/" + PACKAGE
+        runtime_python = (
+            "/opt/governed-memory-controller/runtimes/"
+            + RUNTIME
+            + "/bin/python"
+        )
+        lineage = (
+            101,
+            102,
+            7,
+            8,
+            "/candidate",
+            "lease-1",
+            "task-1",
+            "thread-1",
+        )
+        state = (
+            proof.RunnerMode.START_OR_RECOVER.value,
+            COMMIT,
+            TREE,
+            PACKAGE,
+            RUNTIME,
+            release_root,
+            runtime_python,
+            *lineage,
+        )
+        with (
+            mock.patch.object(proof, "_PREIMPORT_RUNNER_AUTHORITY", state),
+            mock.patch.object(
+                proof,
+                "_preimport_validate_sealed_invocation",
+                return_value=(release_root, runtime_python),
+            ) as validate_seal,
+            mock.patch.object(
+                proof,
+                "_preimport_validate_issuer_authority",
+                return_value=lineage,
+            ) as validate_lineage,
+            mock.patch.object(
+                proof, "_require_active_runner_lease"
+            ) as validate_lease,
+        ):
+            REAL_RUNNER_AUTHORITY_CHECK(proof.RunnerMode.START_OR_RECOVER)
+        validate_seal.assert_called_once_with(
+            proof.RunnerMode.START_OR_RECOVER.value,
+            PACKAGE,
+            RUNTIME,
+        )
+        validate_lineage.assert_called_once_with(runtime_python=runtime_python)
+        validate_lease.assert_called_once_with(state)
+
+    def test_start_mode_refuses_each_bound_identity_drift(self) -> None:
+        release_root = "/opt/governed-memory-controller/releases/" + PACKAGE
+        runtime_python = (
+            "/opt/governed-memory-controller/runtimes/"
+            + RUNTIME
+            + "/bin/python"
+        )
+        lineage = (
+            101,
+            102,
+            7,
+            8,
+            "/candidate",
+            "lease-1",
+            "task-1",
+            "thread-1",
+        )
+        state = (
+            proof.RunnerMode.START_OR_RECOVER.value,
+            COMMIT,
+            TREE,
+            PACKAGE,
+            RUNTIME,
+            release_root,
+            runtime_python,
+            *lineage,
+        )
+        drifts = {
+            "mode": (0, proof.RunnerMode.RECOVER_ONLY.value),
+            "commit": (1, "0" * 39),
+            "tree": (2, "0" * 39),
+            "package": (3, "0" * 63),
+            "runtime": (4, "0" * 63),
+            "release": (5, release_root + "-drift"),
+            "interpreter": (6, runtime_python + "-drift"),
+            "issuer": (7, 103),
+            "manager": (8, 104),
+            "control-device": (9, 9),
+            "control-inode": (10, 10),
+            "repository": (11, "/candidate-drift"),
+            "lease": (12, "lease-2"),
+            "task": (13, "task-2"),
+            "thread": (14, "thread-2"),
+        }
+        for name, (index, value) in drifts.items():
+            drifted = list(state)
+            drifted[index] = value
+            with (
+                self.subTest(identity=name),
+                mock.patch.object(
+                    proof,
+                    "_PREIMPORT_RUNNER_AUTHORITY",
+                    tuple(drifted),
+                ),
+                mock.patch.object(
+                    proof,
+                    "_preimport_validate_sealed_invocation",
+                    return_value=(release_root, runtime_python),
+                ),
+                mock.patch.object(
+                    proof,
+                    "_preimport_validate_issuer_authority",
+                    return_value=lineage,
+                ),
+                mock.patch.object(proof, "_require_active_runner_lease"),
+                self.assertRaisesRegex(
+                    proof.LiveProofError,
+                    "^phase9_live_proof_runner_authority_invalid$",
+                ),
+            ):
+                REAL_RUNNER_AUTHORITY_CHECK(
+                    proof.RunnerMode.START_OR_RECOVER
+                )
+
+    def test_start_mode_refuses_lineage_or_lease_recheck_failure(self) -> None:
+        release_root = "/opt/governed-memory-controller/releases/" + PACKAGE
+        runtime_python = (
+            "/opt/governed-memory-controller/runtimes/"
+            + RUNTIME
+            + "/bin/python"
+        )
+        lineage = (
+            101,
+            102,
+            7,
+            8,
+            "/candidate",
+            "lease-1",
+            "task-1",
+            "thread-1",
+        )
+        state = (
+            proof.RunnerMode.START_OR_RECOVER.value,
+            COMMIT,
+            TREE,
+            PACKAGE,
+            RUNTIME,
+            release_root,
+            runtime_python,
+            *lineage,
+        )
+        for failure in ("lineage", "lease"):
+            with (
+                self.subTest(failure=failure),
+                mock.patch.object(proof, "_PREIMPORT_RUNNER_AUTHORITY", state),
+                mock.patch.object(
+                    proof,
+                    "_preimport_validate_sealed_invocation",
+                    return_value=(release_root, runtime_python),
+                ),
+                mock.patch.object(
+                    proof,
+                    "_preimport_validate_issuer_authority",
+                    side_effect=(
+                        RuntimeError("fd198")
+                        if failure == "lineage"
+                        else None
+                    ),
+                    return_value=lineage,
+                ),
+                mock.patch.object(
+                    proof,
+                    "_require_active_runner_lease",
+                    side_effect=(
+                        proof.LiveProofError(
+                            "phase9_live_proof_runner_authority_invalid"
+                        )
+                        if failure == "lease"
+                        else None
+                    ),
+                ),
+                self.assertRaisesRegex(
+                    proof.LiveProofError,
+                    "^phase9_live_proof_runner_authority_invalid$",
+                ),
+            ):
+                REAL_RUNNER_AUTHORITY_CHECK(
+                    proof.RunnerMode.START_OR_RECOVER
+                )
+
+    def test_repository_runner_cli_is_not_a_sealed_release_invocation(
+        self,
+    ) -> None:
+        completed = subprocess.run(
+            (
+                sys.executable,
+                "-I",
+                "-B",
+                str(Path(proof.__file__)),
+                "start-or-recover",
+                "--candidate-git-commit",
+                COMMIT,
+                "--candidate-git-tree",
+                TREE,
+                "--package-manifest-sha256",
+                PACKAGE,
+                "--controller-runtime-receipt-sha256",
+                RUNTIME,
+            ),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=10,
+        )
+        self.assertEqual(completed.returncode, 1)
+        self.assertEqual(completed.stdout, b"")
+        self.assertEqual(
+            completed.stderr,
+            b"phase9_live_proof_sealed_authority_required\n",
+        )
+
+    def test_issuer_cli_accepts_no_operator_selectable_proof_identity(self) -> None:
         arguments = (
             "--candidate-git-commit",
             COMMIT,
@@ -430,14 +771,38 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
             "--controller-runtime-receipt-sha256",
             RUNTIME,
         )
-        self.assertEqual(issuer.parse_inputs(arguments), inputs())
-        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(
-            SystemExit
+        with (
+            mock.patch.object(issuer, "_require_active_manager_authority") as guard,
+            mock.patch.object(issuer, "_proof_inputs_from_verified_permit") as permit,
+            mock.patch.object(issuer, "issue_and_supervise") as issue,
+            self.assertRaisesRegex(
+                issuer.Phase9ProofIssuerError,
+                "^phase9_proof_issuer_arguments_refused$",
+            ),
         ):
-            issuer.parse_inputs(
-                arguments
-                + ("--pre-effect-disposition-contract-sha256", DISPOSITION_CONTRACT)
-            )
+            issuer.main(arguments)
+        guard.assert_not_called()
+        permit.assert_not_called()
+        issue.assert_not_called()
+
+    def test_issuer_derives_all_proof_inputs_from_verified_permit(self) -> None:
+        candidate = mock.Mock(
+            candidate_git_commit=COMMIT,
+            candidate_git_tree=TREE,
+            package_manifest_sha256=PACKAGE,
+            controller_runtime_receipt_sha256=RUNTIME,
+        )
+        with mock.patch.object(
+            issuer.phase9_permitted_candidate,
+            "require_exact_permitted_candidate",
+            return_value=candidate,
+        ) as require:
+            observed = issuer._proof_inputs_from_verified_permit()
+        self.assertEqual(observed, inputs())
+        require.assert_called_once_with(
+            expected_thread_id=proof.THREAD_ID,
+            expected_authorization_text_sha256=proof.AUTHORIZED_TEXT_SHA256,
+        )
 
     def test_source_uses_closed_public_compositions_and_no_private_key(self) -> None:
         source = Path(proof.__file__).read_text(encoding="utf-8")
@@ -1043,6 +1408,149 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
             ):
                 issuer._require_closed_issuer_runtime()
 
+    def test_preimport_manager_pid_requires_exact_direct_parent_lineage(self) -> None:
+        cases = (
+            ({}, 321),
+            ({issuer.MANAGER_PID_ENVIRONMENT_KEY: "321"}, 322),
+            ({issuer.MANAGER_PID_ENVIRONMENT_KEY: "0321"}, 321),
+        )
+        for environment, parent_pid in cases:
+            with (
+                self.subTest(environment=environment, parent_pid=parent_pid),
+                mock.patch.dict(issuer.os.environ, environment, clear=True),
+                mock.patch.object(issuer.os, "getppid", return_value=parent_pid),
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    "^phase9_proof_issuer_manager_control_required$",
+                ),
+            ):
+                issuer._preimport_manager_pid()
+
+    def test_preimport_manager_control_installs_pdeath_and_rechecks_pipe(self) -> None:
+        opened = mock.Mock(
+            st_mode=stat.S_IFIFO | 0o600,
+            st_dev=7,
+            st_ino=8,
+        )
+        prctl = mock.Mock(return_value=0)
+        library = mock.Mock(prctl=prctl)
+        with (
+            mock.patch.dict(
+                issuer.os.environ,
+                {issuer.MANAGER_PID_ENVIRONMENT_KEY: "321"},
+                clear=True,
+            ),
+            mock.patch.object(issuer.os, "getppid", return_value=321),
+            mock.patch.object(issuer.os, "fstat", return_value=opened),
+            mock.patch.object(issuer.fcntl, "fcntl", return_value=os.O_RDONLY),
+            mock.patch.object(issuer.os, "set_blocking") as set_blocking,
+            mock.patch.object(
+                issuer,
+                "_preimport_validate_manager_lineage",
+            ) as validate_lineage,
+            mock.patch.object(
+                issuer.select,
+                "select",
+                side_effect=(([], [], []), ([], [], [])),
+            ),
+            mock.patch.object(issuer.signal, "signal") as install_signal,
+            mock.patch.object(issuer.ctypes, "CDLL", return_value=library),
+            mock.patch.object(issuer, "_MANAGER_CONTROL_LOST", False),
+            mock.patch.object(issuer, "_DIRECT_MANAGER_PIPE_ID", None),
+        ):
+            self.assertEqual(issuer._preimport_require_manager_control(), 321)
+            self.assertEqual(issuer._DIRECT_MANAGER_PIPE_ID, (7, 8))
+        set_blocking.assert_called_once_with(issuer.MANAGER_CONTROL_FD, False)
+        validate_lineage.assert_called_once_with(321, (7, 8))
+        install_signal.assert_called_once_with(
+            signal.SIGTERM,
+            issuer._mark_manager_control_lost,
+        )
+        prctl.assert_called_once_with(
+            issuer.PR_SET_PDEATHSIG,
+            int(signal.SIGCONT),
+            0,
+            0,
+            0,
+        )
+
+    def test_manager_control_health_refuses_pipe_eof(self) -> None:
+        opened = mock.Mock(
+            st_mode=stat.S_IFIFO | 0o600,
+            st_dev=7,
+            st_ino=8,
+        )
+        with (
+            mock.patch.object(issuer, "_preimport_manager_pid", return_value=321),
+            mock.patch.object(issuer, "_DIRECT_MANAGER_PID", 321),
+            mock.patch.object(issuer, "_DIRECT_MANAGER_PIPE_ID", (7, 8)),
+            mock.patch.object(issuer, "_MANAGER_CONTROL_LOST", False),
+            mock.patch.object(issuer.os, "fstat", return_value=opened),
+            mock.patch.object(issuer.fcntl, "fcntl", return_value=os.O_RDONLY),
+            mock.patch.object(
+                issuer.select,
+                "select",
+                return_value=([issuer.MANAGER_CONTROL_FD], [], []),
+            ),
+            self.assertRaisesRegex(
+                issuer.Phase9ProofIssuerError,
+                "^phase9_proof_issuer_manager_control_lost$",
+            ),
+        ):
+            issuer._require_manager_control_health()
+
+    def test_parent_death_signal_marks_manager_control_lost(self) -> None:
+        opened = mock.Mock(
+            st_mode=stat.S_IFIFO | 0o600,
+            st_dev=7,
+            st_ino=8,
+        )
+        with (
+            mock.patch.object(issuer, "_preimport_manager_pid", return_value=321),
+            mock.patch.object(issuer, "_DIRECT_MANAGER_PID", 321),
+            mock.patch.object(issuer, "_DIRECT_MANAGER_PIPE_ID", (7, 8)),
+            mock.patch.object(issuer, "_MANAGER_CONTROL_LOST", False),
+            mock.patch.object(issuer.os, "fstat", return_value=opened),
+            mock.patch.object(issuer.fcntl, "fcntl", return_value=os.O_RDONLY),
+            mock.patch.object(
+                issuer.select,
+                "select",
+                return_value=([], [], []),
+            ),
+            self.assertRaisesRegex(
+                issuer.Phase9ProofIssuerError,
+                "^phase9_proof_issuer_manager_control_lost$",
+            ),
+        ):
+            issuer._mark_manager_control_lost(signal.SIGTERM, None)
+            issuer._require_manager_control_health()
+
+    def test_issuer_lease_guard_uses_fixed_uid_and_system_python(self) -> None:
+        command_runner = mock.Mock()
+        command_runner.run.return_value = subprocess.CompletedProcess(
+            args=("guard",),
+            returncode=0,
+            stdout=b"",
+            stderr=b"",
+        )
+        environment = {
+            "CHAT_MEMORY_LEASE_ID": "lease-1",
+            "CODEX_TASK_ID": "task-1",
+            "CODEX_THREAD_ID": "thread-1",
+        }
+        issuer._require_production_write_lease(
+            environment,
+            command_runner=command_runner,
+        )
+        call = command_runner.run.call_args
+        self.assertEqual(call.args[0][0], issuer.LEASE_GUARD_PYTHON)
+        self.assertEqual(call.args[0][1], issuer.LEASE_GUARD)
+        self.assertIn("production-write", call.args[0])
+        self.assertIn(str(issuer._ISSUER_REPOSITORY_ROOT), call.args[0])
+        self.assertEqual(call.kwargs["user"], 1000)
+        self.assertEqual(call.kwargs["group"], 1000)
+        self.assertEqual(call.kwargs["extra_groups"], ())
+
     def test_direct_issuer_refuses_each_incomplete_runtime_fence(self) -> None:
         issuer_path = str(Path(issuer.__file__))
         for flags in (("-B",), ("-I",)):
@@ -1076,11 +1584,23 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
             mock.patch.object(
                 os,
                 "listdir",
-                return_value=["0", "1", "2", "3", "8", "9", "10", "77"],
+                return_value=[
+                    "0",
+                    "1",
+                    "2",
+                    "3",
+                    "8",
+                    "9",
+                    "10",
+                    "77",
+                    "198",
+                ],
             ) as listdir,
             mock.patch.object(os, "close", side_effect=close_descriptor),
         ):
-            issuer._close_unintended_runner_descriptors()
+            issuer._close_unintended_runner_descriptors(
+                retain_manager_control=True,
+            )
         listdir.assert_called_once_with("/proc/self/fd")
         self.assertEqual(closed, [3, 8, 10, 77])
 
@@ -1090,6 +1610,16 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
         with (
             mock.patch.object(os, "open", return_value=13) as open_descriptor,
             mock.patch.object(os, "dup2") as duplicate,
+            mock.patch.object(
+                os,
+                "fstat",
+                return_value=mock.Mock(st_mode=stat.S_IFIFO | 0o600),
+            ),
+            mock.patch.object(
+                issuer.fcntl,
+                "fcntl",
+                return_value=os.O_RDONLY,
+            ),
             mock.patch.object(os, "set_inheritable") as set_inheritable,
             mock.patch.object(
                 issuer, "_close_unintended_runner_descriptors"
@@ -1099,6 +1629,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
                 guard_descriptor=20,
                 stdout_descriptor=21,
                 stderr_descriptor=22,
+                mode=proof.RunnerMode.START_OR_RECOVER,
             )
         open_descriptor.assert_called_once_with(
             "/dev/null",
@@ -1120,9 +1651,44 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
                 mock.call(1, True),
                 mock.call(2, True),
                 mock.call(proof.LIVE_PROOF_GUARD_FD, True),
+                mock.call(issuer.MANAGER_CONTROL_FD, True),
             ],
         )
-        close_unintended.assert_called_once_with()
+        close_unintended.assert_called_once_with(
+            retain_manager_control=True,
+        )
+
+    def test_recovery_runner_closes_manager_control_and_authority_environment(
+        self,
+    ) -> None:
+        with (
+            mock.patch.object(os, "open", return_value=13),
+            mock.patch.object(os, "dup2"),
+            mock.patch.object(os, "set_inheritable") as set_inheritable,
+            mock.patch.object(
+                issuer, "_close_unintended_runner_descriptors"
+            ) as close_unintended,
+        ):
+            issuer._seal_exact_runner_process(
+                guard_descriptor=20,
+                stdout_descriptor=21,
+                stderr_descriptor=22,
+                mode=proof.RunnerMode.RECOVER_ONLY,
+            )
+        self.assertNotIn(
+            mock.call(issuer.MANAGER_CONTROL_FD, True),
+            set_inheritable.call_args_list,
+        )
+        close_unintended.assert_called_once_with(
+            retain_manager_control=False,
+        )
+        self.assertEqual(
+            issuer._runner_environment(
+                proof.RunnerMode.RECOVER_ONLY,
+                issuer_pid=123,
+            ),
+            dict(issuer._SAFE_ENVIRONMENT),
+        )
 
     def test_missing_recovery_capsule_parent_is_refused_without_creation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1179,6 +1745,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
 
             with (
                 mock.patch.object(issuer.runner, "RECOVERY_CAPSULE_PATH", capsule_path),
+                mock.patch.object(issuer, "_require_active_manager_authority"),
                 mock.patch.object(
                     issuer,
                     "_ensure_recovery_capsule_parent",
@@ -1201,6 +1768,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
             before = temporary_path.stat()
             with (
                 mock.patch.object(issuer.runner, "RECOVERY_CAPSULE_PATH", capsule_path),
+                mock.patch.object(issuer, "_require_active_manager_authority"),
                 mock.patch.object(
                     issuer,
                     "_ensure_recovery_capsule_parent",
@@ -1221,6 +1789,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
     ) -> None:
         metadata = mock.Mock(st_dev=7, st_ino=8)
         with (
+            mock.patch.object(issuer, "_require_active_manager_authority"),
             mock.patch.object(issuer, "_ensure_recovery_capsule_parent", return_value=77),
             mock.patch.object(os, "open", return_value=88),
             mock.patch.object(os, "fstat", side_effect=OSError("fstat failed")),
@@ -1268,6 +1837,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
                 raise OSError("close failed")
 
         with (
+            mock.patch.object(issuer, "_require_active_manager_authority"),
             mock.patch.object(issuer, "_ensure_recovery_capsule_parent", return_value=77),
             mock.patch.object(os, "open", return_value=88),
             mock.patch.object(os, "fstat", return_value=metadata),
@@ -1289,6 +1859,86 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
             + issuer.RECOVERY_CAPSULE_TEMP_SUFFIX,
             dir_fd=77,
         )
+
+    def test_manager_loss_refuses_capsule_mutations_before_syscall(self) -> None:
+        lost = issuer.Phase9ProofIssuerError(
+            "phase9_proof_issuer_manager_control_lost"
+        )
+        metadata = mock.Mock(st_dev=7, st_ino=8, st_nlink=1)
+        capsule_sha256 = issuer._sha(b"capsule")
+
+        with (
+            mock.patch.object(
+                issuer, "_ensure_recovery_capsule_parent", return_value=77
+            ),
+            mock.patch.object(
+                issuer, "_require_active_manager_authority", side_effect=lost
+            ),
+            mock.patch.object(os, "open") as create,
+            mock.patch.object(os, "close"),
+            self.assertRaisesRegex(
+                issuer.Phase9ProofIssuerError,
+                "^phase9_proof_issuer_manager_control_lost$",
+            ),
+        ):
+            issuer.prepare_fixed_recovery_capsule(
+                {"recovery_capsule": "fixed"}
+            )
+        create.assert_not_called()
+
+        with (
+            mock.patch.object(
+                issuer, "_ensure_recovery_capsule_parent", return_value=77
+            ),
+            mock.patch.object(
+                issuer,
+                "_read_capsule_member",
+                return_value=(b"capsule", metadata),
+            ),
+            mock.patch.object(
+                issuer, "_read_optional_capsule_member", return_value=None
+            ),
+            mock.patch.object(
+                issuer, "_require_active_manager_authority", side_effect=lost
+            ),
+            mock.patch.object(issuer, "_publish_temp_link") as publish,
+            mock.patch.object(os, "close"),
+            self.assertRaisesRegex(
+                issuer.Phase9ProofIssuerError,
+                "^phase9_proof_issuer_manager_control_lost$",
+            ),
+        ):
+            issuer.commit_preclaimed_recovery_capsule(
+                expected_capsule_sha256=capsule_sha256,
+                expected_inode=(7, 8),
+            )
+        publish.assert_not_called()
+
+        linked = mock.Mock(st_dev=7, st_ino=8, st_nlink=2)
+        with (
+            mock.patch.object(
+                issuer, "_ensure_recovery_capsule_parent", return_value=77
+            ),
+            mock.patch.object(
+                issuer,
+                "_read_capsule_member",
+                side_effect=((b"capsule", linked), (b"capsule", linked)),
+            ),
+            mock.patch.object(
+                issuer, "_require_active_manager_authority", side_effect=lost
+            ),
+            mock.patch.object(issuer, "_unlink_exact_member") as unlink,
+            mock.patch.object(os, "close"),
+            self.assertRaisesRegex(
+                issuer.Phase9ProofIssuerError,
+                "^phase9_proof_issuer_manager_control_lost$",
+            ),
+        ):
+            issuer.complete_linked_capsule_publication(
+                expected_capsule_sha256=capsule_sha256,
+                expected_inode=(7, 8),
+            )
+        unlink.assert_not_called()
 
     def test_recovery_capsule_stability_ignores_access_time_but_not_content_metadata(
         self,
@@ -1330,6 +1980,59 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
         self.assertNotIn("TOTAL_SUPERVISION_TIMEOUT_SECONDS", source)
         self.assertNotIn("for attempt in range", source)
         self.assertNotIn("def _read_bounded", source)
+
+    def test_runner_parent_death_fence_precedes_setsid_and_exec(self) -> None:
+        source = Path(issuer.__file__).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        function = next(
+            ast.get_source_segment(source, node)
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "_spawn_exact_runner"
+        )
+        parent_fence = function.index(
+            "_arm_runner_parent_death(expected_parent_pid)"
+        )
+        setsid = function.index("os.setsid()")
+        execute = function.index("os.execve(")
+        self.assertLess(parent_fence, setsid)
+        self.assertLess(setsid, execute)
+
+    def test_linux_runner_parent_death_fence_uses_sigkill_and_parent_recheck(
+        self,
+    ) -> None:
+        prctl = mock.Mock(return_value=0)
+        library = mock.Mock(prctl=prctl)
+        with (
+            mock.patch.object(issuer.sys, "platform", "linux"),
+            mock.patch.object(issuer.ctypes, "CDLL", return_value=library),
+            mock.patch.object(issuer.os, "getppid", return_value=321),
+        ):
+            issuer._arm_runner_parent_death(321)
+        prctl.assert_called_once_with(
+            issuer.PR_SET_PDEATHSIG,
+            int(signal.SIGKILL),
+            0,
+            0,
+            0,
+        )
+
+        with (
+            mock.patch.object(issuer.sys, "platform", "linux"),
+            mock.patch.object(issuer.ctypes, "CDLL", return_value=library),
+            mock.patch.object(issuer.os, "getppid", return_value=999),
+            mock.patch.object(issuer.os, "getpid", return_value=654),
+            mock.patch.object(issuer.os, "kill") as kill,
+            mock.patch.object(
+                issuer.os,
+                "_exit",
+                side_effect=SystemExit(1),
+            ) as exit_process,
+            self.assertRaises(SystemExit),
+        ):
+            issuer._arm_runner_parent_death(321)
+        kill.assert_called_once_with(654, signal.SIGKILL)
+        exit_process.assert_called_once_with(1)
 
     def test_each_normal_worker_has_a_finite_completion_budget(self) -> None:
         self.assertGreater(proof.WORKER_COMPLETION_TIMEOUT_SECONDS, 0)
@@ -1532,6 +2235,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
     def test_issuer_refuses_before_effects_without_durable_recovery_authority(self) -> None:
         with (
             mock.patch.object(issuer, "_require_closed_issuer_runtime"),
+            mock.patch.object(issuer, "_require_active_manager_authority"),
             mock.patch.object(os, "geteuid", return_value=0),
             mock.patch.object(issuer, "verify_exact_clean_candidate"),
             mock.patch.object(
@@ -1562,6 +2266,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
     def test_issuer_refuses_missing_disposition_before_any_v6_mutation(self) -> None:
         with (
             mock.patch.object(issuer, "_require_closed_issuer_runtime"),
+            mock.patch.object(issuer, "_require_active_manager_authority"),
             mock.patch.object(os, "geteuid", return_value=0),
             mock.patch.object(issuer, "verify_exact_clean_candidate"),
             mock.patch.object(
@@ -1609,6 +2314,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
     def test_issuer_cannot_bypass_invalid_disposition_return(self) -> None:
         with (
             mock.patch.object(issuer, "_require_closed_issuer_runtime"),
+            mock.patch.object(issuer, "_require_active_manager_authority"),
             mock.patch.object(os, "geteuid", return_value=0),
             mock.patch.object(issuer, "verify_exact_clean_candidate"),
             mock.patch.object(
@@ -1661,6 +2367,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
         guard.descriptor = 9
         with (
             mock.patch.object(issuer, "_require_closed_issuer_runtime"),
+            mock.patch.object(issuer, "_require_active_manager_authority"),
             mock.patch.object(os, "geteuid", return_value=0),
             mock.patch.object(issuer, "verify_exact_clean_candidate"),
             mock.patch.object(
@@ -1685,6 +2392,11 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
                 side_effect=lambda **unused: events.append("disposition") or disposition_receipt(),
             ) as disposition_check,
             mock.patch.object(
+                issuer.substrate_bootstrap,
+                "bootstrap_phase9_disposable_store_substrate",
+                side_effect=lambda **unused: events.append("bootstrap"),
+            ) as bootstrap,
+            mock.patch.object(
                 issuer.runner,
                 "_prepare_fixed_substrate",
                 side_effect=lambda: events.append("substrate"),
@@ -1702,11 +2414,14 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
         ):
             issuer.issue_and_supervise(inputs())
         disposition_check.assert_called_once_with(inputs=inputs())
+        bootstrap.assert_called_once_with(
+            held_lock=guard.held_capability.return_value
+        )
         substrate_check.assert_called_once_with()
         reconcile.assert_called_once()
         self.assertEqual(
             events,
-            ["guard-enter", "disposition", "substrate"],
+            ["guard-enter", "disposition", "bootstrap", "substrate"],
         )
         construct_guard.assert_called_once_with(
             proof.LIVE_PROOF_GUARD_PATH,
@@ -1721,6 +2436,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
         guard.descriptor = 9
         with (
             mock.patch.object(issuer, "_require_closed_issuer_runtime"),
+            mock.patch.object(issuer, "_require_active_manager_authority"),
             mock.patch.object(os, "geteuid", return_value=0),
             mock.patch.object(issuer, "verify_exact_clean_candidate"),
             mock.patch.object(
@@ -1744,6 +2460,10 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
                 "_require_production_pre_effect_disposition",
                 return_value=disposition_receipt(),
             ),
+            mock.patch.object(
+                issuer.substrate_bootstrap,
+                "bootstrap_phase9_disposable_store_substrate",
+            ) as bootstrap,
             mock.patch.object(
                 issuer.runner,
                 "_prepare_fixed_substrate",
@@ -1770,6 +2490,9 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
             ),
         ):
             issuer.issue_and_supervise(inputs())
+        bootstrap.assert_called_once_with(
+            held_lock=guard.held_capability.return_value
+        )
         substrate_check.assert_called_once_with()
         reconcile.assert_not_called()
         generate_key.assert_not_called()
@@ -1778,10 +2501,125 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
         supervise.assert_not_called()
         guard.__exit__.assert_called_once()
 
+    def test_issuer_refuses_bootstrap_failure_before_substrate_or_capsule(self) -> None:
+        guard = mock.Mock()
+        guard.__enter__ = mock.Mock(return_value=guard)
+        guard.__exit__ = mock.Mock(return_value=None)
+        guard.descriptor = 9
+        with (
+            mock.patch.object(issuer, "_require_closed_issuer_runtime"),
+            mock.patch.object(issuer, "_require_active_manager_authority"),
+            mock.patch.object(os, "geteuid", return_value=0),
+            mock.patch.object(issuer, "verify_exact_clean_candidate"),
+            mock.patch.object(
+                issuer.runner,
+                "_load_release",
+                return_value=(b"manifest", {}),
+            ),
+            mock.patch.object(
+                issuer.runner,
+                "DURABLE_PRE_EFFECT_ROLLBACK_AUTHORITY_PACKAGED",
+                True,
+            ),
+            mock.patch.object(issuer, "_ensure_live_proof_guard_parent"),
+            mock.patch.object(issuer, "GlobalExecutionLock", return_value=guard),
+            mock.patch.object(
+                issuer,
+                "_require_production_pre_effect_disposition",
+                return_value=disposition_receipt(),
+            ),
+            mock.patch.object(
+                issuer.substrate_bootstrap,
+                "bootstrap_phase9_disposable_store_substrate",
+                side_effect=(
+                    issuer.substrate_bootstrap.Phase9DisposableStoreSubstrateError(
+                        "private detail"
+                    )
+                ),
+            ) as bootstrap,
+            mock.patch.object(
+                issuer.runner, "_prepare_fixed_substrate"
+            ) as substrate_check,
+            mock.patch.object(
+                issuer, "reconcile_capsule_publication"
+            ) as reconcile,
+            self.assertRaisesRegex(
+                issuer.Phase9ProofIssuerError,
+                "^phase9_proof_issuer_substrate_bootstrap_failed$",
+            ),
+        ):
+            issuer.issue_and_supervise(inputs())
+        bootstrap.assert_called_once_with(
+            held_lock=guard.held_capability.return_value
+        )
+        substrate_check.assert_not_called()
+        reconcile.assert_not_called()
+        guard.__exit__.assert_called_once()
+
+    def test_manager_loss_at_prebootstrap_fence_prevents_all_live_mutators(
+        self,
+    ) -> None:
+        guard = mock.Mock()
+        guard.__enter__ = mock.Mock(return_value=guard)
+        guard.__exit__ = mock.Mock(return_value=None)
+        guard.descriptor = 9
+        lost = issuer.Phase9ProofIssuerError(
+            "phase9_proof_issuer_manager_control_lost"
+        )
+        with (
+            mock.patch.object(issuer, "_require_closed_issuer_runtime"),
+            mock.patch.object(
+                issuer,
+                "_require_active_manager_authority",
+                side_effect=(None, None, None, None, lost),
+            ) as authority,
+            mock.patch.object(os, "geteuid", return_value=0),
+            mock.patch.object(issuer, "verify_exact_clean_candidate"),
+            mock.patch.object(
+                issuer.runner,
+                "_load_release",
+                return_value=(b"manifest", {}),
+            ),
+            mock.patch.object(
+                issuer.runner,
+                "DURABLE_PRE_EFFECT_ROLLBACK_AUTHORITY_PACKAGED",
+                True,
+            ),
+            mock.patch.object(issuer, "_ensure_live_proof_guard_parent"),
+            mock.patch.object(issuer, "GlobalExecutionLock", return_value=guard),
+            mock.patch.object(
+                issuer,
+                "_require_production_pre_effect_disposition",
+                return_value=disposition_receipt(),
+            ),
+            mock.patch.object(
+                issuer.substrate_bootstrap,
+                "bootstrap_phase9_disposable_store_substrate",
+            ) as bootstrap,
+            mock.patch.object(
+                issuer.runner, "_prepare_fixed_substrate"
+            ) as substrate,
+            mock.patch.object(
+                issuer, "reconcile_capsule_publication"
+            ) as reconcile,
+            self.assertRaisesRegex(
+                issuer.Phase9ProofIssuerError,
+                "^phase9_proof_issuer_manager_control_lost$",
+            ),
+        ):
+            issuer.issue_and_supervise(inputs())
+        self.assertEqual(authority.call_count, 5)
+        bootstrap.assert_not_called()
+        substrate.assert_not_called()
+        reconcile.assert_not_called()
+        guard.__exit__.assert_called_once()
+
     def test_unexpected_supervision_error_kills_and_reaps_exact_group(self) -> None:
         descriptors = [os.open(os.devnull, os.O_RDONLY) for unused in range(2)]
         pid = 424242
         with (
+            mock.patch.object(issuer, "_require_active_manager_authority"),
+            mock.patch.object(issuer, "_require_manager_control_health"),
             mock.patch.object(
                 issuer,
                 "_spawn_exact_runner",
@@ -1808,6 +2646,240 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
         terminate.assert_called_once_with(pid)
         waitpid.assert_called_once_with(pid, os.WNOHANG)
 
+    def test_effectful_supervision_rechecks_lease_while_runner_is_alive(self) -> None:
+        descriptors = [os.open(os.devnull, os.O_RDONLY) for unused in range(2)]
+        pid = 424242
+        with (
+            mock.patch.object(issuer, "_require_active_manager_authority") as initial,
+            mock.patch.object(issuer, "_require_manager_control_health") as lineage,
+            mock.patch.object(issuer, "_require_production_write_lease") as lease,
+            mock.patch.object(issuer, "MANAGER_AUTHORITY_RECHECK_SECONDS", 0.0),
+            mock.patch.object(
+                issuer,
+                "_spawn_exact_runner",
+                return_value=(pid, *descriptors),
+            ),
+            mock.patch.object(os, "waitpid", return_value=(pid, 0)),
+        ):
+            observed = issuer._supervise_attempt(
+                inputs=inputs(),
+                guard_descriptor=9,
+            )
+        self.assertEqual(observed, (0, b"", b""))
+        self.assertEqual(initial.call_count, 2)
+        self.assertEqual(initial.call_args_list, [mock.call(), mock.call()])
+        lineage.assert_called_once_with()
+        lease.assert_called_once_with()
+
+    def test_nonzero_reaped_runner_uses_only_nondestructive_group_fence(
+        self,
+    ) -> None:
+        descriptors = [os.open(os.devnull, os.O_RDONLY) for unused in range(2)]
+        pid = 424242
+        with (
+            mock.patch.object(issuer, "_require_active_manager_authority"),
+            mock.patch.object(issuer, "_require_manager_control_health"),
+            mock.patch.object(
+                issuer,
+                "_spawn_exact_runner",
+                return_value=(pid, *descriptors),
+            ),
+            mock.patch.object(os, "waitpid", return_value=(pid, 1 << 8)),
+            mock.patch.object(
+                issuer,
+                "_require_process_group_absent_after_reap",
+            ) as require_absent,
+            mock.patch.object(
+                issuer,
+                "_terminate_and_reap_exact_runner",
+            ) as destructive_cleanup,
+        ):
+            observed = issuer._supervise_attempt(
+                inputs=inputs(),
+                guard_descriptor=9,
+            )
+        self.assertEqual(observed, (1, b"", b""))
+        require_absent.assert_called_once()
+        self.assertEqual(require_absent.call_args.args, (pid,))
+        destructive_cleanup.assert_not_called()
+
+    def test_signaled_reaped_runner_can_recover_only_after_group_absence(
+        self,
+    ) -> None:
+        descriptors = [os.open(os.devnull, os.O_RDONLY) for unused in range(2)]
+        pid = 424242
+        with (
+            mock.patch.object(issuer, "_require_active_manager_authority"),
+            mock.patch.object(issuer, "_require_manager_control_health"),
+            mock.patch.object(
+                issuer,
+                "_spawn_exact_runner",
+                return_value=(pid, *descriptors),
+            ),
+            mock.patch.object(os, "waitpid", return_value=(pid, signal.SIGKILL)),
+            mock.patch.object(
+                issuer,
+                "_require_process_group_absent_after_reap",
+            ) as require_absent,
+        ):
+            observed = issuer._supervise_attempt(
+                inputs=inputs(),
+                guard_descriptor=9,
+            )
+        self.assertEqual(observed, (128 + signal.SIGKILL, b"", b""))
+        require_absent.assert_called_once()
+
+    def test_post_reap_group_ambiguity_is_terminal_before_recovery(self) -> None:
+        descriptors = [os.open(os.devnull, os.O_RDONLY) for unused in range(2)]
+        pid = 424242
+        with (
+            mock.patch.object(issuer, "_require_active_manager_authority"),
+            mock.patch.object(issuer, "_require_manager_control_health"),
+            mock.patch.object(
+                issuer,
+                "_spawn_exact_runner",
+                return_value=(pid, *descriptors),
+            ),
+            mock.patch.object(os, "waitpid", return_value=(pid, 1 << 8)),
+            mock.patch.object(
+                issuer,
+                "_require_process_group_absent_after_reap",
+                side_effect=issuer.Phase9ProofIssuerError(
+                    "phase9_proof_issuer_runner_cleanup_failed"
+                ),
+            ),
+            mock.patch.object(
+                issuer,
+                "_terminate_and_reap_exact_runner",
+            ) as destructive_cleanup,
+            self.assertRaisesRegex(
+                issuer.Phase9ProofIssuerError,
+                "^phase9_proof_issuer_runner_cleanup_failed$",
+            ),
+        ):
+            issuer._supervise_attempt(
+                inputs=inputs(),
+                guard_descriptor=9,
+            )
+        destructive_cleanup.assert_not_called()
+
+    def test_post_reap_pipe_error_never_destructively_signals_reused_pgid(
+        self,
+    ) -> None:
+        descriptors = [os.open(os.devnull, os.O_RDONLY) for unused in range(2)]
+        pid = 424242
+        with (
+            mock.patch.object(issuer, "_require_active_manager_authority"),
+            mock.patch.object(issuer, "_require_manager_control_health"),
+            mock.patch.object(
+                issuer,
+                "_spawn_exact_runner",
+                return_value=(pid, *descriptors),
+            ),
+            mock.patch.object(os, "waitpid", return_value=(pid, 1 << 8)),
+            mock.patch.object(
+                select,
+                "select",
+                return_value=([descriptors[0]], [], []),
+            ),
+            mock.patch.object(os, "read", side_effect=OSError("pipe")),
+            mock.patch.object(
+                issuer,
+                "_require_process_group_absent_after_reap",
+            ) as require_absent,
+            mock.patch.object(
+                issuer,
+                "_terminate_and_reap_exact_runner",
+            ) as destructive_cleanup,
+            self.assertRaisesRegex(
+                issuer.Phase9ProofIssuerError,
+                "^phase9_proof_issuer_supervision_failed$",
+            ),
+        ):
+            issuer._supervise_attempt(
+                inputs=inputs(),
+                guard_descriptor=9,
+            )
+        require_absent.assert_called_once()
+        destructive_cleanup.assert_not_called()
+
+    def test_initial_authority_loss_refuses_before_runner_spawn(self) -> None:
+        with (
+            mock.patch.object(
+                issuer,
+                "_require_active_manager_authority",
+                side_effect=issuer.Phase9ProofIssuerError(
+                    "phase9_proof_issuer_production_write_lease_denied"
+                ),
+            ),
+            mock.patch.object(issuer, "_spawn_exact_runner") as spawn,
+            self.assertRaisesRegex(
+                issuer.Phase9ProofIssuerError,
+                "^phase9_proof_issuer_production_write_lease_denied$",
+            ),
+        ):
+            issuer._supervise_attempt(
+                inputs=inputs(),
+                guard_descriptor=9,
+            )
+        spawn.assert_not_called()
+
+    def test_recovery_only_supervision_does_not_require_lost_authority(self) -> None:
+        descriptors = [os.open(os.devnull, os.O_RDONLY) for unused in range(2)]
+        pid = 424242
+        with (
+            mock.patch.object(issuer, "_require_active_manager_authority") as initial,
+            mock.patch.object(issuer, "_require_manager_control_health") as lineage,
+            mock.patch.object(issuer, "_require_production_write_lease") as lease,
+            mock.patch.object(
+                issuer,
+                "_spawn_exact_runner",
+                return_value=(pid, *descriptors),
+            ),
+            mock.patch.object(os, "waitpid", return_value=(pid, 0)),
+        ):
+            observed = issuer._supervise_attempt(
+                inputs=inputs(),
+                guard_descriptor=9,
+                mode=proof.RunnerMode.RECOVER_ONLY,
+            )
+        self.assertEqual(observed, (0, b"", b""))
+        initial.assert_not_called()
+        lineage.assert_not_called()
+        lease.assert_not_called()
+
+    def test_manager_control_loss_kills_and_reaps_runner_group(self) -> None:
+        descriptors = [os.open(os.devnull, os.O_RDONLY) for unused in range(2)]
+        pid = 424242
+        with (
+            mock.patch.object(issuer, "_require_active_manager_authority"),
+            mock.patch.object(
+                issuer,
+                "_require_manager_control_health",
+                side_effect=issuer.Phase9ProofIssuerError(
+                    "phase9_proof_issuer_manager_control_lost"
+                ),
+            ),
+            mock.patch.object(
+                issuer,
+                "_spawn_exact_runner",
+                return_value=(pid, *descriptors),
+            ),
+            mock.patch.object(
+                issuer,
+                "_terminate_and_reap_exact_runner",
+            ) as terminate,
+            self.assertRaisesRegex(
+                issuer.Phase9ProofIssuerError,
+                "^phase9_proof_issuer_manager_control_lost$",
+            ),
+        ):
+            issuer._supervise_attempt(
+                inputs=inputs(),
+                guard_descriptor=9,
+            )
+        terminate.assert_called_once_with(pid)
+
     def test_spawn_parent_failure_terminates_child_and_closes_all_pipes(self) -> None:
         pipe_pairs = ((10, 11), (12, 13))
         closed: list[int] = []
@@ -1822,6 +2894,11 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
 
         with (
             mock.patch.object(os, "pipe", side_effect=pipe_pairs),
+            mock.patch.object(
+                issuer,
+                "_runner_environment",
+                return_value=dict(issuer._SAFE_ENVIRONMENT),
+            ),
             mock.patch.object(os, "fork", return_value=424242),
             mock.patch.object(os, "close", side_effect=close_once),
             mock.patch.object(
@@ -1844,7 +2921,12 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
             mock.patch.object(
                 os,
                 "killpg",
-                side_effect=(missing_group, missing_group, missing_group),
+                side_effect=(
+                    missing_group,
+                    missing_group,
+                    missing_group,
+                    missing_group,
+                ),
             ) as kill_group,
             mock.patch.object(os, "kill") as kill_pid,
             mock.patch.object(
@@ -1860,9 +2942,54 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
             mock.patch.object(select, "select", return_value=([], [], [])),
         ):
             issuer._terminate_and_reap_exact_runner(pid)
-        self.assertEqual(kill_group.call_count, 3)
+        self.assertEqual(kill_group.call_count, 4)
+        self.assertEqual(kill_group.call_args_list[-1], mock.call(pid, 0))
         kill_pid.assert_called_once_with(pid, signal.SIGKILL)
         self.assertEqual(waitpid.call_count, 2)
+
+    def test_reaped_runner_requires_bounded_process_group_absence(self) -> None:
+        pid = 424242
+        missing_group = ProcessLookupError()
+        with (
+            mock.patch.object(
+                os,
+                "killpg",
+                side_effect=(None, None, missing_group),
+            ) as kill_group,
+            mock.patch.object(os, "waitpid", return_value=(pid, 0)),
+            mock.patch.object(
+                time,
+                "monotonic",
+                side_effect=(100.0, 100.1),
+            ),
+            mock.patch.object(select, "select", return_value=([], [], [])),
+        ):
+            issuer._terminate_and_reap_exact_runner(pid)
+        self.assertEqual(
+            kill_group.call_args_list,
+            [
+                mock.call(pid, signal.SIGKILL),
+                mock.call(pid, 0),
+                mock.call(pid, 0),
+            ],
+        )
+
+    def test_live_runner_group_at_deadline_refuses_cleanup_proof(self) -> None:
+        pid = 424242
+        with (
+            mock.patch.object(os, "killpg", return_value=None),
+            mock.patch.object(os, "waitpid", return_value=(pid, 0)),
+            mock.patch.object(
+                time,
+                "monotonic",
+                side_effect=(100.0, 106.0),
+            ),
+            self.assertRaisesRegex(
+                issuer.Phase9ProofIssuerError,
+                "^phase9_proof_issuer_runner_cleanup_failed$",
+            ),
+        ):
+            issuer._terminate_and_reap_exact_runner(pid)
 
     def test_exact_runner_timeout_invokes_recovery_only_once(self) -> None:
         schema = b"schema"
@@ -1875,20 +3002,24 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
         }
         (
             runtime,
+            manager_authority,
             guard_parent,
             guard_lock,
             reconcile,
             disposition,
+            bootstrap,
             substrate,
             pair,
             durable,
         ) = self._issuer_guard_mocks()
         with (
             runtime,
+            manager_authority,
             guard_parent,
             guard_lock,
             reconcile,
             disposition,
+            bootstrap,
             substrate,
             pair,
             durable,
@@ -1931,6 +3062,308 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
         self.assertEqual(attempts.call_count, 2)
         self.assertIs(attempts.call_args_list[1].kwargs["mode"], proof.RunnerMode.RECOVER_ONLY)
 
+    def test_unexpected_supervision_error_enters_closed_recovery_then_fails(
+        self,
+    ) -> None:
+        (
+            runtime,
+            manager_authority,
+            guard_parent,
+            guard_lock,
+            reconcile,
+            disposition,
+            bootstrap,
+            substrate,
+            pair,
+            durable,
+        ) = self._issuer_guard_mocks()
+        with (
+            runtime,
+            manager_authority,
+            guard_parent,
+            guard_lock,
+            reconcile,
+            disposition,
+            bootstrap,
+            substrate,
+            pair,
+            durable,
+            mock.patch.object(os, "geteuid", return_value=0),
+            mock.patch.object(
+                issuer.runner,
+                "DURABLE_PRE_EFFECT_ROLLBACK_AUTHORITY_PACKAGED",
+                True,
+            ),
+            mock.patch.object(issuer, "verify_exact_clean_candidate"),
+            mock.patch.object(
+                issuer.runner, "_load_release", return_value=(b"manifest", {})
+            ),
+            mock.patch.object(
+                issuer,
+                "_supervise_attempt",
+                side_effect=(
+                    issuer.Phase9ProofIssuerError(
+                        "phase9_proof_issuer_supervision_failed"
+                    ),
+                    (0, b"pair\n", b""),
+                ),
+            ) as attempts,
+            mock.patch.object(
+                issuer,
+                "_verify_supervised_receipt",
+                return_value=("pair_only", {}),
+            ),
+            self.assertRaisesRegex(
+                issuer.Phase9ProofIssuerError,
+                "^phase9_proof_issuer_supervision_failed$",
+            ),
+        ):
+            issuer.issue_and_supervise(inputs())
+        self.assertEqual(
+            [call.kwargs["mode"] for call in attempts.call_args_list],
+            [proof.RunnerMode.START_OR_RECOVER, proof.RunnerMode.RECOVER_ONLY],
+        )
+
+    def test_ambiguous_runner_cleanup_never_starts_overlapping_recovery(
+        self,
+    ) -> None:
+        (
+            runtime,
+            manager_authority,
+            guard_parent,
+            guard_lock,
+            reconcile,
+            disposition,
+            bootstrap,
+            substrate,
+            pair,
+            durable,
+        ) = self._issuer_guard_mocks()
+        with (
+            runtime,
+            manager_authority,
+            guard_parent,
+            guard_lock,
+            reconcile,
+            disposition,
+            bootstrap,
+            substrate,
+            pair,
+            durable,
+            mock.patch.object(os, "geteuid", return_value=0),
+            mock.patch.object(
+                issuer.runner,
+                "DURABLE_PRE_EFFECT_ROLLBACK_AUTHORITY_PACKAGED",
+                True,
+            ),
+            mock.patch.object(issuer, "verify_exact_clean_candidate"),
+            mock.patch.object(
+                issuer.runner, "_load_release", return_value=(b"manifest", {})
+            ),
+            mock.patch.object(
+                issuer,
+                "_supervise_attempt",
+                side_effect=issuer.Phase9ProofIssuerError(
+                    "phase9_proof_issuer_runner_cleanup_failed"
+                ),
+            ) as attempts,
+            self.assertRaisesRegex(
+                issuer.Phase9ProofIssuerError,
+                "^phase9_proof_issuer_runner_cleanup_failed$",
+            ),
+        ):
+            issuer.issue_and_supervise(inputs())
+        self.assertEqual(attempts.call_count, 1)
+        self.assertIs(
+            attempts.call_args.kwargs["mode"],
+            proof.RunnerMode.START_OR_RECOVER,
+        )
+
+    def test_invalid_success_receipt_recovers_before_refusal(self) -> None:
+        (
+            runtime,
+            manager_authority,
+            guard_parent,
+            guard_lock,
+            reconcile,
+            disposition,
+            bootstrap,
+            substrate,
+            pair,
+            durable,
+        ) = self._issuer_guard_mocks()
+        invalid = issuer.Phase9ProofIssuerError(
+            "phase9_proof_issuer_receipt_invalid"
+        )
+        with (
+            runtime,
+            manager_authority,
+            guard_parent,
+            guard_lock,
+            reconcile,
+            disposition,
+            bootstrap,
+            substrate,
+            pair,
+            durable,
+            mock.patch.object(os, "geteuid", return_value=0),
+            mock.patch.object(
+                issuer.runner,
+                "DURABLE_PRE_EFFECT_ROLLBACK_AUTHORITY_PACKAGED",
+                True,
+            ),
+            mock.patch.object(issuer, "verify_exact_clean_candidate"),
+            mock.patch.object(
+                issuer.runner, "_load_release", return_value=(b"manifest", {})
+            ),
+            mock.patch.object(
+                issuer,
+                "_supervise_attempt",
+                side_effect=((0, b"bad\n", b""), (0, b"pair\n", b"")),
+            ) as attempts,
+            mock.patch.object(
+                issuer,
+                "_verify_supervised_receipt",
+                side_effect=(invalid, ("pair_only", {})),
+            ),
+            self.assertRaisesRegex(
+                issuer.Phase9ProofIssuerError,
+                "^phase9_proof_issuer_receipt_invalid$",
+            ),
+        ):
+            issuer.issue_and_supervise(inputs())
+        self.assertEqual(
+            [call.kwargs["mode"] for call in attempts.call_args_list],
+            [proof.RunnerMode.START_OR_RECOVER, proof.RunnerMode.RECOVER_ONLY],
+        )
+
+    def test_post_failure_durable_read_error_recovers_before_refusal(self) -> None:
+        (
+            runtime,
+            manager_authority,
+            guard_parent,
+            guard_lock,
+            reconcile,
+            disposition,
+            bootstrap,
+            substrate,
+            pair,
+            unused_durable,
+        ) = self._issuer_guard_mocks()
+        del unused_durable
+        with (
+            runtime,
+            manager_authority,
+            guard_parent,
+            guard_lock,
+            reconcile,
+            disposition,
+            bootstrap,
+            substrate,
+            pair,
+            mock.patch.object(os, "geteuid", return_value=0),
+            mock.patch.object(
+                issuer.runner,
+                "DURABLE_PRE_EFFECT_ROLLBACK_AUTHORITY_PACKAGED",
+                True,
+            ),
+            mock.patch.object(issuer, "verify_exact_clean_candidate"),
+            mock.patch.object(
+                issuer.runner, "_load_release", return_value=(b"manifest", {})
+            ),
+            mock.patch.object(
+                issuer,
+                "_supervise_attempt",
+                side_effect=((1, b"", b"failed\n"), (0, b"pair\n", b"")),
+            ) as attempts,
+            mock.patch.object(
+                issuer,
+                "_verify_supervised_receipt",
+                return_value=("pair_only", {}),
+            ),
+            mock.patch.object(
+                issuer.durable_live_proof_receipt,
+                "read_verified_promotable_live_receipt_if_present",
+                side_effect=(
+                    None,
+                    issuer.durable_live_proof_receipt.DurableLiveProofReceiptError(
+                        "invalid"
+                    ),
+                ),
+            ),
+            self.assertRaisesRegex(
+                issuer.Phase9ProofIssuerError,
+                "^phase9_proof_issuer_durable_receipt_invalid$",
+            ),
+        ):
+            issuer.issue_and_supervise(inputs())
+        self.assertEqual(
+            [call.kwargs["mode"] for call in attempts.call_args_list],
+            [proof.RunnerMode.START_OR_RECOVER, proof.RunnerMode.RECOVER_ONLY],
+        )
+
+    def test_manager_loss_continues_only_through_closed_recovery_mode(self) -> None:
+        live = {"receipt_sha256": "d" * 64}
+        (
+            runtime,
+            manager_authority,
+            guard_parent,
+            guard_lock,
+            reconcile,
+            disposition,
+            bootstrap,
+            substrate,
+            pair,
+            durable,
+        ) = self._issuer_guard_mocks()
+        with (
+            runtime,
+            manager_authority,
+            guard_parent,
+            guard_lock,
+            reconcile,
+            disposition,
+            bootstrap,
+            substrate,
+            pair,
+            durable,
+            mock.patch.object(os, "geteuid", return_value=0),
+            mock.patch.object(
+                issuer.runner,
+                "DURABLE_PRE_EFFECT_ROLLBACK_AUTHORITY_PACKAGED",
+                True,
+            ),
+            mock.patch.object(issuer, "verify_exact_clean_candidate"),
+            mock.patch.object(
+                issuer.runner,
+                "_load_release",
+                return_value=(b"manifest", {}),
+            ),
+            mock.patch.object(
+                issuer,
+                "_supervise_attempt",
+                side_effect=(
+                    issuer.Phase9ProofIssuerError(
+                        "phase9_proof_issuer_manager_control_lost"
+                    ),
+                    (0, b"live\n", b""),
+                ),
+            ) as attempts,
+            mock.patch.object(
+                issuer,
+                "_verify_supervised_receipt",
+                return_value=("live", live),
+            ),
+        ):
+            self.assertEqual(dict(issuer.issue_and_supervise(inputs())), live)
+        self.assertEqual(
+            [call.kwargs["mode"] for call in attempts.call_args_list],
+            [
+                proof.RunnerMode.START_OR_RECOVER,
+                proof.RunnerMode.RECOVER_ONLY,
+            ],
+        )
+
     def test_issuer_rejects_receipt_not_bound_to_exact_inputs(self) -> None:
         schema = b"schema"
         verified = {
@@ -1944,20 +3377,24 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
         }
         (
             runtime,
+            manager_authority,
             guard_parent,
             guard_lock,
             reconcile,
             disposition,
+            bootstrap,
             substrate,
             pair,
             durable,
         ) = self._issuer_guard_mocks()
         with (
             runtime,
+            manager_authority,
             guard_parent,
             guard_lock,
             reconcile,
             disposition,
+            bootstrap,
             substrate,
             pair,
             durable,
@@ -2003,20 +3440,24 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
     def test_runner_nonzero_invokes_recovery_once_and_retains_capsule(self) -> None:
         (
             runtime,
+            manager_authority,
             guard_parent,
             guard_lock,
             reconcile,
             disposition,
+            bootstrap,
             substrate,
             pair,
             durable,
         ) = self._issuer_guard_mocks()
         with (
             runtime,
+            manager_authority,
             guard_parent,
             guard_lock,
             reconcile,
             disposition,
+            bootstrap,
             substrate,
             pair,
             durable,
@@ -2056,10 +3497,12 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
     def test_pair_only_retries_same_start_pair_once(self) -> None:
         (
             runtime,
+            manager_authority,
             guard_parent,
             guard_lock,
             reconcile,
             disposition,
+            bootstrap,
             substrate,
             pair,
             durable,
@@ -2067,10 +3510,12 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
         live = {"receipt_sha256": "d" * 64}
         with (
             runtime,
+            manager_authority,
             guard_parent,
             guard_lock,
             reconcile,
             disposition,
+            bootstrap,
             substrate,
             pair,
             durable,
@@ -2114,20 +3559,24 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
     def test_second_pair_only_stops_without_looping(self) -> None:
         (
             runtime,
+            manager_authority,
             guard_parent,
             guard_lock,
             reconcile,
             disposition,
+            bootstrap,
             substrate,
             pair,
             durable,
         ) = self._issuer_guard_mocks()
         with (
             runtime,
+            manager_authority,
             guard_parent,
             guard_lock,
             reconcile,
             disposition,
+            bootstrap,
             substrate,
             pair,
             durable,
@@ -2895,6 +4344,171 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
             ],
         )
 
+    def test_ambiguous_install_worker_cleanup_never_starts_sibling_recovery(
+        self,
+    ) -> None:
+        selected_context = context()
+        modes: list[proof.WorkerMode] = []
+
+        def fork(
+            mode: proof.WorkerMode,
+            unused_context: object,
+            **unused_options: object,
+        ) -> tuple[int, int]:
+            modes.append(mode)
+            return 1, 11
+
+        with (
+            mock.patch.object(
+                proof, "_verify_host_clock_synchronized", return_value=True
+            ),
+            mock.patch.object(proof, "_prepare_fixed_substrate"),
+            mock.patch.object(
+                proof,
+                "preflight_anonymous_publication_capability",
+                return_value=None,
+            ),
+            mock.patch.object(
+                proof,
+                "_verify_start_authority_pair_before_install",
+                return_value={
+                    "recovery_reservation_claim_sha256": "a" * 64,
+                    "install_authority_claim_sha256": "b" * 64,
+                    "start_authority_pair_claimed_atomically": True,
+                },
+            ),
+            mock.patch.object(
+                proof,
+                "_verified_install_context",
+                return_value=(selected_context, object()),
+            ),
+            mock.patch.object(
+                proof,
+                "_expected_install_execution_id",
+                return_value=INSTALL_EXECUTION,
+            ),
+            mock.patch.object(
+                proof, "_execution_directories", return_value=frozenset()
+            ),
+            mock.patch.object(proof, "_fork_worker", side_effect=fork),
+            mock.patch.object(
+                proof,
+                "_kill_after_new_durable_boundary",
+                side_effect=proof.LiveProofError(
+                    "phase9_live_proof_worker_cleanup_unproved"
+                ),
+            ),
+            mock.patch.object(
+                proof, "_recover_verified_install_receipt"
+            ) as recover_install,
+            mock.patch.object(
+                proof, "_complete_exact_rollback_recovery"
+            ) as recover_rollback,
+            self.assertRaisesRegex(
+                proof.LiveProofError,
+                "^phase9_live_proof_worker_cleanup_unproved$",
+            ),
+        ):
+            proof.run_live_proof(inputs())
+        self.assertEqual(modes, [proof.WorkerMode.RESUME_INSTALL])
+        recover_install.assert_not_called()
+        recover_rollback.assert_not_called()
+
+    def test_ambiguous_rollback_worker_cleanup_never_starts_sibling_recovery(
+        self,
+    ) -> None:
+        selected_context = context()
+        install_receipt = {"execution_id": INSTALL_EXECUTION}
+        modes: list[proof.WorkerMode] = []
+
+        def fork(
+            mode: proof.WorkerMode,
+            unused_context: object,
+            **unused_options: object,
+        ) -> tuple[int, int]:
+            modes.append(mode)
+            return len(modes), len(modes) + 10
+
+        with (
+            mock.patch.object(
+                proof, "_verify_host_clock_synchronized", return_value=True
+            ),
+            mock.patch.object(proof, "_prepare_fixed_substrate"),
+            mock.patch.object(
+                proof,
+                "preflight_anonymous_publication_capability",
+                return_value=None,
+            ),
+            mock.patch.object(
+                proof,
+                "_verify_start_authority_pair_before_install",
+                return_value={
+                    "recovery_reservation_claim_sha256": "a" * 64,
+                    "install_authority_claim_sha256": "b" * 64,
+                    "start_authority_pair_claimed_atomically": True,
+                },
+            ),
+            mock.patch.object(
+                proof,
+                "_verified_install_context",
+                return_value=(selected_context, object()),
+            ),
+            mock.patch.object(
+                proof,
+                "_expected_install_execution_id",
+                return_value=INSTALL_EXECUTION,
+            ),
+            mock.patch.object(
+                proof,
+                "_expected_rollback_execution_id",
+                return_value=ROLLBACK_EXECUTION,
+            ),
+            mock.patch.object(
+                proof,
+                "_execution_directories",
+                side_effect=(frozenset(), frozenset()),
+            ),
+            mock.patch.object(proof, "_fork_worker", side_effect=fork),
+            mock.patch.object(
+                proof,
+                "_kill_after_new_durable_boundary",
+                side_effect=(
+                    {"execution_id": INSTALL_EXECUTION},
+                    proof.LiveProofError(
+                        "phase9_live_proof_worker_cleanup_unproved"
+                    ),
+                ),
+            ),
+            mock.patch.object(
+                proof, "_wait_worker", return_value=install_receipt
+            ),
+            mock.patch.object(
+                proof,
+                "verify_install_receipt",
+                side_effect=lambda value: dict(value),
+            ),
+            mock.patch.object(
+                proof, "_build_rollback_documents", return_value=mock.Mock()
+            ),
+            mock.patch.object(
+                proof, "_complete_exact_rollback_recovery"
+            ) as recover_rollback,
+            self.assertRaisesRegex(
+                proof.LiveProofError,
+                "^phase9_live_proof_worker_cleanup_unproved$",
+            ),
+        ):
+            proof.run_live_proof(inputs())
+        self.assertEqual(
+            modes,
+            [
+                proof.WorkerMode.RESUME_INSTALL,
+                proof.WorkerMode.RESUME_INSTALL,
+                proof.WorkerMode.ROLLBACK,
+            ],
+        )
+        recover_rollback.assert_not_called()
+
     def test_live_success_persists_promotable_receipt_before_return(self) -> None:
         selected_context = context()
         install_receipt = {
@@ -3170,6 +4784,61 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
         self.assertIn('("status", "--porcelain=v1", "--untracked-files=all")', source)
         self.assertIn('"safe.directory=" + str(_ISSUER_REPOSITORY_ROOT)', source)
         self.assertIn("verify_exact_clean_candidate(inputs)", source)
+        held_guard = source.split("with guard:", 1)[1]
+        disposition = held_guard.index(
+            "_require_production_pre_effect_disposition(inputs=inputs)"
+        )
+        checks = [
+            index
+            for index in range(len(held_guard))
+            if held_guard.startswith("verify_exact_clean_candidate(inputs)", index)
+        ]
+        bootstrap = held_guard.index(
+            "substrate_bootstrap.bootstrap_phase9_disposable_store_substrate("
+        )
+        substrate = held_guard.index("runner._prepare_fixed_substrate()")
+        self.assertGreaterEqual(len(checks), 2)
+        self.assertLess(checks[0], disposition)
+        self.assertLess(disposition, checks[1])
+        self.assertLess(checks[1], bootstrap)
+        self.assertLess(bootstrap, substrate)
+
+    def test_issuer_permit_bridge_binds_all_proof_inputs_and_authority(self) -> None:
+        authority = mock.sentinel.authority
+        with mock.patch.object(
+            issuer.phase9_permitted_candidate,
+            "require_exact_permitted_candidate",
+            return_value=authority,
+        ) as require:
+            observed = issuer._require_exact_permitted_candidate(inputs())
+        self.assertIs(observed, authority)
+        require.assert_called_once_with(
+            expected_candidate_git_commit=COMMIT,
+            expected_candidate_git_tree=TREE,
+            expected_package_manifest_sha256=PACKAGE,
+            expected_controller_runtime_receipt_sha256=RUNTIME,
+            expected_thread_id=proof.THREAD_ID,
+            expected_authorization_text_sha256=proof.AUTHORIZED_TEXT_SHA256,
+        )
+
+    def test_issuer_maps_permit_refusal_before_candidate_authority(self) -> None:
+        refusal = (
+            issuer.phase9_permitted_candidate.Phase9PermittedCandidateError(
+                "private detail"
+            )
+        )
+        with (
+            mock.patch.object(
+                issuer.phase9_permitted_candidate,
+                "require_exact_permitted_candidate",
+                side_effect=refusal,
+            ),
+            self.assertRaisesRegex(
+                issuer.Phase9ProofIssuerError,
+                "^phase9_proof_issuer_candidate_permit_required$",
+            ),
+        ):
+            issuer._require_exact_permitted_candidate(inputs())
 
     def test_issuer_accepts_devnull_git_stderr_as_none(self) -> None:
         issuer_relative = (
@@ -3195,9 +4864,12 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
             )
             for value in outputs
         )
-        with mock.patch.object(
-            issuer.subprocess, "run", side_effect=completed
-        ) as run:
+        with (
+            mock.patch.object(
+                issuer.subprocess, "run", side_effect=completed
+            ) as run,
+            mock.patch.object(issuer, "_require_exact_permitted_candidate"),
+        ):
             issuer.verify_exact_clean_candidate(inputs())
         self.assertEqual(run.call_count, len(outputs))
         self.assertTrue(
@@ -3207,7 +4879,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
             )
         )
 
-    def test_issuer_has_direct_isolated_runtime_invocation_surface(self) -> None:
+    def test_direct_issuer_requires_the_pinned_r7_runtime_before_imports(self) -> None:
         completed = subprocess.run(
             (sys.executable, "-I", "-B", str(Path(issuer.__file__)), "--help"),
             stdin=subprocess.DEVNULL,
@@ -3216,8 +4888,17 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
             check=False,
             timeout=10,
         )
-        self.assertEqual(completed.returncode, 0, completed.stderr.decode())
-        self.assertIn(b"--package-manifest-sha256", completed.stdout)
+        self.assertEqual(completed.returncode, 1)
+        self.assertEqual(completed.stdout, b"")
+        self.assertEqual(
+            completed.stderr,
+            b"phase9_proof_issuer_pinned_runtime_required\n",
+        )
+        source = Path(issuer.__file__).read_text(encoding="utf-8")
+        self.assertLess(
+            source.index("phase9_proof_issuer_pinned_runtime_required"),
+            source.index("from cryptography.hazmat.primitives import"),
+        )
 
     def test_issuer_execs_runner_with_isolation_and_no_bytecode_writes(self) -> None:
         arguments = issuer._runner_argv(inputs())
@@ -3601,6 +5282,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
                 "_require_pristine_staged_cleanup_state",
                 side_effect=lambda **unused: events.append("pristine"),
             ),
+            mock.patch.object(issuer, "_require_active_manager_authority"),
             mock.patch.object(
                 issuer,
                 "_unlink_exact_member",

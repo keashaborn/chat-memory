@@ -3,11 +3,13 @@ from __future__ import annotations
 
 """Run the signed-capsule Phase 9 disposable store proof.
 
-The outer process accepts only four immutable identities. Authority comes
-from one fixed root-owned recovery capsule containing pre-signed install
-documents and a narrow public rollback-recovery delegation.  The issuer
-discards its private key before this process starts; this runner receives only
-the locked guard descriptor and public capsule.
+The outer process accepts only four immutable identities. Start authority is
+bound to the exact manager-to-issuer process lineage, live lease, inherited
+read-only manager-control descriptor, fixed guard, and sealed release. The
+root-owned recovery capsule contains pre-signed install documents and a narrow
+public rollback-recovery delegation; RECOVER_ONLY remains independently
+sealed and cannot initiate a pristine install. The issuer discards its private
+key before a start-capable runner begins.
 
 This program never imports provider clients, reads production data or provider
 credentials, accepts a path/command/SQL/URL/resource name, or performs a name-based
@@ -17,11 +19,366 @@ only signed public documents; no private signing key is persisted.  Recovery
 can therefore derive and resume only the exact ledger-bound empty rollback.
 """
 
+import errno
+import fcntl
+import os
+import select
+import stat
+import subprocess
 import sys
 
 _DONT_WRITE_BYTECODE_AT_START = sys.dont_write_bytecode
 if __name__ == "__main__" and not _DONT_WRITE_BYTECODE_AT_START:
     raise SystemExit("phase9_live_proof_bytecode_writes_not_disabled")
+
+_PREIMPORT_RELEASE_ROOT = "/opt/governed-memory-controller/releases"
+_PREIMPORT_RUNTIME_ROOT = "/opt/governed-memory-controller/runtimes"
+_PREIMPORT_RUNNER_RELATIVE = (
+    "tools/governed_memory_validation/"
+    "run_disposable_installation_live_proof.py"
+)
+_PREIMPORT_ISSUER_RELATIVE = (
+    "tools/governed_memory_validation/"
+    "issue_disposable_installation_live_proof.py"
+)
+_PREIMPORT_MANAGER_RELATIVE = (
+    "tools/governed_memory_validation/"
+    "execute_phase9_disposable_live_proof_controller.py"
+)
+_PREIMPORT_AUTHORITY_MODES = frozenset(
+    {
+        "preclaim-staged-start",
+        "verify-published-start-pair",
+        "start-or-recover",
+    }
+)
+_PREIMPORT_RECOVERY_MODE = "recover-only"
+_PREIMPORT_WORKER_MODES = frozenset(
+    {
+        "worker-start-or-recover",
+        "worker-recover-only",
+        "install",
+        "resume-install",
+        "rollback",
+        "resume-rollback",
+        "verify-absence",
+    }
+)
+_PREIMPORT_MANAGER_CONTROL_FD = 198
+_PREIMPORT_ISSUER_PID_KEY = "GOVERNED_MEMORY_PHASE9_ISSUER_PID"
+_PREIMPORT_MANAGER_PID_KEY = "GOVERNED_MEMORY_PHASE9_MANAGER_PID"
+_PREIMPORT_REPOSITORY_ROOT_KEY = (
+    "GOVERNED_MEMORY_PHASE9_ISSUER_REPOSITORY_ROOT"
+)
+_PREIMPORT_LEASE_KEYS = (
+    "CHAT_MEMORY_LEASE_ID",
+    "CODEX_TASK_ID",
+    "CODEX_THREAD_ID",
+)
+_PREIMPORT_LEASE_GUARD_PYTHON = "/usr/bin/python3.12"
+_PREIMPORT_LEASE_GUARD = (
+    "/var/lib/chat-memory-change-leases-v1/control/bin/"
+    "chat_memory_lease_guard.py"
+)
+_PREIMPORT_LEASE_ID_CHARACTERS = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._:@-"
+)
+
+
+def _preimport_exact_lower_hex(value: object, length: int) -> bool:
+    return (
+        type(value) is str
+        and len(value) == length
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _preimport_exact_positive_pid(value: object) -> int:
+    if (
+        type(value) is not str
+        or not value.isascii()
+        or not value.isdecimal()
+        or value.startswith("0")
+    ):
+        raise RuntimeError("pid")
+    result = int(value)
+    if result <= 1 or str(result) != value:
+        raise RuntimeError("pid")
+    return result
+
+
+def _preimport_exact_lease_identity(value: object) -> str:
+    if (
+        type(value) is not str
+        or not 1 <= len(value) <= 128
+        or value[0] not in _PREIMPORT_LEASE_ID_CHARACTERS
+        or any(
+            character not in _PREIMPORT_LEASE_ID_CHARACTERS
+            for character in value
+        )
+    ):
+        raise RuntimeError("lease")
+    return value
+
+
+def _preimport_cli_identities() -> tuple[str, str, str, str, str]:
+    arguments = tuple(sys.argv[1:])
+    if (
+        len(arguments) != 9
+        or arguments[1] != "--candidate-git-commit"
+        or arguments[3] != "--candidate-git-tree"
+        or arguments[5] != "--package-manifest-sha256"
+        or arguments[7] != "--controller-runtime-receipt-sha256"
+        or arguments[0]
+        not in (
+            _PREIMPORT_AUTHORITY_MODES
+            | {_PREIMPORT_RECOVERY_MODE}
+            | _PREIMPORT_WORKER_MODES
+        )
+        or not _preimport_exact_lower_hex(arguments[2], 40)
+        or not _preimport_exact_lower_hex(arguments[4], 40)
+        or not _preimport_exact_lower_hex(arguments[6], 64)
+        or not _preimport_exact_lower_hex(arguments[8], 64)
+    ):
+        raise RuntimeError("arguments")
+    return (
+        arguments[0],
+        arguments[2],
+        arguments[4],
+        arguments[6],
+        arguments[8],
+    )
+
+
+def _preimport_proc_cmdline(pid: int) -> tuple[str, ...]:
+    with open(f"/proc/{pid}/cmdline", "rb", buffering=0) as source:
+        raw = source.read(16 * 1024 + 1)
+    if not raw or len(raw) > 16 * 1024 or not raw.endswith(b"\x00"):
+        raise RuntimeError("cmdline")
+    try:
+        values = tuple(item.decode("utf-8") for item in raw[:-1].split(b"\x00"))
+    except UnicodeError as error:
+        raise RuntimeError("cmdline") from error
+    if not values or any(not value for value in values):
+        raise RuntimeError("cmdline")
+    return values
+
+
+def _preimport_proc_parent_pid(pid: int) -> int:
+    with open(f"/proc/{pid}/status", "rb", buffering=0) as source:
+        raw = source.read(64 * 1024 + 1)
+    if len(raw) > 64 * 1024:
+        raise RuntimeError("status")
+    matches = [line for line in raw.splitlines() if line.startswith(b"PPid:\t")]
+    if len(matches) != 1:
+        raise RuntimeError("status")
+    try:
+        value = matches[0][len(b"PPid:\t") :].decode("ascii")
+    except UnicodeError as error:
+        raise RuntimeError("status") from error
+    return _preimport_exact_positive_pid(value)
+
+
+def _preimport_control_descriptor_identity() -> tuple[int, int]:
+    opened = os.fstat(_PREIMPORT_MANAGER_CONTROL_FD)
+    flags = fcntl.fcntl(_PREIMPORT_MANAGER_CONTROL_FD, fcntl.F_GETFL)
+    ready, unused_write, unused_exception = select.select(
+        [_PREIMPORT_MANAGER_CONTROL_FD], [], [], 0
+    )
+    if (
+        not stat.S_ISFIFO(opened.st_mode)
+        or flags & os.O_ACCMODE != os.O_RDONLY
+        or not os.get_inheritable(_PREIMPORT_MANAGER_CONTROL_FD)
+        or ready
+        or unused_write
+        or unused_exception
+    ):
+        raise RuntimeError("control")
+    return opened.st_dev, opened.st_ino
+
+
+def _preimport_require_descriptor_absent(descriptor: int) -> None:
+    try:
+        os.fstat(descriptor)
+    except OSError as error:
+        if error.errno == errno.EBADF:
+            return
+        raise RuntimeError("descriptor") from error
+    raise RuntimeError("descriptor")
+
+
+def _preimport_manager_holds_control_writer(
+    manager_pid: int,
+    control_identity: tuple[int, int],
+) -> bool:
+    for entry in os.listdir(f"/proc/{manager_pid}/fd"):
+        if not entry.isascii() or not entry.isdecimal():
+            continue
+        descriptor = int(entry)
+        try:
+            opened = os.stat(f"/proc/{manager_pid}/fd/{descriptor}")
+            if (
+                not stat.S_ISFIFO(opened.st_mode)
+                or (opened.st_dev, opened.st_ino) != control_identity
+            ):
+                continue
+            with open(
+                f"/proc/{manager_pid}/fdinfo/{descriptor}",
+                "rb",
+                buffering=0,
+            ) as source:
+                raw = source.read(4097)
+            if len(raw) > 4096:
+                raise RuntimeError("fdinfo")
+            flag_lines = [
+                line for line in raw.splitlines() if line.startswith(b"flags:\t")
+            ]
+            if len(flag_lines) != 1:
+                continue
+            flags = int(flag_lines[0][len(b"flags:\t") :], 8)
+            if flags & os.O_ACCMODE == os.O_WRONLY:
+                return True
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+    return False
+
+
+def _preimport_validate_sealed_invocation(
+    mode: str,
+    package_sha256: str,
+    runtime_receipt_sha256: str,
+) -> tuple[str, str]:
+    if not sys.flags.isolated or sys.platform != "linux":
+        raise RuntimeError("runtime")
+    release_root = os.path.join(_PREIMPORT_RELEASE_ROOT, package_sha256)
+    runner_path = os.path.join(release_root, _PREIMPORT_RUNNER_RELATIVE)
+    runtime_python = os.path.join(
+        _PREIMPORT_RUNTIME_ROOT,
+        runtime_receipt_sha256,
+        "bin/python",
+    )
+    if (
+        not os.path.isabs(__file__)
+        or __file__ != os.path.realpath(__file__)
+        or sys.argv[0] != __file__
+        or __file__ != runner_path
+        or sys.executable != runtime_python
+        or os.path.realpath(sys.executable) != sys.executable
+    ):
+        raise RuntimeError("invocation")
+    for path in (runner_path, runtime_python):
+        opened = os.stat(path, follow_symlinks=False)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_uid != 0
+            or opened.st_gid != 0
+            or stat.S_IMODE(opened.st_mode) & 0o022
+        ):
+            raise RuntimeError("ownership")
+    if mode == _PREIMPORT_RECOVERY_MODE or mode in _PREIMPORT_WORKER_MODES:
+        _preimport_require_descriptor_absent(_PREIMPORT_MANAGER_CONTROL_FD)
+    return release_root, runtime_python
+
+
+def _preimport_validate_issuer_authority(
+    *,
+    runtime_python: str,
+) -> tuple[int, int, int, int, str, str, str, str]:
+    issuer_pid = _preimport_exact_positive_pid(
+        os.environ.get(_PREIMPORT_ISSUER_PID_KEY)
+    )
+    manager_pid = _preimport_exact_positive_pid(
+        os.environ.get(_PREIMPORT_MANAGER_PID_KEY)
+    )
+    if os.getppid() != issuer_pid:
+        raise RuntimeError("issuer")
+    repository_root = os.environ.get(_PREIMPORT_REPOSITORY_ROOT_KEY)
+    if (
+        type(repository_root) is not str
+        or not os.path.isabs(repository_root)
+        or os.path.realpath(repository_root) != repository_root
+    ):
+        raise RuntimeError("repository")
+    issuer_path = os.path.join(repository_root, _PREIMPORT_ISSUER_RELATIVE)
+    manager_path = os.path.join(repository_root, _PREIMPORT_MANAGER_RELATIVE)
+    if (
+        os.path.realpath(issuer_path) != issuer_path
+        or os.path.realpath(manager_path) != manager_path
+        or os.readlink(f"/proc/{issuer_pid}/exe") != runtime_python
+        or os.readlink(f"/proc/{manager_pid}/exe") != runtime_python
+        or _preimport_proc_cmdline(issuer_pid)
+        != (runtime_python, "-I", "-B", issuer_path)
+        or _preimport_proc_cmdline(manager_pid)
+        != (runtime_python, "-I", "-B", manager_path)
+        or _preimport_proc_parent_pid(issuer_pid) != manager_pid
+    ):
+        raise RuntimeError("lineage")
+    control_device, control_inode = _preimport_control_descriptor_identity()
+    issuer_control = os.stat(
+        f"/proc/{issuer_pid}/fd/{_PREIMPORT_MANAGER_CONTROL_FD}"
+    )
+    if (
+        not stat.S_ISFIFO(issuer_control.st_mode)
+        or (issuer_control.st_dev, issuer_control.st_ino)
+        != (control_device, control_inode)
+        or not _preimport_manager_holds_control_writer(
+            manager_pid,
+            (control_device, control_inode),
+        )
+    ):
+        raise RuntimeError("control")
+    lease_values = tuple(
+        _preimport_exact_lease_identity(os.environ.get(key))
+        for key in _PREIMPORT_LEASE_KEYS
+    )
+    return (
+        issuer_pid,
+        manager_pid,
+        control_device,
+        control_inode,
+        repository_root,
+        lease_values[0],
+        lease_values[1],
+        lease_values[2],
+    )
+
+
+_PREIMPORT_RUNNER_AUTHORITY: tuple[object, ...] | None = None
+if __name__ == "__main__":
+    try:
+        (
+            _preimport_mode,
+            _preimport_commit,
+            _preimport_tree,
+            _preimport_package,
+            _preimport_runtime,
+        ) = _preimport_cli_identities()
+        _preimport_release_root, _preimport_runtime_python = (
+            _preimport_validate_sealed_invocation(
+                _preimport_mode,
+                _preimport_package,
+                _preimport_runtime,
+            )
+        )
+        if _preimport_mode in _PREIMPORT_AUTHORITY_MODES:
+            _preimport_lineage = _preimport_validate_issuer_authority(
+                runtime_python=_preimport_runtime_python,
+            )
+        else:
+            _preimport_lineage = (0, 0, 0, 0, "", "", "", "")
+        _PREIMPORT_RUNNER_AUTHORITY = (
+            _preimport_mode,
+            _preimport_commit,
+            _preimport_tree,
+            _preimport_package,
+            _preimport_runtime,
+            _preimport_release_root,
+            _preimport_runtime_python,
+            *_preimport_lineage,
+        )
+    except (OSError, RuntimeError, ValueError, TypeError, AttributeError):
+        sys.stderr.write("phase9_live_proof_sealed_authority_required\n")
+        raise SystemExit(1) from None
 
 import argparse
 import base64
@@ -31,13 +388,9 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 import hashlib
 import json
-import os
 from pathlib import Path, PurePosixPath
 import re
-import select
 import signal
-import stat
-import subprocess
 import time
 from types import MappingProxyType
 from typing import Final, Mapping, Sequence
@@ -46,22 +399,10 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 _INVOKED_RELEASE_PACKAGE_SHA256: str | None = None
-if sys.flags.isolated and __name__ == "__main__":
-    _invoked_runner = Path(__file__)
-    _resolved_runner = _invoked_runner.resolve(strict=True)
-    _release_root = _resolved_runner.parents[2]
-    if (
-        not _invoked_runner.is_absolute()
-        or _invoked_runner != _resolved_runner
-        or _release_root.parent
-        != Path("/opt/governed-memory-controller/releases")
-        or re.fullmatch(r"[0-9a-f]{64}", _release_root.name, re.ASCII) is None
-        or _resolved_runner.relative_to(_release_root).as_posix()
-        != "tools/governed_memory_validation/run_disposable_installation_live_proof.py"
-    ):
-        raise SystemExit("phase9_live_proof_release_invocation_invalid")
-    _INVOKED_RELEASE_PACKAGE_SHA256 = _release_root.name
-    sys.path.insert(0, str(_release_root))
+if __name__ == "__main__":
+    assert _PREIMPORT_RUNNER_AUTHORITY is not None
+    _INVOKED_RELEASE_PACKAGE_SHA256 = str(_PREIMPORT_RUNNER_AUTHORITY[3])
+    sys.path.insert(0, str(_PREIMPORT_RUNNER_AUTHORITY[5]))
 
 from tools.governed_memory_install import authority
 from tools.governed_memory_install.authority_state import (
@@ -372,6 +713,124 @@ class RunnerMode(str, Enum):
     VERIFY_PUBLISHED_START_PAIR = "verify-published-start-pair"
     START_OR_RECOVER = "start-or-recover"
     RECOVER_ONLY = "recover-only"
+
+
+def _require_active_runner_lease(
+    authority_state: tuple[object, ...],
+) -> None:
+    repository_root = authority_state[11]
+    lease_values = authority_state[12:15]
+    if (
+        type(repository_root) is not str
+        or not repository_root
+        or len(lease_values) != len(_PREIMPORT_LEASE_KEYS)
+        or any(type(value) is not str for value in lease_values)
+    ):
+        raise LiveProofError("phase9_live_proof_runner_authority_invalid")
+    environment = {
+        "PATH": "/usr/bin:/bin",
+        "LANG": "C",
+        "LC_ALL": "C",
+        **dict(zip(_PREIMPORT_LEASE_KEYS, lease_values, strict=True)),
+    }
+    try:
+        completed = subprocess.run(
+            (
+                _PREIMPORT_LEASE_GUARD_PYTHON,
+                _PREIMPORT_LEASE_GUARD,
+                "--operation",
+                "production-write",
+                "--worktree",
+                repository_root,
+            ),
+            cwd="/",
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=90,
+            check=False,
+            user=1000,
+            group=1000,
+            extra_groups=(),
+        )
+    except (OSError, subprocess.SubprocessError, TypeError) as error:
+        raise LiveProofError(
+            "phase9_live_proof_runner_authority_invalid"
+        ) from error
+    if (
+        completed.returncode != 0
+        or completed.stdout != b""
+        or completed.stderr != b""
+    ):
+        raise LiveProofError("phase9_live_proof_runner_authority_invalid")
+
+
+def _require_runner_process_authority(expected_mode: RunnerMode) -> None:
+    """Reprove the sealed CLI and its mode-specific authority before effects."""
+
+    state = _PREIMPORT_RUNNER_AUTHORITY
+    if type(expected_mode) is not RunnerMode or state is None or len(state) != 15:
+        raise LiveProofError("phase9_live_proof_runner_authority_invalid")
+    (
+        mode,
+        commit,
+        tree,
+        package_sha256,
+        runtime_sha256,
+        release_root,
+        runtime_python,
+        issuer_pid,
+        manager_pid,
+        control_device,
+        control_inode,
+        repository_root,
+        lease_id,
+        task_id,
+        thread_id,
+    ) = state
+    if (
+        mode != expected_mode.value
+        or not _preimport_exact_lower_hex(commit, 40)
+        or not _preimport_exact_lower_hex(tree, 40)
+        or not _preimport_exact_lower_hex(package_sha256, 64)
+        or not _preimport_exact_lower_hex(runtime_sha256, 64)
+    ):
+        raise LiveProofError("phase9_live_proof_runner_authority_invalid")
+    try:
+        observed_release_root, observed_runtime_python = (
+            _preimport_validate_sealed_invocation(
+                str(mode),
+                str(package_sha256),
+                str(runtime_sha256),
+            )
+        )
+        if (
+            observed_release_root != release_root
+            or observed_runtime_python != runtime_python
+        ):
+            raise RuntimeError("identity")
+        if expected_mode.value in _PREIMPORT_AUTHORITY_MODES:
+            observed_lineage = _preimport_validate_issuer_authority(
+                runtime_python=str(runtime_python),
+            )
+            if observed_lineage != (
+                issuer_pid,
+                manager_pid,
+                control_device,
+                control_inode,
+                repository_root,
+                lease_id,
+                task_id,
+                thread_id,
+            ):
+                raise RuntimeError("lineage")
+    except (OSError, RuntimeError, ValueError, TypeError, AttributeError) as error:
+        raise LiveProofError(
+            "phase9_live_proof_runner_authority_invalid"
+        ) from error
+    if expected_mode.value in _PREIMPORT_AUTHORITY_MODES:
+        _require_active_runner_lease(state)
 
 
 def _canonical(value: object) -> bytes:
@@ -1755,6 +2214,7 @@ def preclaim_staged_start_authority_pair(
 ) -> Mapping[str, object]:
     """Atomically claim the pair from the one complete unpublished capsule."""
 
+    _require_runner_process_authority(RunnerMode.PRECLAIM_STAGED_START)
     _verify_host_clock_synchronized()
     _prepare_fixed_substrate()
     context, capsule, inode = _verified_staged_install_context(inputs)
@@ -1790,6 +2250,9 @@ def verify_published_start_authority_pair(
 ) -> Mapping[str, object]:
     """Reverify, without creating, the pair behind a published capsule."""
 
+    _require_runner_process_authority(
+        RunnerMode.VERIFY_PUBLISHED_START_PAIR
+    )
     _verify_host_clock_synchronized()
     _prepare_fixed_substrate()
     context, capsule, inode = _verified_published_install_context(inputs)
@@ -4145,6 +4608,7 @@ def _pair_only_receipt(
 def recover_live_proof(inputs: ProofInputs) -> Mapping[str, object]:
     """Resume only an exact preclaimed install and its derived rollback."""
 
+    _require_runner_process_authority(RunnerMode.RECOVER_ONLY)
     _verify_host_clock_synchronized()
     context, unused_capsule = _verified_install_context(
         inputs,
@@ -4202,6 +4666,7 @@ def recover_live_proof(inputs: ProofInputs) -> Mapping[str, object]:
 def start_or_recover_live_proof(inputs: ProofInputs) -> Mapping[str, object]:
     """Start once only from untouched state, otherwise select closed recovery."""
 
+    _require_runner_process_authority(RunnerMode.START_OR_RECOVER)
     context, unused_capsule = _verified_install_context(
         inputs,
         require_current=False,
@@ -4278,6 +4743,7 @@ def run_live_proof(
 ) -> Mapping[str, object]:
     """Run the one exact install/kill/resume/rollback/kill/resume proof."""
 
+    _require_runner_process_authority(RunnerMode.START_OR_RECOVER)
     host_clock_synchronization_preflight_passed = (
         _verify_host_clock_synchronized()
     )
@@ -4427,6 +4893,7 @@ def run_live_proof(
                 install_death_arm=install_death_arm,
                 rollback_death_arm=rollback_death_arm,
             )
+        _require_runner_process_authority(RunnerMode.START_OR_RECOVER)
         try:
             durable_live_receipt = persist_verified_promotable_live_receipt(
                 inputs=inputs,
@@ -4440,6 +4907,15 @@ def run_live_proof(
             ) from error
         return MappingProxyType(dict(durable_live_receipt))
     except BaseException as original_error:
+        if (
+            isinstance(original_error, LiveProofError)
+            and str(original_error)
+            == "phase9_live_proof_worker_cleanup_unproved"
+        ):
+            # A worker or its descendants may still be effectful and all
+            # siblings inherit the same flock open description. Never launch
+            # an in-process recovery sibling until exact cleanup is proven.
+            raise
         # Never introduce a generic cleanup surface.  As soon as a durable
         # install receipt has verified, even a failure while constructing its
         # first rollback capability must retry that exact construction and
@@ -4508,6 +4984,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     # filesystem or authority inputs.
     if mode in {item.value for item in WorkerMode}:
         raise LiveProofError("phase9_live_proof_worker_context_required")
+    try:
+        selected_mode = RunnerMode(mode)
+    except ValueError as error:
+        raise LiveProofError("phase9_live_proof_mode_invalid") from error
+    _require_runner_process_authority(selected_mode)
     try:
         guard = GlobalExecutionLock.from_inherited_descriptor(
             LIVE_PROOF_GUARD_PATH,

@@ -5,11 +5,11 @@ from __future__ import annotations
 
 This module has no installation, rollback, activation, Docker, network, secret,
 PostgreSQL, or Qdrant execution surface. Phase 7C receipts are immutable
-historical evidence only. The current Phase 8G application proof and Phase 9J
-inactive dormant-store controller package are verified separately. Phase 9J
-packages an administrative cooperative writer fence but does not claim to
-exclude an equivalent privileged-root bypass; production installation and
-activation remain refused.
+historical evidence only. The current Phase 8G application proof, sealed Phase
+9J inactive store package, and published dormant R7 controller substrate are
+verified separately. Phase 9J packages an administrative cooperative writer
+fence but does not claim to exclude an equivalent privileged-root bypass;
+production installation and activation remain refused.
 """
 
 from collections.abc import Mapping, Sequence
@@ -51,6 +51,9 @@ HISTORICAL_PHASE7C_APPLICATION_PROOF = (
     OPS / "history" / "phase7c" / "disposable_proof_receipt.json"
 )
 CURRENT_PHASE8G_APPLICATION_PROOF = OPS / "phase8g_disposable_proof_receipt.json"
+CURRENT_PHASE9J_CONTROLLER_RUNTIME_RELEASE_RECEIPT = (
+    OPS / "phase9j_controller_runtime_release_receipt.json"
+)
 ROOT_MIGRATION_MANIFEST = ROOT / "governed-memory-migrations" / "manifest.json"
 MIGRATION_ROOT = ROOT / "governed-memory-migrations"
 SCHEMA_CONTRACT = MIGRATION_ROOT / "schema_contract.json"
@@ -160,8 +163,20 @@ EXPECTED_PHASE8G_POSTGRES_IMAGE_DIGEST = (
 EXPECTED_CURRENT_RUNTIME_RECEIPT_SHA256 = (
     "25ca53e683e53f79b726909ef64bc8afad30269cce3f59804cf66335667a8108"
 )
+EXPECTED_PHASE9J_CONTROLLER_RUNTIME_RELEASE_RECEIPT_SHA256 = (
+    "c9b6721985c4840f555d583d77fcfb82c4f20d609c0af651a7171744d58c9a11"
+)
+EXPECTED_PHASE9J_PACKAGE_MANIFEST_SHA256 = (
+    "062ea00564e5edfb138dca9240fd5d70cec2c640563d6ad02e1e89de15d7db39"
+)
+EXPECTED_PHASE9J_RUNTIME_TREE_SHA256 = (
+    "49c6713102d87266bf0942d96de344581be14a5203dfc39243e75400b845e002"
+)
+EXPECTED_PHASE9J_RELEASE_TREE_SHA256 = (
+    "cca9612ce64b2c5c124d5845c7330a7d0667dff982d9b922b9fce5ec6122a7ba"
+)
 EXPECTED_CURRENT_RUNTIME_MANIFEST_SHA256 = (
-    "027a699d61cf310c5b5553455ccd6b12fc7789826e302c601ec6648ecca2d6c6"
+    "862900039848c1b34a3378c3a960da94a40448a9e48c70fca518918643747e16"
 )
 EXPECTED_CURRENT_RUNTIME_SOURCE_SHA256 = (
     "b52b753dc7974ee120e4abe264bb36f16b53341fa86b2ea8e0ab5bf86c735c20"
@@ -223,10 +238,10 @@ EXACT_TARGETS = {
 }
 
 EXPECTED_CURRENT_COMPONENT_DISPOSITION: Mapping[str, object] = {
-    "schema_version": "governed-memory-current-component-disposition-v2",
+    "schema_version": "governed-memory-current-component-disposition-v3",
     "status": (
-        "single_current_successor_and_single_current_dormant_store_"
-        "controller_package_inactive"
+        "single_current_successor_with_published_dormant_controller_"
+        "substrate_and_sealed_inactive_store_package"
     ),
     "authority": {
         "accounts": "supabase_auth_retained",
@@ -301,7 +316,15 @@ EXPECTED_CURRENT_COMPONENT_DISPOSITION: Mapping[str, object] = {
             "tools/governed_memory_validation/"
             "run_installation_synthetic_proof.py"
         ),
-        "disposable_linux_proof_entrypoint": (
+        "disposable_linux_proof_manager_entrypoint": (
+            "tools/governed_memory_validation/"
+            "execute_phase9_disposable_live_proof_controller.py"
+        ),
+        "disposable_linux_proof_private_issuer": (
+            "tools/governed_memory_validation/"
+            "issue_disposable_installation_live_proof.py"
+        ),
+        "disposable_linux_proof_sealed_runner": (
             "tools/governed_memory_validation/"
             "run_disposable_installation_live_proof.py"
         ),
@@ -309,10 +332,10 @@ EXPECTED_CURRENT_COMPONENT_DISPOSITION: Mapping[str, object] = {
         "stored_assistant_preferences_allowed": False,
         "legacy_memory_prompt_object_allowed": False,
     },
-    "current_dormant_store_controller": {
+    "sealed_dormant_store_package": {
         "state": (
-            "repository_packaged_not_built_not_installed_not_authorized_"
-            "not_activated"
+            "sealed_package_snapshot_before_controller_substrate_publication_"
+            "not_installed_not_authorized_not_activated"
         ),
         "server_target": "seebx",
         "install_and_empty_rollback_are_distinct_signed_operations": True,
@@ -337,9 +360,9 @@ EXPECTED_CURRENT_COMPONENT_DISPOSITION: Mapping[str, object] = {
         "full_release_tree_sha256_bound_through_claim_journal_host_ownership_and_install_receipt": True,
         "empty_rollback_full_runtime_and_release_identity_bound_through_authority_claim_journal_requests_observations_controller_marker_and_receipt": True,
         "supervisor_launcher_source_packaged": True,
-        "controller_runtime_built_or_installed": False,
-        "controller_release_staged": False,
-        "controller_runtime_and_release_require_separate_future_build_and_install_authority": True,
+        "controller_runtime_built_or_installed_at_package_sealing": False,
+        "controller_release_staged_at_package_sealing": False,
+        "controller_runtime_and_release_required_separate_publication_authority": True,
         "stores_install_owns_or_removes_controller_substrate": False,
         "resolved_store_spec_and_exact_docker_labels_bound": True,
         "resource_identity_ledger_v2_packaged": True,
@@ -387,6 +410,34 @@ EXPECTED_CURRENT_COMPONENT_DISPOSITION: Mapping[str, object] = {
         "installation_performed": False,
         "empty_rollback_performed": False,
         "production_state_changed": False,
+    },
+    "published_controller_substrate": {
+        "state": "published_dormant_not_store_installed_not_activated",
+        "server_target": "seebx",
+        "receipt": (
+            "ops/governed_memory/phase9j_controller_runtime_release_receipt.json"
+        ),
+        "receipt_sha256": (
+            EXPECTED_PHASE9J_CONTROLLER_RUNTIME_RELEASE_RECEIPT_SHA256
+        ),
+        "package_manifest_sha256": EXPECTED_PHASE9J_PACKAGE_MANIFEST_SHA256,
+        "runtime_root": (
+            "/opt/governed-memory-controller/runtimes/"
+            + EXPECTED_PHASE9J_CONTROLLER_RUNTIME_RELEASE_RECEIPT_SHA256
+        ),
+        "runtime_tree_sha256": EXPECTED_PHASE9J_RUNTIME_TREE_SHA256,
+        "release_root": (
+            "/opt/governed-memory-controller/releases/"
+            + EXPECTED_PHASE9J_PACKAGE_MANIFEST_SHA256
+        ),
+        "release_tree_sha256": EXPECTED_PHASE9J_RELEASE_TREE_SHA256,
+        "persistent_controller_substrate_created": True,
+        "persistent_store_resources_created": False,
+        "disposable_live_proof_complete": False,
+        "installation_performed": False,
+        "empty_rollback_performed": False,
+        "production_state_changed": False,
+        "activation_authorized": False,
     },
     "historical_only": {
         "documentation_root": "docs/history/governed_memory",
@@ -441,14 +492,15 @@ EXPECTED_CURRENT_COMPONENT_DISPOSITION: Mapping[str, object] = {
         "separate_exact_deletion_batch_authorized",
     ],
     "safety": {
-        "repository_only": True,
-        "dormant_store_controller_runtime_built_or_installed": False,
-        "dormant_store_controller_release_staged": False,
-        "services_changed": False,
-        "secrets_read_or_changed": False,
-        "docker_or_images_used": False,
-        "postgresql_read_or_changed": False,
-        "qdrant_read_or_changed": False,
+        "controller_substrate_publication_completed": True,
+        "controller_substrate_publication_receipt_promoted": True,
+        "store_installation_or_rollback_performed": False,
+        "disposable_live_proof_performed": False,
+        "production_services_changed": False,
+        "production_secrets_read_or_changed": False,
+        "production_postgresql_read_or_changed": False,
+        "production_qdrant_read_or_changed": False,
+        "production_data_read": False,
         "provider_calls": 0,
         "structured_lifeswitch_data_in_scope": False,
         "accounts_in_scope": False,
@@ -649,6 +701,31 @@ def _verify_current_runtime_receipt(receipt: object) -> None:
         expected_wheel=EXPECTED_CURRENT_RUNTIME_WHEEL,
         expected_wheel_sha256=EXPECTED_CURRENT_RUNTIME_WHEEL_SHA256,
         error="release_current_runtime_contract_invalid",
+    )
+
+
+def _verify_phase9j_controller_runtime_release_receipt(receipt: object) -> None:
+    error = "release_phase9j_controller_runtime_release_receipt_invalid"
+    _require(
+        isinstance(receipt, dict)
+        and _sha256(CURRENT_PHASE9J_CONTROLLER_RUNTIME_RELEASE_RECEIPT)
+        == EXPECTED_PHASE9J_CONTROLLER_RUNTIME_RELEASE_RECEIPT_SHA256
+        and receipt.get("schema_version")
+        == "governed-memory-controller-runtime-build-receipt-v4"
+        and receipt.get("result") == "isolated_controller_runtime_built_and_closed"
+        and receipt.get("package_manifest_sha256")
+        == EXPECTED_PHASE9J_PACKAGE_MANIFEST_SHA256
+        and receipt.get("runtime_tree_sha256")
+        == EXPECTED_PHASE9J_RUNTIME_TREE_SHA256
+        and receipt.get("release_tree_sha256")
+        == EXPECTED_PHASE9J_RELEASE_TREE_SHA256
+        and receipt.get("persistent_controller_substrate_created") is True
+        and receipt.get("persistent_store_resources_created") is False
+        and receipt.get("active_production_state_changed") is False
+        and receipt.get("production_data_read") is False
+        and receipt.get("network_calls") == 0
+        and receipt.get("provider_calls") == 0,
+        error,
     )
 
 
@@ -1098,6 +1175,7 @@ def _verify_runtime_manifest(
         "phase",
         "python_runtime",
         "validation_runtime",
+        "controller_runtime_publication",
         "authority",
         "infrastructure",
         "http_runtime",
@@ -1122,6 +1200,8 @@ def _verify_runtime_manifest(
     )
     assert isinstance(runtime, dict)
     validation = runtime.get("validation_runtime")
+    publication = runtime.get("controller_runtime_publication")
+    authority_metadata = runtime.get("authority")
     disposable = runtime.get("disposable_validation")
     current = runtime.get("inactive_store_package")
     activation = runtime.get("activation")
@@ -1131,6 +1211,16 @@ def _verify_runtime_manifest(
     ingestion = runtime.get("ingestion")
     frontend = runtime.get("frontend_candidate")
     history = runtime.get("historical_evidence")
+    phase8g_authority = (
+        authority_metadata.get("phase8g_application_validation_snapshot")
+        if isinstance(authority_metadata, dict)
+        else None
+    )
+    phase9j_target = (
+        authority_metadata.get("phase9j_inactive_store_target")
+        if isinstance(authority_metadata, dict)
+        else None
+    )
     blockers = _checked_activation_blockers(activation)
     assert isinstance(activation, dict)
 
@@ -1145,6 +1235,55 @@ def _verify_runtime_manifest(
         )
         and runtime.get("production_state_changed") is False
         and runtime.get("legacy_imports_allowed") is False
+        and isinstance(authority_metadata, dict)
+        and set(authority_metadata)
+        == {
+            "phase8g_application_validation_snapshot",
+            "phase9j_inactive_store_target",
+        }
+        and isinstance(phase8g_authority, dict)
+        and phase8g_authority.get("evidence_role")
+        == (
+            "historical_disposable_application_validation_not_current_store_"
+            "or_routing_authority"
+        )
+        and phase8g_authority.get("database_target") == "127.0.0.1:55432"
+        and phase8g_authority.get("qdrant_target") == "127.0.0.1:6343"
+        and phase8g_authority.get("qdrant_collection")
+        == "governed_memory_9a54cf123493_000001"
+        and phase8g_authority.get("conversation_database") == "memory"
+        and phase8g_authority.get("conversation_database_target")
+        == "127.0.0.1:5432"
+        and isinstance(phase9j_target, dict)
+        and set(phase9j_target)
+        == {
+            "source_contract",
+            "source_store_spec",
+            "candidate_id",
+            "database",
+            "database_target",
+            "qdrant_target",
+            "qdrant_collection",
+            "qdrant_alias",
+            "store_installation_performed",
+            "current_route_installed",
+            "activation_authorized",
+        }
+        and phase9j_target.get("source_contract")
+        == "ops/governed_memory/installation/current/contract.json"
+        and phase9j_target.get("source_store_spec")
+        == "ops/governed_memory/installation/store_spec-v2.json"
+        and phase9j_target.get("candidate_id")
+        == "governed_memory_9a54cf123493_000002"
+        and phase9j_target.get("database") == "governed_memory"
+        and phase9j_target.get("database_target") == "127.0.0.1:55433"
+        and phase9j_target.get("qdrant_target") == "127.0.0.1:6344"
+        and phase9j_target.get("qdrant_collection")
+        == "governed_memory_9a54cf123493_000002"
+        and phase9j_target.get("qdrant_alias") == "governed_memory_active"
+        and phase9j_target.get("store_installation_performed") is False
+        and phase9j_target.get("current_route_installed") is False
+        and phase9j_target.get("activation_authorized") is False
         and isinstance(validation, dict)
         and validation.get("runtime_lock")
         == "ops/governed_memory/runtime-requirements.lock"
@@ -1176,6 +1315,63 @@ def _verify_runtime_manifest(
             "historical_phase7c_build_receipt_reusable_for_current_candidate"
         )
         is False
+        and isinstance(publication, dict)
+        and set(publication)
+        == {
+            "state",
+            "server_target",
+            "receipt",
+            "receipt_sha256",
+            "package_manifest_sha256",
+            "runtime_root",
+            "runtime_tree_sha256",
+            "release_root",
+            "release_tree_sha256",
+            "persistent_controller_substrate_created",
+            "persistent_store_resources_created",
+            "active_production_state_changed",
+            "disposable_live_proof_complete",
+            "production_installation_authorized",
+            "activation_authorized",
+            "current_blockers",
+        }
+        and publication.get("state")
+        == "published_dormant_controller_substrate_only"
+        and publication.get("server_target") == "seebx"
+        and publication.get("receipt")
+        == "ops/governed_memory/phase9j_controller_runtime_release_receipt.json"
+        and publication.get("receipt_sha256")
+        == EXPECTED_PHASE9J_CONTROLLER_RUNTIME_RELEASE_RECEIPT_SHA256
+        and publication.get("package_manifest_sha256")
+        == EXPECTED_PHASE9J_PACKAGE_MANIFEST_SHA256
+        and publication.get("package_manifest_sha256")
+        == package_receipt.get("package_manifest_sha256")
+        and publication.get("runtime_root")
+        == (
+            "/opt/governed-memory-controller/runtimes/"
+            + EXPECTED_PHASE9J_CONTROLLER_RUNTIME_RELEASE_RECEIPT_SHA256
+        )
+        and publication.get("runtime_tree_sha256")
+        == EXPECTED_PHASE9J_RUNTIME_TREE_SHA256
+        and publication.get("release_root")
+        == (
+            "/opt/governed-memory-controller/releases/"
+            + EXPECTED_PHASE9J_PACKAGE_MANIFEST_SHA256
+        )
+        and publication.get("release_tree_sha256")
+        == EXPECTED_PHASE9J_RELEASE_TREE_SHA256
+        and publication.get("persistent_controller_substrate_created") is True
+        and publication.get("persistent_store_resources_created") is False
+        and publication.get("active_production_state_changed") is False
+        and publication.get("disposable_live_proof_complete") is False
+        and publication.get("production_installation_authorized") is False
+        and publication.get("activation_authorized") is False
+        and publication.get("current_blockers")
+        == [
+            "external_phase9j_disposable_live_proof_receipt_absent",
+            "production_installation_not_authorized",
+            "production_activation_not_authorized",
+        ]
         and isinstance(disposable, dict)
         and disposable.get("scope")
         == "phase8g_current_candidate_successor_disposable_only"
@@ -1641,6 +1837,16 @@ def verify_candidate_artifacts() -> dict[str, object]:
         == EXPECTED_PHASE8G_PROOF_RECEIPT_SHA256,
         "release_artifact_hash_mismatch",
     )
+    _require(
+        CURRENT_PHASE9J_CONTROLLER_RUNTIME_RELEASE_RECEIPT.is_file()
+        and not CURRENT_PHASE9J_CONTROLLER_RUNTIME_RELEASE_RECEIPT.is_symlink(),
+        "release_artifact_missing_or_symlink",
+    )
+    _require(
+        _sha256(CURRENT_PHASE9J_CONTROLLER_RUNTIME_RELEASE_RECEIPT)
+        == EXPECTED_PHASE9J_CONTROLLER_RUNTIME_RELEASE_RECEIPT_SHA256,
+        "release_artifact_hash_mismatch",
+    )
 
     try:
         migration_receipt = verify_migration_manifest.verify(MIGRATION_ROOT)
@@ -1678,6 +1884,9 @@ def verify_candidate_artifacts() -> dict[str, object]:
         store_receipt,
     )
     current_runtime_receipt = _load_json(CURRENT_RUNTIME_BUILD_RECEIPT)
+    phase9j_controller_runtime_release_receipt = _load_json(
+        CURRENT_PHASE9J_CONTROLLER_RUNTIME_RELEASE_RECEIPT
+    )
     historical_runtime_receipt = _load_json(
         HISTORICAL_PHASE7C_RUNTIME_BUILD_RECEIPT
     )
@@ -1693,6 +1902,9 @@ def verify_candidate_artifacts() -> dict[str, object]:
     schema_contract = _load_json(SCHEMA_CONTRACT)
     _verify_historical_phase7c_runtime_receipt(historical_runtime_receipt)
     _verify_current_runtime_receipt(current_runtime_receipt)
+    _verify_phase9j_controller_runtime_release_receipt(
+        phase9j_controller_runtime_release_receipt
+    )
     _verify_historical_phase7c_application_proof(historical_phase7c)
     _verify_current_phase8g_application_proof(current_phase8g)
     blockers = _verify_runtime_manifest(runtime, package_receipt, store_receipt)
@@ -1725,6 +1937,9 @@ def verify_candidate_artifacts() -> dict[str, object]:
             ),
             "ops/governed_memory/runtime_manifest.json": _sha256(
                 RUNTIME_MANIFEST
+            ),
+            "ops/governed_memory/phase9j_controller_runtime_release_receipt.json": _sha256(
+                CURRENT_PHASE9J_CONTROLLER_RUNTIME_RELEASE_RECEIPT
             ),
             "ops/governed_memory/phase8g_disposable_proof_receipt.json": _sha256(
                 CURRENT_PHASE8G_APPLICATION_PROOF
@@ -1767,6 +1982,9 @@ def verify_candidate_artifacts() -> dict[str, object]:
         "artifact_integrity_verified": True,
         "historical_phase7c_runtime_build_evidence_verified": True,
         "current_runtime_build_evidence_verified": True,
+        "controller_runtime_release_receipt_verified": True,
+        "controller_runtime_substrate_published_dormant": True,
+        "persistent_store_resources_created": False,
         "current_runtime_rebuild_required": False,
         "historical_phase7c_application_proof_verified": True,
         "historical_phase7c_proof_reusable_for_current_candidate": False,
@@ -1800,9 +2018,9 @@ def verify_candidate_artifacts() -> dict[str, object]:
         "full_release_tree_sha256_bound_through_claim_journal_host_ownership_and_install_receipt": True,
         "empty_rollback_full_runtime_and_release_identity_bound_through_authority_claim_journal_requests_observations_controller_marker_and_receipt": True,
         "supervisor_launcher_source_packaged": True,
-        "controller_runtime_built_or_installed": False,
-        "controller_release_staged": False,
-        "controller_runtime_and_release_require_separate_future_build_and_install_authority": True,
+        "sealed_package_controller_runtime_built_or_installed_at_package_sealing": False,
+        "sealed_package_controller_release_staged_at_package_sealing": False,
+        "controller_runtime_and_release_required_separate_publication_authority": True,
         "stores_install_owns_or_removes_controller_substrate": False,
         "resolved_store_spec_and_exact_docker_labels_bound": True,
         "resource_identity_ledger_v2_packaged": True,

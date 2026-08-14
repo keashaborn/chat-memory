@@ -36,6 +36,9 @@ INSTALL_TOOLS = ROOT / "tools" / "governed_memory_install"
 OPS = ROOT / "ops" / "governed_memory"
 RUNTIME_MANIFEST = OPS / "runtime_manifest.json"
 CURRENT_COMPONENT_DISPOSITION = OPS / "current_component_disposition.json"
+PHASE9J_CONTROLLER_RUNTIME_RELEASE_RECEIPT = (
+    OPS / "phase9j_controller_runtime_release_receipt.json"
+)
 HISTORICAL_PHASE6B_COMPONENT_DISPOSITION = (
     OPS / "history" / "phase6b" / "component_disposition.json"
 )
@@ -60,6 +63,9 @@ EXPECTED_HISTORICAL_PHASE7C_SOURCE_TREE_SHA256 = (
 )
 EXPECTED_CURRENT_RUNTIME_RECEIPT_SHA256 = (
     "25ca53e683e53f79b726909ef64bc8afad30269cce3f59804cf66335667a8108"
+)
+EXPECTED_PHASE9J_CONTROLLER_RUNTIME_RELEASE_RECEIPT_SHA256 = (
+    "c9b6721985c4840f555d583d77fcfb82c4f20d609c0af651a7171744d58c9a11"
 )
 EXPECTED_HISTORICAL_PHASE7C_RUNTIME_RECEIPT_SHA256 = (
     "210cd0fe1bdaf60089668b3d2c8d37be760ed9b867e0909d4e83ebcc204e84b2"
@@ -177,6 +183,7 @@ EXPECTED_TEST_FILES = {
     "test_installation_durable_journal.py",
     "test_installation_execution_contracts.py",
     "test_eligibility.py",
+    "test_execute_phase9_disposable_live_proof_controller.py",
     "test_exclusive_cutover.py",
     "test_extraction.py",
     "test_governed_memory_erasure_proxy_v1.py",
@@ -195,6 +202,7 @@ EXPECTED_TEST_FILES = {
     "test_linux_live_transports.py",
     "test_linux_store_readiness.py",
     "test_once_worker.py",
+    "test_phase9_permitted_candidate.py",
     "test_openai_adapters.py",
     "test_pilot_marker.py",
     "test_disposable_installation_live_proof.py",
@@ -298,7 +306,7 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         )
         self.assertEqual(
             disposition["schema_version"],
-            "governed-memory-current-component-disposition-v2",
+            "governed-memory-current-component-disposition-v3",
         )
         active = disposition["current_successor"]
         self.assertFalse(active["legacy_memory_fallback_allowed"])
@@ -318,7 +326,9 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
             active["physical_empty_rollback_adapter"],
             active["controller_runtime_release_builder"],
             active["synthetic_proof_entrypoint"],
-            active["disposable_linux_proof_entrypoint"],
+            active["disposable_linux_proof_manager_entrypoint"],
+            active["disposable_linux_proof_private_issuer"],
+            active["disposable_linux_proof_sealed_runner"],
             active["closed_live_transport_contracts"],
             active["closed_non_postgresql_live_linux_adapters"],
             active["controller_rollback_marker_transport"],
@@ -345,7 +355,7 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
             "separate_exact_deletion_batch_authorized",
             disposition["future_deletion_gates"],
         )
-        controller = disposition["current_dormant_store_controller"]
+        controller = disposition["sealed_dormant_store_package"]
         self.assertTrue(
             controller["claim_bound_install_controller_composition_packaged"]
         )
@@ -375,15 +385,17 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
             "exact_locked_controller_distribution_set_verification_packaged",
             "full_release_tree_sha256_bound_through_claim_journal_host_ownership_and_install_receipt",
             "empty_rollback_full_runtime_and_release_identity_bound_through_authority_claim_journal_requests_observations_controller_marker_and_receipt",
-            "controller_runtime_and_release_require_separate_future_build_and_install_authority",
+            "controller_runtime_and_release_required_separate_publication_authority",
             "supervisor_launcher_source_packaged",
             "resolved_store_spec_and_exact_docker_labels_bound",
             "resource_identity_ledger_v2_packaged",
             "retained_audit_artifact_hashes_bound",
         ):
             self.assertTrue(controller[field], field)
-        self.assertFalse(controller["controller_runtime_built_or_installed"])
-        self.assertFalse(controller["controller_release_staged"])
+        self.assertFalse(
+            controller["controller_runtime_built_or_installed_at_package_sealing"]
+        )
+        self.assertFalse(controller["controller_release_staged_at_package_sealing"])
         self.assertFalse(controller["stores_install_owns_or_removes_controller_substrate"])
         self.assertFalse(
             controller["physical_postgresql_qdrant_writer_exclusion_packaged"]
@@ -429,20 +441,42 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
             controller["concrete_empty_rollback_store_effect_adapters_packaged"]
         )
         self.assertFalse(controller["activation_entrypoint_packaged"])
+        publication = disposition["published_controller_substrate"]
+        self.assertEqual(
+            publication["receipt_sha256"],
+            EXPECTED_PHASE9J_CONTROLLER_RUNTIME_RELEASE_RECEIPT_SHA256,
+        )
+        self.assertEqual(
+            hashlib.sha256(
+                PHASE9J_CONTROLLER_RUNTIME_RELEASE_RECEIPT.read_bytes()
+            ).hexdigest(),
+            EXPECTED_PHASE9J_CONTROLLER_RUNTIME_RELEASE_RECEIPT_SHA256,
+        )
+        self.assertTrue(publication["persistent_controller_substrate_created"])
+        for field in (
+            "persistent_store_resources_created",
+            "disposable_live_proof_complete",
+            "installation_performed",
+            "empty_rollback_performed",
+            "production_state_changed",
+            "activation_authorized",
+        ):
+            self.assertFalse(publication[field], field)
         safety = disposition["safety"]
         for field in (
-            "dormant_store_controller_runtime_built_or_installed",
-            "dormant_store_controller_release_staged",
-            "services_changed",
-            "secrets_read_or_changed",
-            "docker_or_images_used",
-            "postgresql_read_or_changed",
-            "qdrant_read_or_changed",
+            "store_installation_or_rollback_performed",
+            "disposable_live_proof_performed",
+            "production_services_changed",
+            "production_secrets_read_or_changed",
+            "production_postgresql_read_or_changed",
+            "production_qdrant_read_or_changed",
+            "production_data_read",
             "structured_lifeswitch_data_in_scope",
             "accounts_in_scope",
         ):
             self.assertFalse(safety[field], field)
-        self.assertTrue(safety["repository_only"])
+        self.assertTrue(safety["controller_substrate_publication_completed"])
+        self.assertTrue(safety["controller_substrate_publication_receipt_promoted"])
 
     def test_current_source_and_rebuilt_runtime_are_exactly_bound(self) -> None:
         current_source_sha256 = _source_tree_sha256(ROOT)
@@ -479,6 +513,51 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         )
         self.assertFalse(manifest["production_state_changed"])
         self.assertFalse(manifest["legacy_imports_allowed"])
+        authority = manifest["authority"]
+        self.assertEqual(
+            set(authority),
+            {
+                "phase8g_application_validation_snapshot",
+                "phase9j_inactive_store_target",
+            },
+        )
+        phase8g_authority = authority["phase8g_application_validation_snapshot"]
+        self.assertEqual(
+            phase8g_authority["evidence_role"],
+            "historical_disposable_application_validation_not_current_store_"
+            "or_routing_authority",
+        )
+        self.assertEqual(phase8g_authority["database_target"], "127.0.0.1:55432")
+        self.assertEqual(phase8g_authority["qdrant_target"], "127.0.0.1:6343")
+        self.assertEqual(
+            phase8g_authority["qdrant_collection"],
+            "governed_memory_9a54cf123493_000001",
+        )
+        phase9j_target = authority["phase9j_inactive_store_target"]
+        self.assertEqual(
+            phase9j_target["candidate_id"],
+            "governed_memory_9a54cf123493_000002",
+        )
+        self.assertEqual(phase9j_target["database_target"], "127.0.0.1:55433")
+        self.assertEqual(phase9j_target["qdrant_target"], "127.0.0.1:6344")
+        self.assertEqual(
+            phase9j_target["qdrant_collection"],
+            "governed_memory_9a54cf123493_000002",
+        )
+        self.assertFalse(phase9j_target["store_installation_performed"])
+        self.assertFalse(phase9j_target["current_route_installed"])
+        self.assertFalse(phase9j_target["activation_authorized"])
+        publication = manifest["controller_runtime_publication"]
+        self.assertEqual(
+            publication["receipt_sha256"],
+            EXPECTED_PHASE9J_CONTROLLER_RUNTIME_RELEASE_RECEIPT_SHA256,
+        )
+        self.assertTrue(publication["persistent_controller_substrate_created"])
+        self.assertFalse(publication["persistent_store_resources_created"])
+        self.assertFalse(publication["active_production_state_changed"])
+        self.assertFalse(publication["disposable_live_proof_complete"])
+        self.assertFalse(publication["production_installation_authorized"])
+        self.assertFalse(publication["activation_authorized"])
         activation = manifest["activation"]
         self.assertFalse(activation["production_authorized"])
         for key in (
@@ -606,22 +685,22 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
             "phase9j_install_ready_closed_runtime_and_store_transports_"
             "packaged_not_installed_not_activated",
         )
-        self.assertEqual(current["package_artifact_count"], 74)
+        self.assertEqual(current["package_artifact_count"], 76)
         self.assertEqual(
             current["package_manifest_sha256"],
-            "caa3f789003dd2100eca7e68514fcaa114c5c2f2fc12e17871d49973cc7dad63",
+            "062ea00564e5edfb138dca9240fd5d70cec2c640563d6ad02e1e89de15d7db39",
         )
         self.assertEqual(
             current["contract_canonical_sha256"],
-            "74731a53895902096c9593fe514d4de959237f8b06013f77c3e1ce57545345ec",
+            "d59c0328af94f241f4765e751bdf28a1a6c3d7c6ab841ac3a3e7d6fe3be4a9ea",
         )
         self.assertEqual(
             current["controller_plan_canonical_sha256"],
-            "bbf65fd4435413632a2b6834b54371aa8f0c0033242339183a541bef259b90eb",
+            "b66fc26740e48013a4d7818442fa773baac4738ddcd06e31e3c34a777c2f8253",
         )
         self.assertEqual(
             current["execution_contract_canonical_sha256"],
-            "f76e1fd9116116c5282f933bfe4f3b1dcdddbf6246325ad90c39bf741bd7b856",
+            "76e951689cb8ef77a17c01a9e3f4cbe4df69363d9d41c6afe0755be3000238c1",
         )
         self.assertEqual(
             current["controller_runtime_contract_canonical_sha256"],
@@ -1134,15 +1213,18 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
             {
                 "bootstrap_phase9_disposable_store_substrate.py",
                 "durable_live_proof_receipt.py",
+                "execute_phase9_disposable_live_proof_controller.py",
                 "postgres_bootstrap.pgsql",
                 "execute_phase9_pre_effect_disposition.py",
                 "run_disposable_successor.sh",
                 "issue_disposable_installation_live_proof.py",
                 "publish_phase9_controller_runtime.py",
                 "publish_phase9_pre_effect_permit.py",
+                "phase9_permitted_candidate.py",
                 "pre_effect_disposition.py",
                 "process_death_arm_receipt.py",
                 "run_disposable_installation_live_proof.py",
+                "run_memory_unit_tests.py",
                 "runtime_packages.json",
                 "generate_installation_package_manifest.py",
                 "run_installation_synthetic_proof.py",
@@ -1243,7 +1325,7 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
             "Phase 8G",
             "Phase 7C",
             "installation/current/package_manifest.json",
-            "exact 74-artifact stores/controller package",
+            "exact 76-artifact stores/controller package",
             "claim-bound install and empty-rollback controllers",
             "concrete Psycopg adapter",
             "standalone CPython inspector",

@@ -75,7 +75,7 @@
     "tools/governed_memory_validation/durable_live_proof_receipt.py": "894fbb244c40d11ed4353f376d233730a1ec69bf1d117be31d75ba78ff66559b",
     "tools/governed_memory_validation/generate_installation_package_manifest.py": "39f2f3582f3760f8e5dfd3835c42b0a8b597c9937f78d788f31e32abea48b2ce",
     "tools/governed_memory_validation/process_death_arm_receipt.py": "d42c9adee71d091cd29b46ff98325055255ca70791c169a68fc19f7e54174a2c",
-    "tools/governed_memory_validation/run_disposable_installation_live_proof.py": "982873d62e804eab100f074e99252f8bc63d4cc8992d3cd96217763270db4c25",
+    "tools/governed_memory_validation/run_disposable_installation_live_proof.py": "5fbf0f037157ee55029885a776ab060eb7a6347e30bea2ee27f62347551521e3",
     "tools/governed_memory_validation/run_installation_synthetic_proof.py": "5c7da9da1fbceaaece4bbe614a22a8271d2dce01a650196cbf6dd64da598e7b9",
     "tools/governed_memory_validation/verify_store_migration_manifest.py": "d53cf81a1d88e338ab39e7a073805ea25d0477582e9b40a170581ad213a9e6af"
   }

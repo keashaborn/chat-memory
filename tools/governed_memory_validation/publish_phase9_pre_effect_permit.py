@@ -3,22 +3,135 @@ from __future__ import annotations
 
 """Publish the one root-owned Phase 9 pre-effect disposition permit."""
 
+import os
 import sys
 
 
+_PREIMPORT_CONTROLLER_RUNTIME_RECEIPT_SHA256 = (
+    "c9b6721985c4840f555d583d77fcfb82c4f20d609c0af651a7171744d58c9a11"
+)
+_PREIMPORT_CONTROLLER_PYTHON = (
+    "/opt/governed-memory-controller/runtimes/"
+    + _PREIMPORT_CONTROLLER_RUNTIME_RECEIPT_SHA256
+    + "/bin/python"
+)
+_PREIMPORT_MANAGER_PID_KEY = "GOVERNED_MEMORY_PHASE9_MANAGER_PID"
+_PREIMPORT_MANAGER_RELATIVE = (
+    "tools/governed_memory_validation/"
+    "execute_phase9_disposable_live_proof_controller.py"
+)
+_PREIMPORT_LEASE_ID_KEYS = (
+    "CHAT_MEMORY_LEASE_ID",
+    "CODEX_TASK_ID",
+    "CODEX_THREAD_ID",
+)
 _ISOLATED_RUNTIME_AT_START = bool(sys.flags.isolated)
 _DONT_WRITE_BYTECODE_AT_START = bool(sys.dont_write_bytecode)
 if __name__ == "__main__" and not (
-    _ISOLATED_RUNTIME_AT_START and _DONT_WRITE_BYTECODE_AT_START
+    _ISOLATED_RUNTIME_AT_START
+    and _DONT_WRITE_BYTECODE_AT_START
+    and sys.platform == "linux"
+    and sys.executable == _PREIMPORT_CONTROLLER_PYTHON
 ):
     sys.stderr.write("phase9_pre_effect_permit_runtime_isolation_required\n")
+    raise SystemExit(1)
+
+
+def _preimport_identifier_valid(value: object) -> bool:
+    return bool(
+        type(value) is str
+        and 1 <= len(value) <= 128
+        and value.isascii()
+        and value[0].isalnum()
+        and all(
+            character.isalnum() or character in "._:@-"
+            for character in value
+        )
+    )
+
+
+def _preimport_manager_lineage_valid(
+    environment: object = None,
+    *,
+    observed_parent_pid: object = None,
+    observed_parent_executable: object = None,
+    observed_parent_command_line: object = None,
+) -> bool:
+    """Bind direct publication to the exact R7 manager process."""
+
+    try:
+        selected_environment = os.environ if environment is None else environment
+        manager_pid_raw = selected_environment.get(_PREIMPORT_MANAGER_PID_KEY)
+        if (
+            type(manager_pid_raw) is not str
+            or not manager_pid_raw.isascii()
+            or not manager_pid_raw.isdecimal()
+            or manager_pid_raw.startswith("0")
+        ):
+            return False
+        manager_pid = int(manager_pid_raw)
+        parent_pid = (
+            os.getppid()
+            if observed_parent_pid is None
+            else observed_parent_pid
+        )
+        if (
+            type(parent_pid) is not int
+            or parent_pid <= 1
+            or manager_pid != parent_pid
+            or str(manager_pid) != manager_pid_raw
+            or any(
+                not _preimport_identifier_valid(selected_environment.get(key))
+                for key in _PREIMPORT_LEASE_ID_KEYS
+            )
+        ):
+            return False
+        executable = observed_parent_executable
+        if executable is None:
+            executable = os.readlink(f"/proc/{manager_pid}/exe")
+        if (
+            type(executable) is not str
+            or os.path.realpath(executable)
+            != os.path.realpath(_PREIMPORT_CONTROLLER_PYTHON)
+        ):
+            return False
+        command_line = observed_parent_command_line
+        if command_line is None:
+            with open(f"/proc/{manager_pid}/cmdline", "rb") as stream:
+                command_line = stream.read(4097)
+        publisher_path = os.path.realpath(__file__)
+        repository_root = os.path.dirname(
+            os.path.dirname(os.path.dirname(publisher_path))
+        )
+        manager_path = os.path.join(
+            repository_root, _PREIMPORT_MANAGER_RELATIVE
+        )
+        expected_command_line = b"\0".join(
+            value.encode("utf-8")
+            for value in (
+                _PREIMPORT_CONTROLLER_PYTHON,
+                "-I",
+                "-B",
+                manager_path,
+            )
+        ) + b"\0"
+        return (
+            type(command_line) is bytes
+            and len(command_line) <= 4096
+            and command_line == expected_command_line
+        )
+    except (OSError, ValueError, UnicodeError, AttributeError, TypeError):
+        return False
+
+
+if __name__ == "__main__" and not _preimport_manager_lineage_valid():
+    sys.stderr.write("phase9_pre_effect_permit_manager_lineage_required\n")
     raise SystemExit(1)
 
 from collections.abc import Mapping, Sequence
 import errno
 import hashlib
 import json
-import os
 from pathlib import Path
 import re
 import stat
@@ -37,9 +150,23 @@ _WRAPPER_RELATIVE: Final = (
 _CONTROLLER_RELATIVE: Final = (
     "tools/governed_memory_validation/pre_effect_disposition.py"
 )
+_PERMITTED_CANDIDATE_RELATIVE: Final = (
+    "tools/governed_memory_validation/phase9_permitted_candidate.py"
+)
+_ISSUER_RELATIVE: Final = (
+    "tools/governed_memory_validation/issue_disposable_installation_live_proof.py"
+)
+_BOOTSTRAP_RELATIVE: Final = (
+    "tools/governed_memory_validation/bootstrap_phase9_disposable_store_substrate.py"
+)
+_MANAGER_RELATIVE: Final = (
+    "tools/governed_memory_validation/execute_phase9_disposable_live_proof_controller.py"
+)
 _CONTRACT_RELATIVE: Final = "ops/governed_memory/pre_effect_disposition_contract.json"
 _SOURCE_PATHS: Final = (
     _PUBLISHER_RELATIVE, _WRAPPER_RELATIVE, _CONTROLLER_RELATIVE,
+    _PERMITTED_CANDIDATE_RELATIVE, _ISSUER_RELATIVE, _BOOTSTRAP_RELATIVE,
+    _MANAGER_RELATIVE,
     _CONTRACT_RELATIVE,
 )
 _EXPECTED_CANDIDATE_REF: Final = (
@@ -48,13 +175,13 @@ _EXPECTED_CANDIDATE_REF: Final = (
 if _PUBLISHER_PATH.relative_to(_REPOSITORY_ROOT).as_posix() != _PUBLISHER_RELATIVE:
     raise SystemExit("phase9_pre_effect_permit_invocation_invalid")
 
-BASE_CANDIDATE_COMMIT: Final = "7ab5d98a4c6c80ec9246e82767d4edbb431ff0f7"
-BASE_CANDIDATE_TREE: Final = "841756e40b3dd3f8e67673ae58e1f5819e6cfacb"
-PACKAGE_MANIFEST_SHA256: Final = "caa3f789003dd2100eca7e68514fcaa114c5c2f2fc12e17871d49973cc7dad63"
-CONTROLLER_RUNTIME_RECEIPT_SHA256: Final = "24b081b9eb48699b1242bc435a6f4bce756aee242a23a63c60e7ce79802d86ec"
-CONTRACT_SHA256: Final = "5b9c134bc70ab34223d92865711d28c7d84fe4ecdd8e00919655bfb60fa4f5bc"
+BASE_CANDIDATE_COMMIT: Final = "2eee4e6a2bf0b23aaca68fdbb4919b0c58d041a2"
+BASE_CANDIDATE_TREE: Final = "76f5cd6e20241523e1e3d6d1d8f4cf2c5f1de7ab"
+PACKAGE_MANIFEST_SHA256: Final = "062ea00564e5edfb138dca9240fd5d70cec2c640563d6ad02e1e89de15d7db39"
+CONTROLLER_RUNTIME_RECEIPT_SHA256: Final = "c9b6721985c4840f555d583d77fcfb82c4f20d609c0af651a7171744d58c9a11"
+CONTRACT_SHA256: Final = "4b5d4b9c41294247a3087d08c5278436e2a6bdfd317ab1b960a5a95189f2cacb"
 PREDECESSOR_ATTEMPT_IDENTITY_SHA256: Final = "e814fd3ea9e10ebb2cc84f87c7a8a73f6d3d29e8da1f05944c81522b8db6efd9"
-SUCCESSOR_ATTEMPT_IDENTITY_SHA256: Final = "8f8ab6bc56dfceb860c60e6090f60ba2a4069a09a3ba6f9499a3fafbe243789f"
+SUCCESSOR_ATTEMPT_IDENTITY_SHA256: Final = "1242bc9fa4900e80ef4569ca6d69934c3f15c9172f42018577183ae510951842"
 AUTHORIZATION_TEXT_SHA256: Final = "063891fc0189b3c4a0fe393200ae50f59b04f5488800dc27a5ce3020880f3e44"
 THREAD_ID: Final = "019fe927-8367-7f52-86f2-e2b5b43a2390"
 PERMIT_SCHEMA: Final = "governed-memory-phase9j-pre-effect-disposition-permit-v1"
@@ -223,7 +350,9 @@ def _permit(commit: str, tree: str, blobs: Mapping[str, str]) -> bytes:
         "successor_attempt_identity_sha256": SUCCESSOR_ATTEMPT_IDENTITY_SHA256,
         "authorization_text_sha256": AUTHORIZATION_TEXT_SHA256,
         "thread_id": THREAD_ID, "source_blobs": dict(blobs),
-        "authorized_action": "execute_pre_effect_disposition_only",
+        "authorized_action": (
+            "execute_pre_effect_disposition_and_disposable_live_proof_only"
+        ),
         "activation_performed": False, "provider_calls": 0,
         "production_data_read": False, "deletion_performed": False,
     }
@@ -552,8 +681,17 @@ def _publish_create_once(raw: bytes) -> None:
 
 
 def publish_phase9_pre_effect_permit() -> Mapping[str, object]:
-    if not _ISOLATED_RUNTIME_AT_START or not _DONT_WRITE_BYTECODE_AT_START or sys.platform != "linux":
+    if (
+        not _ISOLATED_RUNTIME_AT_START
+        or not _DONT_WRITE_BYTECODE_AT_START
+        or sys.platform != "linux"
+        or sys.executable != _PREIMPORT_CONTROLLER_PYTHON
+    ):
         raise Phase9PreEffectPermitPublicationError("phase9_pre_effect_permit_runtime_isolation_required")
+    if not _preimport_manager_lineage_valid():
+        raise Phase9PreEffectPermitPublicationError(
+            "phase9_pre_effect_permit_manager_lineage_required"
+        )
     if os.geteuid() != ROOT_UID or os.getegid() != ROOT_GID:
         raise Phase9PreEffectPermitPublicationError("phase9_pre_effect_permit_root_required")
     commit, tree, blobs = _verify_selected_candidate()

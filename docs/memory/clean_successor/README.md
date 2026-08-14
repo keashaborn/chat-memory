@@ -7,10 +7,12 @@ inactive dormant-store installation package. These files define the current
 version:
 
 - `ops/governed_memory/installation/current/package_manifest.json`: exact
-  74-artifact stores/controller package;
+  76-artifact stores/controller package;
 - `tools/governed_memory_install/package.py`: offline package verifier;
 - `ops/governed_memory/runtime_manifest.json`: current application,
   installation-proof, and activation status;
+- `ops/governed_memory/phase9j_controller_runtime_release_receipt.json`:
+  exact published dormant R7 controller substrate;
 - `ops/governed_memory/current_component_disposition.json`: current versus
   quarantined component boundary.
 
@@ -50,11 +52,20 @@ privileged root bypass.
 
 ## Current status
 
-The Phase 9J repository package verifies offline and remains inactive. At this
-repository checkpoint, no controller runtime or release has been published and
-the external Phase 9J disposable Linux proof receipt is not yet present. The
-package verifier never builds a runtime, runs Docker, reads secrets, connects
-to a store, installs a service, or activates a route.
+The Phase 9J repository package verifies offline and remains inactive. The
+exact R7 controller runtime and release are published on seebx as a dormant
+controller substrate; the promoted root-owned publication receipt is
+`ops/governed_memory/phase9j_controller_runtime_release_receipt.json`. No
+persistent PostgreSQL or Qdrant store was created, no production state changed,
+and the external Phase 9J disposable Linux proof receipt is not yet present.
+The package verifier itself never builds a runtime, runs Docker, reads secrets,
+connects to a store, installs a service, or activates a route.
+
+The current inactive store target is generation `000002`: PostgreSQL
+`127.0.0.1:55433`, Qdrant `127.0.0.1:6344`, and collection
+`governed_memory_9a54cf123493_000002`. Generation `000001` is retained only as
+the labeled Phase 8G disposable application-validation snapshot and is not
+current store or routing authority.
 
 Phase 8G application/runtime and chat-deletion evidence remains separate. It
 does not substitute for the Phase 9J installation/rollback proof. Phase 7C
