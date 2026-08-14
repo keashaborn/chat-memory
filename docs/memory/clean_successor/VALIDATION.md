@@ -43,7 +43,7 @@ test -n "${CHAT_MEMORY_LEASE_ID:-}"
 test -n "${CODEX_TASK_ID:-}"
 test -n "${CODEX_THREAD_ID:-}"
 sudo --preserve-env=CHAT_MEMORY_LEASE_ID,CODEX_TASK_ID,CODEX_THREAD_ID \
-  /opt/governed-memory-controller/runtimes/9dda4d93a1bcfecf4305736feffafb578e4629cd32594cec6b2d6d72cb90a4d3/bin/python \
+  /opt/governed-memory-controller/runtimes/ed0b3518484eec292f35f8b996bccefd01e13038105634016b4253a8c2a732a7/bin/python \
   -I -B "$PWD/tools/governed_memory_validation/execute_phase9_disposable_live_proof_controller.py"
 ```
 

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-"""Emit the reviewed 000003-failure to 000004-successor contract candidate.
+"""Emit the sealed 000003-failure to 000004-successor contract.
 
-The successor P/R pins are deliberately zero until the rebuilt package and
-controller runtime are published.  The production executor rejects those
-placeholders, so this generator is safe to use for structural review only.
+The corrected successor is bound to the reviewed P4 package and published,
+dormant R4 controller runtime.  Live execution remains permit- and manager-
+gated; generating this contract does not authorize or perform an effect.
 """
 
 import sys
@@ -15,8 +15,12 @@ from tools.governed_memory_validation import staged_prefix_disposition as staged
 
 
 DISPOSITION_ID: Final = "phase9-v7-staged-to-v8-000004"
-CORRECTED_PACKAGE_MANIFEST_SHA256: Final = "0" * 64
-CORRECTED_CONTROLLER_RUNTIME_RECEIPT_SHA256: Final = "0" * 64
+CORRECTED_PACKAGE_MANIFEST_SHA256: Final = (
+    "634669dbca4f2ccfed929951bcdd0d555d19e53f9b736ee21b42217e8e8cd629"
+)
+CORRECTED_CONTROLLER_RUNTIME_RECEIPT_SHA256: Final = (
+    "ed0b3518484eec292f35f8b996bccefd01e13038105634016b4253a8c2a732a7"
+)
 _DEVICE: Final = 66305
 
 

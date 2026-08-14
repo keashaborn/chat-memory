@@ -851,7 +851,7 @@ class Phase9DisposableLiveProofControllerTests(unittest.TestCase):
     def test_runtime_and_issuer_bound_fit_inside_four_hour_lease(self) -> None:
         self.assertEqual(
             subject.CONTROLLER_RUNTIME_RECEIPT_SHA256,
-            "9dda4d93a1bcfecf4305736feffafb578e4629cd32594cec6b2d6d72cb90a4d3",
+            "ed0b3518484eec292f35f8b996bccefd01e13038105634016b4253a8c2a732a7",
         )
         self.assertIn(subject.CONTROLLER_RUNTIME_RECEIPT_SHA256, subject.CONTROLLER_PYTHON)
         self.assertGreaterEqual(subject.ISSUER_TIMEOUT_SECONDS, 2 * 60 * 60)

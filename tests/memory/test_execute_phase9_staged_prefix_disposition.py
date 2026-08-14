@@ -124,20 +124,32 @@ class PreimportBoundaryTests(unittest.TestCase):
             with self.subTest(marker=marker):
                 self.assertLess(source.index(marker), later_import)
 
-    def test_000004_pins_are_explicitly_unsealed(self) -> None:
+    def test_000004_pins_are_exactly_sealed(self) -> None:
         self.assertEqual(
             subject._PREIMPORT_CONTROLLER_RUNTIME_RECEIPT_SHA256,
-            "0" * 64,
+            "ed0b3518484eec292f35f8b996bccefd01e13038105634016b4253a8c2a732a7",
         )
         self.assertEqual(
             subject.CONTROLLER_RUNTIME_RECEIPT_SHA256,
-            "0" * 64,
+            "ed0b3518484eec292f35f8b996bccefd01e13038105634016b4253a8c2a732a7",
         )
-        self.assertEqual(subject.CONTRACT_SHA256, "0" * 64)
-        self.assertEqual(subject.SUCCESSOR_ATTEMPT_IDENTITY_SHA256, "0" * 64)
-        self.assertEqual(subject.PACKAGE_MANIFEST_SHA256, "0" * 64)
-        self.assertFalse(subject._bindings_sealed())
-        self.assertTrue(subject.EXPECTED_CANDIDATE_REF.endswith("000004"))
+        self.assertEqual(
+            subject.CONTRACT_SHA256,
+            "daf64a4a6a17d6666d408f0beb216f44ba7d755efab4b43835ec0c7e3ad11f15",
+        )
+        self.assertEqual(
+            subject.SUCCESSOR_ATTEMPT_IDENTITY_SHA256,
+            "7d36e9326e1b333b4203d167f776ef75759ff295f943f79ae5838b068c3b8ba5",
+        )
+        self.assertEqual(
+            subject.PACKAGE_MANIFEST_SHA256,
+            "634669dbca4f2ccfed929951bcdd0d555d19e53f9b736ee21b42217e8e8cd629",
+        )
+        self.assertTrue(subject._bindings_sealed())
+        self.assertEqual(
+            subject.EXPECTED_CANDIDATE_REF,
+            "refs/tags/governed-memory-phase9j-pre-effect-disposition-000004",
+        )
 
 
 class ContractInstallationTests(unittest.TestCase):

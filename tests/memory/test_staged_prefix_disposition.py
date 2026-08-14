@@ -22,6 +22,11 @@ CORRECTED_RUNTIME = "4" * 64
 TAG_COMMIT = "a" * 40
 TAG_TREE = "b" * 40
 DISPOSITION_ID = "phase9-v7-staged-to-v8-000004"
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+CHECKED_IN_CONTRACT = (
+    REPOSITORY_ROOT
+    / "ops/governed_memory/staged_prefix_disposition_contract.json"
+)
 
 
 class ClosedRunner:
@@ -481,12 +486,26 @@ class StagedPrefixDispositionTests(unittest.TestCase):
 class ProductionContractFactsTests(unittest.TestCase):
     def test_generator_binds_exact_failed_000003_tree_and_000004_namespace(self) -> None:
         document = generator.generate()
+        generated = subject.canonical_json_bytes(document)
+        self.assertEqual(CHECKED_IN_CONTRACT.read_bytes(), generated)
+        self.assertEqual(
+            hashlib.sha256(generated).hexdigest(),
+            "daf64a4a6a17d6666d408f0beb216f44ba7d755efab4b43835ec0c7e3ad11f15",
+        )
         failed = document["failed_attempt"]
         files = {item["role"]: item for item in failed["evidence_files"]}
         directories = {
             item["role"]: item for item in failed["evidence_directories"]
         }
         self.assertEqual(failed["generation"], "000003")
+        self.assertEqual(
+            failed["package_manifest_sha256"],
+            "5addc8e4ab40b6bc700fde57b67579f8caa3d21077715bcdaf61d5714b52743e",
+        )
+        self.assertEqual(
+            failed["controller_runtime_receipt_sha256"],
+            "9dda4d93a1bcfecf4305736feffafb578e4629cd32594cec6b2d6d72cb90a4d3",
+        )
         self.assertEqual(failed["tag"]["commit"], subject.PRODUCTION_OLD_TAG_COMMIT)
         self.assertEqual(files["failed_permit"]["inode"], 1652272)
         self.assertEqual(
@@ -513,7 +532,18 @@ class ProductionContractFactsTests(unittest.TestCase):
         )
         successor = document["corrected_successor"]
         self.assertEqual(successor["generation"], "000004")
-        self.assertEqual(successor["package_manifest_sha256"], "0" * 64)
+        self.assertEqual(
+            successor["package_manifest_sha256"],
+            "634669dbca4f2ccfed929951bcdd0d555d19e53f9b736ee21b42217e8e8cd629",
+        )
+        self.assertEqual(
+            successor["controller_runtime_receipt_sha256"],
+            "ed0b3518484eec292f35f8b996bccefd01e13038105634016b4253a8c2a732a7",
+        )
+        self.assertEqual(
+            successor["attempt_identity_sha256"],
+            "7d36e9326e1b333b4203d167f776ef75759ff295f943f79ae5838b068c3b8ba5",
+        )
         self.assertEqual(
             subject._TCP_IDENTITIES["127.0.0.1:55435@000004"], "55435"
         )

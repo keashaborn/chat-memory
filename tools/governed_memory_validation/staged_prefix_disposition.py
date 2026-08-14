@@ -136,9 +136,11 @@ PRODUCTION_LIVE_GUARD_PATH: Final = Path(
 PRODUCTION_PRESERVED_GENERATION: Final = "000002"
 PRODUCTION_FAILED_GENERATION: Final = "000003"
 PRODUCTION_CORRECTED_GENERATION: Final = "000004"
-# The 000004 package/runtime closure is intentionally not yet published.
-# A production call must reject these placeholders before any filesystem write.
-PRODUCTION_CONTRACT_SHA256: Final[str | None] = None
+# The sealed 000004 contract binds the reviewed P4 package and dormant R4
+# runtime; the production executor separately enforces permit and manager gates.
+PRODUCTION_CONTRACT_SHA256: Final[str | None] = (
+    "daf64a4a6a17d6666d408f0beb216f44ba7d755efab4b43835ec0c7e3ad11f15"
+)
 PRODUCTION_FAILED_PACKAGE_MANIFEST_SHA256: Final = (
     "5addc8e4ab40b6bc700fde57b67579f8caa3d21077715bcdaf61d5714b52743e"
 )

@@ -8,7 +8,7 @@ import sys
 
 
 _PREIMPORT_CONTROLLER_RUNTIME_RECEIPT_SHA256 = (
-    "0" * 64
+    "ed0b3518484eec292f35f8b996bccefd01e13038105634016b4253a8c2a732a7"
 )
 _PREIMPORT_CONTROLLER_PYTHON = (
     "/opt/governed-memory-controller/runtimes/"
@@ -184,17 +184,27 @@ _SOURCE_PATHS: Final = (
 if _ENTRYPOINT_PATH.relative_to(_REPOSITORY_ROOT).as_posix() != _ENTRYPOINT_RELATIVE:
     raise SystemExit("phase9_staged_prefix_disposition_invocation_invalid")
 
-PACKAGE_MANIFEST_SHA256: Final = "0" * 64
-CONTROLLER_RUNTIME_RECEIPT_SHA256: Final = "0" * 64
-CONTRACT_SHA256: Final = "0" * 64
+PACKAGE_MANIFEST_SHA256: Final = (
+    "634669dbca4f2ccfed929951bcdd0d555d19e53f9b736ee21b42217e8e8cd629"
+)
+CONTROLLER_RUNTIME_RECEIPT_SHA256: Final = (
+    "ed0b3518484eec292f35f8b996bccefd01e13038105634016b4253a8c2a732a7"
+)
+CONTRACT_SHA256: Final = (
+    "daf64a4a6a17d6666d408f0beb216f44ba7d755efab4b43835ec0c7e3ad11f15"
+)
 PREDECESSOR_ATTEMPT_IDENTITY_SHA256: Final = (
     "2e3de35830821049d557ef012d526736c484f8eb8aed4bf03d0bbd662caae2ce"
 )
-SUCCESSOR_ATTEMPT_IDENTITY_SHA256: Final = "0" * 64
-AUTHORIZATION_TEXT_SHA256: Final = "0" * 64
+SUCCESSOR_ATTEMPT_IDENTITY_SHA256: Final = (
+    "7d36e9326e1b333b4203d167f776ef75759ff295f943f79ae5838b068c3b8ba5"
+)
+AUTHORIZATION_TEXT_SHA256: Final = (
+    "063891fc0189b3c4a0fe393200ae50f59b04f5488800dc27a5ce3020880f3e44"
+)
 THREAD_ID: Final = "019fe927-8367-7f52-86f2-e2b5b43a2390"
-BASE_CANDIDATE_COMMIT: Final = "0" * 40
-BASE_CANDIDATE_TREE: Final = "0" * 40
+BASE_CANDIDATE_COMMIT: Final = "5404581c5bf22bfb72a7ca51d8426b6274616d55"
+BASE_CANDIDATE_TREE: Final = "20ffff71b9272f40ff90736dba581da136473d25"
 PERMIT_SCHEMA: Final = "governed-memory-phase9j-staged-prefix-permit-v2"
 PERMIT_RESULT: Final = (
     "exact_staged_prefix_disposition_and_disposable_proof_permitted"
