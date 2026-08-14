@@ -249,7 +249,7 @@ _ATTACHMENT_REQUEST_RE = re.compile(
 _ALLOWLISTED_FACT_RE = re.compile(
     r"\s*(?:(?:i|we)\s+(?:prefer|like|love|dislike|avoid|live|lived|work|worked|"
     r"own|owned|adopted|moved|believe)\b[^?\n]{1,1000}|"
-    r"(?:my|our)\s+(?:favorite|family|mother|father|sister|brother|spouse|"
+    r"(?:my|our)\s+(?:favorite|preferred|family|mother|father|sister|brother|spouse|"
     r"partner|dog|cat|pet|job|career|home|hometown|belief|preference)\b"
     r"[^?\n]{1,1000}|synthetic\s+(?:account|owner)\s+prefers\b[^?\n]{1,1000})"
     r"\s*[.!]?\s*",
@@ -274,7 +274,7 @@ _PET_RE = re.compile(r"\b(?:dog|cat|pet|puppy|kitten|horse|bird)\b", re.I)
 _RESIDENCE_RE = re.compile(r"\b(?:live|lived|home|hometown|moved|grew up)\b", re.I)
 _EMPLOYMENT_RE = re.compile(r"\b(?:work|worked|job|career|occupation|degree)\b", re.I)
 _BELIEF_RE = re.compile(r"\b(?:believe|think|opinion|view|theory)\b", re.I)
-_PREFERENCE_RE = re.compile(r"\b(?:prefer|favorite|like|love|dislike|avoid)\b", re.I)
+_PREFERENCE_RE = re.compile(r"\b(?:prefer|preferred|favorite|like|love|dislike|avoid)\b", re.I)
 
 
 def external_send_privacy_denial(text: object) -> EligibilityReason | None:

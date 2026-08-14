@@ -78,6 +78,15 @@ class EligibilityTests(unittest.TestCase):
         self.assertEqual(evidence["source_sha256"], make_ingest_payload(text=text)["content_sha256"])
         self.assertEqual(evidence["selected_sha256"], evidence["source_sha256"])
 
+    def test_preferred_noun_phrase_is_selected_as_life_preference(self) -> None:
+        result = self.evaluate("My preferred test color is cobalt blue.")
+        evidence = result["selected_evidence"]
+
+        self.assertEqual(result["decision"], EligibilityDecision.SEND_EXTERNAL.value)
+        self.assertIsNotNone(evidence)
+        self.assertEqual(evidence["category"], "life_preference")
+        self.assertEqual(evidence["assertion_mode"], "endorsed")
+
     def test_non_user_role_fails_closed(self) -> None:
         result = self.evaluate(SOURCE_TEXT, role="assistant")
         self.assertEqual(result["decision"], EligibilityDecision.BLOCK_LOCAL.value)
