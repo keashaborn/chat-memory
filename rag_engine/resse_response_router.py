@@ -20,9 +20,9 @@ from rag_engine.chat_attachment_context_v1 import (
 from rag_engine.governed_memory.exclusive_cutover import (
     exclusive_memory_mode,
 )
-from rag_engine.governed_memory_chat_retraction_v1 import (
-    ChatRetractionError,
-    ChatRetractionRuntimeV1,
+from rag_engine.governed_memory_chat_lifecycle_v1 import (
+    ChatMemoryLifecycleError,
+    ChatMemoryLifecycleRuntimeV1,
 )
 from rag_engine.governed_memory.response_provider import (
     EXCLUSIVE_MODE_SUCCESSOR,
@@ -118,7 +118,9 @@ SuccessorLiveAuthorityFactory = Callable[[], MemoryLiveAuthorityVerifierV1]
 
 
 SUCCESSOR_RESPONSE_RUNTIME = SuccessorResponseRuntime()
-CHAT_RETRACTION_RUNTIME = ChatRetractionRuntimeV1.from_environment()
+CHAT_MEMORY_LIFECYCLE_RUNTIME = (
+    ChatMemoryLifecycleRuntimeV1.from_environment()
+)
 EXCLUSIVE_MEMORY_MODE = exclusive_memory_mode()
 RESPONSE_MEMORY_MODE = EXCLUSIVE_MEMORY_MODE.value
 
@@ -377,13 +379,13 @@ async def resse_response_query(
 
     if tentative_successor_eligible:
         try:
-            await CHAT_RETRACTION_RUNTIME.apply_if_requested(
+            await CHAT_MEMORY_LIFECYCLE_RUNTIME.apply_if_requested(
                 message=payload.message,
                 authorization=(
                     req.headers.get("authorization") or ""
                 ).strip(),
             )
-        except ChatRetractionError as exc:
+        except ChatMemoryLifecycleError as exc:
             raise _no_store_http_exception(
                 exc.status_code,
                 exc.code,

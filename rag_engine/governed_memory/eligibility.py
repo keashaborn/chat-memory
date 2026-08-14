@@ -9,6 +9,10 @@ import re
 from typing import Any, Mapping
 from uuid import UUID
 
+from rag_engine.governed_memory_chat_commands_v1 import (
+    explicit_preference_correction_command_v1,
+)
+
 from .contracts import (
     ContractViolation,
     EligibilityDecision,
@@ -28,6 +32,7 @@ from .contracts import (
 
 class EligibilityReason(str, Enum):
     PERSONAL_FACT_SELECTED = "personal_fact_selected"
+    EXPLICIT_CORRECTION_COMMAND = "explicit_correction_command"
     EXPLICIT_REMEMBER_SELECTED = "explicit_remember_selected"
     BEFORE_CUTOVER = "before_cutover"
     EMPTY_OR_NOISE = "empty_or_noise"
@@ -638,6 +643,14 @@ def classify_eligibility(
             selected_policy,
             EligibilityDecision.SKIP_ZERO_CALL,
             EligibilityReason.TASK_REQUEST,
+        )
+
+    if explicit_preference_correction_command_v1(text) is not None:
+        return source, _result(
+            source,
+            selected_policy,
+            EligibilityDecision.SKIP_ZERO_CALL,
+            EligibilityReason.EXPLICIT_CORRECTION_COMMAND,
         )
 
     remember = _REMEMBER_RE.match(text)

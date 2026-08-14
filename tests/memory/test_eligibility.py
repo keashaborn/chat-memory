@@ -87,6 +87,21 @@ class EligibilityTests(unittest.TestCase):
         self.assertEqual(evidence["category"], "life_preference")
         self.assertEqual(evidence["assertion_mode"], "endorsed")
 
+    def test_explicit_correction_command_never_enters_ordinary_extraction(self) -> None:
+        result = self.evaluate(
+            "My preferred correction test fruit is now a kiwi, "
+            "replacing the mango."
+        )
+
+        self.assertEqual(
+            result["decision"], EligibilityDecision.SKIP_ZERO_CALL.value
+        )
+        self.assertEqual(
+            result["reason_codes"], ["explicit_correction_command"]
+        )
+        self.assertFalse(result["provider_allowed"])
+        self.assertIsNone(result["selected_evidence"])
+
     def test_non_user_role_fails_closed(self) -> None:
         result = self.evaluate(SOURCE_TEXT, role="assistant")
         self.assertEqual(result["decision"], EligibilityDecision.BLOCK_LOCAL.value)
