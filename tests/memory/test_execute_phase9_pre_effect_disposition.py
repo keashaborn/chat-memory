@@ -44,7 +44,7 @@ def permit(**changes: object) -> dict[str, object]:
 
 
 class PreimportLineageTests(unittest.TestCase):
-    def test_exact_r7_manager_and_lease_lineage_is_required(self) -> None:
+    def test_exact_phase9j_manager_and_lease_lineage_is_required(self) -> None:
         manager_pid = 4242
         environment = {
             subject._PREIMPORT_MANAGER_PID_KEY: str(manager_pid),

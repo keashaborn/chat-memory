@@ -9,7 +9,7 @@ import sys
 
 
 _PREIMPORT_CONTROLLER_RUNTIME_RECEIPT_SHA256 = (
-    "c9b6721985c4840f555d583d77fcfb82c4f20d609c0af651a7171744d58c9a11"
+    "7de191f42a1c14b6bc2c29b3e7b425bd1b2593f7de95e03af7d2f93ff5d4a53b"
 )
 _PREIMPORT_CONTROLLER_PYTHON = (
     "/opt/governed-memory-controller/runtimes/"

@@ -22,7 +22,7 @@ substitute for this sequence.
 The package verifier must report schema v6, Phase 9J inactive state, exactly 76
 artifacts, no proof receipt inside the sealed package, no installation, no
 secret access, no image staging, and no activation. The release guard separately
-verifies the promoted R7 dormant-substrate receipt and must still refuse
+verifies the promoted current Phase 9J dormant-substrate receipt and must still refuse
 production release with
 `inactive_installation_package_not_authorized`.
 
@@ -36,14 +36,14 @@ The external Phase 9J proof is a separate, explicitly authorized operation on
 **seebx**. The lease-guarded manager is the sole public entrypoint. Do not
 invoke the permit publisher, pre-effect disposition executor, substrate
 bootstrap, proof issuer, or sealed runner directly. From the exact clean tagged
-candidate, invoke the manager with the pinned R7 interpreter and no arguments:
+candidate, invoke the manager with the pinned Phase 9J interpreter and no arguments:
 
 ```bash
 test -n "${CHAT_MEMORY_LEASE_ID:-}"
 test -n "${CODEX_TASK_ID:-}"
 test -n "${CODEX_THREAD_ID:-}"
 sudo --preserve-env=CHAT_MEMORY_LEASE_ID,CODEX_TASK_ID,CODEX_THREAD_ID \
-  /opt/governed-memory-controller/runtimes/c9b6721985c4840f555d583d77fcfb82c4f20d609c0af651a7171744d58c9a11/bin/python \
+  /opt/governed-memory-controller/runtimes/7de191f42a1c14b6bc2c29b3e7b425bd1b2593f7de95e03af7d2f93ff5d4a53b/bin/python \
   -I -B "$PWD/tools/governed_memory_validation/execute_phase9_disposable_live_proof_controller.py"
 ```
 
@@ -67,7 +67,7 @@ running only bounded `RECOVER_ONLY`; the manager must never kill that recovery
 when its own wait bound expires. Control withdrawal sends `SIGCONT`, and the
 issuer's Linux parent-death signal is also `SIGCONT`, so a stopped issuer wakes,
 observes pipe/parent loss, and enters the same recovery path. The substrate
-callable independently reproves the exact R7 issuer/manager process lineage,
+callable independently reproves the exact Phase 9J issuer/manager process lineage,
 FD 198, active lease, and held fixed global lock immediately before mutation.
 This is not a malicious same-UID confinement boundary and must not be reused
 as Phase 10 activation authority.

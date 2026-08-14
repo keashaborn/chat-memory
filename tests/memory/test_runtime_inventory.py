@@ -65,7 +65,7 @@ EXPECTED_CURRENT_RUNTIME_RECEIPT_SHA256 = (
     "25ca53e683e53f79b726909ef64bc8afad30269cce3f59804cf66335667a8108"
 )
 EXPECTED_PHASE9J_CONTROLLER_RUNTIME_RELEASE_RECEIPT_SHA256 = (
-    "c9b6721985c4840f555d583d77fcfb82c4f20d609c0af651a7171744d58c9a11"
+    "7de191f42a1c14b6bc2c29b3e7b425bd1b2593f7de95e03af7d2f93ff5d4a53b"
 )
 EXPECTED_HISTORICAL_PHASE7C_RUNTIME_RECEIPT_SHA256 = (
     "210cd0fe1bdaf60089668b3d2c8d37be760ed9b867e0909d4e83ebcc204e84b2"
@@ -688,7 +688,7 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         self.assertEqual(current["package_artifact_count"], 76)
         self.assertEqual(
             current["package_manifest_sha256"],
-            "062ea00564e5edfb138dca9240fd5d70cec2c640563d6ad02e1e89de15d7db39",
+            "2e5da1091b456b705d955c5cc3a119e507116f892de0bcb92017185ca4ed2e89",
         )
         self.assertEqual(
             current["contract_canonical_sha256"],

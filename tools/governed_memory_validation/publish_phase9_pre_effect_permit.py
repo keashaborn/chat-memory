@@ -8,7 +8,7 @@ import sys
 
 
 _PREIMPORT_CONTROLLER_RUNTIME_RECEIPT_SHA256 = (
-    "c9b6721985c4840f555d583d77fcfb82c4f20d609c0af651a7171744d58c9a11"
+    "7de191f42a1c14b6bc2c29b3e7b425bd1b2593f7de95e03af7d2f93ff5d4a53b"
 )
 _PREIMPORT_CONTROLLER_PYTHON = (
     "/opt/governed-memory-controller/runtimes/"
@@ -57,7 +57,7 @@ def _preimport_manager_lineage_valid(
     observed_parent_executable: object = None,
     observed_parent_command_line: object = None,
 ) -> bool:
-    """Bind direct publication to the exact R7 manager process."""
+    """Bind direct publication to the exact Phase 9J manager process."""
 
     try:
         selected_environment = os.environ if environment is None else environment
@@ -177,11 +177,11 @@ if _PUBLISHER_PATH.relative_to(_REPOSITORY_ROOT).as_posix() != _PUBLISHER_RELATI
 
 BASE_CANDIDATE_COMMIT: Final = "2eee4e6a2bf0b23aaca68fdbb4919b0c58d041a2"
 BASE_CANDIDATE_TREE: Final = "76f5cd6e20241523e1e3d6d1d8f4cf2c5f1de7ab"
-PACKAGE_MANIFEST_SHA256: Final = "062ea00564e5edfb138dca9240fd5d70cec2c640563d6ad02e1e89de15d7db39"
-CONTROLLER_RUNTIME_RECEIPT_SHA256: Final = "c9b6721985c4840f555d583d77fcfb82c4f20d609c0af651a7171744d58c9a11"
-CONTRACT_SHA256: Final = "4b5d4b9c41294247a3087d08c5278436e2a6bdfd317ab1b960a5a95189f2cacb"
+PACKAGE_MANIFEST_SHA256: Final = "2e5da1091b456b705d955c5cc3a119e507116f892de0bcb92017185ca4ed2e89"
+CONTROLLER_RUNTIME_RECEIPT_SHA256: Final = "7de191f42a1c14b6bc2c29b3e7b425bd1b2593f7de95e03af7d2f93ff5d4a53b"
+CONTRACT_SHA256: Final = "758175f12c844a81c1fac2061d2a41d094034d697241545656c8ddac4e51e989"
 PREDECESSOR_ATTEMPT_IDENTITY_SHA256: Final = "e814fd3ea9e10ebb2cc84f87c7a8a73f6d3d29e8da1f05944c81522b8db6efd9"
-SUCCESSOR_ATTEMPT_IDENTITY_SHA256: Final = "1242bc9fa4900e80ef4569ca6d69934c3f15c9172f42018577183ae510951842"
+SUCCESSOR_ATTEMPT_IDENTITY_SHA256: Final = "38cfb351b7a6c3d8c4e128d1870e307015c2e9158f85eec72058213bcc189ff3"
 AUTHORIZATION_TEXT_SHA256: Final = "063891fc0189b3c4a0fe393200ae50f59b04f5488800dc27a5ce3020880f3e44"
 THREAD_ID: Final = "019fe927-8367-7f52-86f2-e2b5b43a2390"
 PERMIT_SCHEMA: Final = "governed-memory-phase9j-pre-effect-disposition-permit-v1"

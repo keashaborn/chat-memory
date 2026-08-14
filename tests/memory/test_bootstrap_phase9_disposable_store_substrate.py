@@ -55,7 +55,7 @@ class Phase9DisposableStoreSubstrateTests(unittest.TestCase):
         )
         self.platform = mock.patch.object(subject.sys, "platform", "linux")
         self.executable = mock.patch.object(
-            subject.sys, "executable", subject._PINNED_R7_INTERPRETER
+            subject.sys, "executable", subject._PINNED_PHASE9J_INTERPRETER
         )
         self.guard_path = mock.patch.object(
             subject, "LIVE_PROOF_GUARD_PATH", self.lock_path
@@ -238,7 +238,7 @@ class Phase9DisposableStoreSubstrateTests(unittest.TestCase):
             subject.main(())
         bootstrap.assert_not_called()
 
-    def test_direct_bootstrap_requires_pinned_r7_runtime_before_imports(self) -> None:
+    def test_direct_bootstrap_requires_pinned_phase9j_runtime_before_imports(self) -> None:
         completed = subprocess.run(
             (
                 self.test_python,

@@ -4879,7 +4879,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
             )
         )
 
-    def test_direct_issuer_requires_the_pinned_r7_runtime_before_imports(self) -> None:
+    def test_direct_issuer_requires_the_pinned_phase9j_runtime_before_imports(self) -> None:
         completed = subprocess.run(
             (sys.executable, "-I", "-B", str(Path(issuer.__file__)), "--help"),
             stdin=subprocess.DEVNULL,

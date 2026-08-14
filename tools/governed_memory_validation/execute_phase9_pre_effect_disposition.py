@@ -8,7 +8,7 @@ import sys
 
 
 _PREIMPORT_CONTROLLER_RUNTIME_RECEIPT_SHA256 = (
-    "c9b6721985c4840f555d583d77fcfb82c4f20d609c0af651a7171744d58c9a11"
+    "7de191f42a1c14b6bc2c29b3e7b425bd1b2593f7de95e03af7d2f93ff5d4a53b"
 )
 _PREIMPORT_CONTROLLER_PYTHON = (
     "/opt/governed-memory-controller/runtimes/"
@@ -57,7 +57,7 @@ def _preimport_manager_lineage_valid(
     observed_parent_executable: object = None,
     observed_parent_command_line: object = None,
 ) -> bool:
-    """Bind direct disposition to the exact R7 manager process."""
+    """Bind direct disposition to the exact Phase 9J manager process."""
 
     try:
         selected_environment = os.environ if environment is None else environment
@@ -180,19 +180,19 @@ if _ENTRYPOINT_PATH.relative_to(_REPOSITORY_ROOT).as_posix() != _ENTRYPOINT_RELA
     raise SystemExit("phase9_pre_effect_disposition_invocation_invalid")
 
 PACKAGE_MANIFEST_SHA256: Final = (
-    "062ea00564e5edfb138dca9240fd5d70cec2c640563d6ad02e1e89de15d7db39"
+    "2e5da1091b456b705d955c5cc3a119e507116f892de0bcb92017185ca4ed2e89"
 )
 CONTROLLER_RUNTIME_RECEIPT_SHA256: Final = (
-    "c9b6721985c4840f555d583d77fcfb82c4f20d609c0af651a7171744d58c9a11"
+    "7de191f42a1c14b6bc2c29b3e7b425bd1b2593f7de95e03af7d2f93ff5d4a53b"
 )
 CONTRACT_SHA256: Final = (
-    "4b5d4b9c41294247a3087d08c5278436e2a6bdfd317ab1b960a5a95189f2cacb"
+    "758175f12c844a81c1fac2061d2a41d094034d697241545656c8ddac4e51e989"
 )
 PREDECESSOR_ATTEMPT_IDENTITY_SHA256: Final = (
     "e814fd3ea9e10ebb2cc84f87c7a8a73f6d3d29e8da1f05944c81522b8db6efd9"
 )
 SUCCESSOR_ATTEMPT_IDENTITY_SHA256: Final = (
-    "1242bc9fa4900e80ef4569ca6d69934c3f15c9172f42018577183ae510951842"
+    "38cfb351b7a6c3d8c4e128d1870e307015c2e9158f85eec72058213bcc189ff3"
 )
 AUTHORIZATION_TEXT_SHA256: Final = (
     "063891fc0189b3c4a0fe393200ae50f59b04f5488800dc27a5ce3020880f3e44"

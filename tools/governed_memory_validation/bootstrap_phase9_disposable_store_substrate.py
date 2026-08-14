@@ -8,12 +8,12 @@ import sys
 
 _ISOLATED_RUNTIME_AT_START = bool(sys.flags.isolated)
 _DONT_WRITE_BYTECODE_AT_START = bool(sys.dont_write_bytecode)
-_PINNED_R7_RUNTIME_RECEIPT_SHA256 = (
-    "c9b6721985c4840f555d583d77fcfb82c4f20d609c0af651a7171744d58c9a11"
+_PINNED_PHASE9J_RUNTIME_RECEIPT_SHA256 = (
+    "7de191f42a1c14b6bc2c29b3e7b425bd1b2593f7de95e03af7d2f93ff5d4a53b"
 )
-_PINNED_R7_INTERPRETER = (
+_PINNED_PHASE9J_INTERPRETER = (
     "/opt/governed-memory-controller/runtimes/"
-    + _PINNED_R7_RUNTIME_RECEIPT_SHA256
+    + _PINNED_PHASE9J_RUNTIME_RECEIPT_SHA256
     + "/bin/python"
 )
 if __name__ == "__main__" and not (
@@ -22,7 +22,7 @@ if __name__ == "__main__" and not (
     sys.stderr.write("phase9_store_substrate_runtime_isolation_required\n")
     raise SystemExit(1)
 if __name__ == "__main__" and (
-    sys.platform != "linux" or sys.executable != _PINNED_R7_INTERPRETER
+    sys.platform != "linux" or sys.executable != _PINNED_PHASE9J_INTERPRETER
 ):
     sys.stderr.write("phase9_store_substrate_pinned_runtime_required\n")
     raise SystemExit(1)
@@ -168,17 +168,17 @@ def _issuer_control_snapshot() -> tuple[int, tuple[int, int]]:
     manager_path = str(_REPOSITORY_ROOT / MANAGER_RELATIVE)
     expected_issuer = b"\0".join(
         value.encode("utf-8")
-        for value in (_PINNED_R7_INTERPRETER, "-I", "-B", issuer_path)
+        for value in (_PINNED_PHASE9J_INTERPRETER, "-I", "-B", issuer_path)
     ) + b"\0"
     expected_manager = b"\0".join(
         value.encode("utf-8")
-        for value in (_PINNED_R7_INTERPRETER, "-I", "-B", manager_path)
+        for value in (_PINNED_PHASE9J_INTERPRETER, "-I", "-B", manager_path)
     ) + b"\0"
     if (
         os.path.realpath(os.readlink("/proc/self/exe"))
-        != os.path.realpath(_PINNED_R7_INTERPRETER)
+        != os.path.realpath(_PINNED_PHASE9J_INTERPRETER)
         or os.path.realpath(os.readlink(f"/proc/{manager_pid}/exe"))
-        != os.path.realpath(_PINNED_R7_INTERPRETER)
+        != os.path.realpath(_PINNED_PHASE9J_INTERPRETER)
         or _read_exact_cmdline("self") != expected_issuer
         or _read_exact_cmdline(manager_raw) != expected_manager
     ):
@@ -187,13 +187,13 @@ def _issuer_control_snapshot() -> tuple[int, tuple[int, int]]:
 
 
 def _require_issuer_invocation_authority() -> None:
-    """Require the exact R7 issuer, live manager pipe, and active lease."""
+    """Require the exact Phase 9J issuer, manager pipe, and active lease."""
 
     if (
         not _ISOLATED_RUNTIME_AT_START
         or not _DONT_WRITE_BYTECODE_AT_START
         or sys.platform != "linux"
-        or sys.executable != _PINNED_R7_INTERPRETER
+        or sys.executable != _PINNED_PHASE9J_INTERPRETER
     ):
         raise Phase9DisposableStoreSubstrateError(
             "phase9_store_substrate_issuer_authority_required"
@@ -556,7 +556,7 @@ def bootstrap_phase9_disposable_store_substrate(
         not _ISOLATED_RUNTIME_AT_START
         or not _DONT_WRITE_BYTECODE_AT_START
         or sys.platform != "linux"
-        or sys.executable != _PINNED_R7_INTERPRETER
+        or sys.executable != _PINNED_PHASE9J_INTERPRETER
     ):
         raise Phase9DisposableStoreSubstrateError(
             "phase9_store_substrate_runtime_isolation_required"

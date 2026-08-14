@@ -6,7 +6,7 @@ from __future__ import annotations
 This module has no installation, rollback, activation, Docker, network, secret,
 PostgreSQL, or Qdrant execution surface. Phase 7C receipts are immutable
 historical evidence only. The current Phase 8G application proof, sealed Phase
-9J inactive store package, and published dormant R7 controller substrate are
+9J inactive store package, and published dormant Phase 9J controller substrate are
 verified separately. Phase 9J packages an administrative cooperative writer
 fence but does not claim to exclude an equivalent privileged-root bypass;
 production installation and activation remain refused.
@@ -164,19 +164,19 @@ EXPECTED_CURRENT_RUNTIME_RECEIPT_SHA256 = (
     "25ca53e683e53f79b726909ef64bc8afad30269cce3f59804cf66335667a8108"
 )
 EXPECTED_PHASE9J_CONTROLLER_RUNTIME_RELEASE_RECEIPT_SHA256 = (
-    "c9b6721985c4840f555d583d77fcfb82c4f20d609c0af651a7171744d58c9a11"
+    "7de191f42a1c14b6bc2c29b3e7b425bd1b2593f7de95e03af7d2f93ff5d4a53b"
 )
 EXPECTED_PHASE9J_PACKAGE_MANIFEST_SHA256 = (
-    "062ea00564e5edfb138dca9240fd5d70cec2c640563d6ad02e1e89de15d7db39"
+    "2e5da1091b456b705d955c5cc3a119e507116f892de0bcb92017185ca4ed2e89"
 )
 EXPECTED_PHASE9J_RUNTIME_TREE_SHA256 = (
-    "49c6713102d87266bf0942d96de344581be14a5203dfc39243e75400b845e002"
+    "8842461fb701fc559437f52f71c95d47363e5bece2b9efbf246b2a54530b6403"
 )
 EXPECTED_PHASE9J_RELEASE_TREE_SHA256 = (
-    "cca9612ce64b2c5c124d5845c7330a7d0667dff982d9b922b9fce5ec6122a7ba"
+    "a8f9226a30718a4155c9835325aa13ed904ec8adbd453041ce2a7e89c235a2f8"
 )
 EXPECTED_CURRENT_RUNTIME_MANIFEST_SHA256 = (
-    "862900039848c1b34a3378c3a960da94a40448a9e48c70fca518918643747e16"
+    "23b0673d682a734cdf9fd886db014cacbe9697802efb5c5973a82f1c1f49d8a9"
 )
 EXPECTED_CURRENT_RUNTIME_SOURCE_SHA256 = (
     "b52b753dc7974ee120e4abe264bb36f16b53341fa86b2ea8e0ab5bf86c735c20"

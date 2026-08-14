@@ -222,7 +222,7 @@ class Phase9DisposableLiveProofControllerTests(unittest.TestCase):
             )
         runner.Popen.assert_not_called()
 
-    def test_step_uses_exact_r7_runtime_and_rechecks_lease_while_running(self) -> None:
+    def test_step_uses_exact_phase9j_runtime_and_rechecks_lease_while_running(self) -> None:
         receipt = subject._canonical({"result": "ok"}) + b"\n"
         process = FakeProcess(
             [
@@ -767,7 +767,7 @@ class Phase9DisposableLiveProofControllerTests(unittest.TestCase):
     def test_runtime_and_issuer_bound_fit_inside_four_hour_lease(self) -> None:
         self.assertEqual(
             subject.CONTROLLER_RUNTIME_RECEIPT_SHA256,
-            "c9b6721985c4840f555d583d77fcfb82c4f20d609c0af651a7171744d58c9a11",
+            "7de191f42a1c14b6bc2c29b3e7b425bd1b2593f7de95e03af7d2f93ff5d4a53b",
         )
         self.assertIn(subject.CONTROLLER_RUNTIME_RECEIPT_SHA256, subject.CONTROLLER_PYTHON)
         self.assertGreaterEqual(subject.ISSUER_TIMEOUT_SECONDS, 2 * 60 * 60)

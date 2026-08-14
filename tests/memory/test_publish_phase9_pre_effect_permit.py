@@ -12,7 +12,7 @@ from tools.governed_memory_validation import publish_phase9_pre_effect_permit as
 
 
 class CandidateSelectionTests(unittest.TestCase):
-    def test_preimport_gate_binds_exact_r7_manager_and_lease_lineage(self) -> None:
+    def test_preimport_gate_binds_exact_phase9j_manager_and_lease_lineage(self) -> None:
         manager_pid = 4242
         environment = {
             subject._PREIMPORT_MANAGER_PID_KEY: str(manager_pid),

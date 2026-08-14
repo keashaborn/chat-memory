@@ -23,12 +23,12 @@ import stat
 
 _ISOLATED_RUNTIME_AT_START = bool(sys.flags.isolated)
 _DONT_WRITE_BYTECODE_AT_START = bool(sys.dont_write_bytecode)
-_PINNED_R7_RUNTIME_RECEIPT_SHA256 = (
-    "c9b6721985c4840f555d583d77fcfb82c4f20d609c0af651a7171744d58c9a11"
+_PINNED_PHASE9J_RUNTIME_RECEIPT_SHA256 = (
+    "7de191f42a1c14b6bc2c29b3e7b425bd1b2593f7de95e03af7d2f93ff5d4a53b"
 )
-_PINNED_R7_INTERPRETER = (
+_PINNED_PHASE9J_INTERPRETER = (
     "/opt/governed-memory-controller/runtimes/"
-    + _PINNED_R7_RUNTIME_RECEIPT_SHA256
+    + _PINNED_PHASE9J_RUNTIME_RECEIPT_SHA256
     + "/bin/python"
 )
 MANAGER_CONTROL_FD = 198
@@ -140,10 +140,10 @@ def _preimport_validate_manager_lineage(
         or tuple(sys.argv) != (issuer_path,)
         or os.path.realpath(manager_path) != manager_path
         or os.readlink(f"/proc/{manager_pid}/exe")
-        != _PINNED_R7_INTERPRETER
+        != _PINNED_PHASE9J_INTERPRETER
         or _preimport_proc_cmdline(manager_pid)
         != (
-            _PINNED_R7_INTERPRETER,
+            _PINNED_PHASE9J_INTERPRETER,
             "-I",
             "-B",
             manager_path,
@@ -218,7 +218,7 @@ if __name__ == "__main__" and not (
     sys.stderr.write("phase9_proof_issuer_runtime_isolation_required\n")
     raise SystemExit(1)
 if __name__ == "__main__" and (
-    sys.platform != "linux" or sys.executable != _PINNED_R7_INTERPRETER
+    sys.platform != "linux" or sys.executable != _PINNED_PHASE9J_INTERPRETER
 ):
     sys.stderr.write("phase9_proof_issuer_pinned_runtime_required\n")
     raise SystemExit(1)

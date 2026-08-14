@@ -12,7 +12,7 @@ version:
 - `ops/governed_memory/runtime_manifest.json`: current application,
   installation-proof, and activation status;
 - `ops/governed_memory/phase9j_controller_runtime_release_receipt.json`:
-  exact published dormant R7 controller substrate;
+  exact published dormant Phase 9J controller substrate;
 - `ops/governed_memory/current_component_disposition.json`: current versus
   quarantined component boundary.
 
@@ -53,8 +53,8 @@ privileged root bypass.
 ## Current status
 
 The Phase 9J repository package verifies offline and remains inactive. The
-exact R7 controller runtime and release are published on seebx as a dormant
-controller substrate; the promoted root-owned publication receipt is
+exact current Phase 9J controller runtime and release are published on seebx
+as a dormant controller substrate; the promoted root-owned publication receipt is
 `ops/governed_memory/phase9j_controller_runtime_release_receipt.json`. No
 persistent PostgreSQL or Qdrant store was created, no production state changed,
 and the external Phase 9J disposable Linux proof receipt is not yet present.
