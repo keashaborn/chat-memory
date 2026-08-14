@@ -192,7 +192,7 @@ def dispatched_binding() -> dict[str, object]:
         "owner_user_id": str(OWNER_A),
         "dispatch_state": "dispatched",
         "outcome": "exposed",
-        "response_id": RESPONSE_A,
+        "response_id": str(RESPONSE_A),
         "query_sha256": "1" * 64,
         "policy_sha256": "2" * 64,
         "allowed_predicates": ["preference"],
@@ -203,8 +203,8 @@ def dispatched_binding() -> dict[str, object]:
         "renderer_sha256": "3" * 64,
         "prompt_sha256": "4" * 64,
         "explicit_recall": False,
-        "selected_claim_ids": [CLAIM_A],
-        "injected_claim_ids": [CLAIM_A],
+        "selected_claim_ids": [str(CLAIM_A)],
+        "injected_claim_ids": [str(CLAIM_A)],
         "selection_manifest_sha256": "5" * 64,
         "injection_manifest_sha256": "6" * 64,
     }
@@ -237,6 +237,37 @@ class SuccessorResponsePostgresReceiptTests(unittest.IsolatedAsyncioTestCase):
             outbound_request='{"messages":[]}',
         )
         self.assertFalse(repository.rolled_back)
+
+    async def test_malformed_wire_answer_uuid_is_rejected(self) -> None:
+        binding = dispatched_binding()
+        binding["response_id"] = "not-a-uuid"
+        repository = _TestablePostgresSuccessorResponseRepository(
+            FakeBindingConnection(
+                {
+                    "binding_id": UUID(
+                        "77777777-7777-4777-8777-777777777777"
+                    ),
+                    "selection_manifest_sha256": binding[
+                        "selection_manifest_sha256"
+                    ],
+                    "injection_manifest_sha256": binding[
+                        "injection_manifest_sha256"
+                    ],
+                }
+            )
+        )
+        with self.assertRaisesRegex(
+            ContractViolation,
+            "invalid_response_memory_answer",
+        ):
+            await repository.persist_answer_binding(
+                actor=make_response_actor(),
+                operation_id=UUID("34343434-3434-4434-8434-343434343434"),
+                thread_id=THREAD_A,
+                binding=binding,
+                memory_block="bounded synthetic memory block",
+                outbound_request='{"messages":[]}',
+            )
 
     async def test_conflicting_database_receipt_fails_closed(self) -> None:
         binding = dispatched_binding()

@@ -27,6 +27,17 @@ _PERSIST_BINDING_SQL = (
 )
 
 
+def _wire_uuid(value: object, code: str) -> UUID:
+    if isinstance(value, UUID):
+        return value
+    if not isinstance(value, str):
+        raise ContractViolation(code)
+    try:
+        return UUID(value)
+    except ValueError as exc:
+        raise ContractViolation(code) from exc
+
+
 class SuccessorResponsePostgresError(RuntimeError):
     pass
 
@@ -118,7 +129,7 @@ class PostgresSuccessorResponseRepository:
             or binding.get("outcome") != "exposed"
         ):
             raise ContractViolation("response_memory_answer_binding_mismatch")
-        response_id = require_uuid(
+        response_id = _wire_uuid(
             binding.get("response_id"),
             "invalid_response_memory_answer",
         )
@@ -132,11 +143,11 @@ class PostgresSuccessorResponseRepository:
         ):
             require_sha256(binding.get(field), f"invalid_response_memory_{field}")
         selected = tuple(
-            require_uuid(value, "invalid_response_memory_selected_claim")
+            _wire_uuid(value, "invalid_response_memory_selected_claim")
             for value in binding.get("selected_claim_ids", ())
         )
         injected = tuple(
-            require_uuid(value, "invalid_response_memory_injected_claim")
+            _wire_uuid(value, "invalid_response_memory_injected_claim")
             for value in binding.get("injected_claim_ids", ())
         )
         if not selected or not injected:
