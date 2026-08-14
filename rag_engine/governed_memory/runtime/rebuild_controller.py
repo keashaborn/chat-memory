@@ -38,7 +38,7 @@ _COLLECTION_RE = re.compile(
     r"governed_memory_9a54cf123493_(?P<generation>[0-9]{6})\Z",
     re.ASCII,
 )
-_INITIAL_MANIFEST_SHA256 = sha256_text(
+REBUILD_INITIAL_MANIFEST_SHA256 = sha256_text(
     "governed-memory-successor-rebuild-manifest-v1"
 )
 
@@ -61,6 +61,38 @@ def _uuid(value: object, code: str) -> UUID:
     except (TypeError, ValueError) as exc:
         raise ContractViolation(code) from exc
     return require_uuid(parsed, code)
+
+
+def rebuild_manifest_step_sha256(
+    previous_sha256: str,
+    index: int,
+    point: Mapping[str, Any],
+) -> str:
+    payload = point.get("payload")
+    if (
+        not isinstance(payload, Mapping)
+        or tuple(sorted(payload)) != QDRANT_PAYLOAD_FIELDS
+    ):
+        raise ContractViolation("invalid_rebuild_projection_point")
+    return canonical_sha256(
+        "governed_memory.successor_rebuild_manifest_step",
+        {
+            "index": index,
+            "payload_sha256": require_sha256(
+                point.get("payload_sha256"),
+                "invalid_rebuild_payload_sha256",
+            ),
+            "point_id": str(_uuid(point.get("point_id"), "invalid_rebuild_point_id")),
+            "previous_sha256": require_sha256(
+                previous_sha256,
+                "invalid_rebuild_previous_manifest",
+            ),
+            "vector_sha256": require_sha256(
+                payload.get("vector_sha256"),
+                "invalid_rebuild_vector_sha256",
+            ),
+        },
+    )
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -207,38 +239,6 @@ class SuccessorRebuildController:
             raise ContractViolation("rebuild_target_generation_not_next")
         return source_name, target_name
 
-    @staticmethod
-    def _manifest_step(
-        previous_sha256: str,
-        index: int,
-        point: Mapping[str, Any],
-    ) -> str:
-        payload = point.get("payload")
-        if (
-            not isinstance(payload, Mapping)
-            or tuple(sorted(payload)) != QDRANT_PAYLOAD_FIELDS
-        ):
-            raise ContractViolation("invalid_rebuild_projection_point")
-        return canonical_sha256(
-            "governed_memory.successor_rebuild_manifest_step",
-            {
-                "index": index,
-                "payload_sha256": require_sha256(
-                    point.get("payload_sha256"),
-                    "invalid_rebuild_payload_sha256",
-                ),
-                "point_id": str(_uuid(point.get("point_id"), "invalid_rebuild_point_id")),
-                "previous_sha256": require_sha256(
-                    previous_sha256,
-                    "invalid_rebuild_previous_manifest",
-                ),
-                "vector_sha256": require_sha256(
-                    payload.get("vector_sha256"),
-                    "invalid_rebuild_vector_sha256",
-                ),
-            },
-        )
-
     async def prepare(
         self,
         *,
@@ -258,7 +258,7 @@ class SuccessorRebuildController:
         after_claim: UUID | None = None
         prior_key: tuple[UUID, UUID] | None = None
         point_count = 0
-        manifest_sha256 = _INITIAL_MANIFEST_SHA256
+        manifest_sha256 = REBUILD_INITIAL_MANIFEST_SHA256
         while True:
             rows = await self._repository.read_projection_rebuild_batch(
                 after_owner_user_id=after_owner,
@@ -308,7 +308,7 @@ class SuccessorRebuildController:
                     point=point,
                 )
                 point_count += 1
-                manifest_sha256 = self._manifest_step(
+                manifest_sha256 = rebuild_manifest_step_sha256(
                     manifest_sha256,
                     point_count,
                     point,
@@ -418,5 +418,7 @@ __all__ = [
     "RebuildPrepareReceipt",
     "RebuildQdrantStore",
     "RebuildTargetReceipt",
+    "REBUILD_INITIAL_MANIFEST_SHA256",
     "SuccessorRebuildController",
+    "rebuild_manifest_step_sha256",
 ]
