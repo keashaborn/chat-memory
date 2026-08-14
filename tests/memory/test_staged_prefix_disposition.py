@@ -582,36 +582,39 @@ class ProductionContractFactsTests(unittest.TestCase):
         self.assertEqual(subject._TCP_IDENTITIES["127.0.0.1:55437@000006"], "55437")
         self.assertEqual(subject._TCP_IDENTITIES["127.0.0.1:6348@000006"], "6348")
 
-    @unittest.skip("P6/R6/C6 are intentionally unsealed")
-    def test_generator_binds_exact_failed_000004_tree_and_000005_namespace(self) -> None:
+    def test_generator_binds_exact_failed_000005_tree_and_000006_namespace(self) -> None:
         document = generator.generate()
         generated = subject.canonical_json_bytes(document)
         self.assertEqual(CHECKED_IN_CONTRACT.read_bytes(), generated)
         self.assertEqual(
             hashlib.sha256(generated).hexdigest(),
-            "c6997cf3e7076fc0f72c0dc9bd9709310b39391c3af00bb36aa39a9fcb0c45a8",
+            "50c86899b801dcbfd972c1e09a76c2b501d96015c4df0d12a3790e08c6cd0eb8",
         )
         failed = document["failed_attempt"]
         files = {item["role"]: item for item in failed["evidence_files"]}
         directories = {
             item["role"]: item for item in failed["evidence_directories"]
         }
-        self.assertEqual(failed["generation"], "000004")
+        self.assertEqual(failed["generation"], "000005")
         self.assertEqual(
             failed["package_manifest_sha256"],
-            "634669dbca4f2ccfed929951bcdd0d555d19e53f9b736ee21b42217e8e8cd629",
+            "aff26c82b1c566104f969b02f1bc821badaab0a74945456aaa0f527620994425",
         )
         self.assertEqual(
             failed["controller_runtime_receipt_sha256"],
-            "ed0b3518484eec292f35f8b996bccefd01e13038105634016b4253a8c2a732a7",
+            "0c19395ccfcab313c59792c81303f3d0257a78292dd0255596f203688985ff4d",
         )
         self.assertEqual(failed["tag"]["commit"], subject.PRODUCTION_OLD_TAG_COMMIT)
-        self.assertEqual(files["failed_permit"]["inode"], 1608996)
+        self.assertEqual(files["failed_permit"]["inode"], 1652295)
         self.assertEqual(
-            files["failed_store_spec_v3_tombstone"]["sha256"],
-            "00e8770895fbc7a6d400895093c1d2de57eaf3910728eb9381fb5f42e067d1e1",
+            files["failed_store_spec_v4_tombstone"]["sha256"],
+            "30e2e37763b974d8b5e99de090e9a2d70f00c272e6a261e80a4161e190d7ccd3",
         )
-        self.assertEqual(files["failed_authority_state_v4"]["mode"], 0o600)
+        self.assertEqual(files["failed_authority_state_v5"]["mode"], 0o600)
+        self.assertEqual(
+            files["failed_manager_failure_evidence"]["sha256"],
+            "376aa4365af5f89816a8f3dd7f3f7e86ab75b5de002e4dceb2c2b661fb60f5f4",
+        )
         self.assertEqual(files["failed_execution_journal"]["size"], 0)
         self.assertEqual(
             files["failed_execution_journal"]["path"],
@@ -622,7 +625,7 @@ class ProductionContractFactsTests(unittest.TestCase):
             str(subject.PRODUCTION_EXECUTION_ROOT / "resources.jsonl"),
         )
         self.assertEqual(
-            directories["failed_executions_v4"]["entries"],
+            directories["failed_executions_v5"]["entries"],
             [subject.PRODUCTION_EXECUTION_ID],
         )
         self.assertEqual(
@@ -630,24 +633,24 @@ class ProductionContractFactsTests(unittest.TestCase):
             ["journal.jsonl", "resources.jsonl"],
         )
         successor = document["corrected_successor"]
-        self.assertEqual(successor["generation"], "000005")
+        self.assertEqual(successor["generation"], "000006")
         self.assertEqual(
             successor["package_manifest_sha256"],
-            "aff26c82b1c566104f969b02f1bc821badaab0a74945456aaa0f527620994425",
+            "c4f6e657d864a3fc60271dc8e875c12c193b91bb6fc5815314c7dd0182c4af8e",
         )
         self.assertEqual(
             successor["controller_runtime_receipt_sha256"],
-            "0c19395ccfcab313c59792c81303f3d0257a78292dd0255596f203688985ff4d",
+            "9884fa9db3be81039b691a25866994d6033c5cf9175030ea82de401a2bbe6334",
         )
         self.assertEqual(
             successor["attempt_identity_sha256"],
-            "877d152d868515a8b60d3cbc43c8af0b95482d7dff1511a91e606e3bff19b646",
+            "3832d4f3568501a2f5961de76fda76efd05a6715afb37457200cb2fd81704c87",
         )
         self.assertEqual(
-            subject._TCP_IDENTITIES["127.0.0.1:55436@000005"], "55436"
+            subject._TCP_IDENTITIES["127.0.0.1:55437@000006"], "55437"
         )
         self.assertEqual(
-            subject._TCP_IDENTITIES["127.0.0.1:6347@000005"], "6347"
+            subject._TCP_IDENTITIES["127.0.0.1:6348@000006"], "6348"
         )
 
 

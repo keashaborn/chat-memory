@@ -283,28 +283,40 @@ class PermitPublicationTests(unittest.TestCase):
         self.assertIs(value["production_data_read"], False)
         self.assertIs(value["deletion_performed"], False)
 
-    def test_000006_bindings_remain_unsealed_until_p6_r6_exist(self) -> None:
+    def test_000006_production_bindings_are_exactly_sealed(self) -> None:
         self.assertEqual(
             subject._PREIMPORT_CONTROLLER_RUNTIME_RECEIPT_SHA256,
-            "0c19395ccfcab313c59792c81303f3d0257a78292dd0255596f203688985ff4d",
+            "9884fa9db3be81039b691a25866994d6033c5cf9175030ea82de401a2bbe6334",
         )
-        self.assertEqual(subject.PACKAGE_MANIFEST_SHA256, "0" * 64)
-        self.assertEqual(subject.CONTROLLER_RUNTIME_RECEIPT_SHA256, "0" * 64)
-        self.assertEqual(subject.CONTRACT_SHA256, "0" * 64)
-        self.assertEqual(subject.SUCCESSOR_ATTEMPT_IDENTITY_SHA256, "0" * 64)
+        self.assertEqual(
+            subject.PACKAGE_MANIFEST_SHA256,
+            "c4f6e657d864a3fc60271dc8e875c12c193b91bb6fc5815314c7dd0182c4af8e",
+        )
+        self.assertEqual(
+            subject.CONTROLLER_RUNTIME_RECEIPT_SHA256,
+            "9884fa9db3be81039b691a25866994d6033c5cf9175030ea82de401a2bbe6334",
+        )
+        self.assertEqual(
+            subject.CONTRACT_SHA256,
+            "50c86899b801dcbfd972c1e09a76c2b501d96015c4df0d12a3790e08c6cd0eb8",
+        )
+        self.assertEqual(
+            subject.SUCCESSOR_ATTEMPT_IDENTITY_SHA256,
+            "3832d4f3568501a2f5961de76fda76efd05a6715afb37457200cb2fd81704c87",
+        )
         self.assertEqual(
             subject.BASE_CANDIDATE_COMMIT,
-            "ddbbf1ac6c1ed6c58f8b1ea8701a5803f49c6065",
+            "7b00e321970952818cfeb3534baa8525226f1432",
         )
         self.assertEqual(
             subject.BASE_CANDIDATE_TREE,
-            "446a5adfb1096ef672b13e3fda82ec8e8275bb1e",
+            "2f75a1efadfe04d934a7d9d1e78f07ad35aa2642",
         )
         self.assertEqual(
             subject.PREDECESSOR_ATTEMPT_IDENTITY_SHA256,
             "d03dd69ec940943e0c7d1d4ac46fed59624ec3bd521f5ba32669108e127fde3c",
         )
-        self.assertFalse(subject._bindings_sealed())
+        self.assertTrue(subject._bindings_sealed())
 
     def test_create_once_root_permit_allows_exact_replay_only(self) -> None:
         temporary, unused_root, path, raw, patcher = self.publication_fixture()

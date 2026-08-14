@@ -24,7 +24,7 @@ import stat
 _ISOLATED_RUNTIME_AT_START = bool(sys.flags.isolated)
 _DONT_WRITE_BYTECODE_AT_START = bool(sys.dont_write_bytecode)
 _PINNED_PHASE9J_RUNTIME_RECEIPT_SHA256 = (
-    "0c19395ccfcab313c59792c81303f3d0257a78292dd0255596f203688985ff4d"
+    "9884fa9db3be81039b691a25866994d6033c5cf9175030ea82de401a2bbe6334"
 )
 _PINNED_PHASE9J_INTERPRETER = (
     "/opt/governed-memory-controller/runtimes/"

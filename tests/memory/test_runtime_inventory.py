@@ -65,16 +65,16 @@ EXPECTED_CURRENT_RUNTIME_RECEIPT_SHA256 = (
     "25ca53e683e53f79b726909ef64bc8afad30269cce3f59804cf66335667a8108"
 )
 EXPECTED_PHASE9J_CONTROLLER_RUNTIME_RELEASE_RECEIPT_SHA256 = (
-    "0c19395ccfcab313c59792c81303f3d0257a78292dd0255596f203688985ff4d"
+    "9884fa9db3be81039b691a25866994d6033c5cf9175030ea82de401a2bbe6334"
 )
 EXPECTED_PHASE9J_PACKAGE_MANIFEST_SHA256 = (
-    "aff26c82b1c566104f969b02f1bc821badaab0a74945456aaa0f527620994425"
+    "c4f6e657d864a3fc60271dc8e875c12c193b91bb6fc5815314c7dd0182c4af8e"
 )
 EXPECTED_PHASE9J_RUNTIME_TREE_SHA256 = (
-    "0e1b1afec04d2432620ac9ba701048e25fb40a789acaf0ba68ddb1facdd84c47"
+    "61d979628f05b789bc74c6d5ad8b755fa73172492c2a6c425cbca5923237672d"
 )
 EXPECTED_PHASE9J_RELEASE_TREE_SHA256 = (
-    "33ecf0a0cdca8c085d7c67ea05ef6decbad8703791baa8cc9b742629a31307a0"
+    "d71014855b9b59c3fad3dabda2e72827a21686621ef6ccc1ca2b36669f295e36"
 )
 EXPECTED_HISTORICAL_PHASE7C_RUNTIME_RECEIPT_SHA256 = (
     "210cd0fe1bdaf60089668b3d2c8d37be760ed9b867e0909d4e83ebcc204e84b2"
@@ -723,15 +723,15 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         )
         self.assertEqual(
             current["contract_canonical_sha256"],
-            "e1c47edb4e1e4f2354563bb0842a44e4f57a96579d72cb99394be787ff78fd2a",
+            "a290fccd427e77d6790cf412712ef77b9f199612b4f9914d3bd4275146691031",
         )
         self.assertEqual(
             current["controller_plan_canonical_sha256"],
-            "f80c6de2352168242d3bfe3fdceb24051313984b813e062df322a8e7295f8603",
+            "0712ecd82bcb20c561ee94ff72ab28a4264651bfe0398ecce9fd23c318ed8fc2",
         )
         self.assertEqual(
             current["execution_contract_canonical_sha256"],
-            "8fe3a1e4b03a8a2a23c4b89899288c244111f47327a3c3aa51d41599ab2d12c6",
+            "247466888415743fe4a0ef3c677f5cb8deb7b41fe116acd78a5c7647f8ca98d6",
         )
         self.assertEqual(
             current["controller_runtime_contract_canonical_sha256"],
@@ -743,11 +743,11 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         )
         self.assertEqual(
             current["postgres_native_stage_contract_canonical_sha256"],
-            "da99f9e10e2ed5227d6ee743145bb6d05b8afe240cbbf3432626b63879ca7997",
+            "2e58aa4513f0e78d2cce62a4ebd5f179a38ef8fcc5ce166c87bfb9cbfcb900ca",
         )
         self.assertEqual(
             current["store_migration_manifest_sha256"],
-            "9b9ba0316fb874a1ebd79de4a1dbf656d64c39b247bc25354ee41a24520e294a",
+            "5a216df5ff299e4b3a50b301b09d7eb8bfa7bcedd17ea624833816c93899ab2d",
         )
         self.assertEqual(current["store_migration_file_count"], 9)
         self.assertTrue(current["static_package_verification_complete"])

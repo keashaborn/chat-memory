@@ -137,8 +137,10 @@ PRODUCTION_PRESERVED_GENERATION: Final = "000002"
 PRODUCTION_FAILED_GENERATION: Final = "000005"
 PRODUCTION_CORRECTED_GENERATION: Final = "000006"
 # C6 binds the reviewed failed 000005 evidence to the independently published
-# P6/R6 corrected 000006 successor. It remains unsealed in the package commit.
-PRODUCTION_CONTRACT_SHA256: Final[str | None] = None
+# P6/R6 corrected 000006 successor.
+PRODUCTION_CONTRACT_SHA256: Final[str | None] = (
+    "50c86899b801dcbfd972c1e09a76c2b501d96015c4df0d12a3790e08c6cd0eb8"
+)
 PRODUCTION_FAILED_PACKAGE_MANIFEST_SHA256: Final = (
     "aff26c82b1c566104f969b02f1bc821badaab0a74945456aaa0f527620994425"
 )

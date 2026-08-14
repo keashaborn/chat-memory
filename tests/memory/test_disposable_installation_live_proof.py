@@ -5089,7 +5089,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
     def test_direct_issuer_requires_the_pinned_phase9j_runtime_before_imports(self) -> None:
         self.assertEqual(
             issuer._PINNED_PHASE9J_RUNTIME_RECEIPT_SHA256,
-            "0c19395ccfcab313c59792c81303f3d0257a78292dd0255596f203688985ff4d",
+            "9884fa9db3be81039b691a25866994d6033c5cf9175030ea82de401a2bbe6334",
         )
         with tempfile.TemporaryDirectory() as temporary:
             wrong_python = Path(temporary) / "wrong-python"
