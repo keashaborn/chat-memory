@@ -404,7 +404,7 @@ class FakeConversationConnection(FakeConnection):
                     "requester_has_usage": True,
                     "requester_has_create": False,
                     "schema_acl_entry_count": 5,
-                    "schema_owner_grantable_entry_count": 2,
+                    "schema_owner_grantable_entry_count": 0,
                     "schema_runtime_grantable_entry_count": 0,
                     "schema_acl_exact": True,
                 }
@@ -418,7 +418,7 @@ class FakeConversationConnection(FakeConnection):
                     "requester_expected_execute_count": 2,
                     "public_or_api_execute_count": 0,
                     "expected_function_acl_entry_count": 4,
-                    "expected_function_owner_grantable_entry_count": 2,
+                    "expected_function_owner_grantable_entry_count": 0,
                     "expected_function_requester_grantable_entry_count": 0,
                     "expected_function_acl_exact": True,
                     "unexpected_public_api_or_requester_security_definer_count": 0,
@@ -934,6 +934,10 @@ class ServiceOnTests(unittest.IsolatedAsyncioTestCase):
             conversation.fetch_calls,
             [(_CONVERSATION_BRIDGE_CATALOG_SQL, ())],
         )
+        self.assertEqual(
+            conversation.execute_calls,
+            [("SET ROLE memory_erasure_requester", ()), ("RESET ROLE", ())],
+        )
         self.assertIn(
             "'memory_erasure_requester', routine.oid, 'EXECUTE'",
             _CONVERSATION_FUNCTION_PREFLIGHT_SQL,
@@ -1336,12 +1340,16 @@ class ServiceOnTests(unittest.IsolatedAsyncioTestCase):
     async def test_source_preflight_rejects_every_authority_surface_drift(
         self,
     ) -> None:
-        self.assertIn(
-            "pg_catalog.string_to_array(",
+        self.assertNotIn(
+            "shared_preload_libraries",
             _CONVERSATION_LOGGING_PREFLIGHT_SQL,
         )
-        self.assertNotIn(
-            r"\\s*pgaudit",
+        self.assertIn(
+            "pg_catalog.pg_extension AS extension",
+            _CONVERSATION_LOGGING_PREFLIGHT_SQL,
+        )
+        self.assertIn(
+            "extension.extname = 'pgaudit'",
             _CONVERSATION_LOGGING_PREFLIGHT_SQL,
         )
         drifts = (
@@ -1365,13 +1373,13 @@ class ServiceOnTests(unittest.IsolatedAsyncioTestCase):
             ("auto_explain_parameter_logging_disabled", False),
             ("schema_owner_exact", False),
             ("schema_acl_entry_count", 6),
-            ("schema_owner_grantable_entry_count", 0),
+            ("schema_owner_grantable_entry_count", 1),
             ("schema_runtime_grantable_entry_count", 1),
             ("schema_acl_exact", False),
             ("expected_function_identity_exact", False),
             ("requester_execute_count", 3),
             ("expected_function_acl_entry_count", 5),
-            ("expected_function_owner_grantable_entry_count", 0),
+            ("expected_function_owner_grantable_entry_count", 1),
             ("expected_function_requester_grantable_entry_count", 1),
             ("expected_function_acl_exact", False),
             (

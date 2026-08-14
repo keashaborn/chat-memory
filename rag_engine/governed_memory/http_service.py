@@ -221,9 +221,9 @@ SELECT
     SELECT 1 FROM schema_acl AS acl
     WHERE acl.grantee IN (0, 'governed_memory_api'::regrole::oid)
        OR NOT (
-         (acl.grantee = 'sage'::regrole::oid
+        (acl.grantee = 'sage'::regrole::oid
           AND acl.privilege_type IN ('USAGE', 'CREATE')
-          AND acl.is_grantable)
+          AND NOT acl.is_grantable)
          OR
          (acl.grantee IN (
             'memory_ingest_writer'::regrole::oid,
@@ -309,7 +309,7 @@ SELECT
     JOIN expected_routine AS expected ON expected.oid = acl.oid
     WHERE acl.privilege_type <> 'EXECUTE'
        OR NOT (
-         (acl.grantee = 'sage'::regrole::oid AND acl.is_grantable)
+         (acl.grantee = 'sage'::regrole::oid AND NOT acl.is_grantable)
          OR
          (acl.grantee = 'memory_erasure_requester'::regrole::oid
           AND NOT acl.is_grantable)
@@ -505,14 +505,8 @@ SELECT
   )::integer = 0 AS ordinary_parameter_logging_disabled,
   NOT EXISTS (
     SELECT 1
-    FROM pg_catalog.unnest(
-      pg_catalog.string_to_array(
-        pg_catalog.current_setting('shared_preload_libraries'), ','
-      )
-    ) AS configured(library_name)
-    WHERE pg_catalog.lower(
-      pg_catalog.btrim(configured.library_name)
-    ) = 'pgaudit'
+    FROM pg_catalog.pg_extension AS extension
+    WHERE extension.extname = 'pgaudit'
   ) AS pgaudit_not_preloaded,
   (
     pg_catalog.current_setting(
@@ -1274,7 +1268,7 @@ async def _preflight_conversation_connection(
         or type(schema["schema_acl_entry_count"]) is not int
         or schema["schema_acl_entry_count"] != 5
         or type(schema["schema_owner_grantable_entry_count"]) is not int
-        or schema["schema_owner_grantable_entry_count"] != 2
+        or schema["schema_owner_grantable_entry_count"] != 0
         or type(schema["schema_runtime_grantable_entry_count"]) is not int
         or schema["schema_runtime_grantable_entry_count"] != 0
         or schema["schema_acl_exact"] is not True
@@ -1288,8 +1282,15 @@ async def _preflight_conversation_connection(
     ):
         raise HttpServicePreflightError()
 
+    await connection.execute("SET ROLE memory_erasure_requester")
+    try:
+        function_row = await connection.fetchrow(
+            _CONVERSATION_FUNCTION_PREFLIGHT_SQL
+        )
+    finally:
+        await connection.execute("RESET ROLE")
     functions = _row_values(
-        await connection.fetchrow(_CONVERSATION_FUNCTION_PREFLIGHT_SQL),
+        function_row,
         (
             "expected_function_count",
             "expected_function_identity_exact",
@@ -1318,7 +1319,7 @@ async def _preflight_conversation_connection(
         or type(
             functions["expected_function_owner_grantable_entry_count"]
         ) is not int
-        or functions["expected_function_owner_grantable_entry_count"] != 2
+        or functions["expected_function_owner_grantable_entry_count"] != 0
         or type(
             functions["expected_function_requester_grantable_entry_count"]
         ) is not int
