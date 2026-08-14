@@ -224,20 +224,35 @@ class BoundedSubprocessFixedArgvRunner:
     ) -> bool:
         name = argv[-1]
         if argv[1:3] == ("network", "inspect"):
-            expected = (
-                "Error response from daemon: network " + name + " not found\n"
-            ).encode("utf-8")
+            expected = {
+                (
+                    "Error response from daemon: network "
+                    + name
+                    + " not found\n"
+                ).encode("utf-8")
+            }
         elif argv[1:3] == ("volume", "inspect"):
-            expected = (
-                "Error response from daemon: get " + name + ": no such volume\n"
-            ).encode("utf-8")
+            expected = {
+                (
+                    "Error response from daemon: get "
+                    + name
+                    + ": no such volume\n"
+                ).encode("utf-8")
+            }
         elif argv[1:3] == ("container", "inspect"):
-            expected = ("Error: No such container: " + name + "\n").encode(
-                "utf-8"
-            )
+            expected = {
+                ("Error: No such container: " + name + "\n").encode(
+                    "utf-8"
+                ),
+                (
+                    "Error response from daemon: No such container: "
+                    + name
+                    + "\n"
+                ).encode("utf-8"),
+            }
         else:
             return False
-        return stderr == expected and stdout in {b"", b"[]\n"}
+        return stderr in expected and stdout in {b"", b"\n", b"[]\n"}
 
     @staticmethod
     def _success_output_valid(argv: tuple[str, ...], stdout: bytes) -> bool:

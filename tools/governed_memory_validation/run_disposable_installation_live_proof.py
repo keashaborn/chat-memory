@@ -415,6 +415,7 @@ from tools.governed_memory_install.controller_runtime import (
     verified_controller_runtime_evidence,
     verify_controller_runtime_capability,
 )
+from tools.governed_memory_install.controller import STORES_ONLY_PLAN
 from tools.governed_memory_install.durable_receipts import (
     DurableReceiptStore,
     ReceiptArtifact,
@@ -697,6 +698,9 @@ class LiveProofError(RuntimeError):
 _INTERNAL_INSTALL_FAILURE_CODE_RE: Final = re.compile(
     r"[a-z][a-z0-9_]{1,95}\Z", re.ASCII
 )
+_INTERNAL_INSTALL_CONTROLLER_STEP_IDS: Final = frozenset(
+    step.step_id for step in STORES_ONLY_PLAN
+)
 
 
 def _sanitized_internal_install_failure_code(
@@ -723,6 +727,15 @@ def _sanitized_internal_install_failure_code(
             and _INTERNAL_INSTALL_FAILURE_CODE_RE.fullmatch(value) is not None
         ):
             selected = value
+        elif module == "tools.governed_memory_install.controller":
+            base_code, separator, step_id = value.partition(":")
+            if (
+                separator == ":"
+                and _INTERNAL_INSTALL_FAILURE_CODE_RE.fullmatch(base_code)
+                is not None
+                and step_id in _INTERNAL_INSTALL_CONTROLLER_STEP_IDS
+            ):
+                selected = base_code
         cause = current.__cause__
         current = cause if isinstance(cause, BaseException) else None
     return selected

@@ -476,10 +476,46 @@ class DockerAdapterTests(unittest.TestCase):
                 ).encode("utf-8"),
             )
         )
+        live_absence_cases = (
+            (
+                DockerRequestId.OBSERVE_NETWORK,
+                lambda name: (
+                    "Error response from daemon: network "
+                    + name
+                    + " not found\n"
+                ),
+            ),
+            (
+                DockerRequestId.OBSERVE_POSTGRES_VOLUME,
+                lambda name: (
+                    "Error response from daemon: get "
+                    + name
+                    + ": no such volume\n"
+                ),
+            ),
+            (
+                DockerRequestId.OBSERVE_POSTGRES_CONTAINER,
+                lambda name: (
+                    "Error response from daemon: No such container: "
+                    + name
+                    + "\n"
+                ),
+            ),
+        )
+        for request_id, stderr_for_name in live_absence_cases:
+            live_argv = DOCKER_REQUESTS[request_id].argv
+            with self.subTest(request_id=request_id):
+                self.assertTrue(
+                    runner._verified_absence(
+                        live_argv,
+                        b"\n",
+                        stderr_for_name(live_argv[-1]).encode("utf-8"),
+                    )
+                )
         self.assertFalse(
             runner._verified_absence(
                 observe,
-                b"[]\n",
+                b"\n",
                 b"permission denied\n",
             )
         )

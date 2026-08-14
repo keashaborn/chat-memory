@@ -27,7 +27,7 @@ from tools.governed_memory_validation import (
 from tools.governed_memory_validation import (
     run_disposable_installation_live_proof as proof,
 )
-from tools.governed_memory_install import linux_store_effects
+from tools.governed_memory_install import controller, linux_store_effects
 from tools.governed_memory_install.execution_lock import (
     ExecutionLockBusyError,
     ExecutionLockSecurityError,
@@ -3821,6 +3821,21 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
                 held_lock=mock.sentinel.held_lock,
                 resume_only=False,
             )
+
+        step_specific = controller.StateDriftError(
+            "dormant_store_install_step_state_drift:"
+            "I03_VERIFY_LIVE_PREFLIGHT"
+        )
+        self.assertEqual(
+            proof._sanitized_internal_install_failure_code(step_specific),
+            "dormant_store_install_step_state_drift",
+        )
+        unknown_step = controller.StateDriftError(
+            "dormant_store_install_step_state_drift:I99_UNKNOWN"
+        )
+        self.assertIsNone(
+            proof._sanitized_internal_install_failure_code(unknown_step)
+        )
 
         untrusted = OSError("/etc/private/secret-value")
         self.assertIsNone(
