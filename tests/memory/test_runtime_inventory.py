@@ -567,13 +567,13 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         phase9j_target = authority["phase9j_inactive_store_target"]
         self.assertEqual(
             phase9j_target["candidate_id"],
-            "governed_memory_9a54cf123493_000005",
+            "governed_memory_9a54cf123493_000006",
         )
-        self.assertEqual(phase9j_target["database_target"], "127.0.0.1:55436")
-        self.assertEqual(phase9j_target["qdrant_target"], "127.0.0.1:6347")
+        self.assertEqual(phase9j_target["database_target"], "127.0.0.1:55437")
+        self.assertEqual(phase9j_target["qdrant_target"], "127.0.0.1:6348")
         self.assertEqual(
             phase9j_target["qdrant_collection"],
-            "governed_memory_9a54cf123493_000005",
+            "governed_memory_9a54cf123493_000006",
         )
         self.assertFalse(phase9j_target["store_installation_performed"])
         self.assertFalse(phase9j_target["current_route_installed"])

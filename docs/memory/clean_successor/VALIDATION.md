@@ -52,8 +52,8 @@ exact candidate and task. Broad `sudo -E` is not permitted.
 
 The manager validates the production change lease, publishes and rereads the
 root-owned permit, requires the fixed tagged candidate and exact source blobs,
-executes the corrected 000005 staged-prefix disposition, bootstraps only the
-fixed 000005 empty substrate,
+executes the corrected 000006 staged-prefix disposition, bootstraps only the
+fixed 000006 empty substrate,
 and launches the issuer for one disposable live proof. The permit authorizes
 only that disposition-plus-proof chain; it does not authorize activation,
 production-data access, provider calls, or any production, user, chat,

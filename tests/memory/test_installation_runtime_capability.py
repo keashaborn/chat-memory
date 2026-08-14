@@ -951,7 +951,7 @@ class RuntimeCapabilityTests(unittest.TestCase):
         unit = (
             __import__("pathlib").Path(
                 "ops/governed_memory/installation/systemd/"
-                "governed-memory-stores-v5.service.in"
+                "governed-memory-stores-v6.service.in"
             ).read_text(encoding="ascii")
         )
         exact = (

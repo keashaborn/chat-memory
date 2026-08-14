@@ -72,7 +72,7 @@ def disposition_receipt() -> dict[str, object]:
         "contract_sha256": DISPOSITION_CONTRACT,
         "failed_prefix_identity_sha256": PREDECESSOR_ATTEMPT,
         "corrected_attempt_identity_sha256": successor,
-        "corrected_generation": "000005",
+        "corrected_generation": "000006",
         "failed_evidence_preserved_in_place": True,
         "no_store_or_service_effects_proven": True,
         "deletion_performed": False,
@@ -219,7 +219,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
         static_spec = json.loads(
             (
                 Path(__file__).resolve().parents[2]
-                / "ops/governed_memory/installation/store_spec-v5.json"
+                / "ops/governed_memory/installation/store_spec-v6.json"
             ).read_text(encoding="ascii")
         )
         reconstructed = bind_store_spec(
@@ -5137,7 +5137,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
 
     def test_empty_pre_effect_install_journal_selects_resume(self) -> None:
         journal = Path(
-            "/var/lib/governed-memory-controller/executions-v5/"
+            "/var/lib/governed-memory-controller/executions-v6/"
             + INSTALL_EXECUTION
             + "/journal.jsonl"
         )
@@ -5181,7 +5181,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
 
     def test_nonempty_install_journal_remains_strict(self) -> None:
         journal = Path(
-            "/var/lib/governed-memory-controller/executions-v5/"
+            "/var/lib/governed-memory-controller/executions-v6/"
             + INSTALL_EXECUTION
             + "/journal.jsonl"
         )

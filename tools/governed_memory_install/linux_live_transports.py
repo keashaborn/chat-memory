@@ -16,19 +16,19 @@ from typing import Final, Mapping
 
 
 DOCKER_BINARY: Final = "/usr/bin/docker"
-POSTGRES_CONTAINER: Final = "governed-memory-postgres-9a54cf123493-000005"
-QDRANT_CONTAINER: Final = "governed-memory-qdrant-9a54cf123493-000005"
-POSTGRES_VOLUME: Final = "governed-memory-postgres-data-9a54cf123493-000005"
-QDRANT_VOLUME: Final = "governed-memory-qdrant-data-9a54cf123493-000005"
-DOCKER_NETWORK: Final = "governed-memory-net-9a54cf123493-000005"
+POSTGRES_CONTAINER: Final = "governed-memory-postgres-9a54cf123493-000006"
+QDRANT_CONTAINER: Final = "governed-memory-qdrant-9a54cf123493-000006"
+POSTGRES_VOLUME: Final = "governed-memory-postgres-data-9a54cf123493-000006"
+QDRANT_VOLUME: Final = "governed-memory-qdrant-data-9a54cf123493-000006"
+DOCKER_NETWORK: Final = "governed-memory-net-9a54cf123493-000006"
 
-QDRANT_BIND: Final = "127.0.0.1:6347"
-QDRANT_COLLECTION: Final = "governed_memory_9a54cf123493_000005"
+QDRANT_BIND: Final = "127.0.0.1:6348"
+QDRANT_COLLECTION: Final = "governed_memory_9a54cf123493_000006"
 QDRANT_ALIAS: Final = "governed_memory_active"
 
-SYSTEMD_UNIT_PATH: Final = "/etc/systemd/system/governed-memory-stores-v5.service"
+SYSTEMD_UNIT_PATH: Final = "/etc/systemd/system/governed-memory-stores-v6.service"
 SYSTEMD_ENABLEMENT_PATH: Final = (
-    "/etc/systemd/system/multi-user.target.wants/governed-memory-stores-v5.service"
+    "/etc/systemd/system/multi-user.target.wants/governed-memory-stores-v6.service"
 )
 SYSTEMD_ENABLEMENT_TARGET: Final = SYSTEMD_UNIT_PATH
 
@@ -418,7 +418,7 @@ ROOT_FILE_SLOTS: Final[Mapping[RootFileSlot, RootFileSlotContract]] = MappingPro
     {
         RootFileSlot.RESOLVED_STORE_SPEC: RootFileSlotContract(
             RootFileSlot.RESOLVED_STORE_SPEC,
-            "/etc/governed-memory-controller/store_spec-v5.json",
+            "/etc/governed-memory-controller/store_spec-v6.json",
             RootNodeKind.REGULAR_FILE,
             0o600,
             16 * 1024 * 1024,
@@ -427,7 +427,7 @@ ROOT_FILE_SLOTS: Final[Mapping[RootFileSlot, RootFileSlotContract]] = MappingPro
         ),
         RootFileSlot.POSTGRES_SECRET: RootFileSlotContract(
             RootFileSlot.POSTGRES_SECRET,
-            "/etc/governed-memory-stores/9a54cf123493-000005/postgres.env",
+            "/etc/governed-memory-stores/9a54cf123493-000006/postgres.env",
             RootNodeKind.REGULAR_FILE,
             0o600,
             64 * 1024,
@@ -435,14 +435,14 @@ ROOT_FILE_SLOTS: Final[Mapping[RootFileSlot, RootFileSlotContract]] = MappingPro
             + (
                 SafeAncestorContract("/etc/governed-memory-stores", frozenset({0o755})),
                 SafeAncestorContract(
-                    "/etc/governed-memory-stores/9a54cf123493-000005",
+                    "/etc/governed-memory-stores/9a54cf123493-000006",
                     frozenset({0o700}),
                 ),
             ),
         ),
         RootFileSlot.QDRANT_SECRET: RootFileSlotContract(
             RootFileSlot.QDRANT_SECRET,
-            "/etc/governed-memory-stores/9a54cf123493-000005/qdrant.env",
+            "/etc/governed-memory-stores/9a54cf123493-000006/qdrant.env",
             RootNodeKind.REGULAR_FILE,
             0o600,
             64 * 1024,
@@ -450,14 +450,14 @@ ROOT_FILE_SLOTS: Final[Mapping[RootFileSlot, RootFileSlotContract]] = MappingPro
             + (
                 SafeAncestorContract("/etc/governed-memory-stores", frozenset({0o755})),
                 SafeAncestorContract(
-                    "/etc/governed-memory-stores/9a54cf123493-000005",
+                    "/etc/governed-memory-stores/9a54cf123493-000006",
                     frozenset({0o700}),
                 ),
             ),
         ),
         RootFileSlot.TERMINAL_POSTFLIGHT_RECEIPT: RootFileSlotContract(
             RootFileSlot.TERMINAL_POSTFLIGHT_RECEIPT,
-            "/var/lib/governed-memory-controller/executions-v5/{execution_id}/terminal-postflight-receipt.json",
+            "/var/lib/governed-memory-controller/executions-v6/{execution_id}/terminal-postflight-receipt.json",
             RootNodeKind.REGULAR_FILE,
             0o600,
             64 * 1024,
@@ -467,17 +467,17 @@ ROOT_FILE_SLOTS: Final[Mapping[RootFileSlot, RootFileSlotContract]] = MappingPro
                 SafeAncestorContract("/var/lib", frozenset({0o755})),
                 SafeAncestorContract("/var/lib/governed-memory-controller", frozenset({0o700})),
                 SafeAncestorContract(
-                    "/var/lib/governed-memory-controller/executions-v5", frozenset({0o700})
+                    "/var/lib/governed-memory-controller/executions-v6", frozenset({0o700})
                 ),
                 SafeAncestorContract(
-                    "/var/lib/governed-memory-controller/executions-v5/{execution_id}",
+                    "/var/lib/governed-memory-controller/executions-v6/{execution_id}",
                     frozenset({0o700}),
                 ),
             ),
         ),
         RootFileSlot.ROLLBACK_CONTROLLER_AUTHORITY_MARKER: RootFileSlotContract(
             RootFileSlot.ROLLBACK_CONTROLLER_AUTHORITY_MARKER,
-            "/var/lib/governed-memory-controller/executions-v5/{execution_id}/empty-rollback-controller-authority-marker.json",
+            "/var/lib/governed-memory-controller/executions-v6/{execution_id}/empty-rollback-controller-authority-marker.json",
             RootNodeKind.REGULAR_FILE,
             0o400,
             64 * 1024,
@@ -487,17 +487,17 @@ ROOT_FILE_SLOTS: Final[Mapping[RootFileSlot, RootFileSlotContract]] = MappingPro
                 SafeAncestorContract("/var/lib", frozenset({0o755})),
                 SafeAncestorContract("/var/lib/governed-memory-controller", frozenset({0o700})),
                 SafeAncestorContract(
-                    "/var/lib/governed-memory-controller/executions-v5", frozenset({0o700})
+                    "/var/lib/governed-memory-controller/executions-v6", frozenset({0o700})
                 ),
                 SafeAncestorContract(
-                    "/var/lib/governed-memory-controller/executions-v5/{execution_id}",
+                    "/var/lib/governed-memory-controller/executions-v6/{execution_id}",
                     frozenset({0o700}),
                 ),
             ),
         ),
         RootFileSlot.ROLLBACK_SEMANTIC_EMPTY_PROOF: RootFileSlotContract(
             RootFileSlot.ROLLBACK_SEMANTIC_EMPTY_PROOF,
-            "/var/lib/governed-memory-controller/executions-v5/{execution_id}/empty-rollback-semantic-empty-proof.json",
+            "/var/lib/governed-memory-controller/executions-v6/{execution_id}/empty-rollback-semantic-empty-proof.json",
             RootNodeKind.REGULAR_FILE,
             0o400,
             64 * 1024,
@@ -507,17 +507,17 @@ ROOT_FILE_SLOTS: Final[Mapping[RootFileSlot, RootFileSlotContract]] = MappingPro
                 SafeAncestorContract("/var/lib", frozenset({0o755})),
                 SafeAncestorContract("/var/lib/governed-memory-controller", frozenset({0o700})),
                 SafeAncestorContract(
-                    "/var/lib/governed-memory-controller/executions-v5", frozenset({0o700})
+                    "/var/lib/governed-memory-controller/executions-v6", frozenset({0o700})
                 ),
                 SafeAncestorContract(
-                    "/var/lib/governed-memory-controller/executions-v5/{execution_id}",
+                    "/var/lib/governed-memory-controller/executions-v6/{execution_id}",
                     frozenset({0o700}),
                 ),
             ),
         ),
         RootFileSlot.SYSTEMD_DAEMON_RELOAD_PENDING: RootFileSlotContract(
             RootFileSlot.SYSTEMD_DAEMON_RELOAD_PENDING,
-            "/var/lib/governed-memory-controller/executions-v5/{execution_id}/systemd-daemon-reload-pending.json",
+            "/var/lib/governed-memory-controller/executions-v6/{execution_id}/systemd-daemon-reload-pending.json",
             RootNodeKind.REGULAR_FILE,
             0o400,
             64 * 1024,
@@ -527,10 +527,10 @@ ROOT_FILE_SLOTS: Final[Mapping[RootFileSlot, RootFileSlotContract]] = MappingPro
                 SafeAncestorContract("/var/lib", frozenset({0o755})),
                 SafeAncestorContract("/var/lib/governed-memory-controller", frozenset({0o700})),
                 SafeAncestorContract(
-                    "/var/lib/governed-memory-controller/executions-v5", frozenset({0o700})
+                    "/var/lib/governed-memory-controller/executions-v6", frozenset({0o700})
                 ),
                 SafeAncestorContract(
-                    "/var/lib/governed-memory-controller/executions-v5/{execution_id}",
+                    "/var/lib/governed-memory-controller/executions-v6/{execution_id}",
                     frozenset({0o700}),
                 ),
             ),
@@ -685,7 +685,7 @@ _CREATE_COLLECTION_BODY: Final = (
 )
 _CREATE_ALIAS_BODY: Final = (
     b'{"actions":[{"create_alias":{"alias_name":"governed_memory_active",'
-    b'"collection_name":"governed_memory_9a54cf123493_000005"}}]}'
+    b'"collection_name":"governed_memory_9a54cf123493_000006"}}]}'
 )
 _REMOVE_ALIAS_BODY: Final = (
     b'{"actions":[{"delete_alias":{"alias_name":"governed_memory_active"}}]}'

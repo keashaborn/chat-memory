@@ -21,7 +21,7 @@ from typing import Final, Mapping
 
 
 EXECUTIONS_ROOT: Final = Path(
-    "/var/lib/governed-memory-controller/executions-v5"
+    "/var/lib/governed-memory-controller/executions-v6"
 )
 PROCESS_DEATH_ARM_RECEIPT_SCHEMA: Final = (
     "governed-memory-phase9-process-death-arm-receipt-v2"

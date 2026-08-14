@@ -1,6 +1,6 @@
 {
   "schema_version": "governed-memory-dormant-store-install-store-migration-manifest-v2",
-  "candidate_id": "governed_memory_9a54cf123493_000005",
+  "candidate_id": "governed_memory_9a54cf123493_000006",
   "state": "repository-only-current-stores-only-migration-set-not-installed-not-authorized",
   "execution_order": [
     "ops/governed_memory/installation/current/postgres/roles_preflight.pgsql",

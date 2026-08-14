@@ -33,7 +33,7 @@ from .rollback import (
 
 
 PRODUCTION_EXECUTIONS_ROOT: Final = Path(
-    "/var/lib/governed-memory-controller/executions-v5"
+    "/var/lib/governed-memory-controller/executions-v6"
 )
 MAX_DURABLE_RECEIPT_BYTES: Final = 64 * 1024
 _EXECUTION_RE = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)

@@ -211,7 +211,7 @@
     "r03_reverifies_exact_retained_install_receipt_and_anchored_ledger_before_first_effect": true,
     "final_rollback_receipt_persisted_while_controller_authority_marker_held": true,
     "final_rollback_receipt_persistence_while_controller_authority_marker_held_required": true,
-    "canonical_production_executions_root": "/var/lib/governed-memory-controller/executions-v5",
+    "canonical_production_executions_root": "/var/lib/governed-memory-controller/executions-v6",
     "public_install_and_rollback_entrypoints_require_root_owned_production_receipt_store": true,
     "synthetic_receipt_stores_accepted_only_by_private_in_process_test_wrappers": true,
     "receipt_schema_files_hash_bound_by_package": true,

@@ -20,12 +20,15 @@ class Phase9DisposableStoreSubstrateTests(unittest.TestCase):
         self.test_python = sys.executable
         self.temporary = tempfile.TemporaryDirectory()
         root = Path(self.temporary.name)
+        root.chmod(0o700)
         self.store_parent = root / "governed-memory-stores"
         self.store_parent.mkdir(mode=0o755)
-        self.store_target = self.store_parent / "9a54cf123493-000005"
+        self.store_parent.chmod(0o755)
+        self.store_target = self.store_parent / "9a54cf123493-000006"
         self.execution_parent = root / "governed-memory-controller"
         self.execution_parent.mkdir(mode=0o700)
-        self.execution_target = self.execution_parent / "executions-v5"
+        self.execution_parent.chmod(0o700)
+        self.execution_target = self.execution_parent / "executions-v6"
         self.selected = (
             subject._FixedDirectory(
                 self.store_parent, 0o755, self.store_target.name, self.store_target
@@ -39,6 +42,7 @@ class Phase9DisposableStoreSubstrateTests(unittest.TestCase):
         )
         self.lock_parent = root / "lock"
         self.lock_parent.mkdir(mode=0o700)
+        self.lock_parent.chmod(0o700)
         self.lock_path = self.lock_parent / "phase9-disposable-live-proof.lock"
         self.execution_lock = GlobalExecutionLock(
             self.lock_path,

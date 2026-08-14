@@ -182,7 +182,7 @@ class PsycopgPostgreSQLAdapterTests(unittest.TestCase):
             receipt_sink=ReceiptSink(),
             runtime_capability=capability,
         )
-        self.assertEqual(adapter.bind, "127.0.0.1:55436")
+        self.assertEqual(adapter.bind, "127.0.0.1:55437")
         self.assertIsNone(adapter._lock_connection)
         for forbidden in ("dsn", "host", "port", "database", "role", "sql", "path"):
             self.assertNotIn(

@@ -108,7 +108,7 @@ def _artifacts() -> ExactInstallArtifacts:
 
 def _resolved_spec() -> dict[str, object]:
     static = load_store_spec(
-        ROOT / "ops/governed_memory/installation/store_spec-v5.json"
+        ROOT / "ops/governed_memory/installation/store_spec-v6.json"
     )
     return bind_store_spec(
         static,
@@ -717,7 +717,7 @@ class LinuxStoreEffectsTests(unittest.TestCase):
             supervisor_launcher_path=self.identity.supervisor_launcher_path,
             supervisor_launcher_sha256=LAUNCHER_SHA256,
             postflight_receipt_path=(
-                "/var/lib/governed-memory-controller/executions-v5/"
+                "/var/lib/governed-memory-controller/executions-v6/"
                 + EXECUTION_ID
                 + "/terminal-postflight-receipt.json"
             ),

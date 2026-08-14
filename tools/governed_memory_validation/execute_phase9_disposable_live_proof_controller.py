@@ -17,7 +17,7 @@ _PREIMPORT_CONTROLLER_PYTHON = (
 )
 _PREIMPORT_GIT = "/usr/bin/git"
 _PREIMPORT_EXPECTED_CANDIDATE_REF = (
-    "refs/tags/governed-memory-phase9j-pre-effect-disposition-000005"
+    "refs/tags/governed-memory-phase9j-pre-effect-disposition-000006"
 )
 _PREIMPORT_CONTROLLER_RELATIVE = (
     "tools/governed_memory_validation/"
@@ -284,7 +284,7 @@ FAILURE_EVIDENCE_STATE_ROOT: Final = Path(
     "/var/lib/governed-memory-controller"
 )
 FAILURE_EVIDENCE_NAME_PREFIX: Final = (
-    "phase9-disposable-live-proof-failure-000005-"
+    "phase9-disposable-live-proof-failure-000006-"
 )
 MAX_FAILURE_EVIDENCE_BYTES: Final = 16 * 1024
 _ID_RE: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}\Z", re.ASCII)

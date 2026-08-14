@@ -99,7 +99,7 @@ class _Fixture:
             json.loads(
                 (
                     REPO_ROOT
-                    / "ops/governed_memory/installation/store_spec-v5.json"
+                    / "ops/governed_memory/installation/store_spec-v6.json"
                 ).read_text(encoding="ascii")
             )
         )
@@ -158,7 +158,7 @@ class _Fixture:
             "ops/governed_memory/installation/current/controller_plan.json": (
                 self.execution_plan_json
             ),
-            "ops/governed_memory/installation/store_spec-v5.json": (
+            "ops/governed_memory/installation/store_spec-v6.json": (
                 self.store_spec_json
             ),
             "ops/governed_memory/installation/current/"
@@ -424,7 +424,7 @@ class DormantStoreInstallDurableJournalTests(unittest.TestCase):
                     package_manifest_json=alternate.package_manifest_json,
                     artifact_bytes={
                         **alternate.artifact_bytes,
-                        "ops/governed_memory/installation/store_spec-v5.json": (
+                        "ops/governed_memory/installation/store_spec-v6.json": (
                             alternate.store_spec_json + b" "
                         ),
                     },

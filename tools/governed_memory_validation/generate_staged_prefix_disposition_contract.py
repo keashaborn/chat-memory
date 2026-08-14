@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-"""Emit the reviewed 000004-failure to 000005-successor contract.
+"""Emit the draft 000005-failure to 000006-successor contract.
 
-P5 and R5 are independently frozen and bound here. Live execution remains
-permit- and manager-gated; generating this contract does not authorize or
-perform an effect.
+P6 and R6 are intentionally zero-bound until the package and dormant runtime
+are independently frozen. Live execution remains permit- and manager-gated;
+generating this draft does not authorize or perform an effect.
 """
 
 import sys
@@ -14,13 +14,9 @@ from typing import Final
 from tools.governed_memory_validation import staged_prefix_disposition as staged
 
 
-DISPOSITION_ID: Final = "phase9-v8-staged-to-v9-000005"
-CORRECTED_PACKAGE_MANIFEST_SHA256: Final = (
-    "aff26c82b1c566104f969b02f1bc821badaab0a74945456aaa0f527620994425"
-)
-CORRECTED_CONTROLLER_RUNTIME_RECEIPT_SHA256: Final = (
-    "0c19395ccfcab313c59792c81303f3d0257a78292dd0255596f203688985ff4d"
-)
+DISPOSITION_ID: Final = "phase9-v9-staged-to-v10-000006"
+CORRECTED_PACKAGE_MANIFEST_SHA256: Final = "0" * 64
+CORRECTED_CONTROLLER_RUNTIME_RECEIPT_SHA256: Final = "0" * 64
 _DEVICE: Final = 66305
 
 
@@ -170,9 +166,9 @@ def generate() -> dict[str, object]:
                 "failed_contract",
                 paths.old_contract_path,
                 staged.PRODUCTION_OLD_CONTRACT_SHA256,
-                11136,
+                11753,
                 0o400,
-                3932168,
+                3932177,
             ),
             _file(
                 "failed_permit",
@@ -180,31 +176,31 @@ def generate() -> dict[str, object]:
                 staged.PRODUCTION_OLD_PERMIT_SHA256,
                 2398,
                 0o400,
-                1608996,
+                1652295,
             ),
             _file(
-                "failed_store_spec_v3_tombstone",
+                "failed_store_spec_v4_tombstone",
                 paths.old_pre_effect_receipt_path,
                 staged.PRODUCTION_OLD_RECEIPT_SHA256,
                 1958,
                 0o400,
-                4721729,
+                4795869,
             ),
             _file(
-                "failed_capsule_v5",
+                "failed_capsule_v6",
                 paths.staged_capsule_path,
                 staged.PRODUCTION_STAGED_CAPSULE_SHA256,
                 6719,
                 0o400,
-                1641790,
+                1652296,
             ),
             _file(
-                "failed_authority_state_v4",
+                "failed_authority_state_v5",
                 paths.failed_authority_state_path,
                 staged.PRODUCTION_FAILED_AUTHORITY_STATE_SHA256,
                 28672,
                 0o600,
-                1652284,
+                1652297,
             ),
             _file(
                 "failed_execution_journal",
@@ -212,7 +208,7 @@ def generate() -> dict[str, object]:
                 staged.PRODUCTION_EMPTY_FILE_SHA256,
                 0,
                 0o600,
-                4535460,
+                4211509,
             ),
             _file(
                 "failed_execution_resources",
@@ -220,28 +216,36 @@ def generate() -> dict[str, object]:
                 staged.PRODUCTION_EMPTY_FILE_SHA256,
                 0,
                 0o600,
-                4535461,
+                4211510,
+            ),
+            _file(
+                "failed_manager_failure_evidence",
+                paths.failed_manager_failure_evidence_path,
+                staged.PRODUCTION_MANAGER_FAILURE_EVIDENCE_SHA256,
+                1217,
+                0o400,
+                1652298,
             ),
         ],
         "evidence_directories": [
             _directory(
-                "failed_executions_v4",
+                "failed_executions_v5",
                 paths.executions_root,
-                4458945,
+                4194810,
                 3,
                 [staged.PRODUCTION_EXECUTION_ID],
             ),
             _directory(
                 "failed_execution",
                 paths.failed_execution_root,
-                4503453,
+                4205767,
                 2,
                 ["journal.jsonl", "resources.jsonl"],
             ),
             _directory(
                 "failed_store_secret",
                 paths.store_secret_root,
-                5505025,
+                5505246,
                 2,
                 [],
             ),

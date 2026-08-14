@@ -177,26 +177,18 @@ _SOURCE_PATHS: Final = (
     _CONTRACT_RELATIVE,
 )
 _EXPECTED_CANDIDATE_REF: Final = (
-    "refs/tags/governed-memory-phase9j-pre-effect-disposition-000005"
+    "refs/tags/governed-memory-phase9j-pre-effect-disposition-000006"
 )
 if _PUBLISHER_PATH.relative_to(_REPOSITORY_ROOT).as_posix() != _PUBLISHER_RELATIVE:
     raise SystemExit("phase9_staged_prefix_permit_invocation_invalid")
 
-BASE_CANDIDATE_COMMIT: Final = "a390df9d367a700691e032ce4ea39a5abc9f2eee"
-BASE_CANDIDATE_TREE: Final = "02add3871b90c8336861cd904a175a8ce8dbdf3f"
-PACKAGE_MANIFEST_SHA256: Final = (
-    "aff26c82b1c566104f969b02f1bc821badaab0a74945456aaa0f527620994425"
-)
-CONTROLLER_RUNTIME_RECEIPT_SHA256: Final = (
-    "0c19395ccfcab313c59792c81303f3d0257a78292dd0255596f203688985ff4d"
-)
-CONTRACT_SHA256: Final = (
-    "c6997cf3e7076fc0f72c0dc9bd9709310b39391c3af00bb36aa39a9fcb0c45a8"
-)
-PREDECESSOR_ATTEMPT_IDENTITY_SHA256: Final = "942d1d443617c16b161b254a033fc7b0273a0fb26842e5f4d7d93c2fbfda8156"
-SUCCESSOR_ATTEMPT_IDENTITY_SHA256: Final = (
-    "877d152d868515a8b60d3cbc43c8af0b95482d7dff1511a91e606e3bff19b646"
-)
+BASE_CANDIDATE_COMMIT: Final = "ddbbf1ac6c1ed6c58f8b1ea8701a5803f49c6065"
+BASE_CANDIDATE_TREE: Final = "446a5adfb1096ef672b13e3fda82ec8e8275bb1e"
+PACKAGE_MANIFEST_SHA256: Final = "0" * 64
+CONTROLLER_RUNTIME_RECEIPT_SHA256: Final = "0" * 64
+CONTRACT_SHA256: Final = "0" * 64
+PREDECESSOR_ATTEMPT_IDENTITY_SHA256: Final = "d03dd69ec940943e0c7d1d4ac46fed59624ec3bd521f5ba32669108e127fde3c"
+SUCCESSOR_ATTEMPT_IDENTITY_SHA256: Final = "0" * 64
 AUTHORIZATION_TEXT_SHA256: Final = (
     "063891fc0189b3c4a0fe393200ae50f59b04f5488800dc27a5ce3020880f3e44"
 )
@@ -206,7 +198,7 @@ PERMIT_RESULT: Final = (
     "exact_staged_prefix_disposition_and_disposable_proof_permitted"
 )
 STATE_ROOT: Final = Path("/var/lib/governed-memory-controller")
-PERMIT_PATH: Final = STATE_ROOT / "phase9j-pre-effect-disposition-permit-000005.json"
+PERMIT_PATH: Final = STATE_ROOT / "phase9j-pre-effect-disposition-permit-000006.json"
 PERMIT_STAGING_NAME: Final = "." + PERMIT_PATH.name + ".publishing"
 RUNTIME_RECEIPT_PATH: Final = STATE_ROOT / "runtime-receipts" / (CONTROLLER_RUNTIME_RECEIPT_SHA256 + ".json")
 ROOT_UID: Final = 0

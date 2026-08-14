@@ -130,7 +130,7 @@ def _static_store_spec() -> dict[str, object]:
     return json.loads(
         (
             REPO_ROOT
-            / "ops/governed_memory/installation/store_spec-v5.json"
+            / "ops/governed_memory/installation/store_spec-v6.json"
         ).read_text(encoding="ascii")
     )
 
@@ -160,7 +160,7 @@ def _synthetic_package_artifacts(
         "ops/governed_memory/installation/current/controller_plan.json": (
             _canonical(plan)
         ),
-        "ops/governed_memory/installation/store_spec-v5.json": _canonical(
+        "ops/governed_memory/installation/store_spec-v6.json": _canonical(
             _static_store_spec()
         ),
         "ops/governed_memory/installation/current/"
@@ -241,7 +241,7 @@ def _terminal_readiness(
 ) -> TerminalCanonicalStoreReadiness:
     return TerminalCanonicalStoreReadiness.create(
         TerminalPostgreSQLReadiness(
-            "127.0.0.1:55436",
+            "127.0.0.1:55437",
             16,
             POSTGRES_SERVER_VERSION,
             "governed_memory",
@@ -254,12 +254,12 @@ def _terminal_readiness(
             "9" * 64,
         ),
         TerminalQdrantReadiness(
-            "127.0.0.1:6347",
+            "127.0.0.1:6348",
             "1.19.0",
-            "governed_memory_9a54cf123493_000005",
+            "governed_memory_9a54cf123493_000006",
             "governed_memory_active",
             True,
-            "governed_memory_9a54cf123493_000005",
+            "governed_memory_9a54cf123493_000006",
             EXPECTED_QDRANT_COLLECTION_CONFIG_SHA256,
             0,
             0,
@@ -349,7 +349,7 @@ class _Readiness:
         self.fresh_calls += 1
         return EmptyStoreReadiness.create(
             PrebootstrapPostgreSQLReadiness(
-                "127.0.0.1:55436",
+                "127.0.0.1:55437",
                 16,
                 POSTGRES_SERVER_VERSION,
                 "postgres",
@@ -361,9 +361,9 @@ class _Readiness:
                 "7" * 64,
             ),
             QdrantReadiness(
-                "127.0.0.1:6347",
+                "127.0.0.1:6348",
                 "1.19.0",
-                "governed_memory_9a54cf123493_000005",
+                "governed_memory_9a54cf123493_000006",
                 "governed_memory_active",
                 False,
                 0,
@@ -964,7 +964,7 @@ class InstallationCompositionTests(unittest.TestCase):
     def test_readiness_rejects_boolean_numeric_fields(self) -> None:
         constructors = (
             lambda: PrebootstrapPostgreSQLReadiness(
-                "127.0.0.1:55436",
+                "127.0.0.1:55437",
                 False,
                 POSTGRES_SERVER_VERSION,
                 "postgres",
@@ -976,7 +976,7 @@ class InstallationCompositionTests(unittest.TestCase):
                 "1" * 64,
             ),
             lambda: PrebootstrapPostgreSQLReadiness(
-                "127.0.0.1:55436",
+                "127.0.0.1:55437",
                 16,
                 POSTGRES_SERVER_VERSION,
                 "postgres",
@@ -988,9 +988,9 @@ class InstallationCompositionTests(unittest.TestCase):
                 "1" * 64,
             ),
             lambda: QdrantReadiness(
-                "127.0.0.1:6347",
+                "127.0.0.1:6348",
                 "1.19.0",
-                "governed_memory_9a54cf123493_000005",
+                "governed_memory_9a54cf123493_000006",
                 "governed_memory_active",
                 False,
                 False,
@@ -999,7 +999,7 @@ class InstallationCompositionTests(unittest.TestCase):
             ),
             lambda: EmptyStoreReadiness.create(
                 PrebootstrapPostgreSQLReadiness(
-                    "127.0.0.1:55436",
+                    "127.0.0.1:55437",
                     16,
                     POSTGRES_SERVER_VERSION,
                     "postgres",
@@ -1011,9 +1011,9 @@ class InstallationCompositionTests(unittest.TestCase):
                     "1" * 64,
                 ),
                 QdrantReadiness(
-                    "127.0.0.1:6347",
+                    "127.0.0.1:6348",
                     "1.19.0",
-                    "governed_memory_9a54cf123493_000005",
+                    "governed_memory_9a54cf123493_000006",
                     "governed_memory_active",
                     False,
                     0,
@@ -1023,7 +1023,7 @@ class InstallationCompositionTests(unittest.TestCase):
                 provider_call_count=False,
             ),
             lambda: TerminalPostgreSQLReadiness(
-                "127.0.0.1:55436",
+                "127.0.0.1:55437",
                 16,
                 POSTGRES_SERVER_VERSION,
                 "governed_memory",
@@ -1036,12 +1036,12 @@ class InstallationCompositionTests(unittest.TestCase):
                 "9" * 64,
             ),
             lambda: TerminalQdrantReadiness(
-                "127.0.0.1:6347",
+                "127.0.0.1:6348",
                 "1.19.0",
-                "governed_memory_9a54cf123493_000005",
+                "governed_memory_9a54cf123493_000006",
                 "governed_memory_active",
                 False,
-                "governed_memory_9a54cf123493_000005",
+                "governed_memory_9a54cf123493_000006",
                 EXPECTED_QDRANT_COLLECTION_CONFIG_SHA256,
                 0,
                 0,
@@ -1049,9 +1049,9 @@ class InstallationCompositionTests(unittest.TestCase):
                 "a" * 64,
             ),
             lambda: TerminalQdrantReadiness(
-                "127.0.0.1:6347",
+                "127.0.0.1:6348",
                 "1.19.0",
-                "governed_memory_9a54cf123493_000005",
+                "governed_memory_9a54cf123493_000006",
                 "governed_memory_active",
                 True,
                 "wrong_collection",
@@ -1187,7 +1187,7 @@ class InstallationCompositionTests(unittest.TestCase):
                 ),
             )
         production_execution_root = (
-            Path("/var/lib/governed-memory-controller/executions-v5")
+            Path("/var/lib/governed-memory-controller/executions-v6")
             / self.identity_evidence.execution_id
         )
         production_ledger_path = (
@@ -1407,7 +1407,7 @@ class InstallationCompositionTests(unittest.TestCase):
             prerequisites,
             store_spec_sha256=hashlib.sha256(
                 artifacts[
-                    "ops/governed_memory/installation/store_spec-v5.json"
+                    "ops/governed_memory/installation/store_spec-v6.json"
                 ]
             ).hexdigest(),
             controller_requirements_lock_sha256=hashlib.sha256(

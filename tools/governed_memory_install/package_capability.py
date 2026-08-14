@@ -31,7 +31,7 @@ _CONTRACT_PATH: Final = "ops/governed_memory/installation/current/contract.json"
 _PLAN_PATH: Final = (
     "ops/governed_memory/installation/current/controller_plan.json"
 )
-_STORE_SPEC_PATH: Final = "ops/governed_memory/installation/store_spec-v5.json"
+_STORE_SPEC_PATH: Final = "ops/governed_memory/installation/store_spec-v6.json"
 _RESOURCE_IDENTITY_PATH: Final = (
     "tools/governed_memory_install/resource_identity.py"
 )
