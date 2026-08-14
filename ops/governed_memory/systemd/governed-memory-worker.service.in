@@ -1,9 +1,7 @@
-# Dormant candidate template only. Do not install, enable, start, or schedule it.
-# There is intentionally no Install section and no timer artifact.
 [Unit]
-Description=Governed Memory clean successor one-shot worker candidate
-After=network-online.target
-Wants=network-online.target
+Description=Governed Memory clean successor one-shot worker
+After=network-online.target governed-memory-postgres-loopback.socket governed-memory-qdrant-loopback.socket
+Wants=network-online.target governed-memory-postgres-loopback.socket governed-memory-qdrant-loopback.socket
 ConditionPathExists=/etc/governed-memory/runtime/worker.env
 ConditionPathExists=/etc/governed-memory/runtime/pilot.env
 
@@ -11,12 +9,9 @@ ConditionPathExists=/etc/governed-memory/runtime/pilot.env
 Type=oneshot
 User=governed-memory
 Group=governed-memory
-Environment=GOVERNED_MEMORY_WORKER_MODE=off
-Environment=GOVERNED_MEMORY_EXCLUSIVE_MODE=successor_pilot
 EnvironmentFile=/etc/governed-memory/runtime/worker.env
 EnvironmentFile=/etc/governed-memory/runtime/pilot.env
 ExecStart=/opt/governed-memory/current/venv/bin/python -m rag_engine.governed_memory.runtime.once_worker --once
-Restart=no
 TimeoutStartSec=120
 TimeoutStopSec=15
 KillSignal=SIGTERM
