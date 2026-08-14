@@ -6,6 +6,7 @@ This module owns no command-line entry point and performs no installation
 work.  It only serializes a caller that has already established authority.
 """
 
+import errno
 import fcntl
 import os
 from pathlib import Path
@@ -171,8 +172,12 @@ class GlobalExecutionLock:
             self._validate_open_file()
             try:
                 fcntl.flock(self._fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except (BlockingIOError, OSError) as error:
-                raise ExecutionLockBusyError("execution_lock_busy") from error
+            except OSError as error:
+                if error.errno in {errno.EACCES, errno.EAGAIN}:
+                    raise ExecutionLockBusyError("execution_lock_busy") from error
+                raise ExecutionLockSecurityError(
+                    "execution_lock_acquire_failed"
+                ) from error
             self._validate_open_file()
         except BaseException:
             self.close()

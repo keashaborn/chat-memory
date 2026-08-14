@@ -25,6 +25,7 @@ if __name__ == "__main__" and not (
 import argparse
 import base64
 from collections.abc import Mapping as MappingABC
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import errno
 import hashlib
@@ -34,6 +35,7 @@ from pathlib import Path
 import re
 import signal
 import select
+import sqlite3
 import stat
 import subprocess
 import time
@@ -56,10 +58,17 @@ sys.path.insert(0, str(_ISSUER_REPOSITORY_ROOT))
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from tools.governed_memory_install import authority
+from tools.governed_memory_install import authority, authority_state as authority_state_module
+from tools.governed_memory_install.authority_state import (
+    STATE_APPLICATION_ID,
+    STATE_SCHEMA_VERSION,
+)
 from tools.governed_memory_install.execution_lock import (
     ExecutionLockError,
     GlobalExecutionLock,
+)
+from tools.governed_memory_validation import (
+    durable_live_proof_receipt,
 )
 from tools.governed_memory_validation import (
     pre_effect_disposition,
@@ -95,6 +104,16 @@ _GIT: Final = "/usr/bin/git"
 
 class Phase9ProofIssuerError(RuntimeError):
     """Content-free refusal from the repository-only proof issuer."""
+
+
+@dataclass(frozen=True, slots=True)
+class CapsulePublicationObservation:
+    """One verified crash state for the fixed capsule publication."""
+
+    state: str
+    capsule: runner.VerifiedRecoveryCapsule
+    capsule_sha256: str
+    inode: tuple[int, int]
 
 
 def _require_closed_issuer_runtime() -> None:
@@ -492,6 +511,7 @@ def _read_capsule_member(
     name: str,
     *,
     allowed_link_counts: frozenset[int],
+    allow_empty: bool = False,
 ) -> tuple[bytes, os.stat_result]:
     """Read one protected capsule inode without following or racing its name."""
 
@@ -531,7 +551,7 @@ def _read_capsule_member(
             or opened.st_uid != 0
             or opened.st_gid != 0
             or opened.st_nlink not in allowed_link_counts
-            or opened.st_size < 1
+            or opened.st_size < (0 if allow_empty else 1)
             or opened.st_size > 64 * 1024
             or (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)
         ):
@@ -578,6 +598,7 @@ def _read_optional_capsule_member(
     name: str,
     *,
     allowed_link_counts: frozenset[int],
+    allow_empty: bool = False,
 ) -> tuple[bytes, os.stat_result] | None:
     """Return None only for a stable initial leaf absence."""
 
@@ -586,6 +607,7 @@ def _read_optional_capsule_member(
             parent_fd,
             name,
             allowed_link_counts=allowed_link_counts,
+            allow_empty=allow_empty,
         )
     except Phase9ProofIssuerError as error:
         if str(error) != "phase9_proof_issuer_recovery_capsule_absent":
@@ -686,12 +708,288 @@ def _publish_temp_link(
         ) from error
 
 
+def _verify_exact_empty_directory(path: Path, mode: int) -> None:
+    """Prove one fixed root-owned directory is empty and identity-stable."""
+
+    descriptor = -1
+    flags = os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
+    flags |= getattr(os, "O_DIRECTORY", 0)
+    try:
+        descriptor = os.open(path, flags)
+        before = os.fstat(descriptor)
+        named = path.stat(follow_symlinks=False)
+        if (
+            not stat.S_ISDIR(before.st_mode)
+            or stat.S_IMODE(before.st_mode) != mode
+            or before.st_uid != 0
+            or before.st_gid != 0
+            or (before.st_dev, before.st_ino) != (named.st_dev, named.st_ino)
+            or os.listdir(descriptor) != []
+        ):
+            raise Phase9ProofIssuerError(
+                "phase9_proof_issuer_staged_cleanup_not_pristine"
+            )
+        after = os.fstat(descriptor)
+        named_after = path.stat(follow_symlinks=False)
+        if (
+            runner._stable_file_identity(after)
+            != runner._stable_file_identity(before)
+            or (named_after.st_dev, named_after.st_ino)
+            != (before.st_dev, before.st_ino)
+        ):
+            raise Phase9ProofIssuerError(
+                "phase9_proof_issuer_staged_cleanup_not_pristine"
+            )
+    except Phase9ProofIssuerError:
+        raise
+    except OSError as error:
+        raise Phase9ProofIssuerError(
+            "phase9_proof_issuer_staged_cleanup_not_pristine"
+        ) from error
+    finally:
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+
+
+def _verify_pristine_authority_state() -> None:
+    """Allow absence or the exact initialized v2 database with zero effects."""
+
+    path = runner.AUTHORITY_STATE_PATH
+    sidecars = tuple(Path(str(path) + suffix) for suffix in ("-journal", "-wal", "-shm"))
+    for sidecar in sidecars:
+        try:
+            sidecar.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError as error:
+            raise Phase9ProofIssuerError(
+                "phase9_proof_issuer_staged_cleanup_not_pristine"
+            ) from error
+        raise Phase9ProofIssuerError(
+            "phase9_proof_issuer_staged_cleanup_not_pristine"
+        )
+    try:
+        before = path.stat(follow_symlinks=False)
+    except FileNotFoundError:
+        return
+    except OSError as error:
+        raise Phase9ProofIssuerError(
+            "phase9_proof_issuer_staged_cleanup_not_pristine"
+        ) from error
+    if (
+        not stat.S_ISREG(before.st_mode)
+        or stat.S_IMODE(before.st_mode) != 0o600
+        or before.st_uid != 0
+        or before.st_gid != 0
+        or before.st_nlink != 1
+        or not 1 <= before.st_size <= 8 * 1024 * 1024
+    ):
+        raise Phase9ProofIssuerError(
+            "phase9_proof_issuer_staged_cleanup_not_pristine"
+        )
+    try:
+        connection = sqlite3.connect(
+            path.as_uri() + "?mode=ro&immutable=1",
+            uri=True,
+            isolation_level=None,
+        )
+        try:
+            connection.execute("PRAGMA query_only=ON")
+            application_id = connection.execute(
+                "PRAGMA application_id"
+            ).fetchone()[0]
+            user_version = connection.execute(
+                "PRAGMA user_version"
+            ).fetchone()[0]
+            quick_check = connection.execute("PRAGMA quick_check").fetchall()
+            objects = connection.execute(
+                "SELECT type, name, sql FROM sqlite_schema "
+                "WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name"
+            ).fetchall()
+            expected_objects = [
+                (
+                    "table",
+                    "authority_state_identity_v1",
+                    authority_state_module._STATE_IDENTITY_TABLE_SQL,
+                ),
+                (
+                    "table",
+                    "filesystem_identity_seal_v1",
+                    authority_state_module._FILESYSTEM_IDENTITY_TABLE_SQL,
+                ),
+                (
+                    "table",
+                    "journal_anchor_v1",
+                    authority_state_module._ANCHOR_TABLE_SQL,
+                ),
+                (
+                    "table",
+                    "nonce_claim_v1",
+                    authority_state_module._NONCE_TABLE_SQL,
+                ),
+                (
+                    "table",
+                    "resource_ledger_anchor_v1",
+                    authority_state_module._RESOURCE_ANCHOR_TABLE_SQL,
+                ),
+            ]
+            counts = {
+                table: connection.execute(
+                    f"SELECT count(*) FROM {table}"
+                ).fetchone()[0]
+                for unused_type, table, unused_sql in expected_objects
+                if table != "authority_state_identity_v1"
+            }
+            identity = connection.execute(
+                "SELECT singleton, path_sha256, directory_device, "
+                "directory_inode, database_device, database_inode "
+                "FROM authority_state_identity_v1"
+            ).fetchall()
+        finally:
+            connection.close()
+    except Exception as error:
+        raise Phase9ProofIssuerError(
+            "phase9_proof_issuer_staged_cleanup_not_pristine"
+        ) from error
+    parent = path.parent.stat(follow_symlinks=False)
+    after = path.stat(follow_symlinks=False)
+    if (
+        application_id != STATE_APPLICATION_ID
+        or user_version != STATE_SCHEMA_VERSION
+        or quick_check != [("ok",)]
+        or objects != expected_objects
+        or any(value != 0 for value in counts.values())
+        or identity
+        != [
+            (
+                1,
+                _sha(str(path).encode("utf-8")),
+                parent.st_dev,
+                parent.st_ino,
+                before.st_dev,
+                before.st_ino,
+            )
+        ]
+        or runner._stable_file_identity(after)
+        != runner._stable_file_identity(before)
+    ):
+        raise Phase9ProofIssuerError(
+            "phase9_proof_issuer_staged_cleanup_not_pristine"
+        )
+    for sidecar in sidecars:
+        try:
+            sidecar.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError as error:
+            raise Phase9ProofIssuerError(
+                "phase9_proof_issuer_staged_cleanup_not_pristine"
+            ) from error
+        else:
+            raise Phase9ProofIssuerError(
+                "phase9_proof_issuer_staged_cleanup_not_pristine"
+            )
+
+
+def _verified_production_disposition_contract(
+    inputs: runner.ProofInputs,
+) -> Mapping[str, object]:
+    paths = pre_effect_disposition.production_disposition_paths()
+    expectation = pre_effect_disposition.ReviewedDispositionExpectation(
+        contract_sha256=str(pre_effect_disposition.PRODUCTION_CONTRACT_SHA256),
+        disposition_id=pre_effect_disposition.PRODUCTION_DISPOSITION_ID,
+        authorization_text_sha256=(
+            pre_effect_disposition.PRODUCTION_AUTHORIZATION_TEXT_SHA256
+        ),
+        predecessor_attempt_identity_sha256=str(
+            pre_effect_disposition.PRODUCTION_PREDECESSOR_ATTEMPT_IDENTITY_SHA256
+        ),
+        successor_attempt_identity_sha256=(
+            pre_effect_disposition.production_successor_attempt_identity_sha256(
+                package_manifest_sha256=inputs.package_manifest_sha256,
+                controller_runtime_receipt_sha256=(
+                    inputs.controller_runtime_receipt_sha256
+                ),
+            )
+        ),
+        successor_generation=(
+            pre_effect_disposition.PRODUCTION_SUCCESSOR_GENERATION
+        ),
+    )
+    try:
+        contract, unused_expected = (
+            pre_effect_disposition._load_contract_and_expected_receipt(
+                paths, expectation
+            )
+        )
+    except pre_effect_disposition.PreEffectDispositionError as error:
+        raise Phase9ProofIssuerError(
+            "phase9_proof_issuer_staged_cleanup_not_pristine"
+        ) from error
+    return MappingProxyType(contract)
+
+
+def _require_pristine_staged_cleanup_state(
+    *,
+    inputs: runner.ProofInputs,
+) -> None:
+    """Prove no installation effect before removing one failed staging inode."""
+
+    try:
+        runner.RECOVERY_CAPSULE_PATH.lstat()
+    except FileNotFoundError:
+        pass
+    except OSError as error:
+        raise Phase9ProofIssuerError(
+            "phase9_proof_issuer_staged_cleanup_not_pristine"
+        ) from error
+    else:
+        raise Phase9ProofIssuerError(
+            "phase9_proof_issuer_staged_cleanup_not_pristine"
+        )
+    _verify_pristine_authority_state()
+    _verify_exact_empty_directory(runner.EXECUTIONS_ROOT, 0o700)
+    _verify_exact_empty_directory(runner.STORE_SECRET_ROOT, 0o700)
+    contract = _verified_production_disposition_contract(inputs)
+    resources = contract.get("host_resources")
+    if type(resources) is not list:
+        raise Phase9ProofIssuerError(
+            "phase9_proof_issuer_staged_cleanup_not_pristine"
+        )
+    allowed_present_paths = {
+        str(runner.AUTHORITY_STATE_PATH),
+        str(runner.EXECUTIONS_ROOT),
+        str(runner.RECOVERY_CAPSULE_PATH),
+    }
+    checked = [
+        item
+        for item in resources
+        if not (
+            type(item) is dict
+            and item.get("kind") == "path"
+            and item.get("identity") in allowed_present_paths
+        )
+    ]
+    try:
+        pre_effect_disposition._verify_host_absence(
+            checked,
+            runner=pre_effect_disposition._ClosedHostCommandRunner(),
+        )
+    except pre_effect_disposition.PreEffectDispositionError as error:
+        raise Phase9ProofIssuerError(
+            "phase9_proof_issuer_staged_cleanup_not_pristine"
+        ) from error
+
+
 def reconcile_capsule_publication(
     *,
     inputs: runner.ProofInputs,
     artifacts: Mapping[str, bytes],
-) -> tuple[runner.VerifiedRecoveryCapsule, str, tuple[int, int]] | None:
-    """Adopt or finish an independently verified retained publication."""
+) -> CapsulePublicationObservation | None:
+    """Classify the exact crash state without creating authority or publishing."""
 
     parent_fd = _ensure_recovery_capsule_parent()
     temp_name = _recovery_capsule_temp_name()
@@ -705,6 +1003,7 @@ def reconcile_capsule_publication(
             parent_fd,
             temp_name,
             allowed_link_counts=frozenset({1, 2}),
+            allow_empty=True,
         )
         if final_member is None and temp_member is None:
             for name in (runner.RECOVERY_CAPSULE_PATH.name, temp_name):
@@ -735,18 +1034,42 @@ def reconcile_capsule_publication(
                     "phase9_proof_issuer_recovery_capsule_parent_invalid"
                 )
             return None
-        verified_final = None
-        verified_temp = None
+        verified_final: runner.VerifiedRecoveryCapsule | None = None
+        verified_temp: runner.VerifiedRecoveryCapsule | None = None
         if final_member is not None:
             final_raw, final = final_member
-            verified_final = runner._verify_recovery_capsule_raw(
-                inputs, artifacts, final_raw, require_current=False
-            )
+            try:
+                verified_final = runner._verify_recovery_capsule_raw(
+                    inputs, artifacts, final_raw, require_current=False
+                )
+            except runner.LiveProofError as error:
+                raise Phase9ProofIssuerError(
+                    "phase9_proof_issuer_recovery_capsule_invalid"
+                ) from error
         if temp_member is not None:
             temp_raw, temp = temp_member
-            verified_temp = runner._verify_recovery_capsule_raw(
-                inputs, artifacts, temp_raw, require_current=False
-            )
+            try:
+                verified_temp = runner._verify_recovery_capsule_raw(
+                    inputs, artifacts, temp_raw, require_current=False
+                )
+            except runner.LiveProofError as error:
+                if final_member is not None or temp.st_nlink != 1:
+                    raise Phase9ProofIssuerError(
+                        "phase9_proof_issuer_recovery_capsule_invalid"
+                    ) from error
+                _require_pristine_staged_cleanup_state(inputs=inputs)
+                inode = (temp.st_dev, temp.st_ino)
+                _unlink_exact_member(parent_fd, temp_name, inode)
+                if _read_optional_capsule_member(
+                    parent_fd,
+                    temp_name,
+                    allowed_link_counts=frozenset({1}),
+                    allow_empty=True,
+                ) is not None:
+                    raise Phase9ProofIssuerError(
+                        "phase9_proof_issuer_recovery_capsule_cleanup_failed"
+                    )
+                return None
         if final_member is not None and temp_member is not None:
             final_raw, final = final_member
             temp_raw, temp = temp_member
@@ -761,8 +1084,7 @@ def reconcile_capsule_publication(
                     "phase9_proof_issuer_capsule_publication_drift"
                 )
             inode = (final.st_dev, final.st_ino)
-            os.fsync(parent_fd)
-            _unlink_exact_member(parent_fd, temp_name, inode)
+            state = "linked"
             verified = verified_final
             raw = final_raw
         elif temp_member is not None:
@@ -770,10 +1092,9 @@ def reconcile_capsule_publication(
             if temp.st_nlink != 1:
                 raise Phase9ProofIssuerError(
                     "phase9_proof_issuer_capsule_publication_drift"
-                )
+            )
             inode = (temp.st_dev, temp.st_ino)
-            _publish_temp_link(parent_fd, temp_inode=inode)
-            _unlink_exact_member(parent_fd, temp_name, inode)
+            state = "staged"
             verified = verified_temp
             raw = temp_raw
         else:
@@ -782,35 +1103,22 @@ def reconcile_capsule_publication(
             if final.st_nlink != 1:
                 raise Phase9ProofIssuerError(
                     "phase9_proof_issuer_capsule_publication_drift"
-                )
+            )
             inode = (final.st_dev, final.st_ino)
+            state = "published"
             verified = verified_final
             raw = final_raw
-        published_raw, published = _read_capsule_member(
-            parent_fd,
-            runner.RECOVERY_CAPSULE_PATH.name,
-            allowed_link_counts=frozenset({1}),
-        )
-        if published_raw != raw or (
-            published.st_dev,
-            published.st_ino,
-        ) != inode:
-            raise Phase9ProofIssuerError(
-                "phase9_proof_issuer_capsule_publication_drift"
-            )
         os.fsync(parent_fd)
         if verified is None:
             raise Phase9ProofIssuerError(
                 "phase9_proof_issuer_recovery_capsule_invalid"
             )
-        published_verified = runner._verify_recovery_capsule_raw(
-            inputs, artifacts, published_raw, require_current=False
+        return CapsulePublicationObservation(
+            state=state,
+            capsule=verified,
+            capsule_sha256=_sha(raw),
+            inode=inode,
         )
-        if published_verified.raw != verified.raw:
-            raise Phase9ProofIssuerError(
-                "phase9_proof_issuer_capsule_publication_drift"
-            )
-        return published_verified, _sha(raw), inode
     finally:
         try:
             os.close(parent_fd)
@@ -818,16 +1126,15 @@ def reconcile_capsule_publication(
             pass
 
 
-def publish_fixed_recovery_capsule(
+def prepare_fixed_recovery_capsule(
     capsule: Mapping[str, object],
 ) -> tuple[str, tuple[int, int]]:
-    """Transactionally publish one fixed durable public recovery capsule."""
+    """Durably prepare one complete unpublished fixed capsule."""
 
     raw = _canonical(dict(capsule))
     parent_fd = _ensure_recovery_capsule_parent()
     file_fd = -1
     temp_created = False
-    final_published = False
     temp_inode: tuple[int, int] | None = None
     try:
         flags = (
@@ -877,17 +1184,23 @@ def publish_fixed_recovery_capsule(
             or (opened.st_dev, opened.st_ino) != temp_inode
         ):
             raise Phase9ProofIssuerError("phase9_proof_issuer_recovery_capsule_invalid")
-        _publish_temp_link(parent_fd, temp_inode=temp_inode)
-        final_published = True
-        _unlink_exact_member(parent_fd, _recovery_capsule_temp_name(), temp_inode)
-        final_raw, final = _read_capsule_member(
+        try:
+            os.close(file_fd)
+        except OSError as error:
+            file_fd = -1
+            raise Phase9ProofIssuerError(
+                "phase9_proof_issuer_recovery_capsule_write_failed"
+            ) from error
+        file_fd = -1
+        os.fsync(parent_fd)
+        staged_raw, staged = _read_capsule_member(
             parent_fd,
-            runner.RECOVERY_CAPSULE_PATH.name,
+            _recovery_capsule_temp_name(),
             allowed_link_counts=frozenset({1}),
         )
-        if final_raw != raw or (final.st_dev, final.st_ino) != temp_inode:
+        if staged_raw != raw or (staged.st_dev, staged.st_ino) != temp_inode:
             raise Phase9ProofIssuerError(
-                "phase9_proof_issuer_recovery_capsule_publication_invalid"
+                "phase9_proof_issuer_recovery_capsule_write_failed"
             )
         return _sha(raw), temp_inode
     except BaseException as error:
@@ -899,12 +1212,9 @@ def publish_fixed_recovery_capsule(
         if isinstance(error, Phase9ProofIssuerError):
             raise
         if isinstance(error, OSError):
-            code = (
-                "phase9_proof_issuer_recovery_capsule_publication_failed"
-                if final_published
-                else "phase9_proof_issuer_recovery_capsule_write_failed"
-            )
-            raise Phase9ProofIssuerError(code) from error
+            raise Phase9ProofIssuerError(
+                "phase9_proof_issuer_recovery_capsule_write_failed"
+            ) from error
         raise
     finally:
         if file_fd >= 0:
@@ -916,6 +1226,98 @@ def publish_fixed_recovery_capsule(
             os.close(parent_fd)
         except OSError:
             pass
+
+
+def complete_linked_capsule_publication(
+    *,
+    expected_capsule_sha256: str,
+    expected_inode: tuple[int, int],
+) -> None:
+    """Finish only the exact already-linked publication after pair proof."""
+
+    parent_fd = _ensure_recovery_capsule_parent()
+    try:
+        temp_raw, temp = _read_capsule_member(
+            parent_fd,
+            _recovery_capsule_temp_name(),
+            allowed_link_counts=frozenset({2}),
+        )
+        final_raw, final = _read_capsule_member(
+            parent_fd,
+            runner.RECOVERY_CAPSULE_PATH.name,
+            allowed_link_counts=frozenset({2}),
+        )
+        if (
+            _sha(temp_raw) != expected_capsule_sha256
+            or final_raw != temp_raw
+            or (temp.st_dev, temp.st_ino) != expected_inode
+            or (final.st_dev, final.st_ino) != expected_inode
+        ):
+            raise Phase9ProofIssuerError(
+                "phase9_proof_issuer_capsule_publication_drift"
+            )
+        _unlink_exact_member(
+            parent_fd, _recovery_capsule_temp_name(), expected_inode
+        )
+        published_raw, published = _read_capsule_member(
+            parent_fd,
+            runner.RECOVERY_CAPSULE_PATH.name,
+            allowed_link_counts=frozenset({1}),
+        )
+        if (
+            _sha(published_raw) != expected_capsule_sha256
+            or (published.st_dev, published.st_ino) != expected_inode
+        ):
+            raise Phase9ProofIssuerError(
+                "phase9_proof_issuer_capsule_publication_drift"
+            )
+        os.fsync(parent_fd)
+    finally:
+        try:
+            os.close(parent_fd)
+        except OSError:
+            pass
+
+
+def commit_preclaimed_recovery_capsule(
+    *,
+    expected_capsule_sha256: str,
+    expected_inode: tuple[int, int],
+) -> None:
+    """Publish only the exact staged capsule whose start pair was preclaimed."""
+
+    parent_fd = _ensure_recovery_capsule_parent()
+    try:
+        raw, staged = _read_capsule_member(
+            parent_fd,
+            _recovery_capsule_temp_name(),
+            allowed_link_counts=frozenset({1}),
+        )
+        if (
+            _sha(raw) != expected_capsule_sha256
+            or (staged.st_dev, staged.st_ino) != expected_inode
+        ):
+            raise Phase9ProofIssuerError(
+                "phase9_proof_issuer_capsule_publication_drift"
+            )
+        if _read_optional_capsule_member(
+            parent_fd,
+            runner.RECOVERY_CAPSULE_PATH.name,
+            allowed_link_counts=frozenset({1, 2}),
+        ) is not None:
+            raise Phase9ProofIssuerError(
+                "phase9_proof_issuer_existing_recovery_capsule_refused"
+            )
+        _publish_temp_link(parent_fd, temp_inode=expected_inode)
+    finally:
+        try:
+            os.close(parent_fd)
+        except OSError:
+            pass
+    complete_linked_capsule_publication(
+        expected_capsule_sha256=expected_capsule_sha256,
+        expected_inode=expected_inode,
+    )
 
 
 def _runner_argv(
@@ -1249,6 +1651,80 @@ def _strict_runner_receipt_payload(stdout: bytes, stderr: bytes) -> bytes:
     return stdout[:-1]
 
 
+_START_AUTHORITY_PAIR_RECEIPT_KEYS: Final = frozenset(
+    {
+        "result",
+        "recovery_capsule_sha256",
+        "recovery_capsule_device",
+        "recovery_capsule_inode",
+        "recovery_reservation_claim_sha256",
+        "install_authority_claim_sha256",
+        "start_authority_pair_claimed_atomically",
+    }
+)
+
+
+def _run_start_authority_pair_mode(
+    *,
+    inputs: runner.ProofInputs,
+    guard_descriptor: int,
+    mode: runner.RunnerMode,
+    expected_capsule_sha256: str,
+    expected_inode: tuple[int, int],
+) -> Mapping[str, object]:
+    """Run and strictly bind one closed preclaim or reverify operation."""
+
+    if mode not in {
+        runner.RunnerMode.PRECLAIM_STAGED_START,
+        runner.RunnerMode.VERIFY_PUBLISHED_START_PAIR,
+    }:
+        raise Phase9ProofIssuerError("phase9_proof_issuer_mode_invalid")
+    status, stdout, stderr = _supervise_attempt(
+        inputs=inputs,
+        guard_descriptor=guard_descriptor,
+        mode=mode,
+    )
+    if status != 0:
+        raise Phase9ProofIssuerError(
+            _strict_runner_error(status, stdout, stderr)
+        )
+    try:
+        receipt = runner._parse_canonical_object(
+            _strict_runner_receipt_payload(stdout, stderr),
+            "phase9_proof_issuer_start_authority_receipt_invalid",
+        )
+    except runner.LiveProofError as error:
+        raise Phase9ProofIssuerError(
+            "phase9_proof_issuer_start_authority_receipt_invalid"
+        ) from error
+    allowed_results = (
+        {"nonce_claimed", "exact_execution_resumed"}
+        if mode is runner.RunnerMode.PRECLAIM_STAGED_START
+        else {"exact_execution_resumed"}
+    )
+    if (
+        set(receipt) != _START_AUTHORITY_PAIR_RECEIPT_KEYS
+        or receipt.get("result") not in allowed_results
+        or receipt.get("recovery_capsule_sha256")
+        != expected_capsule_sha256
+        or receipt.get("recovery_capsule_device") != expected_inode[0]
+        or receipt.get("recovery_capsule_inode") != expected_inode[1]
+        or receipt.get("start_authority_pair_claimed_atomically") is not True
+        or any(
+            type(receipt.get(key)) is not str
+            or runner._HASH_RE.fullmatch(str(receipt[key])) is None
+            for key in (
+                "recovery_reservation_claim_sha256",
+                "install_authority_claim_sha256",
+            )
+        )
+    ):
+        raise Phase9ProofIssuerError(
+            "phase9_proof_issuer_start_authority_receipt_invalid"
+        )
+    return MappingProxyType(receipt)
+
+
 def _ensure_live_proof_guard_parent() -> None:
     """Create or reopen the one fixed root-owned guard directory."""
 
@@ -1338,7 +1814,7 @@ def _verify_supervised_receipt(
     stdout: bytes,
     stderr: bytes,
 ) -> tuple[str, Mapping[str, object]]:
-    """Verify one exact live or explicitly non-promotable recovery receipt."""
+    """Verify one exact live or explicitly non-promotable state receipt."""
 
     try:
         receipt = runner._parse_canonical_object(
@@ -1352,6 +1828,9 @@ def _verify_supervised_receipt(
         elif schema == runner.RECOVERY_RECEIPT_SCHEMA:
             kind = "recovery"
             verified = runner.verify_recovery_receipt(receipt)
+        elif schema == runner.PAIR_ONLY_RECEIPT_SCHEMA:
+            kind = "pair_only"
+            verified = runner.verify_pair_only_receipt(receipt)
         else:
             raise runner.LiveProofError(
                 "phase9_live_proof_receipt_schema_invalid"
@@ -1435,6 +1914,186 @@ def _require_production_pre_effect_disposition(
     return receipt
 
 
+def _remove_exact_staged_capsule_after_pristine_proof(
+    *,
+    inputs: runner.ProofInputs,
+    expected_capsule_sha256: str,
+    expected_inode: tuple[int, int],
+) -> None:
+    _require_pristine_staged_cleanup_state(inputs=inputs)
+    parent_fd = _ensure_recovery_capsule_parent()
+    try:
+        raw, staged = _read_capsule_member(
+            parent_fd,
+            _recovery_capsule_temp_name(),
+            allowed_link_counts=frozenset({1}),
+            allow_empty=True,
+        )
+        if (
+            _sha(raw) != expected_capsule_sha256
+            or (staged.st_dev, staged.st_ino) != expected_inode
+        ):
+            raise Phase9ProofIssuerError(
+                "phase9_proof_issuer_capsule_publication_drift"
+            )
+        _unlink_exact_member(
+            parent_fd,
+            _recovery_capsule_temp_name(),
+            expected_inode,
+        )
+    finally:
+        try:
+            os.close(parent_fd)
+        except OSError:
+            pass
+
+
+def _prepare_preclaim_publish_new_capsule(
+    *,
+    inputs: runner.ProofInputs,
+    artifacts: Mapping[str, bytes],
+    guard_descriptor: int,
+) -> tuple[CapsulePublicationObservation, Mapping[str, object]]:
+    private_key = Ed25519PrivateKey.generate()
+    capsule = build_exact_recovery_capsule(
+        inputs=inputs,
+        artifacts=dict(artifacts),
+        private_key=private_key,
+        issued_at=datetime.now(timezone.utc),
+    )
+    verify_exact_clean_candidate(inputs)
+    capsule_sha256, capsule_inode = prepare_fixed_recovery_capsule(capsule)
+    # Nothing reachable by the sealed runner retains signing authority.
+    del capsule
+    del private_key
+    try:
+        prior_success = (
+            durable_live_proof_receipt.preflight_anonymous_publication_capability(
+                inputs=inputs,
+                artifacts=artifacts,
+                capsule_sha256=capsule_sha256,
+            )
+        )
+    except durable_live_proof_receipt.DurableLiveProofReceiptError as error:
+        _remove_exact_staged_capsule_after_pristine_proof(
+            inputs=inputs,
+            expected_capsule_sha256=capsule_sha256,
+            expected_inode=capsule_inode,
+        )
+        raise Phase9ProofIssuerError(
+            "phase9_proof_issuer_durable_receipt_preflight_failed"
+        ) from error
+    if prior_success is not None:
+        raise Phase9ProofIssuerError(
+            "phase9_proof_issuer_durable_receipt_without_published_capsule"
+        )
+    pair = _run_start_authority_pair_mode(
+        inputs=inputs,
+        guard_descriptor=guard_descriptor,
+        mode=runner.RunnerMode.PRECLAIM_STAGED_START,
+        expected_capsule_sha256=capsule_sha256,
+        expected_inode=capsule_inode,
+    )
+    commit_preclaimed_recovery_capsule(
+        expected_capsule_sha256=capsule_sha256,
+        expected_inode=capsule_inode,
+    )
+    verified_pair = _run_start_authority_pair_mode(
+        inputs=inputs,
+        guard_descriptor=guard_descriptor,
+        mode=runner.RunnerMode.VERIFY_PUBLISHED_START_PAIR,
+        expected_capsule_sha256=capsule_sha256,
+        expected_inode=capsule_inode,
+    )
+    if any(
+        verified_pair.get(key) != pair.get(key)
+        for key in (
+            "recovery_reservation_claim_sha256",
+            "install_authority_claim_sha256",
+        )
+    ):
+        raise Phase9ProofIssuerError(
+            "phase9_proof_issuer_start_authority_receipt_invalid"
+        )
+    try:
+        verified_capsule = runner._load_verified_recovery_capsule(
+            inputs,
+            artifacts,
+            require_current=False,
+        )
+    except runner.LiveProofError as error:
+        raise Phase9ProofIssuerError(
+            "phase9_proof_issuer_recovery_capsule_invalid"
+        ) from error
+    if _sha(verified_capsule.raw) != capsule_sha256:
+        raise Phase9ProofIssuerError(
+            "phase9_proof_issuer_capsule_publication_drift"
+        )
+    return (
+        CapsulePublicationObservation(
+            state="published",
+            capsule=verified_capsule,
+            capsule_sha256=capsule_sha256,
+            inode=capsule_inode,
+        ),
+        verified_pair,
+    )
+
+
+def _adopt_durable_success_after_fresh_absence_recheck(
+    *,
+    inputs: runner.ProofInputs,
+    artifacts: Mapping[str, bytes],
+    capsule_sha256: str,
+    durable_receipt: Mapping[str, object],
+    guard_descriptor: int,
+) -> Mapping[str, object]:
+    status, stdout, stderr = _supervise_attempt(
+        inputs=inputs,
+        guard_descriptor=guard_descriptor,
+        mode=runner.RunnerMode.RECOVER_ONLY,
+    )
+    if status != 0:
+        raise Phase9ProofIssuerError(
+            _strict_runner_error(status, stdout, stderr)
+        )
+    kind, recovery = _verify_supervised_receipt(
+        inputs=inputs,
+        artifacts=artifacts,
+        capsule_sha256=capsule_sha256,
+        stdout=stdout,
+        stderr=stderr,
+    )
+    exact_bindings = (
+        "candidate_git_commit",
+        "candidate_git_tree",
+        "package_manifest_sha256",
+        "controller_runtime_receipt_sha256",
+        "recovery_capsule_sha256",
+        "recovery_reservation_claim_sha256",
+        "install_authority_claim_sha256",
+        "installation_execution_id",
+        "installation_receipt_sha256",
+        "empty_rollback_execution_id",
+        "empty_rollback_receipt_sha256",
+    )
+    if (
+        kind != "recovery"
+        or recovery.get("exact_resources_absent") is not True
+        or recovery.get("stores_installed") is not False
+        or recovery.get("stores_supervisor_installed") is not False
+        or recovery.get("start_authority_pair_claimed_atomically") is not True
+        or any(
+            recovery.get(key) != durable_receipt.get(key)
+            for key in exact_bindings
+        )
+    ):
+        raise Phase9ProofIssuerError(
+            "phase9_proof_issuer_durable_receipt_adoption_invalid"
+        )
+    return MappingProxyType(dict(durable_receipt))
+
+
 def issue_and_supervise(inputs: runner.ProofInputs) -> Mapping[str, object]:
     """Issue exact authority and supervise one bounded exact runner."""
 
@@ -1469,7 +2128,13 @@ def issue_and_supervise(inputs: runner.ProofInputs) -> Mapping[str, object]:
     with guard:
         _require_production_pre_effect_disposition(inputs=inputs)
         try:
-            reconciled = reconcile_capsule_publication(
+            runner._prepare_fixed_substrate()
+        except runner.LiveProofError as error:
+            raise Phase9ProofIssuerError(
+                "phase9_proof_issuer_substrate_invalid"
+            ) from error
+        try:
+            observation = reconcile_capsule_publication(
                 inputs=inputs,
                 artifacts=artifacts,
             )
@@ -1477,37 +2142,152 @@ def issue_and_supervise(inputs: runner.ProofInputs) -> Mapping[str, object]:
             raise Phase9ProofIssuerError(
                 "phase9_proof_issuer_recovery_capsule_invalid"
             ) from error
-        if reconciled is None:
-            private_key = Ed25519PrivateKey.generate()
-            capsule = build_exact_recovery_capsule(
+        if observation is None:
+            observation, start_pair = _prepare_preclaim_publish_new_capsule(
                 inputs=inputs,
-                artifacts=dict(artifacts),
-                private_key=private_key,
-                issued_at=datetime.now(timezone.utc),
+                artifacts=artifacts,
+                guard_descriptor=guard.descriptor,
             )
-            verify_exact_clean_candidate(inputs)
-            capsule_sha256, unused_capsule_inode = publish_fixed_recovery_capsule(
-                capsule
-            )
+        elif observation.state == "staged":
             try:
-                verified_capsule = runner._load_verified_recovery_capsule(
-                    inputs,
-                    artifacts,
-                    require_current=False,
+                prior_success = (
+                    durable_live_proof_receipt.preflight_anonymous_publication_capability(
+                        inputs=inputs,
+                        artifacts=artifacts,
+                        capsule_sha256=observation.capsule_sha256,
+                    )
                 )
-            except runner.LiveProofError as error:
+            except durable_live_proof_receipt.DurableLiveProofReceiptError as error:
+                _remove_exact_staged_capsule_after_pristine_proof(
+                    inputs=inputs,
+                    expected_capsule_sha256=(
+                        observation.capsule_sha256
+                    ),
+                    expected_inode=observation.inode,
+                )
                 raise Phase9ProofIssuerError(
-                    "phase9_proof_issuer_recovery_capsule_invalid"
+                    "phase9_proof_issuer_durable_receipt_preflight_failed"
                 ) from error
-            if _sha(verified_capsule.raw) != capsule_sha256:
+            if prior_success is not None:
                 raise Phase9ProofIssuerError(
-                    "phase9_proof_issuer_capsule_publication_drift"
+                    "phase9_proof_issuer_durable_receipt_without_published_capsule"
                 )
-            # Nothing reachable by the spawned runner retains this key.
-            del capsule
-            del private_key
+            try:
+                start_pair = _run_start_authority_pair_mode(
+                    inputs=inputs,
+                    guard_descriptor=guard.descriptor,
+                    mode=runner.RunnerMode.PRECLAIM_STAGED_START,
+                    expected_capsule_sha256=(
+                        observation.capsule_sha256
+                    ),
+                    expected_inode=observation.inode,
+                )
+            except Phase9ProofIssuerError as error:
+                if str(error) != (
+                    "phase9_live_proof_start_authority_pair_expired"
+                ):
+                    raise
+                _remove_exact_staged_capsule_after_pristine_proof(
+                    inputs=inputs,
+                    expected_capsule_sha256=(
+                        observation.capsule_sha256
+                    ),
+                    expected_inode=observation.inode,
+                )
+                observation, start_pair = (
+                    _prepare_preclaim_publish_new_capsule(
+                        inputs=inputs,
+                        artifacts=artifacts,
+                        guard_descriptor=guard.descriptor,
+                    )
+                )
+            else:
+                commit_preclaimed_recovery_capsule(
+                    expected_capsule_sha256=(
+                        observation.capsule_sha256
+                    ),
+                    expected_inode=observation.inode,
+                )
+                published_pair = _run_start_authority_pair_mode(
+                    inputs=inputs,
+                    guard_descriptor=guard.descriptor,
+                    mode=runner.RunnerMode.VERIFY_PUBLISHED_START_PAIR,
+                    expected_capsule_sha256=(
+                        observation.capsule_sha256
+                    ),
+                    expected_inode=observation.inode,
+                )
+                if any(
+                    published_pair.get(key) != start_pair.get(key)
+                    for key in (
+                        "recovery_reservation_claim_sha256",
+                        "install_authority_claim_sha256",
+                    )
+                ):
+                    raise Phase9ProofIssuerError(
+                        "phase9_proof_issuer_start_authority_receipt_invalid"
+                    )
+                observation = CapsulePublicationObservation(
+                    state="published",
+                    capsule=observation.capsule,
+                    capsule_sha256=observation.capsule_sha256,
+                    inode=observation.inode,
+                )
+        elif observation.state in {"linked", "published"}:
+            start_pair = _run_start_authority_pair_mode(
+                inputs=inputs,
+                guard_descriptor=guard.descriptor,
+                mode=runner.RunnerMode.VERIFY_PUBLISHED_START_PAIR,
+                expected_capsule_sha256=observation.capsule_sha256,
+                expected_inode=observation.inode,
+            )
+            if observation.state == "linked":
+                complete_linked_capsule_publication(
+                    expected_capsule_sha256=(
+                        observation.capsule_sha256
+                    ),
+                    expected_inode=observation.inode,
+                )
+                observation = CapsulePublicationObservation(
+                    state="published",
+                    capsule=observation.capsule,
+                    capsule_sha256=observation.capsule_sha256,
+                    inode=observation.inode,
+                )
         else:
-            verified_capsule, capsule_sha256, unused_capsule_inode = reconciled
+            raise Phase9ProofIssuerError(
+                "phase9_proof_issuer_capsule_publication_drift"
+            )
+
+        capsule_sha256 = observation.capsule_sha256
+        if (
+            observation.state != "published"
+            or start_pair.get("start_authority_pair_claimed_atomically")
+            is not True
+        ):
+            raise Phase9ProofIssuerError(
+                "phase9_proof_issuer_start_authority_receipt_invalid"
+            )
+        try:
+            durable_success = (
+                durable_live_proof_receipt.read_verified_promotable_live_receipt_if_present(
+                inputs=inputs,
+                artifacts=artifacts,
+                capsule_sha256=capsule_sha256,
+            )
+            )
+        except durable_live_proof_receipt.DurableLiveProofReceiptError as error:
+            raise Phase9ProofIssuerError(
+                "phase9_proof_issuer_durable_receipt_invalid"
+            ) from error
+        if durable_success is not None:
+            return _adopt_durable_success_after_fresh_absence_recheck(
+                inputs=inputs,
+                artifacts=artifacts,
+                capsule_sha256=capsule_sha256,
+                durable_receipt=durable_success,
+                guard_descriptor=guard.descriptor,
+            )
 
         recovery_required = False
         try:
@@ -1533,12 +2313,39 @@ def issue_and_supervise(inputs: runner.ProofInputs) -> Mapping[str, object]:
                     raise Phase9ProofIssuerError(
                         "phase9_proof_issuer_recovery_completed_live_proof_not_proven"
                     )
+                if kind != "live":
+                    raise Phase9ProofIssuerError(
+                        "phase9_proof_issuer_recovery_receipt_invalid"
+                    )
                 return verified
             recovery_required = True
 
         if not recovery_required:
             raise Phase9ProofIssuerError(
                 "phase9_proof_issuer_recovery_state_invalid"
+            )
+        # A killed runner may have durably published verified success before
+        # stdout was observed.  Re-read that create-once evidence and require a
+        # fresh exact-absence recovery before returning the original receipt.
+        try:
+            durable_after_failure = (
+                durable_live_proof_receipt.read_verified_promotable_live_receipt_if_present(
+                    inputs=inputs,
+                    artifacts=artifacts,
+                    capsule_sha256=capsule_sha256,
+                )
+            )
+        except durable_live_proof_receipt.DurableLiveProofReceiptError as error:
+            raise Phase9ProofIssuerError(
+                "phase9_proof_issuer_durable_receipt_invalid"
+            ) from error
+        if durable_after_failure is not None:
+            return _adopt_durable_success_after_fresh_absence_recheck(
+                inputs=inputs,
+                artifacts=artifacts,
+                capsule_sha256=capsule_sha256,
+                durable_receipt=durable_after_failure,
+                guard_descriptor=guard.descriptor,
             )
         # The first exact process group is already killed and reaped on a
         # timeout, or exited nonzero.  Invoke the closed recovery mode once.
@@ -1551,21 +2358,109 @@ def issue_and_supervise(inputs: runner.ProofInputs) -> Mapping[str, object]:
             raise Phase9ProofIssuerError(
                 _strict_runner_error(status, stdout, stderr)
             )
-        kind, unused_verified = _verify_supervised_receipt(
+        kind, verified = _verify_supervised_receipt(
             inputs=inputs,
             artifacts=artifacts,
             capsule_sha256=capsule_sha256,
             stdout=stdout,
             stderr=stderr,
         )
-        if kind != "recovery":
+        if kind == "live":
+            return verified
+        if kind == "recovery":
+            # Cleanup evidence is deliberately non-promotable unless both
+            # durable commanded-death arms allow exact reconstruction.
+            raise Phase9ProofIssuerError(
+                "phase9_proof_issuer_recovery_completed_live_proof_not_proven"
+            )
+        if kind != "pair_only":
             raise Phase9ProofIssuerError(
                 "phase9_proof_issuer_recovery_receipt_invalid"
             )
-        # Cleanup evidence is deliberately non-promotable.  A recovery run
-        # does not complete both commanded fault-injection boundaries.
+
+        # The first runner died after atomically claiming its exact pair but
+        # before creating the expected execution directory.  Retry that same
+        # pair once; never mint another claim and never loop.
+        try:
+            retry_status, retry_stdout, retry_stderr = _supervise_attempt(
+                inputs=inputs,
+                guard_descriptor=guard.descriptor,
+                mode=runner.RunnerMode.START_OR_RECOVER,
+            )
+        except Phase9ProofIssuerError as error:
+            if str(error) != "phase9_proof_issuer_runner_timeout":
+                raise
+            retry_status = -1
+            retry_stdout = b""
+            retry_stderr = b""
+        if retry_status == 0:
+            retry_kind, retry_verified = _verify_supervised_receipt(
+                inputs=inputs,
+                artifacts=artifacts,
+                capsule_sha256=capsule_sha256,
+                stdout=retry_stdout,
+                stderr=retry_stderr,
+            )
+            if retry_kind == "live":
+                return retry_verified
+            if retry_kind == "recovery":
+                raise Phase9ProofIssuerError(
+                    "phase9_proof_issuer_recovery_completed_live_proof_not_proven"
+                )
+            raise Phase9ProofIssuerError(
+                "phase9_proof_issuer_recovery_receipt_invalid"
+            )
+
+        # A retry may have published success immediately before losing stdout.
+        try:
+            durable_after_retry = (
+                durable_live_proof_receipt.read_verified_promotable_live_receipt_if_present(
+                    inputs=inputs,
+                    artifacts=artifacts,
+                    capsule_sha256=capsule_sha256,
+                )
+            )
+        except durable_live_proof_receipt.DurableLiveProofReceiptError as error:
+            raise Phase9ProofIssuerError(
+                "phase9_proof_issuer_durable_receipt_invalid"
+            ) from error
+        if durable_after_retry is not None:
+            return _adopt_durable_success_after_fresh_absence_recheck(
+                inputs=inputs,
+                artifacts=artifacts,
+                capsule_sha256=capsule_sha256,
+                durable_receipt=durable_after_retry,
+                guard_descriptor=guard.descriptor,
+            )
+
+        status, stdout, stderr = _supervise_attempt(
+            inputs=inputs,
+            guard_descriptor=guard.descriptor,
+            mode=runner.RunnerMode.RECOVER_ONLY,
+        )
+        if status != 0:
+            raise Phase9ProofIssuerError(
+                _strict_runner_error(status, stdout, stderr)
+            )
+        final_kind, final_verified = _verify_supervised_receipt(
+            inputs=inputs,
+            artifacts=artifacts,
+            capsule_sha256=capsule_sha256,
+            stdout=stdout,
+            stderr=stderr,
+        )
+        if final_kind == "live":
+            return final_verified
+        if final_kind == "recovery":
+            raise Phase9ProofIssuerError(
+                "phase9_proof_issuer_recovery_completed_live_proof_not_proven"
+            )
+        if final_kind == "pair_only":
+            raise Phase9ProofIssuerError(
+                "phase9_proof_issuer_start_not_observed_pair_only_pristine"
+            )
         raise Phase9ProofIssuerError(
-            "phase9_proof_issuer_recovery_completed_live_proof_not_proven"
+            "phase9_proof_issuer_recovery_receipt_invalid"
         )
 
 

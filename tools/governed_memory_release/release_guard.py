@@ -161,7 +161,7 @@ EXPECTED_CURRENT_RUNTIME_RECEIPT_SHA256 = (
     "25ca53e683e53f79b726909ef64bc8afad30269cce3f59804cf66335667a8108"
 )
 EXPECTED_CURRENT_RUNTIME_MANIFEST_SHA256 = (
-    "253faa2d00fc9d8fb3bde1e1a7d531a1eda8a63dd886339479bedf66e3d01c4d"
+    "027a699d61cf310c5b5553455ccd6b12fc7789826e302c601ec6648ecca2d6c6"
 )
 EXPECTED_CURRENT_RUNTIME_SOURCE_SHA256 = (
     "b52b753dc7974ee120e4abe264bb36f16b53341fa86b2ea8e0ab5bf86c735c20"
@@ -212,13 +212,13 @@ EXPECTED_ACTIVATION_BLOCKER_COUNT = 41
 CURRENT_CREATE_REFUSAL_CODE = "inactive_installation_package_not_authorized"
 
 EXACT_TARGETS = {
-    "postgres_container": "governed-memory-postgres-9a54cf123493-000001",
-    "qdrant_container": "governed-memory-qdrant-9a54cf123493-000001",
-    "postgres_volume": "governed-memory-postgres-data-9a54cf123493-000001",
-    "qdrant_volume": "governed-memory-qdrant-data-9a54cf123493-000001",
-    "network": "governed-memory-net-9a54cf123493-000001",
+    "postgres_container": "governed-memory-postgres-9a54cf123493-000002",
+    "qdrant_container": "governed-memory-qdrant-9a54cf123493-000002",
+    "postgres_volume": "governed-memory-postgres-data-9a54cf123493-000002",
+    "qdrant_volume": "governed-memory-qdrant-data-9a54cf123493-000002",
+    "network": "governed-memory-net-9a54cf123493-000002",
     "database": "governed_memory",
-    "collection": "governed_memory_9a54cf123493_000001",
+    "collection": "governed_memory_9a54cf123493_000002",
     "alias": "governed_memory_active",
 }
 
@@ -887,7 +887,7 @@ def _verify_current_package_receipts(
     store_artifacts = store_receipt.get("artifact_sha256")
     _require(
         package_receipt.get("schema_version")
-        == "governed-memory-dormant-store-install-package-verification-v5"
+        == "governed-memory-dormant-store-install-package-verification-v6"
         and isinstance(package_artifacts, dict)
         and bool(package_artifacts)
         and package_receipt.get("artifact_count") == len(package_artifacts)
@@ -1238,7 +1238,7 @@ def _verify_runtime_manifest(
         and current.get("package_manifest")
         == "ops/governed_memory/installation/current/package_manifest.json"
         and current.get("package_manifest_schema_version")
-        == "governed-memory-dormant-store-install-inactive-execution-package-manifest-v5"
+        == "governed-memory-dormant-store-install-inactive-execution-package-manifest-v6"
         and current.get("package_manifest_sha256")
         == package_receipt.get("package_manifest_sha256")
         and current.get("package_artifact_count")

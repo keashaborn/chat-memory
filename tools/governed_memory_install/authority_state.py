@@ -189,6 +189,15 @@ class NonceClaimIdentity:
 
 
 @dataclass(frozen=True, slots=True)
+class NonceClaimPair:
+    """Atomic result for two complete content-free nonce identities."""
+
+    result: str
+    first: NonceClaim
+    second: NonceClaim
+
+
+@dataclass(frozen=True, slots=True)
 class NonceClaimPresence:
     """Content-free presence of one nonce claim, independent of its binding."""
 
@@ -339,6 +348,36 @@ def derive_nonce_claim_identity(
     )
 
 
+def _require_nonce_claim_identity(
+    value: object,
+) -> tuple[str, str, str, str, str, str, str]:
+    if type(value) is not NonceClaimIdentity:
+        raise AuthorityStateIntegrityError(
+            "authority_nonce_pair_identity_invalid"
+        )
+    expected = tuple(getattr(value, column) for column in _NONCE_COLUMNS)
+    if (
+        len(expected) != len(_NONCE_COLUMNS)
+        or any(
+            not isinstance(item, str) or HASH_RE.fullmatch(item) is None
+            for item in expected
+        )
+        or value.claim_sha256
+        != _claim_sha256(
+            nonce_hash=value.nonce_sha256,
+            operation_hash=value.operation_sha256,
+            execution_hash=value.execution_sha256,
+            authorization_hash=value.authorization_sha256,
+            scope_hash=value.scope_sha256,
+            trust_bundle_hash=value.trust_bundle_sha256,
+        )
+    ):
+        raise AuthorityStateIntegrityError(
+            "authority_nonce_pair_identity_invalid"
+        )
+    return expected
+
+
 class AuthorityState:
     """SQLite-backed nonce ledger and hash-chain anchor.
 
@@ -382,7 +421,7 @@ class AuthorityState:
         self._directory_inode: tuple[int, int] | None = None
         self._database_inode: tuple[int, int] | None = None
         self._schema_ready = False
-        self._created = self._prepare_path(create=create)
+        self._initialization_authorized = self._prepare_path(create=create)
         self._initialize_schema()
 
     @staticmethod
@@ -431,17 +470,31 @@ class AuthorityState:
         directory_fd = self._open_validated_directory()
         database_fd = -1
         flags = os.O_RDWR | os.O_CLOEXEC | self._nofollow_flag()
+        newly_created = False
         try:
             if create:
-                database_fd = os.open(
-                    self.path.name,
-                    flags | os.O_CREAT | os.O_EXCL,
-                    0o600,
-                    dir_fd=directory_fd,
-                )
-                os.fchmod(database_fd, 0o600)
-                os.fsync(database_fd)
-                os.fsync(directory_fd)
+                try:
+                    database_fd = os.open(
+                        self.path.name,
+                        flags | os.O_CREAT | os.O_EXCL,
+                        0o600,
+                        dir_fd=directory_fd,
+                    )
+                    newly_created = True
+                except FileExistsError:
+                    # `create=True` is also the explicit recovery authority
+                    # for a final inode left before the initial schema
+                    # transaction committed.  Exact schema validation below
+                    # still refuses every nonempty foreign or drifted state.
+                    database_fd = os.open(
+                        self.path.name,
+                        flags,
+                        dir_fd=directory_fd,
+                    )
+                if newly_created:
+                    os.fchmod(database_fd, 0o600)
+                    os.fsync(database_fd)
+                    os.fsync(directory_fd)
             else:
                 database_fd = os.open(
                     self.path.name,
@@ -616,7 +669,7 @@ class AuthorityState:
                 """
             ).fetchall()
             if (
-                self._created
+                self._initialization_authorized
                 and application_id == 0
                 and user_version == 0
                 and not objects
@@ -977,6 +1030,138 @@ class AuthorityState:
         )
         self._validate_path()
         return NonceClaim(result=result, **dict(zip(_NONCE_COLUMNS, expected)))
+
+    @staticmethod
+    def _insert_exact_nonce_identity(
+        connection: sqlite3.Connection,
+        identity: tuple[str, str, str, str, str, str, str],
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO nonce_claim_v1 (
+                nonce_sha256, operation_sha256, execution_sha256,
+                authorization_sha256, scope_sha256,
+                trust_bundle_sha256, claim_sha256
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            identity,
+        )
+
+    def claim_exact_nonce_pair(
+        self,
+        first: NonceClaimIdentity,
+        second: NonceClaimIdentity,
+        *,
+        held_lock: HeldExecutionLockCapability,
+        allow_new_pair: bool,
+    ) -> NonceClaimPair:
+        """Claim two exact nonce identities in one all-or-nothing transaction.
+
+        The caller owns authorization-window policy through ``allow_new_pair``.
+        An exact durable pair can resume regardless of that policy; no partial
+        pair is ever created or accepted.
+        """
+
+        _require_held_lock(
+            held_lock,
+            code="authority_nonce_pair_claim_lock_not_held",
+        )
+        if not isinstance(allow_new_pair, bool):
+            raise AuthorityStateIntegrityError(
+                "authority_new_pair_policy_invalid"
+            )
+        first_expected = _require_nonce_claim_identity(first)
+        second_expected = _require_nonce_claim_identity(second)
+        if first.nonce_sha256 == second.nonce_sha256:
+            raise AuthorityStateIntegrityError(
+                "authority_nonce_pair_not_distinct"
+            )
+        if first.claim_sha256 == second.claim_sha256:
+            raise AuthorityStateIntegrityError(
+                "authority_nonce_pair_collision"
+            )
+
+        connection = self._connect()
+        try:
+            self._begin_immediate(connection)
+            rows = connection.execute(
+                """
+                SELECT nonce_sha256, operation_sha256, execution_sha256,
+                       authorization_sha256, scope_sha256,
+                       trust_bundle_sha256, claim_sha256
+                FROM nonce_claim_v1
+                WHERE nonce_sha256 IN (?, ?)
+                """,
+                (first.nonce_sha256, second.nonce_sha256),
+            ).fetchall()
+            observed = {row[0]: tuple(row) for row in rows}
+            if len(observed) != len(rows) or len(rows) > 2:
+                raise AuthorityStateIntegrityError(
+                    "authority_state_nonce_row_invalid"
+                )
+            first_row = observed.get(first.nonce_sha256)
+            second_row = observed.get(second.nonce_sha256)
+            if first_row is None and second_row is None:
+                if not allow_new_pair:
+                    raise AuthorityClaimNotAllowedError(
+                        "authority_new_pair_claim_not_allowed"
+                    )
+                AuthorityState._insert_exact_nonce_identity(
+                    connection, first_expected
+                )
+                AuthorityState._insert_exact_nonce_identity(
+                    connection, second_expected
+                )
+                result = "nonce_claimed"
+            elif first_row is None or second_row is None:
+                raise AuthorityReplayError(
+                    "authority_nonce_pair_mixed_state"
+                )
+            elif first_row == first_expected and second_row == second_expected:
+                result = "exact_execution_resumed"
+            else:
+                raise AuthorityReplayError(
+                    "authority_nonce_pair_replayed"
+                )
+            _require_held_lock(
+                held_lock,
+                code="authority_nonce_pair_claim_lock_not_held",
+            )
+            self._finish(connection)
+        except AuthorityStateError:
+            connection.rollback()
+            raise
+        except sqlite3.IntegrityError as error:
+            connection.rollback()
+            raise AuthorityReplayError(
+                "authority_nonce_pair_collision"
+            ) from error
+        except sqlite3.OperationalError as error:
+            connection.rollback()
+            raise AuthorityStateBusyError("authority_state_busy") from error
+        except sqlite3.DatabaseError as error:
+            connection.rollback()
+            raise AuthorityStateIntegrityError(
+                "authority_state_database_invalid"
+            ) from error
+        finally:
+            connection.close()
+        _require_held_lock(
+            held_lock,
+            code="authority_nonce_pair_claim_lock_not_held",
+        )
+        self._validate_path()
+        return NonceClaimPair(
+            result=result,
+            first=NonceClaim(
+                result=result,
+                **dict(zip(_NONCE_COLUMNS, first_expected)),
+            ),
+            second=NonceClaim(
+                result=result,
+                **dict(zip(_NONCE_COLUMNS, second_expected)),
+            ),
+        )
 
     def inspect_nonce_claim(
         self,

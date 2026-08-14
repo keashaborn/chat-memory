@@ -25,6 +25,7 @@ if __name__ == "__main__" and not _DONT_WRITE_BYTECODE_AT_START:
 
 import argparse
 import base64
+import ctypes
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from enum import Enum
@@ -66,6 +67,7 @@ from tools.governed_memory_install import authority
 from tools.governed_memory_install.authority_state import (
     AuthorityClaimNotAllowedError,
     AuthorityState,
+    derive_nonce_claim_identity,
     operation_sha256 as authority_operation_sha256,
 )
 from tools.governed_memory_install.controller_runtime import (
@@ -76,6 +78,13 @@ from tools.governed_memory_install.durable_receipts import (
     DurableReceiptStore,
     ReceiptArtifact,
 )
+from tools.governed_memory_validation.durable_live_proof_receipt import (
+    DurableLiveProofReceiptError,
+    persist_verified_promotable_live_receipt,
+    preflight_anonymous_publication_capability,
+    read_verified_promotable_live_receipt_if_present,
+)
+from tools.governed_memory_validation import process_death_arm_receipt
 from tools.governed_memory_install.execution_capability import (
     reconstruct_resolved_store_spec_from_claimed_binding,
     resume_dormant_store_install_execution_binding,
@@ -85,7 +94,10 @@ from tools.governed_memory_install.execution_authority import (
     KernelUtcClock,
     read_trusted_utc,
 )
-from tools.governed_memory_install.execution_lock import GlobalExecutionLock
+from tools.governed_memory_install.execution_lock import (
+    ExecutionLockBusyError,
+    GlobalExecutionLock,
+)
 from tools.governed_memory_install.host_boundary import (
     CommandRunner,
     FIXED_ENVIRONMENT,
@@ -98,6 +110,11 @@ from tools.governed_memory_install.install_backend import InstallPrerequisites
 from tools.governed_memory_install.install_entrypoint import (
     resume_authorized_dormant_store_install,
     run_authorized_dormant_store_install,
+)
+from tools.governed_memory_install.journal import (
+    DurableJournal,
+    DurableJournalError,
+    parse_durable_journal_bytes,
 )
 from tools.governed_memory_install.linux_plan import validate_store_spec
 from tools.governed_memory_install.package_capability import (
@@ -136,6 +153,11 @@ from tools.governed_memory_install.rollback_entrypoint import (
     resume_authorized_empty_store_rollback,
     start_reserved_authorized_empty_store_rollback,
 )
+from tools.governed_memory_install.rollback_journal import (
+    DurableRollbackJournal,
+    DurableRollbackJournalError,
+    parse_rollback_journal_bytes,
+)
 
 
 THREAD_ID: Final = "019fe927-8367-7f52-86f2-e2b5b43a2390"
@@ -146,13 +168,19 @@ AUTHORIZED_TEXT_SHA256: Final = hashlib.sha256(
 RECOVERY_CAPSULE_PATH: Final = Path(
     "/var/lib/governed-memory-controller/phase9-disposable-proof-recovery-capsule-v3.json"
 )
+RECOVERY_CAPSULE_STAGING_PATH: Final = RECOVERY_CAPSULE_PATH.with_name(
+    RECOVERY_CAPSULE_PATH.name + ".publishing"
+)
 RECOVERY_CAPSULE_SCHEMA: Final = "governed-memory-phase9-disposable-proof-recovery-capsule-v3"
 AUTHORIZATION_NAMESPACE: Final = "governed-memory-phase9-live-proof-v2"
 INSTALL_SCOPE_ID: Final = "phase9-disposable-live-install-000002"
 ROLLBACK_SCOPE_ID: Final = "phase9-disposable-live-rollback-000002"
-LIVE_PROOF_RECEIPT_SCHEMA: Final = "governed-memory-phase9-live-proof-receipt-v3"
+LIVE_PROOF_RECEIPT_SCHEMA: Final = "governed-memory-phase9-live-proof-receipt-v4"
 RECOVERY_RECEIPT_SCHEMA: Final = (
     "governed-memory-phase9-disposable-proof-recovery-receipt-v1"
+)
+PAIR_ONLY_RECEIPT_SCHEMA: Final = (
+    "governed-memory-phase9-start-pair-no-execution-receipt-v1"
 )
 LIVE_PROOF_RECEIPT_SCHEMA_RELATIVE: Final = (
     "ops/governed_memory/installation/current/live_proof_receipt.schema.json"
@@ -196,6 +224,7 @@ DURABLE_PRE_EFFECT_ROLLBACK_AUTHORITY_PACKAGED: Final = True
 POLL_INTERVAL_SECONDS: Final = 0.002
 MAX_WORKER_RESULT_BYTES: Final = 1024 * 1024
 MAX_ARTIFACT_BYTES: Final = 8 * 1024 * 1024
+PR_SET_PDEATHSIG: Final = 1
 TIMEDATECTL_BINARY: Final = Path("/usr/bin/timedatectl")
 TIMEDATECTL_SYNCHRONIZATION_ARGV: Final = (
     "/usr/bin/timedatectl",
@@ -208,6 +237,8 @@ TIMEDATECTL_TIMEOUT_SECONDS: Final = 5
 _HASH_RE: Final = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _COMMIT_RE: Final = re.compile(r"[0-9a-f]{40}\Z", re.ASCII)
 _EXECUTION_DIRECTORY_RE: Final = _HASH_RE
+_INSTALL_ATTEMPT_RE: Final = re.compile(r"install-[0-9a-f]{40}\Z", re.ASCII)
+_ROLLBACK_ATTEMPT_RE: Final = re.compile(r"rollback-[0-9a-f]{40}\Z", re.ASCII)
 
 _LIVE_PROOF_RECEIPT_KEYS: Final = frozenset(
     {
@@ -221,6 +252,8 @@ _LIVE_PROOF_RECEIPT_KEYS: Final = frozenset(
         "live_proof_receipt_schema_sha256",
         "recovery_capsule_sha256",
         "recovery_reservation_claim_sha256",
+        "install_authority_claim_sha256",
+        "start_authority_pair_claimed_atomically",
         "recovery_capsule_published_before_first_install_effect",
         "recovery_reservation_claimed_before_first_install_effect",
         "ephemeral_private_signer_retained_at_execution_start",
@@ -233,7 +266,9 @@ _LIVE_PROOF_RECEIPT_KEYS: Final = frozenset(
         "empty_rollback_receipt_sha256",
         "retained_audit_set_sha256",
         "install_process_death_boundary_sha256",
+        "install_process_death_arm_receipt_sha256",
         "rollback_process_death_boundary_sha256",
+        "rollback_process_death_arm_receipt_sha256",
         "install_process_death_observed",
         "install_exact_resume_completed",
         "cold_controller_process_restart_terminal_postflight_verified",
@@ -272,6 +307,9 @@ _RECOVERY_RECEIPT_KEYS: Final = frozenset(
         "package_manifest_sha256",
         "controller_runtime_receipt_sha256",
         "recovery_capsule_sha256",
+        "recovery_reservation_claim_sha256",
+        "install_authority_claim_sha256",
+        "start_authority_pair_claimed_atomically",
         "installation_execution_id",
         "installation_receipt_sha256",
         "empty_rollback_execution_id",
@@ -286,10 +324,37 @@ _RECOVERY_RECEIPT_KEYS: Final = frozenset(
         "receipt_sha256",
     }
 )
+_PAIR_ONLY_RECEIPT_KEYS: Final = frozenset(
+    {
+        "schema_version",
+        "result",
+        "candidate_git_commit",
+        "candidate_git_tree",
+        "package_manifest_sha256",
+        "controller_runtime_receipt_sha256",
+        "recovery_capsule_sha256",
+        "recovery_reservation_claim_sha256",
+        "install_authority_claim_sha256",
+        "start_authority_pair_claimed_atomically",
+        "expected_installation_execution_id",
+        "install_execution_directory_present",
+        "installation_receipt_present",
+        "rollback_authority_claim_present",
+        "install_initiated_by_recovery_mode",
+        "provider_calls",
+        "production_data_read",
+        "activation_performed",
+        "receipt_sha256",
+    }
+)
 
 
 class LiveProofError(RuntimeError):
     """Content-free refusal from the disposable live proof runner."""
+
+
+class _CooperativeBoundaryStopAbort(BaseException):
+    """Bypass controller recovery after an exact committed stop boundary."""
 
 
 class WorkerMode(str, Enum):
@@ -303,6 +368,8 @@ class WorkerMode(str, Enum):
 
 
 class RunnerMode(str, Enum):
+    PRECLAIM_STAGED_START = "preclaim-staged-start"
+    VERIFY_PUBLISHED_START_PAIR = "verify-published-start-pair"
     START_OR_RECOVER = "start-or-recover"
     RECOVER_ONLY = "recover-only"
 
@@ -380,6 +447,21 @@ class ProofInputs:
             != _INVOKED_RELEASE_PACKAGE_SHA256
         ):
             raise LiveProofError("phase9_live_proof_release_identity_mismatch")
+
+
+@dataclass(frozen=True, slots=True)
+class BoundaryJournalEvidence:
+    boundary_kind: str
+    execution_id: str
+    journal_name: str
+    plan_sha256: str
+    attempt_id: str
+    boundary_step_id: str
+    boundary_record_sequence: int
+    boundary_record_sha256: str
+    journal_sequence_at_arm: int
+    journal_head_sha256_at_arm: str
+    journal_record_sha256s: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -800,23 +882,31 @@ def _stable_file_identity(value: os.stat_result) -> tuple[int, ...]:
     )
 
 
-def _load_verified_recovery_capsule(
+def _load_verified_recovery_capsule_member(
     inputs: ProofInputs,
     artifacts: Mapping[str, bytes],
     *,
+    path: Path,
+    allowed_link_counts: frozenset[int],
     require_current: bool = True,
-) -> VerifiedRecoveryCapsule:
-    if type(require_current) is not bool:
+) -> tuple[VerifiedRecoveryCapsule, tuple[int, int]]:
+    if (
+        type(require_current) is not bool
+        or type(path) is not Path
+        or path not in {RECOVERY_CAPSULE_PATH, RECOVERY_CAPSULE_STAGING_PATH}
+        or not allowed_link_counts
+        or not allowed_link_counts.issubset({1, 2})
+    ):
         raise LiveProofError("phase9_live_proof_recovery_capsule_policy_invalid")
     parent_fd = descriptor = -1
     try:
         flags = os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
         parent_fd = os.open(
-            RECOVERY_CAPSULE_PATH.parent,
+            path.parent,
             flags | getattr(os, "O_DIRECTORY", 0),
         )
         parent = os.fstat(parent_fd)
-        named_parent = RECOVERY_CAPSULE_PATH.parent.stat(
+        named_parent = path.parent.stat(
             follow_symlinks=False
         )
         if (
@@ -831,13 +921,13 @@ def _load_verified_recovery_capsule(
                 "phase9_live_proof_recovery_capsule_parent_invalid"
             )
         descriptor = os.open(
-            RECOVERY_CAPSULE_PATH.name,
+            path.name,
             flags,
             dir_fd=parent_fd,
         )
         opened = os.fstat(descriptor)
         named = os.stat(
-            RECOVERY_CAPSULE_PATH.name,
+            path.name,
             dir_fd=parent_fd,
             follow_symlinks=False,
         )
@@ -846,7 +936,7 @@ def _load_verified_recovery_capsule(
             or stat.S_IMODE(opened.st_mode) != 0o400
             or opened.st_uid != 0
             or opened.st_gid != 0
-            or opened.st_nlink != 1
+            or opened.st_nlink not in allowed_link_counts
             or opened.st_size < 1
             or opened.st_size > 64 * 1024
             or (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)
@@ -855,12 +945,12 @@ def _load_verified_recovery_capsule(
         raw = os.read(descriptor, opened.st_size + 1)
         after = os.fstat(descriptor)
         named_after = os.stat(
-            RECOVERY_CAPSULE_PATH.name,
+            path.name,
             dir_fd=parent_fd,
             follow_symlinks=False
         )
         parent_after = os.fstat(parent_fd)
-        named_parent_after = RECOVERY_CAPSULE_PATH.parent.stat(
+        named_parent_after = path.parent.stat(
             follow_symlinks=False
         )
         if (
@@ -883,12 +973,31 @@ def _load_verified_recovery_capsule(
             os.close(descriptor)
         if parent_fd >= 0:
             os.close(parent_fd)
-    return _verify_recovery_capsule_raw(
+    return (
+        _verify_recovery_capsule_raw(
+            inputs,
+            artifacts,
+            raw,
+            require_current=require_current,
+        ),
+        (opened.st_dev, opened.st_ino),
+    )
+
+
+def _load_verified_recovery_capsule(
+    inputs: ProofInputs,
+    artifacts: Mapping[str, bytes],
+    *,
+    require_current: bool = True,
+) -> VerifiedRecoveryCapsule:
+    capsule, unused_inode = _load_verified_recovery_capsule_member(
         inputs,
         artifacts,
-        raw,
+        path=RECOVERY_CAPSULE_PATH,
+        allowed_link_counts=frozenset({1}),
         require_current=require_current,
     )
+    return capsule
 
 
 def _verify_recovery_capsule_raw(
@@ -1155,18 +1264,14 @@ def _install_scope(
     }
 
 
-def _verified_install_context(
+def _verified_install_context_from_capsule(
     inputs: ProofInputs,
     *,
-    require_current: bool = True,
+    package_manifest: bytes,
+    artifacts: Mapping[str, bytes],
+    runtime_receipt: bytes,
+    capsule: VerifiedRecoveryCapsule,
 ) -> tuple[ProofContext, VerifiedRecoveryCapsule]:
-    package_manifest, artifacts = _load_release(inputs)
-    runtime_receipt = _load_runtime_receipt(inputs)
-    capsule = _load_verified_recovery_capsule(
-        inputs,
-        artifacts,
-        require_current=require_current,
-    )
     documents = capsule.install_documents
     scope_document = _parse_canonical_object(
         documents.scope, "phase9_live_proof_scope_invalid"
@@ -1245,6 +1350,71 @@ def _verified_install_context(
         ),
         capsule,
     )
+
+
+def _verified_install_context(
+    inputs: ProofInputs,
+    *,
+    require_current: bool = True,
+) -> tuple[ProofContext, VerifiedRecoveryCapsule]:
+    package_manifest, artifacts = _load_release(inputs)
+    runtime_receipt = _load_runtime_receipt(inputs)
+    capsule = _load_verified_recovery_capsule(
+        inputs,
+        artifacts,
+        require_current=require_current,
+    )
+    return _verified_install_context_from_capsule(
+        inputs,
+        package_manifest=package_manifest,
+        artifacts=artifacts,
+        runtime_receipt=runtime_receipt,
+        capsule=capsule,
+    )
+
+
+def _verified_staged_install_context(
+    inputs: ProofInputs,
+) -> tuple[ProofContext, VerifiedRecoveryCapsule, tuple[int, int]]:
+    package_manifest, artifacts = _load_release(inputs)
+    runtime_receipt = _load_runtime_receipt(inputs)
+    capsule, inode = _load_verified_recovery_capsule_member(
+        inputs,
+        artifacts,
+        path=RECOVERY_CAPSULE_STAGING_PATH,
+        allowed_link_counts=frozenset({1, 2}),
+        require_current=False,
+    )
+    context, verified = _verified_install_context_from_capsule(
+        inputs,
+        package_manifest=package_manifest,
+        artifacts=artifacts,
+        runtime_receipt=runtime_receipt,
+        capsule=capsule,
+    )
+    return context, verified, inode
+
+
+def _verified_published_install_context(
+    inputs: ProofInputs,
+) -> tuple[ProofContext, VerifiedRecoveryCapsule, tuple[int, int]]:
+    package_manifest, artifacts = _load_release(inputs)
+    runtime_receipt = _load_runtime_receipt(inputs)
+    capsule, inode = _load_verified_recovery_capsule_member(
+        inputs,
+        artifacts,
+        path=RECOVERY_CAPSULE_PATH,
+        allowed_link_counts=frozenset({1, 2}),
+        require_current=False,
+    )
+    context, verified = _verified_install_context_from_capsule(
+        inputs,
+        package_manifest=package_manifest,
+        artifacts=artifacts,
+        runtime_receipt=runtime_receipt,
+        capsule=capsule,
+    )
+    return context, verified, inode
 
 
 def _verify_preexisting_root_directory(path: Path, mode: int) -> None:
@@ -1331,7 +1501,7 @@ def _authority_state(*, allow_create: bool = True) -> AuthorityState:
         metadata = AUTHORITY_STATE_PATH.stat(follow_symlinks=False)
         if not stat.S_ISREG(metadata.st_mode):
             raise LiveProofError("phase9_live_proof_authority_state_invalid")
-        create = False
+        create = allow_create
     except FileNotFoundError:
         if not allow_create:
             raise LiveProofError(
@@ -1425,19 +1595,232 @@ def _claim_or_verify_recovery_reservation(
     )
 
 
-def _claim_recovery_reservation_before_install(
+def _start_authority_pair_identities(context: ProofContext) -> tuple[object, object]:
+    """Derive the exact reservation/install claim pair from one verified capsule."""
+
+    try:
+        reservation = recovery_reservation_binding(
+            context.verified_recovery_delegation_capability
+        )
+        install = _install_authority_material(context.verified_scope_capability)
+        document = context.recovery_capsule.document
+        if (
+            reservation.installation_execution_id != install["execution_id"]
+            or reservation.not_before != document.get("not_before")
+            or reservation.expires_at != document.get("expires_at")
+            or reservation.nonce == install["nonce"]
+            or reservation.nonce == context.recovery_capsule.rollback_nonce
+            or install["nonce"] == context.recovery_capsule.rollback_nonce
+        ):
+            raise LiveProofError(
+                "phase9_live_proof_start_authority_pair_binding_mismatch"
+            )
+        reservation_identity = derive_nonce_claim_identity(
+            reservation.nonce,
+            operation=reservation.operation,
+            execution_sha256=reservation.execution_sha256,
+            authorization_sha256=reservation.authorization_sha256,
+            scope_sha256=reservation.scope_sha256,
+            trust_bundle_sha256=reservation.trust_bundle_sha256,
+        )
+        install_identity = derive_nonce_claim_identity(
+            install["nonce"],
+            operation=install["operation"],
+            execution_sha256=install["execution_sha256"],
+            authorization_sha256=install["authorization_sha256"],
+            scope_sha256=install["scope_sha256"],
+            trust_bundle_sha256=install["trust_bundle_sha256"],
+        )
+    except LiveProofError:
+        raise
+    except Exception as error:
+        raise LiveProofError(
+            "phase9_live_proof_start_authority_pair_invalid"
+        ) from error
+    if (
+        reservation_identity.nonce_sha256 == install_identity.nonce_sha256
+        or reservation_identity.claim_sha256 == install_identity.claim_sha256
+    ):
+        raise LiveProofError("phase9_live_proof_start_authority_pair_not_distinct")
+    return reservation_identity, install_identity
+
+
+def _claim_or_verify_start_authority_pair(
+    context: ProofContext,
+    *,
+    state: AuthorityState,
+    held_lock: object,
+    allow_new_pair: bool,
+) -> Mapping[str, object]:
+    """Create both start claims atomically, or reverify the exact durable pair."""
+
+    if type(allow_new_pair) is not bool:
+        raise LiveProofError("phase9_live_proof_start_authority_pair_invalid")
+    reservation_identity, install_identity = _start_authority_pair_identities(context)
+    document = context.recovery_capsule.document
+    try:
+        not_before = _parse_utc(document.get("not_before"))
+        expires_at = _parse_utc(document.get("expires_at"))
+        reading = read_trusted_utc(KernelUtcClock())
+        if reading.observed_at < not_before:
+            raise LiveProofError(
+                "phase9_live_proof_start_authority_pair_not_yet_valid"
+            )
+        current = reading.observed_at < expires_at
+        pair = state.claim_exact_nonce_pair(
+            reservation_identity,
+            install_identity,
+            held_lock=held_lock,
+            allow_new_pair=allow_new_pair and current,
+        )
+    except AuthorityClaimNotAllowedError as error:
+        code = (
+            "phase9_live_proof_start_authority_pair_expired"
+            if allow_new_pair and not current
+            else "phase9_live_proof_start_authority_pair_absent"
+        )
+        raise LiveProofError(code) from error
+    except LiveProofError:
+        raise
+    except Exception as error:
+        raise LiveProofError(
+            "phase9_live_proof_start_authority_pair_invalid"
+        ) from error
+    allowed_results = (
+        {"nonce_claimed", "exact_execution_resumed"}
+        if allow_new_pair
+        else {"exact_execution_resumed"}
+    )
+    if (
+        pair.result not in allowed_results
+        or pair.first.claim_sha256 != reservation_identity.claim_sha256
+        or pair.second.claim_sha256 != install_identity.claim_sha256
+        or pair.first.operation_sha256
+        != authority_operation_sha256(RECOVERY_RESERVATION_OPERATION)
+        or pair.second.operation_sha256
+        != authority_operation_sha256(authority.AUTHORIZATION_OPERATION)
+    ):
+        raise LiveProofError("phase9_live_proof_start_authority_pair_invalid")
+    return MappingProxyType(
+        {
+            "result": pair.result,
+            "recovery_reservation_claim_sha256": pair.first.claim_sha256,
+            "install_authority_claim_sha256": pair.second.claim_sha256,
+            "start_authority_pair_claimed_atomically": True,
+        }
+    )
+
+
+def _start_authority_pair_receipt(
+    *,
+    pair: Mapping[str, object],
+    capsule: VerifiedRecoveryCapsule,
+    inode: tuple[int, int],
+) -> Mapping[str, object]:
+    receipt = {
+        "result": pair["result"],
+        "recovery_capsule_sha256": _sha(capsule.raw),
+        "recovery_capsule_device": inode[0],
+        "recovery_capsule_inode": inode[1],
+        "recovery_reservation_claim_sha256": pair[
+            "recovery_reservation_claim_sha256"
+        ],
+        "install_authority_claim_sha256": pair[
+            "install_authority_claim_sha256"
+        ],
+        "start_authority_pair_claimed_atomically": True,
+    }
+    if (
+        receipt["result"] not in {"nonce_claimed", "exact_execution_resumed"}
+        or any(
+            type(receipt[key]) is not str
+            or _HASH_RE.fullmatch(str(receipt[key])) is None
+            for key in (
+                "recovery_capsule_sha256",
+                "recovery_reservation_claim_sha256",
+                "install_authority_claim_sha256",
+            )
+        )
+        or type(receipt["recovery_capsule_device"]) is not int
+        or receipt["recovery_capsule_device"] < 0
+        or type(receipt["recovery_capsule_inode"]) is not int
+        or receipt["recovery_capsule_inode"] <= 0
+    ):
+        raise LiveProofError("phase9_live_proof_start_authority_pair_invalid")
+    return MappingProxyType(receipt)
+
+
+def preclaim_staged_start_authority_pair(
+    inputs: ProofInputs,
+) -> Mapping[str, object]:
+    """Atomically claim the pair from the one complete unpublished capsule."""
+
+    _verify_host_clock_synchronized()
+    _prepare_fixed_substrate()
+    context, capsule, inode = _verified_staged_install_context(inputs)
+    with GlobalExecutionLock(GLOBAL_LOCK_PATH, expected_uid=0) as lock:
+        held = lock.held_capability()
+        state = _authority_state(allow_create=True)
+        pair = _claim_or_verify_start_authority_pair(
+            context,
+            state=state,
+            held_lock=held,
+            allow_new_pair=True,
+        )
+        observed, observed_inode = _load_verified_recovery_capsule_member(
+            inputs,
+            context.artifacts,
+            path=RECOVERY_CAPSULE_STAGING_PATH,
+            allowed_link_counts=frozenset({1, 2}),
+            require_current=False,
+        )
+        if observed.raw != capsule.raw or observed_inode != inode:
+            raise LiveProofError(
+                "phase9_live_proof_staged_recovery_capsule_changed"
+            )
+    return _start_authority_pair_receipt(
+        pair=pair,
+        capsule=capsule,
+        inode=inode,
+    )
+
+
+def verify_published_start_authority_pair(
+    inputs: ProofInputs,
+) -> Mapping[str, object]:
+    """Reverify, without creating, the pair behind a published capsule."""
+
+    _verify_host_clock_synchronized()
+    _prepare_fixed_substrate()
+    context, capsule, inode = _verified_published_install_context(inputs)
+    with GlobalExecutionLock(GLOBAL_LOCK_PATH, expected_uid=0) as lock:
+        held = lock.held_capability()
+        state = _authority_state(allow_create=False)
+        pair = _claim_or_verify_start_authority_pair(
+            context,
+            state=state,
+            held_lock=held,
+            allow_new_pair=False,
+        )
+    return _start_authority_pair_receipt(
+        pair=pair,
+        capsule=capsule,
+        inode=inode,
+    )
+
+
+def _verify_start_authority_pair_before_install(
     context: ProofContext,
 ) -> Mapping[str, object]:
     with GlobalExecutionLock(GLOBAL_LOCK_PATH, expected_uid=0) as lock:
         held = lock.held_capability()
         _verify_host_clock_synchronized()
-        state = _authority_state(allow_create=True)
-        return _claim_or_verify_recovery_reservation(
+        state = _authority_state(allow_create=False)
+        return _claim_or_verify_start_authority_pair(
             context,
             state=state,
             held_lock=held,
-            allow_new_claim=True,
-            require_current=True,
+            allow_new_pair=False,
         )
 
 
@@ -1996,6 +2379,89 @@ def _dispatch_worker(
     raise LiveProofError("phase9_live_proof_worker_mode_refused")
 
 
+def _cooperative_boundary_target(
+    mode: WorkerMode,
+    boundary_kind: str | None,
+) -> tuple[type[object], str, str] | None:
+    """Select the only two proof-only post-fsync stop boundaries."""
+
+    if boundary_kind is None:
+        return None
+    if (
+        boundary_kind == process_death_arm_receipt.INSTALL_BOUNDARY_KIND
+        and mode is WorkerMode.RESUME_INSTALL
+    ):
+        return DurableJournal, "append_journal", INSTALL_KILL_STEP
+    if (
+        boundary_kind
+        == process_death_arm_receipt.EMPTY_ROLLBACK_BOUNDARY_KIND
+        and mode is WorkerMode.ROLLBACK
+    ):
+        return DurableRollbackJournal, "append", ROLLBACK_KILL_STEP
+    raise LiveProofError(
+        "phase9_live_proof_cooperative_stop_boundary_invalid"
+    )
+
+
+def _dispatch_worker_with_cooperative_boundary_stop(
+    mode: WorkerMode,
+    context: ProofContext,
+    *,
+    boundary_kind: str | None,
+) -> Mapping[str, object]:
+    """Self-stop immediately after the exact durable APPLIED append returns.
+
+    The patch exists only inside one forked sealed proof worker.  The public
+    install and rollback entrypoints and their dependency surfaces remain
+    unchanged.  If the worker is ever continued instead of killed, it refuses
+    before the controller can dispatch the next effect.
+    """
+
+    target = _cooperative_boundary_target(mode, boundary_kind)
+    if target is None:
+        return _dispatch_worker(mode, context)
+    journal_type, method_name, step_id = target
+    original = getattr(journal_type, method_name, None)
+    if not callable(original):
+        raise LiveProofError(
+            "phase9_live_proof_cooperative_stop_boundary_invalid"
+        )
+    stopped = False
+
+    def append_then_stop(instance: object, record: object) -> None:
+        nonlocal stopped
+        original(instance, record)
+        if (
+            getattr(record, "step_id", None) == step_id
+            and getattr(record, "event", None) == JOURNAL_APPLIED_EVENT
+        ):
+            if stopped:
+                raise _CooperativeBoundaryStopAbort(
+                    "phase9_live_proof_cooperative_stop_reentered"
+                )
+            stopped = True
+            try:
+                os.kill(os.getpid(), signal.SIGSTOP)
+            except OSError as error:
+                raise _CooperativeBoundaryStopAbort(
+                    "phase9_live_proof_cooperative_stop_failed"
+                ) from error
+            raise _CooperativeBoundaryStopAbort(
+                "phase9_live_proof_cooperative_stop_unexpectedly_resumed"
+            )
+
+    setattr(journal_type, method_name, append_then_stop)
+    try:
+        result = _dispatch_worker(mode, context)
+    finally:
+        setattr(journal_type, method_name, original)
+    if not stopped:
+        raise LiveProofError(
+            "phase9_live_proof_cooperative_stop_boundary_not_reached"
+        )
+    return result
+
+
 def _child_write(descriptor: int, value: Mapping[str, object]) -> None:
     raw = _canonical(value)
     if len(raw) > MAX_WORKER_RESULT_BYTES:
@@ -2008,15 +2474,76 @@ def _child_write(descriptor: int, value: Mapping[str, object]) -> None:
         view = view[written:]
 
 
+def _arm_worker_parent_death(expected_parent_pid: int) -> None:
+    """Kill an orphaned Linux worker before it can dispatch any effect."""
+
+    if (
+        sys.platform != "linux"
+        or type(expected_parent_pid) is not int
+        or expected_parent_pid <= 1
+    ):
+        raise LiveProofError("phase9_live_proof_worker_parent_fence_invalid")
+    try:
+        library = ctypes.CDLL(None, use_errno=True)
+        prctl = library.prctl
+        prctl.argtypes = (
+            ctypes.c_int,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+        )
+        prctl.restype = ctypes.c_int
+        result = prctl(
+            PR_SET_PDEATHSIG,
+            int(signal.SIGKILL),
+            0,
+            0,
+            0,
+        )
+    except (AttributeError, OSError, TypeError, ValueError) as error:
+        raise LiveProofError(
+            "phase9_live_proof_worker_parent_fence_invalid"
+        ) from error
+    if result != 0:
+        raise LiveProofError("phase9_live_proof_worker_parent_fence_invalid")
+    # PR_SET_PDEATHSIG does not retroactively signal when the parent died
+    # between fork and prctl.  Refuse that race before dispatch.
+    if os.getppid() != expected_parent_pid:
+        try:
+            os.kill(os.getpid(), signal.SIGKILL)
+        finally:
+            os._exit(1)
+
+
+def _adopt_inherited_live_proof_guard() -> GlobalExecutionLock:
+    """Revalidate the issuer-owned operation guard inside each worker."""
+
+    try:
+        return GlobalExecutionLock.from_inherited_descriptor(
+            LIVE_PROOF_GUARD_PATH,
+            LIVE_PROOF_GUARD_FD,
+            expected_uid=0,
+            expected_gid=0,
+        )
+    except Exception as error:
+        raise LiveProofError("phase9_live_proof_worker_guard_invalid") from error
+
+
 def _fork_worker(
-    mode: WorkerMode, context: ProofContext
+    mode: WorkerMode,
+    context: ProofContext,
+    *,
+    cooperative_boundary_kind: str | None = None,
 ) -> tuple[int, int]:
+    _cooperative_boundary_target(mode, cooperative_boundary_kind)
     if not hasattr(os, "fork"):
         raise LiveProofError("phase9_live_proof_linux_fork_required")
     try:
         read_fd, write_fd = os.pipe()
     except OSError as error:
         raise LiveProofError("phase9_live_proof_worker_pipe_failed") from error
+    expected_parent_pid = os.getpid()
     try:
         pid = os.fork()
     except OSError as error:
@@ -2030,9 +2557,15 @@ def _fork_worker(
         os.close(read_fd)
         exit_code = 1
         try:
-            result = _dispatch_worker(mode, context)
-            _child_write(write_fd, {"ok": True, "result": dict(result)})
-            exit_code = 0
+            _arm_worker_parent_death(expected_parent_pid)
+            with _adopt_inherited_live_proof_guard():
+                result = _dispatch_worker_with_cooperative_boundary_stop(
+                    mode,
+                    context,
+                    boundary_kind=cooperative_boundary_kind,
+                )
+                _child_write(write_fd, {"ok": True, "result": dict(result)})
+                exit_code = 0
         except BaseException as error:
             code = str(error)
             if not code or any(character in code for character in "\r\n\x00"):
@@ -2218,6 +2751,80 @@ def _terminate_and_reap_worker(
         time.sleep(POLL_INTERVAL_SECONDS)
 
 
+def _verify_stopped_worker_holds_global_execution_lock() -> bool:
+    """Prove the stopped effect worker still excludes another executor."""
+
+    try:
+        unexpected = GlobalExecutionLock(
+            GLOBAL_LOCK_PATH,
+            expected_uid=0,
+            expected_gid=0,
+        )
+    except ExecutionLockBusyError:
+        return True
+    except Exception as error:
+        raise LiveProofError(
+            "phase9_live_proof_global_lock_exclusion_unproved"
+        ) from error
+    else:
+        unexpected.close()
+        raise LiveProofError(
+            "phase9_live_proof_global_lock_exclusion_unproved"
+        )
+
+
+def _verify_stopped_worker_has_no_children(pid: int) -> bool:
+    """Require one stopped task and an empty direct child-process set."""
+
+    if (
+        sys.platform != "linux"
+        or type(pid) is not int
+        or pid <= 1
+        or getattr(os, "O_NOFOLLOW", 0) == 0
+    ):
+        raise LiveProofError(
+            "phase9_live_proof_worker_child_exclusion_unproved"
+        )
+    task_root = Path(f"/proc/{pid}/task")
+    try:
+        with os.scandir(task_root) as entries:
+            task_ids = tuple(
+                sorted(
+                    entry.name
+                    for entry in entries
+                    if entry.is_dir(follow_symlinks=False)
+                )
+            )
+    except OSError as error:
+        raise LiveProofError(
+            "phase9_live_proof_worker_child_exclusion_unproved"
+        ) from error
+    if task_ids != (str(pid),):
+        raise LiveProofError(
+            "phase9_live_proof_worker_child_exclusion_unproved"
+        )
+    path = task_root / str(pid) / "children"
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            path,
+            os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
+        )
+        raw = os.read(descriptor, 4097)
+    except OSError as error:
+        raise LiveProofError(
+            "phase9_live_proof_worker_child_exclusion_unproved"
+        ) from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    if len(raw) > 4096 or raw.strip():
+        raise LiveProofError(
+            "phase9_live_proof_worker_child_exclusion_unproved"
+        )
+    return True
+
+
 def _execution_directories() -> frozenset[str]:
     names: set[str] = set()
     try:
@@ -2255,6 +2862,93 @@ def _journal_has_boundary(path: Path, step_id: str) -> bool:
     return False
 
 
+def _boundary_journal_evidence(
+    *,
+    context: ProofContext,
+    boundary_kind: str,
+    execution_id: str,
+    journal_name: str,
+    step_id: str,
+) -> BoundaryJournalEvidence:
+    """Read one stopped worker's complete, hash-chained boundary state."""
+
+    _require_hash(execution_id)
+    if boundary_kind == "install":
+        if journal_name != "journal.jsonl" or step_id != INSTALL_KILL_STEP:
+            raise LiveProofError("phase9_live_proof_boundary_identity_invalid")
+        expected_plan = verified_package_evidence(
+            context.verified_package_capability
+        ).controller_model_sha256
+        attempt_pattern = _INSTALL_ATTEMPT_RE
+    elif boundary_kind == "empty_rollback":
+        if journal_name != "rollback.jsonl" or step_id != ROLLBACK_KILL_STEP:
+            raise LiveProofError("phase9_live_proof_boundary_identity_invalid")
+        expected_plan = rollback_capability_evidence(
+            _verified_rollback_capability(context)
+        ).rollback_plan_sha256
+        attempt_pattern = _ROLLBACK_ATTEMPT_RE
+    else:
+        raise LiveProofError("phase9_live_proof_boundary_identity_invalid")
+    path = EXECUTIONS_ROOT / execution_id / journal_name
+    raw = _read_regular_no_follow(path, maximum=16 * 1024 * 1024)
+    lines = raw.splitlines()
+    if not lines or not raw.endswith(b"\n"):
+        raise LiveProofError("phase9_live_proof_boundary_journal_invalid")
+    first = _parse_canonical_object(
+        lines[0],
+        "phase9_live_proof_boundary_journal_invalid",
+    )
+    attempt_id = first.get("attempt_id")
+    if (
+        first.get("plan_sha256") != expected_plan
+        or type(attempt_id) is not str
+        or attempt_pattern.fullmatch(attempt_id) is None
+    ):
+        raise LiveProofError("phase9_live_proof_boundary_journal_invalid")
+    try:
+        if boundary_kind == "install":
+            records = parse_durable_journal_bytes(
+                raw,
+                expected_plan_sha256=expected_plan,
+                expected_attempt_id=attempt_id,
+            )
+        else:
+            records = parse_rollback_journal_bytes(
+                raw,
+                plan_sha256=expected_plan,
+                attempt_id=attempt_id,
+            )
+    except (DurableJournalError, DurableRollbackJournalError) as error:
+        raise LiveProofError(
+            "phase9_live_proof_boundary_journal_invalid"
+        ) from error
+    matches = tuple(
+        record
+        for record in records
+        if record.step_id == step_id
+        and record.event == JOURNAL_APPLIED_EVENT
+    )
+    if len(matches) != 1 or not records:
+        raise LiveProofError("phase9_live_proof_boundary_journal_invalid")
+    boundary = matches[0]
+    head = records[-1]
+    return BoundaryJournalEvidence(
+        boundary_kind=boundary_kind,
+        execution_id=execution_id,
+        journal_name=journal_name,
+        plan_sha256=expected_plan,
+        attempt_id=attempt_id,
+        boundary_step_id=step_id,
+        boundary_record_sequence=boundary.sequence,
+        boundary_record_sha256=boundary.record_sha256,
+        journal_sequence_at_arm=len(records),
+        journal_head_sha256_at_arm=head.record_sha256,
+        journal_record_sha256s=tuple(
+            record.record_sha256 for record in records
+        ),
+    )
+
+
 def _install_journal_compensation_complete(path: Path) -> bool:
     """Read one strict install journal terminal state; malformed bytes refuse."""
 
@@ -2287,15 +2981,90 @@ def _install_journal_compensation_complete(path: Path) -> bool:
     )
 
 
+def _build_process_death_arm_receipt(
+    *,
+    context: ProofContext,
+    evidence: BoundaryJournalEvidence,
+    worker_pid: int,
+    recovery_reservation_claim_sha256: str,
+    install_authority_claim_sha256: str,
+) -> Mapping[str, object]:
+    """Bind a stopped owned worker to its exact durable journal boundary."""
+
+    if type(worker_pid) is not int or worker_pid <= 1:
+        raise LiveProofError("phase9_live_proof_worker_identity_invalid")
+    _require_hash(recovery_reservation_claim_sha256)
+    _require_hash(install_authority_claim_sha256)
+    worker_identity_sha256 = _document_sha(
+        {
+            "schema_version": "governed-memory-phase9-owned-worker-identity-v1",
+            "runner_pid": os.getpid(),
+            "worker_pid": worker_pid,
+        }
+    )
+    receipt: dict[str, object] = {
+        "schema_version": (
+            process_death_arm_receipt.PROCESS_DEATH_ARM_RECEIPT_SCHEMA
+        ),
+        "result": (
+            process_death_arm_receipt.PROCESS_DEATH_ARM_RECEIPT_RESULT
+        ),
+        "boundary_kind": evidence.boundary_kind,
+        "candidate_git_commit": context.inputs.candidate_git_commit,
+        "candidate_git_tree": context.inputs.candidate_git_tree,
+        "package_manifest_sha256": context.inputs.package_manifest_sha256,
+        "controller_runtime_receipt_sha256": (
+            context.inputs.controller_runtime_receipt_sha256
+        ),
+        "recovery_capsule_sha256": _sha(context.recovery_capsule.raw),
+        "recovery_reservation_claim_sha256": (
+            recovery_reservation_claim_sha256
+        ),
+        "install_authority_claim_sha256": install_authority_claim_sha256,
+        "execution_id": evidence.execution_id,
+        "journal_name": evidence.journal_name,
+        "journal_plan_sha256": evidence.plan_sha256,
+        "journal_attempt_id": evidence.attempt_id,
+        "boundary_step_id": evidence.boundary_step_id,
+        "boundary_event": JOURNAL_APPLIED_EVENT,
+        "boundary_record_sequence": evidence.boundary_record_sequence,
+        "boundary_record_sha256": evidence.boundary_record_sha256,
+        "journal_sequence_at_arm": evidence.journal_sequence_at_arm,
+        "journal_head_sha256_at_arm": evidence.journal_head_sha256_at_arm,
+        "worker_identity_sha256": worker_identity_sha256,
+        "worker_parent_death_sigkill_armed": True,
+        "worker_cooperative_post_fsync_sigstop_observed": True,
+        "worker_sigstop_observed": True,
+        "worker_child_process_set_empty_at_arm": True,
+        "global_execution_lock_exclusion_observed": True,
+        "sigkill_required_before_resume": True,
+    }
+    receipt["receipt_sha256"] = _document_sha(receipt)
+    try:
+        return process_death_arm_receipt.verify_process_death_arm_receipt(
+            receipt,
+            expected_execution_id=evidence.execution_id,
+            expected_boundary_kind=evidence.boundary_kind,
+        )
+    except process_death_arm_receipt.ProcessDeathArmReceiptError as error:
+        raise LiveProofError(
+            "phase9_live_proof_process_death_arm_invalid"
+        ) from error
+
+
 def _kill_after_new_durable_boundary(
     *,
+    context: ProofContext,
+    boundary_kind: str,
     pid: int,
     read_fd: int,
     expected_execution_id: str,
     allowed_existing_directories: frozenset[str],
     journal_name: str,
     step_id: str,
-) -> str:
+    recovery_reservation_claim_sha256: str,
+    install_authority_claim_sha256: str,
+) -> Mapping[str, object]:
     _require_hash(expected_execution_id)
     if (
         type(allowed_existing_directories) is not frozenset
@@ -2311,8 +3080,11 @@ def _kill_after_new_durable_boundary(
     descriptor_owned = True
     try:
         while time.monotonic() < deadline:
-            waited, status = os.waitpid(pid, os.WNOHANG)
-            if waited == pid:
+            waited, status = os.waitpid(
+                pid,
+                os.WNOHANG | os.WUNTRACED,
+            )
+            if waited == pid and not os.WIFSTOPPED(status):
                 child_owned = False
                 raw = _read_pipe(read_fd)
                 descriptor_owned = False
@@ -2328,7 +3100,7 @@ def _kill_after_new_durable_boundary(
                     if type(code) is str
                     else "phase9_live_proof_worker_exited_before_boundary"
                 )
-            if waited != 0:
+            if waited not in (0, pid):
                 raise LiveProofError("phase9_live_proof_worker_wait_failed")
             observed_directories = _execution_directories()
             unexpected = observed_directories - (
@@ -2339,23 +3111,73 @@ def _kill_after_new_durable_boundary(
                 raise LiveProofError(
                     "phase9_live_proof_parallel_execution_detected"
                 )
-            if expected_execution_id in observed_directories:
-                journal_path = (
-                    EXECUTIONS_ROOT / expected_execution_id / journal_name
+            if waited == pid:
+                if (
+                    os.WSTOPSIG(status) != signal.SIGSTOP
+                    or expected_execution_id not in observed_directories
+                ):
+                    raise LiveProofError(
+                        "phase9_live_proof_worker_stopped_state_invalid"
+                    )
+                evidence = _boundary_journal_evidence(
+                    context=context,
+                    boundary_kind=boundary_kind,
+                    execution_id=expected_execution_id,
+                    journal_name=journal_name,
+                    step_id=step_id,
                 )
-                if _journal_has_boundary(journal_path, step_id):
-                    status = _terminate_and_reap_worker(pid, read_fd)
-                    child_owned = False
-                    descriptor_owned = False
-                    if (
-                        status is None
-                        or not os.WIFSIGNALED(status)
-                        or os.WTERMSIG(status) != signal.SIGKILL
-                    ):
-                        raise LiveProofError(
-                            "phase9_live_proof_process_death_unproved"
+                if (
+                    evidence.boundary_record_sequence
+                    != evidence.journal_sequence_at_arm
+                    or evidence.boundary_record_sha256
+                    != evidence.journal_head_sha256_at_arm
+                ):
+                    raise LiveProofError(
+                        "phase9_live_proof_cooperative_stop_boundary_invalid"
+                    )
+                if not _verify_stopped_worker_has_no_children(pid):
+                    raise LiveProofError(
+                        "phase9_live_proof_worker_child_exclusion_unproved"
+                    )
+                if not _verify_stopped_worker_holds_global_execution_lock():
+                    raise LiveProofError(
+                        "phase9_live_proof_global_lock_exclusion_unproved"
+                    )
+                arm = _build_process_death_arm_receipt(
+                    context=context,
+                    evidence=evidence,
+                    worker_pid=pid,
+                    recovery_reservation_claim_sha256=(
+                        recovery_reservation_claim_sha256
+                    ),
+                    install_authority_claim_sha256=(
+                        install_authority_claim_sha256
+                    ),
+                )
+                try:
+                    durable_arm = (
+                        process_death_arm_receipt.persist_process_death_arm_receipt(
+                            arm
                         )
-                    return expected_execution_id
+                    )
+                except (
+                    process_death_arm_receipt.ProcessDeathArmReceiptError
+                ) as error:
+                    raise LiveProofError(
+                        "phase9_live_proof_process_death_arm_persistence_failed"
+                    ) from error
+                status = _terminate_and_reap_worker(pid, read_fd)
+                child_owned = False
+                descriptor_owned = False
+                if (
+                    status is None
+                    or not os.WIFSIGNALED(status)
+                    or os.WTERMSIG(status) != signal.SIGKILL
+                ):
+                    raise LiveProofError(
+                        "phase9_live_proof_process_death_unproved"
+                    )
+                return MappingProxyType(dict(durable_arm))
             time.sleep(POLL_INTERVAL_SECONDS)
         raise LiveProofError("phase9_live_proof_boundary_timeout")
     except BaseException as original_error:
@@ -2378,15 +3200,6 @@ def _kill_after_new_durable_boundary(
         raise original_error
 
 
-def _boundary_sha256(step_id: str) -> str:
-    return _document_sha(
-        {
-            "event": JOURNAL_APPLIED_EVENT,
-            "step_id": step_id,
-        }
-    )
-
-
 def verify_live_proof_receipt(
     receipt: Mapping[str, object],
 ) -> dict[str, object]:
@@ -2402,9 +3215,13 @@ def verify_live_proof_receipt(
         != "one_bounded_disposable_linux_execution_terminal_snapshot"
         or receipt.get("cold_restart_scope")
         != "controller_worker_process_only"
+        or type(receipt.get("exact_rollback_resources_absent_count")) is not int
         or receipt.get("exact_rollback_resources_absent_count") != 15
+        or type(receipt.get("source_postgres_read_count")) is not int
         or receipt.get("source_postgres_read_count") != 0
+        or type(receipt.get("source_postgres_write_count")) is not int
         or receipt.get("source_postgres_write_count") != 0
+        or type(receipt.get("provider_calls")) is not int
         or receipt.get("provider_calls") != 0
         or receipt.get("production_data_read") is not False
         or receipt.get("application_services_installed") is not False
@@ -2437,6 +3254,7 @@ def verify_live_proof_receipt(
         "host_clock_synchronization_preflight_passed",
         "recovery_capsule_published_before_first_install_effect",
         "recovery_reservation_claimed_before_first_install_effect",
+        "start_authority_pair_claimed_atomically",
         "recovery_capsule_retained_at_terminal_observation",
     )
     required_false = (
@@ -2453,6 +3271,7 @@ def verify_live_proof_receipt(
         "live_proof_receipt_schema_sha256",
         "recovery_capsule_sha256",
         "recovery_reservation_claim_sha256",
+        "install_authority_claim_sha256",
         "authorization_text_sha256",
         "installation_execution_id",
         "installation_receipt_sha256",
@@ -2461,7 +3280,9 @@ def verify_live_proof_receipt(
         "empty_rollback_receipt_sha256",
         "retained_audit_set_sha256",
         "install_process_death_boundary_sha256",
+        "install_process_death_arm_receipt_sha256",
         "rollback_process_death_boundary_sha256",
+        "rollback_process_death_arm_receipt_sha256",
     ):
         if type(receipt.get(key)) is not str or _HASH_RE.fullmatch(
             str(receipt[key])
@@ -2493,6 +3314,8 @@ def verify_recovery_receipt(
         or receipt.get("stores_installed") is not False
         or receipt.get("stores_supervisor_installed") is not False
         or receipt.get("install_initiated_by_recovery_mode") is not False
+        or receipt.get("start_authority_pair_claimed_atomically") is not True
+        or type(receipt.get("provider_calls")) is not int
         or receipt.get("provider_calls") != 0
         or receipt.get("production_data_read") is not False
         or receipt.get("activation_performed") is not False
@@ -2502,6 +3325,8 @@ def verify_recovery_receipt(
         "package_manifest_sha256",
         "controller_runtime_receipt_sha256",
         "recovery_capsule_sha256",
+        "recovery_reservation_claim_sha256",
+        "install_authority_claim_sha256",
         "installation_execution_id",
         "installation_receipt_sha256",
         "empty_rollback_execution_id",
@@ -2528,6 +3353,130 @@ def verify_recovery_receipt(
     return receipt
 
 
+def verify_pair_only_receipt(
+    value: Mapping[str, object],
+) -> dict[str, object]:
+    """Verify the safe, non-promotable pair-without-execution state."""
+
+    receipt = dict(value)
+    if (
+        set(receipt) != _PAIR_ONLY_RECEIPT_KEYS
+        or receipt.get("schema_version") != PAIR_ONLY_RECEIPT_SCHEMA
+        or receipt.get("result")
+        != "exact_start_pair_present_install_execution_absent"
+        or receipt.get("start_authority_pair_claimed_atomically") is not True
+        or receipt.get("install_execution_directory_present") is not False
+        or receipt.get("installation_receipt_present") is not False
+        or receipt.get("rollback_authority_claim_present") is not False
+        or receipt.get("install_initiated_by_recovery_mode") is not False
+        or type(receipt.get("provider_calls")) is not int
+        or receipt.get("provider_calls") != 0
+        or receipt.get("production_data_read") is not False
+        or receipt.get("activation_performed") is not False
+    ):
+        raise LiveProofError("phase9_live_proof_pair_only_receipt_invalid")
+    for key in (
+        "package_manifest_sha256",
+        "controller_runtime_receipt_sha256",
+        "recovery_capsule_sha256",
+        "recovery_reservation_claim_sha256",
+        "install_authority_claim_sha256",
+        "expected_installation_execution_id",
+        "receipt_sha256",
+    ):
+        if type(receipt.get(key)) is not str or _HASH_RE.fullmatch(
+            str(receipt[key])
+        ) is None:
+            raise LiveProofError(
+                "phase9_live_proof_pair_only_receipt_invalid"
+            )
+    for key in ("candidate_git_commit", "candidate_git_tree"):
+        if type(receipt.get(key)) is not str or _COMMIT_RE.fullmatch(
+            str(receipt[key])
+        ) is None:
+            raise LiveProofError(
+                "phase9_live_proof_pair_only_receipt_invalid"
+            )
+    if receipt["receipt_sha256"] != _document_sha(
+        {key: item for key, item in receipt.items() if key != "receipt_sha256"}
+    ):
+        raise LiveProofError("phase9_live_proof_pair_only_receipt_invalid")
+    return receipt
+
+
+def _verify_death_arm_against_completed_journal(
+    *,
+    context: ProofContext,
+    arm_receipt: Mapping[str, object],
+    completed_receipt: Mapping[str, object],
+    boundary_kind: str,
+) -> Mapping[str, object]:
+    """Bind one pre-kill arm to the later exact completed journal head."""
+
+    completed = (
+        verify_install_receipt(completed_receipt)
+        if boundary_kind == "install"
+        else verify_empty_rollback_receipt(completed_receipt)
+    )
+    execution_id = str(completed["execution_id"])
+    try:
+        arm = process_death_arm_receipt.verify_process_death_arm_receipt(
+            arm_receipt,
+            expected_execution_id=execution_id,
+            expected_boundary_kind=boundary_kind,
+        )
+    except process_death_arm_receipt.ProcessDeathArmReceiptError as error:
+        raise LiveProofError(
+            "phase9_live_proof_process_death_arm_invalid"
+        ) from error
+    expected_bindings = {
+        "candidate_git_commit": context.inputs.candidate_git_commit,
+        "candidate_git_tree": context.inputs.candidate_git_tree,
+        "package_manifest_sha256": context.inputs.package_manifest_sha256,
+        "controller_runtime_receipt_sha256": (
+            context.inputs.controller_runtime_receipt_sha256
+        ),
+        "recovery_capsule_sha256": _sha(context.recovery_capsule.raw),
+        "execution_id": execution_id,
+        "journal_plan_sha256": completed["plan_sha256"],
+        "journal_attempt_id": completed["attempt_id"],
+    }
+    if any(arm.get(key) != value for key, value in expected_bindings.items()):
+        raise LiveProofError("phase9_live_proof_process_death_arm_mismatch")
+    journal_name = str(arm["journal_name"])
+    step_id = str(arm["boundary_step_id"])
+    evidence = _boundary_journal_evidence(
+        context=context,
+        boundary_kind=boundary_kind,
+        execution_id=execution_id,
+        journal_name=journal_name,
+        step_id=step_id,
+    )
+    arm_sequence = arm.get("journal_sequence_at_arm")
+    boundary_sequence = arm.get("boundary_record_sequence")
+    if (
+        type(arm_sequence) is not int
+        or type(boundary_sequence) is not int
+        or arm_sequence > len(evidence.journal_record_sha256s)
+        or boundary_sequence > len(evidence.journal_record_sha256s)
+        or evidence.journal_record_sha256s[arm_sequence - 1]
+        != arm.get("journal_head_sha256_at_arm")
+        or evidence.journal_record_sha256s[boundary_sequence - 1]
+        != arm.get("boundary_record_sha256")
+        or evidence.boundary_record_sequence != boundary_sequence
+        or evidence.boundary_record_sha256
+        != arm.get("boundary_record_sha256")
+        or evidence.plan_sha256 != completed["plan_sha256"]
+        or evidence.attempt_id != completed["attempt_id"]
+        or len(evidence.journal_record_sha256s)
+        != completed["journal_sequence"]
+        or evidence.journal_record_sha256s[-1]
+        != completed["journal_head_sha256"]
+    ):
+        raise LiveProofError("phase9_live_proof_process_death_arm_mismatch")
+    return MappingProxyType(dict(arm))
+
+
 def _proof_receipt(
     *,
     context: ProofContext,
@@ -2536,9 +3485,32 @@ def _proof_receipt(
     absence: Mapping[str, object],
     host_clock_synchronization_preflight_passed: bool,
     recovery_reservation_claim_sha256: str,
+    install_authority_claim_sha256: str,
+    install_death_arm: Mapping[str, object],
+    rollback_death_arm: Mapping[str, object],
 ) -> dict[str, object]:
     install = verify_install_receipt(install_receipt)
     rollback = verify_empty_rollback_receipt(rollback_receipt)
+    verified_install_arm = _verify_death_arm_against_completed_journal(
+        context=context,
+        arm_receipt=install_death_arm,
+        completed_receipt=install,
+        boundary_kind="install",
+    )
+    verified_rollback_arm = _verify_death_arm_against_completed_journal(
+        context=context,
+        arm_receipt=rollback_death_arm,
+        completed_receipt=rollback,
+        boundary_kind="empty_rollback",
+    )
+    if any(
+        arm.get("recovery_reservation_claim_sha256")
+        != recovery_reservation_claim_sha256
+        or arm.get("install_authority_claim_sha256")
+        != install_authority_claim_sha256
+        for arm in (verified_install_arm, verified_rollback_arm)
+    ):
+        raise LiveProofError("phase9_live_proof_process_death_arm_mismatch")
     schema_raw = context.artifacts.get(LIVE_PROOF_RECEIPT_SCHEMA_RELATIVE)
     if type(schema_raw) is not bytes:
         raise LiveProofError("phase9_live_proof_receipt_schema_missing")
@@ -2558,6 +3530,7 @@ def _proof_receipt(
         or rollback["exact_rollback_resources_absent_count"] != 15
         or host_clock_synchronization_preflight_passed is not True
         or _HASH_RE.fullmatch(recovery_reservation_claim_sha256) is None
+        or _HASH_RE.fullmatch(install_authority_claim_sha256) is None
     ):
         raise LiveProofError("phase9_live_proof_receipt_effect_boundary_invalid")
     terminal_capsule = _load_verified_recovery_capsule(
@@ -2584,6 +3557,8 @@ def _proof_receipt(
         "recovery_reservation_claim_sha256": (
             recovery_reservation_claim_sha256
         ),
+        "install_authority_claim_sha256": install_authority_claim_sha256,
+        "start_authority_pair_claimed_atomically": True,
         "recovery_capsule_published_before_first_install_effect": True,
         "recovery_reservation_claimed_before_first_install_effect": True,
         "ephemeral_private_signer_retained_at_execution_start": False,
@@ -2597,12 +3572,18 @@ def _proof_receipt(
         "retained_audit_set_sha256": rollback[
             "retained_audit_set_sha256"
         ],
-        "install_process_death_boundary_sha256": _boundary_sha256(
-            INSTALL_KILL_STEP
-        ),
-        "rollback_process_death_boundary_sha256": _boundary_sha256(
-            ROLLBACK_KILL_STEP
-        ),
+        "install_process_death_boundary_sha256": verified_install_arm[
+            "boundary_record_sha256"
+        ],
+        "install_process_death_arm_receipt_sha256": verified_install_arm[
+            "receipt_sha256"
+        ],
+        "rollback_process_death_boundary_sha256": verified_rollback_arm[
+            "boundary_record_sha256"
+        ],
+        "rollback_process_death_arm_receipt_sha256": verified_rollback_arm[
+            "receipt_sha256"
+        ],
         "install_process_death_observed": True,
         "install_exact_resume_completed": True,
         "cold_controller_process_restart_terminal_postflight_verified": True,
@@ -2650,6 +3631,73 @@ def _proof_receipt(
     }
     receipt["receipt_sha256"] = _document_sha(receipt)
     return verify_live_proof_receipt(receipt)
+
+
+def _reconstruct_promotable_live_receipt_from_retained_evidence(
+    *,
+    context: ProofContext,
+    install_receipt: Mapping[str, object],
+    rollback_receipt: Mapping[str, object],
+    absence: Mapping[str, object],
+) -> Mapping[str, object] | None:
+    """Rebuild success only from both durable pre-kill arm receipts."""
+
+    install = verify_install_receipt(install_receipt)
+    rollback = verify_empty_rollback_receipt(rollback_receipt)
+    try:
+        install_arm = (
+            process_death_arm_receipt.read_process_death_arm_receipt_if_present(
+                execution_id=str(install["execution_id"]),
+                boundary_kind="install",
+            )
+        )
+        rollback_arm = (
+            process_death_arm_receipt.read_process_death_arm_receipt_if_present(
+                execution_id=str(rollback["execution_id"]),
+                boundary_kind="empty_rollback",
+            )
+        )
+    except process_death_arm_receipt.ProcessDeathArmReceiptError as error:
+        raise LiveProofError(
+            "phase9_live_proof_process_death_arm_invalid"
+        ) from error
+    if install_arm is None or rollback_arm is None:
+        # Zero or one arm cannot prove both commanded process deaths.  Exact
+        # cleanup remains valid but deliberately non-promotable.
+        return None
+    rollback_documents = _build_rollback_documents(
+        context=context,
+        install_receipt=install,
+    )
+    selected = replace(context, rollback_documents=rollback_documents)
+    reservation_identity, install_identity = _start_authority_pair_identities(
+        selected
+    )
+    verified = _proof_receipt(
+        context=selected,
+        install_receipt=install,
+        rollback_receipt=rollback,
+        absence=absence,
+        host_clock_synchronization_preflight_passed=True,
+        recovery_reservation_claim_sha256=(
+            reservation_identity.claim_sha256
+        ),
+        install_authority_claim_sha256=install_identity.claim_sha256,
+        install_death_arm=install_arm,
+        rollback_death_arm=rollback_arm,
+    )
+    try:
+        durable = persist_verified_promotable_live_receipt(
+            inputs=selected.inputs,
+            artifacts=selected.artifacts,
+            capsule_sha256=_sha(selected.recovery_capsule.raw),
+            receipt=verified,
+        )
+    except DurableLiveProofReceiptError as error:
+        raise LiveProofError(
+            "phase9_live_proof_durable_receipt_persistence_failed"
+        ) from error
+    return MappingProxyType(dict(durable))
 
 
 def _complete_exact_rollback_recovery(
@@ -2850,36 +3898,7 @@ def _recovery_selection_worker(
                 raise LiveProofError(
                     "phase9_live_proof_recovery_state_inconsistent"
                 )
-            if allow_start:
-                reservation = _claim_or_verify_recovery_reservation(
-                    context,
-                    state=state,
-                    held_lock=held,
-                    allow_new_claim=True,
-                    require_current=True,
-                )
-                if reservation.get("result") != "nonce_claimed":
-                    raise LiveProofError(
-                        "phase9_live_proof_recovery_state_inconsistent"
-                    )
-                return MappingProxyType(
-                    {
-                        "action": "start",
-                        "recovery_reservation_claim_sha256": reservation[
-                            "claim_sha256"
-                        ],
-                    }
-                )
-            raise LiveProofError(
-                "phase9_live_proof_recovery_no_effects_reserved"
-            )
-        _claim_or_verify_recovery_reservation(
-            context,
-            state=state,
-            held_lock=held,
-            allow_new_claim=False,
-            require_current=False,
-        )
+            raise LiveProofError("phase9_live_proof_start_authority_pair_absent")
         if not install_present:
             if receipt_evidence is not None:
                 raise LiveProofError(
@@ -2888,6 +3907,60 @@ def _recovery_selection_worker(
             raise LiveProofError(
                 "phase9_live_proof_recovery_reserved_without_install_claim"
             )
+        pair = _claim_or_verify_start_authority_pair(
+            context,
+            state=state,
+            held_lock=held,
+            allow_new_pair=False,
+        )
+        if receipt_evidence is None:
+            execution_directories = _execution_directories()
+            if execution_id not in execution_directories:
+                if execution_directories:
+                    raise LiveProofError(
+                        "phase9_live_proof_parallel_execution_detected"
+                    )
+                if not allow_start:
+                    rollback_present = state.inspect_nonce_claim(
+                        str(context.recovery_capsule.rollback_nonce),
+                        held_lock=held,
+                    ).present
+                    if rollback_present:
+                        raise LiveProofError(
+                            "phase9_live_proof_rollback_state_without_install_receipt"
+                        )
+                    return MappingProxyType(
+                        {
+                            "action": "pair_only",
+                            "recovery_reservation_claim_sha256": pair[
+                                "recovery_reservation_claim_sha256"
+                            ],
+                            "install_authority_claim_sha256": pair[
+                                "install_authority_claim_sha256"
+                            ],
+                            "start_authority_pair_claimed_atomically": True,
+                            "expected_installation_execution_id": execution_id,
+                            "install_execution_directory_present": False,
+                            "installation_receipt_present": False,
+                            "rollback_authority_claim_present": False,
+                        }
+                    )
+                return MappingProxyType(
+                    {
+                        "action": "start_preclaimed",
+                        "recovery_reservation_claim_sha256": pair[
+                            "recovery_reservation_claim_sha256"
+                        ],
+                        "install_authority_claim_sha256": pair[
+                            "install_authority_claim_sha256"
+                        ],
+                        "start_authority_pair_claimed_atomically": True,
+                    }
+                )
+            if execution_directories != frozenset({execution_id}):
+                raise LiveProofError(
+                    "phase9_live_proof_parallel_execution_detected"
+                )
         rollback_present = False
         if receipt_evidence is not None:
             install = verify_install_receipt(
@@ -2988,6 +4061,9 @@ def _recovery_receipt(
         or absence.get("stores_supervisor_installed") is not False
     ):
         raise LiveProofError("phase9_live_proof_recovery_receipt_invalid")
+    reservation_identity, install_identity = _start_authority_pair_identities(
+        context
+    )
     receipt: dict[str, object] = {
         "schema_version": RECOVERY_RECEIPT_SCHEMA,
         "result": "exact_reserved_install_recovered_and_rolled_back_empty",
@@ -2998,6 +4074,11 @@ def _recovery_receipt(
             context.inputs.controller_runtime_receipt_sha256
         ),
         "recovery_capsule_sha256": _sha(context.recovery_capsule.raw),
+        "recovery_reservation_claim_sha256": (
+            reservation_identity.claim_sha256
+        ),
+        "install_authority_claim_sha256": install_identity.claim_sha256,
+        "start_authority_pair_claimed_atomically": True,
         "installation_execution_id": install["execution_id"],
         "installation_receipt_sha256": install["receipt_sha256"],
         "empty_rollback_execution_id": rollback["execution_id"],
@@ -3014,6 +4095,53 @@ def _recovery_receipt(
     return MappingProxyType(verify_recovery_receipt(receipt))
 
 
+def _pair_only_receipt(
+    *,
+    context: ProofContext,
+    selection: Mapping[str, object],
+) -> Mapping[str, object]:
+    """Attest pristine pair-only state without initiating an install."""
+
+    if (
+        selection.get("action") != "pair_only"
+        or selection.get("start_authority_pair_claimed_atomically") is not True
+        or selection.get("install_execution_directory_present") is not False
+        or selection.get("installation_receipt_present") is not False
+        or selection.get("rollback_authority_claim_present") is not False
+    ):
+        raise LiveProofError("phase9_live_proof_pair_only_selection_invalid")
+    receipt: dict[str, object] = {
+        "schema_version": PAIR_ONLY_RECEIPT_SCHEMA,
+        "result": "exact_start_pair_present_install_execution_absent",
+        "candidate_git_commit": context.inputs.candidate_git_commit,
+        "candidate_git_tree": context.inputs.candidate_git_tree,
+        "package_manifest_sha256": context.inputs.package_manifest_sha256,
+        "controller_runtime_receipt_sha256": (
+            context.inputs.controller_runtime_receipt_sha256
+        ),
+        "recovery_capsule_sha256": _sha(context.recovery_capsule.raw),
+        "recovery_reservation_claim_sha256": selection.get(
+            "recovery_reservation_claim_sha256"
+        ),
+        "install_authority_claim_sha256": selection.get(
+            "install_authority_claim_sha256"
+        ),
+        "start_authority_pair_claimed_atomically": True,
+        "expected_installation_execution_id": selection.get(
+            "expected_installation_execution_id"
+        ),
+        "install_execution_directory_present": False,
+        "installation_receipt_present": False,
+        "rollback_authority_claim_present": False,
+        "install_initiated_by_recovery_mode": False,
+        "provider_calls": 0,
+        "production_data_read": False,
+        "activation_performed": False,
+    }
+    receipt["receipt_sha256"] = _document_sha(receipt)
+    return MappingProxyType(verify_pair_only_receipt(receipt))
+
+
 def recover_live_proof(inputs: ProofInputs) -> Mapping[str, object]:
     """Resume only an exact preclaimed install and its derived rollback."""
 
@@ -3025,6 +4153,8 @@ def recover_live_proof(inputs: ProofInputs) -> Mapping[str, object]:
     _prepare_fixed_substrate()
     pid, descriptor = _fork_worker(WorkerMode.RECOVER_ONLY, context)
     selection = _wait_worker(pid, descriptor)
+    if selection.get("action") == "pair_only":
+        return _pair_only_receipt(context=context, selection=selection)
     if selection.get("action") != "recovered":
         raise LiveProofError("phase9_live_proof_recovery_selection_invalid")
     install_raw = selection.get("install_receipt")
@@ -3038,6 +4168,29 @@ def recover_live_proof(inputs: ProofInputs) -> Mapping[str, object]:
         raise LiveProofError("phase9_live_proof_recovery_selection_invalid")
     install = verify_install_receipt(install_raw)
     rollback = verify_empty_rollback_receipt(rollback_raw)
+    try:
+        existing_promotable = (
+            read_verified_promotable_live_receipt_if_present(
+                inputs=context.inputs,
+                artifacts=context.artifacts,
+                capsule_sha256=_sha(context.recovery_capsule.raw),
+            )
+        )
+    except DurableLiveProofReceiptError as error:
+        raise LiveProofError(
+            "phase9_live_proof_durable_receipt_preflight_failed"
+        ) from error
+    if existing_promotable is None:
+        reconstructed = (
+            _reconstruct_promotable_live_receipt_from_retained_evidence(
+                context=context,
+                install_receipt=install,
+                rollback_receipt=rollback,
+                absence=absence,
+            )
+        )
+        if reconstructed is not None:
+            return reconstructed
     return _recovery_receipt(
         context=context,
         install_receipt=install,
@@ -3056,20 +4209,25 @@ def start_or_recover_live_proof(inputs: ProofInputs) -> Mapping[str, object]:
     _prepare_fixed_substrate()
     pid, descriptor = _fork_worker(WorkerMode.START_OR_RECOVER, context)
     selection = _wait_worker(pid, descriptor)
-    if selection.get("action") == "start":
-        # Fresh start re-verifies the capsule's current window immediately
-        # before the durable reservation and first worker.
-        _verified_install_context(inputs, require_current=True)
-        claim_sha256 = selection.get("recovery_reservation_claim_sha256")
-        if type(claim_sha256) is not str or _HASH_RE.fullmatch(
-            claim_sha256
-        ) is None:
+    if selection.get("action") == "start_preclaimed":
+        reservation_claim_sha256 = selection.get(
+            "recovery_reservation_claim_sha256"
+        )
+        install_claim_sha256 = selection.get("install_authority_claim_sha256")
+        if (
+            type(reservation_claim_sha256) is not str
+            or _HASH_RE.fullmatch(reservation_claim_sha256) is None
+            or type(install_claim_sha256) is not str
+            or _HASH_RE.fullmatch(install_claim_sha256) is None
+            or selection.get("start_authority_pair_claimed_atomically") is not True
+        ):
             raise LiveProofError(
                 "phase9_live_proof_recovery_selection_invalid"
             )
         return run_live_proof(
             inputs,
-            expected_reservation_claim_sha256=claim_sha256,
+            expected_reservation_claim_sha256=reservation_claim_sha256,
+            expected_install_claim_sha256=install_claim_sha256,
         )
     if selection.get("action") != "recovered":
         raise LiveProofError("phase9_live_proof_recovery_selection_invalid")
@@ -3082,10 +4240,32 @@ def start_or_recover_live_proof(inputs: ProofInputs) -> Mapping[str, object]:
         or type(absence) is not dict
     ):
         raise LiveProofError("phase9_live_proof_recovery_selection_invalid")
+    install = verify_install_receipt(install_raw)
+    rollback = verify_empty_rollback_receipt(rollback_raw)
+    try:
+        existing_promotable = read_verified_promotable_live_receipt_if_present(
+            inputs=context.inputs,
+            artifacts=context.artifacts,
+            capsule_sha256=_sha(context.recovery_capsule.raw),
+        )
+    except DurableLiveProofReceiptError as error:
+        raise LiveProofError(
+            "phase9_live_proof_durable_receipt_preflight_failed"
+        ) from error
+    if existing_promotable is not None:
+        return MappingProxyType(dict(existing_promotable))
+    reconstructed = _reconstruct_promotable_live_receipt_from_retained_evidence(
+        context=context,
+        install_receipt=install,
+        rollback_receipt=rollback,
+        absence=absence,
+    )
+    if reconstructed is not None:
+        return reconstructed
     return _recovery_receipt(
         context=context,
-        install_receipt=verify_install_receipt(install_raw),
-        rollback_receipt=verify_empty_rollback_receipt(rollback_raw),
+        install_receipt=install,
+        rollback_receipt=rollback,
         absence=absence,
     )
 
@@ -3094,16 +4274,36 @@ def run_live_proof(
     inputs: ProofInputs,
     *,
     expected_reservation_claim_sha256: str | None = None,
+    expected_install_claim_sha256: str | None = None,
 ) -> Mapping[str, object]:
     """Run the one exact install/kill/resume/rollback/kill/resume proof."""
 
     host_clock_synchronization_preflight_passed = (
         _verify_host_clock_synchronized()
     )
-    context, unused_capsule = _verified_install_context(inputs)
+    context, unused_capsule = _verified_install_context(
+        inputs, require_current=False
+    )
     _prepare_fixed_substrate()
-    reservation = _claim_recovery_reservation_before_install(context)
-    reservation_claim_sha256 = str(reservation["claim_sha256"])
+    try:
+        prior_promotable = preflight_anonymous_publication_capability(
+            inputs=inputs,
+            artifacts=context.artifacts,
+            capsule_sha256=_sha(context.recovery_capsule.raw),
+        )
+    except DurableLiveProofReceiptError as error:
+        raise LiveProofError(
+            "phase9_live_proof_durable_receipt_preflight_failed"
+        ) from error
+    if prior_promotable is not None:
+        raise LiveProofError(
+            "phase9_live_proof_existing_promotable_receipt_requires_recovery"
+        )
+    pair = _verify_start_authority_pair_before_install(context)
+    reservation_claim_sha256 = str(
+        pair["recovery_reservation_claim_sha256"]
+    )
+    install_claim_sha256 = str(pair["install_authority_claim_sha256"])
     if (
         expected_reservation_claim_sha256 is not None
         and reservation_claim_sha256
@@ -3112,6 +4312,11 @@ def run_live_proof(
         raise LiveProofError(
             "phase9_live_proof_recovery_reservation_mismatch"
         )
+    if (
+        expected_install_claim_sha256 is not None
+        and install_claim_sha256 != expected_install_claim_sha256
+    ):
+        raise LiveProofError("phase9_live_proof_install_authority_mismatch")
     rollback_context: ProofContext | None = None
     verified_install: Mapping[str, object] | None = None
     install_worker_started = False
@@ -3126,23 +4331,38 @@ def run_live_proof(
             raise LiveProofError(
                 "phase9_live_proof_install_execution_preexisting"
             )
-        pid, descriptor = _fork_worker(WorkerMode.INSTALL, context)
+        pid, descriptor = _fork_worker(
+            WorkerMode.RESUME_INSTALL,
+            context,
+            cooperative_boundary_kind=(
+                process_death_arm_receipt.INSTALL_BOUNDARY_KIND
+            ),
+        )
         install_worker_started = True
-        killed_install_execution = _kill_after_new_durable_boundary(
+        install_death_arm = _kill_after_new_durable_boundary(
+            context=context,
+            boundary_kind="install",
             pid=pid,
             read_fd=descriptor,
             expected_execution_id=installation_execution_id,
             allowed_existing_directories=before_install,
             journal_name="journal.jsonl",
             step_id=INSTALL_KILL_STEP,
+            recovery_reservation_claim_sha256=(
+                reservation_claim_sha256
+            ),
+            install_authority_claim_sha256=install_claim_sha256,
         )
-        if killed_install_execution != installation_execution_id:
+        if (
+            install_death_arm.get("execution_id")
+            != installation_execution_id
+        ):
             raise LiveProofError("phase9_live_proof_install_execution_mismatch")
         pid, descriptor = _fork_worker(WorkerMode.RESUME_INSTALL, context)
         install_receipt = _wait_worker(pid, descriptor)
         install = verify_install_receipt(install_receipt)
         verified_install = MappingProxyType(dict(install))
-        if install["execution_id"] != killed_install_execution:
+        if install["execution_id"] != installation_execution_id:
             raise LiveProofError("phase9_live_proof_install_resume_mismatch")
 
         rollback_documents = _build_rollback_documents(
@@ -3161,29 +4381,38 @@ def run_live_proof(
                 "phase9_live_proof_rollback_execution_preexisting"
             )
         pid, descriptor = _fork_worker(
-            WorkerMode.ROLLBACK, rollback_context
+            WorkerMode.ROLLBACK,
+            rollback_context,
+            cooperative_boundary_kind=(
+                process_death_arm_receipt.EMPTY_ROLLBACK_BOUNDARY_KIND
+            ),
         )
-        killed_rollback_execution = _kill_after_new_durable_boundary(
+        rollback_death_arm = _kill_after_new_durable_boundary(
+            context=rollback_context,
+            boundary_kind="empty_rollback",
             pid=pid,
             read_fd=descriptor,
             expected_execution_id=rollback_execution_id,
             allowed_existing_directories=before_rollback,
             journal_name="rollback.jsonl",
             step_id=ROLLBACK_KILL_STEP,
+            recovery_reservation_claim_sha256=(
+                reservation_claim_sha256
+            ),
+            install_authority_claim_sha256=install_claim_sha256,
         )
         pid, descriptor = _fork_worker(
             WorkerMode.RESUME_ROLLBACK, rollback_context
         )
         rollback_receipt = _wait_worker(pid, descriptor)
         rollback = verify_empty_rollback_receipt(rollback_receipt)
-        if rollback["execution_id"] != killed_rollback_execution:
+        if rollback["execution_id"] != rollback_execution_id:
             raise LiveProofError("phase9_live_proof_rollback_resume_mismatch")
         pid, descriptor = _fork_worker(
             WorkerMode.VERIFY_ABSENCE, rollback_context
         )
         absence = _wait_worker(pid, descriptor)
-        return MappingProxyType(
-            _proof_receipt(
+        verified_live_receipt = _proof_receipt(
                 context=rollback_context,
                 install_receipt=install,
                 rollback_receipt=rollback,
@@ -3194,8 +4423,22 @@ def run_live_proof(
                 recovery_reservation_claim_sha256=(
                     reservation_claim_sha256
                 ),
+                install_authority_claim_sha256=install_claim_sha256,
+                install_death_arm=install_death_arm,
+                rollback_death_arm=rollback_death_arm,
             )
-        )
+        try:
+            durable_live_receipt = persist_verified_promotable_live_receipt(
+                inputs=inputs,
+                artifacts=rollback_context.artifacts,
+                capsule_sha256=_sha(rollback_context.recovery_capsule.raw),
+                receipt=verified_live_receipt,
+            )
+        except DurableLiveProofReceiptError as error:
+            raise LiveProofError(
+                "phase9_live_proof_durable_receipt_persistence_failed"
+            ) from error
+        return MappingProxyType(dict(durable_live_receipt))
     except BaseException as original_error:
         # Never introduce a generic cleanup surface.  As soon as a durable
         # install receipt has verified, even a failure while constructing its
@@ -3275,7 +4518,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     except Exception as error:
         raise LiveProofError("phase9_live_proof_guard_invalid") from error
     with guard:
-        if mode == RunnerMode.START_OR_RECOVER.value:
+        if mode == RunnerMode.PRECLAIM_STAGED_START.value:
+            receipt = preclaim_staged_start_authority_pair(inputs)
+        elif mode == RunnerMode.VERIFY_PUBLISHED_START_PAIR.value:
+            receipt = verify_published_start_authority_pair(inputs)
+        elif mode == RunnerMode.START_OR_RECOVER.value:
             receipt = start_or_recover_live_proof(inputs)
         elif mode == RunnerMode.RECOVER_ONLY.value:
             receipt = recover_live_proof(inputs)

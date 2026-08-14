@@ -37,8 +37,8 @@ class DormantStoreInstallPackageTests(unittest.TestCase):
         self.assertEqual(receipt["schema_version"], (
             "governed-memory-dormant-store-install-package-verification-v6"
         ))
-        self.assertEqual(receipt["artifact_count"], 74)
-        self.assertEqual(len(package.EXPECTED_ARTIFACTS), 74)
+        self.assertEqual(receipt["artifact_count"], 76)
+        self.assertEqual(len(package.EXPECTED_ARTIFACTS), 76)
         self.assertTrue(
             receipt["durable_install_and_rollback_journal_adapters_packaged"]
         )
@@ -457,7 +457,7 @@ class DormantStoreInstallPackageTests(unittest.TestCase):
             package.MANIFEST.read_text(encoding="ascii")
         )
         self.assertEqual(checked_in, generate_installation_package_manifest.generate())
-        self.assertEqual(package.verify()["artifact_count"], 74)
+        self.assertEqual(package.verify()["artifact_count"], 76)
 
     def test_postgres_runtime_driver_probe_is_exact_and_cross_bound(self) -> None:
         native = json.loads(
@@ -562,6 +562,8 @@ class DormantStoreInstallPackageTests(unittest.TestCase):
             "tools/governed_memory_release/linux_runtime_publication_primitives.py",
             "tools/governed_memory_release/runtime_input_stager.py",
             "tools/governed_memory_release/runtime_publication_transport.py",
+            "tools/governed_memory_validation/durable_live_proof_receipt.py",
+            "tools/governed_memory_validation/process_death_arm_receipt.py",
         }
         self.assertTrue(required.issubset(artifacts))
         for historical in (

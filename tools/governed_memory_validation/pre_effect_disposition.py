@@ -80,11 +80,20 @@ PRODUCTION_SUCCESSOR_AUTHORITY_STATE_PATH: Final = (
 PRODUCTION_SUCCESSOR_CAPSULE_PATH: Final = (
     PRODUCTION_STATE_ROOT / "phase9-disposable-proof-recovery-capsule-v3.json"
 )
+PRODUCTION_SUCCESSOR_PROMOTABLE_RECEIPT_PATH: Final = (
+    PRODUCTION_STATE_ROOT
+    / "phase9-disposable-live-proof-promotable-receipt-000002.json"
+)
+PRODUCTION_SUCCESSOR_PROMOTABLE_RECEIPT_STAGING_PATH: Final = Path(
+    str(PRODUCTION_SUCCESSOR_PROMOTABLE_RECEIPT_PATH) + ".publishing"
+)
 PRODUCTION_DISPOSITION_ID: Final = "phase9-v5-pre-effect-to-v6-000002"
-# These two repository authority values are deliberately fail-closed until the
-# exact tracked production contract and predecessor identity are frozen.
-PRODUCTION_CONTRACT_SHA256: Final[str | None] = None
-PRODUCTION_PREDECESSOR_ATTEMPT_IDENTITY_SHA256: Final[str | None] = None
+PRODUCTION_CONTRACT_SHA256: Final[str | None] = (
+    "5b9c134bc70ab34223d92865711d28c7d84fe4ecdd8e00919655bfb60fa4f5bc"
+)
+PRODUCTION_PREDECESSOR_ATTEMPT_IDENTITY_SHA256: Final[str | None] = (
+    "e814fd3ea9e10ebb2cc84f87c7a8a73f6d3d29e8da1f05944c81522b8db6efd9"
+)
 PRODUCTION_AUTHORIZATION_TEXT_SHA256: Final = (
     "063891fc0189b3c4a0fe393200ae50f59b04f5488800dc27a5ce3020880f3e44"
 )
@@ -104,6 +113,12 @@ _SUCCESSOR_ATTEMPT_IDENTITY_SCHEMA: Final = (
 _SUCCESSOR_ATTEMPT_IDENTITY_DOMAIN: Final = (
     b"governed-memory-pre-effect-successor-attempt-identity-v1\x00"
 )
+_PREDECESSOR_ATTEMPT_IDENTITY_SCHEMA: Final = (
+    "governed-memory-pre-effect-predecessor-attempt-identity-v1"
+)
+_PREDECESSOR_ATTEMPT_IDENTITY_DOMAIN: Final = (
+    b"governed-memory-pre-effect-predecessor-attempt-identity-v1\x00"
+)
 
 EMPTY_SHA256: Final = hashlib.sha256(b"").hexdigest()
 MAX_CONTRACT_BYTES: Final = 256 * 1024
@@ -114,6 +129,7 @@ MAX_DOCKER_OUTPUT_BYTES: Final = 128 * 1024
 MAX_SOCKET_OUTPUT_BYTES: Final = 128 * 1024
 
 _HASH_RE: Final = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
+_COMMIT_RE: Final = re.compile(r"[0-9a-f]{40}\Z", re.ASCII)
 _ID_RE: Final = re.compile(r"[a-z0-9][a-z0-9_.-]{0,127}\Z", re.ASCII)
 _GENERATION_RE: Final = re.compile(r"[0-9]{6}\Z", re.ASCII)
 _DOCKER_NAME_RE: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z", re.ASCII)
@@ -137,7 +153,7 @@ _AUTHORIZATION_KEYS: Final = {
     "authorization_id",
     "thread_id",
     "authorization_text_sha256",
-    "authorized_at",
+    "authority_materialized_at",
 }
 _PREDECESSOR_KEYS: Final = {
     "attempt_identity_sha256",
@@ -263,6 +279,29 @@ _REQUIRED_TCP_LISTENERS: Final = MappingProxyType(
         "127.0.0.1:55433@000002": ("successor", "55433"),
         "127.0.0.1:6343@000001": ("predecessor", "6343"),
         "127.0.0.1:6344@000002": ("successor", "6344"),
+    }
+)
+_PRODUCTION_SUCCESSOR_ROTATED_PHYSICAL_IDENTITIES: Final = frozenset(
+    {
+        ("path", "/etc/governed-memory-controller/store_spec-v2.json"),
+        ("path", "/etc/systemd/system/governed-memory-stores-v2.service"),
+        (
+            "path",
+            "/etc/systemd/system/multi-user.target.wants/"
+            "governed-memory-stores-v2.service",
+        ),
+        ("path", str(PRODUCTION_SUCCESSOR_AUTHORITY_STATE_PATH)),
+        ("path", str(PRODUCTION_STATE_ROOT / "executions-v2")),
+        ("path", str(PRODUCTION_SUCCESSOR_PROMOTABLE_RECEIPT_PATH)),
+        ("path", str(PRODUCTION_SUCCESSOR_CAPSULE_PATH)),
+    }
+)
+_PRODUCTION_SUCCESSOR_TRANSIENT_REQUIRED_ABSENT_IDENTITIES: Final = frozenset(
+    {
+        (
+            "path",
+            str(PRODUCTION_SUCCESSOR_PROMOTABLE_RECEIPT_STAGING_PATH),
+        )
     }
 )
 
@@ -416,6 +455,61 @@ def canonical_json_bytes(value: object) -> bytes:
 
 def _sha(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
+
+
+def predecessor_attempt_identity_sha256(
+    *,
+    generation: str,
+    capsule_sha256: str,
+    authority_state_sha256: str,
+    execution_id: str,
+    scalar_bindings: Mapping[str, object],
+) -> str:
+    """Derive the predecessor identity from its sealed C/T/P/R evidence."""
+
+    candidate_git_commit = scalar_bindings.get("candidate_git_commit")
+    candidate_git_tree = scalar_bindings.get("candidate_git_tree")
+    package_manifest_sha256 = scalar_bindings.get("package_manifest_sha256")
+    controller_runtime_receipt_sha256 = scalar_bindings.get(
+        "controller_runtime_receipt_sha256"
+    )
+    if (
+        type(generation) is not str
+        or _GENERATION_RE.fullmatch(generation) is None
+        or type(capsule_sha256) is not str
+        or _HASH_RE.fullmatch(capsule_sha256) is None
+        or type(authority_state_sha256) is not str
+        or _HASH_RE.fullmatch(authority_state_sha256) is None
+        or type(execution_id) is not str
+        or _HASH_RE.fullmatch(execution_id) is None
+        or type(candidate_git_commit) is not str
+        or _COMMIT_RE.fullmatch(candidate_git_commit) is None
+        or type(candidate_git_tree) is not str
+        or _COMMIT_RE.fullmatch(candidate_git_tree) is None
+        or type(package_manifest_sha256) is not str
+        or _HASH_RE.fullmatch(package_manifest_sha256) is None
+        or type(controller_runtime_receipt_sha256) is not str
+        or _HASH_RE.fullmatch(controller_runtime_receipt_sha256) is None
+    ):
+        raise PreEffectDispositionIntegrityError(
+            "pre_effect_disposition_predecessor_identity_inputs_invalid"
+        )
+    material = {
+        "schema_version": _PREDECESSOR_ATTEMPT_IDENTITY_SCHEMA,
+        "generation": generation,
+        "candidate_git_commit": candidate_git_commit,
+        "candidate_git_tree": candidate_git_tree,
+        "package_manifest_sha256": package_manifest_sha256,
+        "controller_runtime_receipt_sha256": (
+            controller_runtime_receipt_sha256
+        ),
+        "capsule_sha256": capsule_sha256,
+        "authority_state_sha256": authority_state_sha256,
+        "execution_id": execution_id,
+    }
+    return _sha(
+        _PREDECESSOR_ATTEMPT_IDENTITY_DOMAIN + canonical_json_bytes(material)
+    )
 
 
 def production_successor_attempt_identity_sha256(
@@ -658,7 +752,7 @@ def _verify_contract(
         raise PreEffectDispositionIntegrityError(
             "pre_effect_disposition_contract_binding_invalid"
         )
-    _parse_time(authorization["authorized_at"])
+    _parse_time(authorization["authority_materialized_at"])
 
     capsule = predecessor.get("capsule")
     state_contract = predecessor.get("authority_state")
@@ -688,6 +782,16 @@ def _verify_contract(
     ):
         raise PreEffectDispositionIntegrityError(
             "pre_effect_disposition_predecessor_contract_invalid"
+        )
+    if predecessor["attempt_identity_sha256"] != predecessor_attempt_identity_sha256(
+        generation=str(predecessor["generation"]),
+        capsule_sha256=str(capsule["sha256"]),
+        authority_state_sha256=str(state_contract["sha256"]),
+        execution_id=str(execution["execution_id"]),
+        scalar_bindings=capsule["scalar_bindings"],
+    ):
+        raise PreEffectDispositionIntegrityError(
+            "pre_effect_disposition_predecessor_identity_invalid"
         )
 
     successor_state = _canonical_absolute_path(
@@ -731,7 +835,14 @@ def _verify_contract(
             or type(item.get("identity")) is not str
             or not item["identity"]
             or item.get("generation") != expectation.successor_generation
-            or expectation.successor_generation not in str(item["identity"])
+            or (
+                expectation.successor_generation not in str(item["identity"])
+                and (
+                    not paths.production
+                    or (str(item["kind"]), str(item["identity"]))
+                    not in _PRODUCTION_SUCCESSOR_ROTATED_PHYSICAL_IDENTITIES
+                )
+            )
         ):
             raise PreEffectDispositionIntegrityError(
                 "pre_effect_disposition_successor_resource_invalid"
@@ -754,6 +865,13 @@ def _verify_contract(
     if not physical_identities.issubset(probed_successor_identities):
         raise PreEffectDispositionIntegrityError(
             "pre_effect_disposition_successor_resource_unprobed"
+        )
+    if paths.production and (
+        probed_successor_identities - physical_identities
+        != _PRODUCTION_SUCCESSOR_TRANSIENT_REQUIRED_ABSENT_IDENTITIES
+    ):
+        raise PreEffectDispositionIntegrityError(
+            "pre_effect_disposition_successor_resource_incomplete"
         )
     return document
 
@@ -1489,6 +1607,136 @@ def _write_create_once(
 ) -> None:
     parent_fd = file_fd = -1
     nofollow = getattr(os, "O_NOFOLLOW", 0)
+    staging_name = "." + path.name + ".publishing"
+
+    def read_member(
+        name: str, allowed_links: frozenset[int]
+    ) -> tuple[bytes, tuple[int, int]] | None:
+        descriptor = -1
+        try:
+            descriptor = os.open(
+                name,
+                os.O_RDONLY | os.O_CLOEXEC | nofollow
+                | getattr(os, "O_NONBLOCK", 0),
+                dir_fd=parent_fd,
+            )
+        except FileNotFoundError:
+            return None
+        except OSError as error:
+            raise PreEffectDispositionSecurityError(
+                "pre_effect_disposition_receipt_publication_conflict"
+            ) from error
+        try:
+            before = os.fstat(descriptor)
+            named = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+            if (
+                not stat.S_ISREG(before.st_mode)
+                or stat.S_IMODE(before.st_mode) != 0o400
+                or before.st_uid != expected_uid
+                or before.st_gid != expected_gid
+                or before.st_nlink not in allowed_links
+                or before.st_size <= 0
+                or before.st_size > MAX_RECEIPT_BYTES
+                or (before.st_dev, before.st_ino) != (named.st_dev, named.st_ino)
+            ):
+                raise PreEffectDispositionSecurityError(
+                    "pre_effect_disposition_receipt_publication_conflict"
+                )
+            content = bytearray()
+            while len(content) <= MAX_RECEIPT_BYTES:
+                block = os.read(
+                    descriptor,
+                    min(65536, MAX_RECEIPT_BYTES + 1 - len(content)),
+                )
+                if not block:
+                    break
+                content.extend(block)
+            after = os.fstat(descriptor)
+            named_after = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+            if (
+                len(content) != before.st_size
+                or _stable_identity(after) != _stable_identity(before)
+                or _stable_identity(named_after) != _stable_identity(before)
+            ):
+                raise PreEffectDispositionSecurityError(
+                    "pre_effect_disposition_receipt_publication_conflict"
+                )
+            return bytes(content), (before.st_dev, before.st_ino)
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+
+    def unlink_staging(expected_inode: tuple[int, int]) -> None:
+        try:
+            named = os.stat(
+                staging_name, dir_fd=parent_fd, follow_symlinks=False
+            )
+            if (named.st_dev, named.st_ino) != expected_inode:
+                raise PreEffectDispositionSecurityError(
+                    "pre_effect_disposition_receipt_publication_conflict"
+                )
+            os.unlink(staging_name, dir_fd=parent_fd)
+            os.fsync(parent_fd)
+        except PreEffectDispositionError:
+            raise
+        except OSError as error:
+            raise PreEffectDispositionSecurityError(
+                "pre_effect_disposition_receipt_write_failed"
+            ) from error
+
+    def fsync_member(
+        name: str,
+        expected_inode: tuple[int, int],
+        *,
+        expected_link_count: int,
+    ) -> None:
+        descriptor = -1
+        try:
+            descriptor = os.open(
+                name,
+                os.O_RDONLY | os.O_CLOEXEC | nofollow
+                | getattr(os, "O_NONBLOCK", 0),
+                dir_fd=parent_fd,
+            )
+            before = os.fstat(descriptor)
+            named = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+            if (
+                not stat.S_ISREG(before.st_mode)
+                or stat.S_IMODE(before.st_mode) != 0o400
+                or before.st_uid != expected_uid
+                or before.st_gid != expected_gid
+                or before.st_nlink != expected_link_count
+                or (before.st_dev, before.st_ino) != expected_inode
+                or (named.st_dev, named.st_ino) != expected_inode
+            ):
+                raise PreEffectDispositionSecurityError(
+                    "pre_effect_disposition_receipt_publication_conflict"
+                )
+            os.fsync(descriptor)
+            after = os.fstat(descriptor)
+            named_after = os.stat(
+                name, dir_fd=parent_fd, follow_symlinks=False
+            )
+            if (
+                _stable_identity(after) != _stable_identity(before)
+                or _stable_identity(named_after) != _stable_identity(before)
+            ):
+                raise PreEffectDispositionSecurityError(
+                    "pre_effect_disposition_receipt_publication_conflict"
+                )
+            closing_fd = descriptor
+            descriptor = -1
+            os.close(closing_fd)
+        except PreEffectDispositionError:
+            raise
+        except OSError as error:
+            raise PreEffectDispositionSecurityError(
+                "pre_effect_disposition_receipt_write_failed"
+            ) from error
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+
     try:
         parent_fd = os.open(
             path.parent,
@@ -1506,26 +1754,71 @@ def _write_create_once(
             raise PreEffectDispositionSecurityError(
                 "pre_effect_disposition_receipt_parent_invalid"
             )
-        try:
-            file_fd = os.open(
-                path.name,
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | nofollow,
-                0o400,
-                dir_fd=parent_fd,
-            )
-        except FileExistsError:
-            existing = _read_regular(
-                path,
-                mode=0o400,
-                expected_uid=expected_uid,
-                expected_gid=expected_gid,
-                maximum=MAX_RECEIPT_BYTES,
-            )
-            if existing.raw != raw:
+        final = read_member(path.name, frozenset({1, 2}))
+        staging = read_member(
+            staging_name,
+            frozenset({2}) if final is not None else frozenset({1}),
+        )
+        if final is not None:
+            final_raw, final_inode = final
+            if final_raw != raw:
                 raise PreEffectDispositionIntegrityError(
                     "pre_effect_disposition_receipt_conflict"
                 )
+            if staging is None:
+                if os.stat(path.name, dir_fd=parent_fd, follow_symlinks=False).st_nlink != 1:
+                    raise PreEffectDispositionSecurityError(
+                        "pre_effect_disposition_receipt_publication_conflict"
+                    )
+                return
+            staging_raw, staging_inode = staging
+            if staging_raw != raw or staging_inode != final_inode:
+                raise PreEffectDispositionSecurityError(
+                    "pre_effect_disposition_receipt_publication_conflict"
+                )
+            fsync_member(path.name, final_inode, expected_link_count=2)
+            os.fsync(parent_fd)
+            unlink_staging(staging_inode)
+            if read_member(path.name, frozenset({1})) != (raw, final_inode):
+                raise PreEffectDispositionSecurityError(
+                    "pre_effect_disposition_receipt_write_failed"
+                )
             return
+        if staging is not None:
+            staging_raw, staging_inode = staging
+            if staging_raw != raw:
+                raise PreEffectDispositionSecurityError(
+                    "pre_effect_disposition_receipt_publication_conflict"
+                )
+            fsync_member(staging_name, staging_inode, expected_link_count=1)
+            os.fsync(parent_fd)
+            try:
+                os.link(
+                    staging_name, path.name,
+                    src_dir_fd=parent_fd, dst_dir_fd=parent_fd,
+                    follow_symlinks=False,
+                )
+            except FileExistsError as error:
+                raise PreEffectDispositionSecurityError(
+                    "pre_effect_disposition_receipt_publication_conflict"
+                ) from error
+            os.fsync(parent_fd)
+            if read_member(path.name, frozenset({2})) != (raw, staging_inode):
+                raise PreEffectDispositionSecurityError(
+                    "pre_effect_disposition_receipt_write_failed"
+                )
+            unlink_staging(staging_inode)
+            if read_member(path.name, frozenset({1})) != (raw, staging_inode):
+                raise PreEffectDispositionSecurityError(
+                    "pre_effect_disposition_receipt_write_failed"
+                )
+            return
+        file_fd = os.open(
+            staging_name,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | nofollow,
+            0o400,
+            dir_fd=parent_fd,
+        )
         os.fchown(file_fd, expected_uid, expected_gid)
         os.fchmod(file_fd, 0o400)
         view = memoryview(raw)
@@ -1535,7 +1828,36 @@ def _write_create_once(
                 raise OSError
             view = view[written:]
         os.fsync(file_fd)
+        staged = os.fstat(file_fd)
+        staging_inode = (staged.st_dev, staged.st_ino)
+        closing_fd = file_fd
+        file_fd = -1
+        os.close(closing_fd)
         os.fsync(parent_fd)
+        if read_member(staging_name, frozenset({1})) != (raw, staging_inode):
+            raise PreEffectDispositionSecurityError(
+                "pre_effect_disposition_receipt_write_failed"
+            )
+        try:
+            os.link(
+                staging_name, path.name,
+                src_dir_fd=parent_fd, dst_dir_fd=parent_fd,
+                follow_symlinks=False,
+            )
+        except FileExistsError as error:
+            raise PreEffectDispositionSecurityError(
+                "pre_effect_disposition_receipt_publication_conflict"
+            ) from error
+        os.fsync(parent_fd)
+        if read_member(path.name, frozenset({2})) != (raw, staging_inode):
+            raise PreEffectDispositionSecurityError(
+                "pre_effect_disposition_receipt_write_failed"
+            )
+        unlink_staging(staging_inode)
+        if read_member(path.name, frozenset({1})) != (raw, staging_inode):
+            raise PreEffectDispositionSecurityError(
+                "pre_effect_disposition_receipt_write_failed"
+            )
     except PreEffectDispositionError:
         raise
     except OSError as error:
@@ -1833,6 +2155,7 @@ __all__ = [
     "ReviewedDispositionExpectation",
     "canonical_json_bytes",
     "execute_pre_effect_disposition",
+    "predecessor_attempt_identity_sha256",
     "production_disposition_paths",
     "production_successor_attempt_identity_sha256",
     "refuse_retired_predecessor_entrypoint",

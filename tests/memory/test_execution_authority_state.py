@@ -4,12 +4,16 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import base64
+import errno
+import fcntl
 import hashlib
 import os
 from pathlib import Path
+import sqlite3
 import tempfile
 import threading
 import unittest
+from unittest import mock
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -17,11 +21,15 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from tools.governed_memory_install import authority as authority
 
 from tools.governed_memory_install.authority_state import (
+    AuthorityClaimNotAllowedError,
     AuthorityReplayError,
     AuthorityState,
+    AuthorityStateIntegrityError,
     AuthorityStateSecurityError,
     JournalAnchorError,
+    NonceClaimIdentity,
     ZERO_HEAD,
+    derive_nonce_claim_identity,
 )
 from tools.governed_memory_install.execution_authority import (
     ExecutionAuthorityError,
@@ -30,6 +38,7 @@ from tools.governed_memory_install.execution_authority import (
     resume_execution_authority,
 )
 from tools.governed_memory_install.execution_lock import (
+    ExecutionLockError,
     ExecutionLockBusyError,
     ExecutionLockSecurityError,
     GlobalExecutionLock,
@@ -44,6 +53,7 @@ TRUST_BUNDLE = "5" * 64
 HEAD_ONE = "6" * 64
 HEAD_TWO = "7" * 64
 NONCE = "dormant_store_install_nonce_000000000000000000000099"
+SECOND_NONCE = "empty_rollback_nonce_0000000000000000000000000100"
 NAMESPACE = "governed-memory.installation.dormant_store_install.v1"
 THREAD_ID = "019fe927-8367-7f52-86f2-e2b5b43a2390"
 SCOPE_ID = "dormant_store_install-fresh-stores-000001"
@@ -104,6 +114,26 @@ def evidence() -> ScopeEvidence:
         not_before="2026-08-11T12:00:00Z",
         expires_at="2026-08-11T12:10:00Z",
     )
+
+
+def exact_nonce_pair() -> tuple[NonceClaimIdentity, NonceClaimIdentity]:
+    first = derive_nonce_claim_identity(
+        NONCE,
+        operation="dormant_install",
+        execution_sha256=EXECUTION,
+        authorization_sha256=AUTHORIZATION,
+        scope_sha256=SCOPE,
+        trust_bundle_sha256=TRUST_BUNDLE,
+    )
+    second = derive_nonce_claim_identity(
+        SECOND_NONCE,
+        operation="empty_rollback",
+        execution_sha256="8" * 64,
+        authorization_sha256="9" * 64,
+        scope_sha256="a" * 64,
+        trust_bundle_sha256="b" * 64,
+    )
+    return first, second
 
 
 def execution_capability() -> object:
@@ -312,6 +342,360 @@ class AuthorityStateTests(unittest.TestCase):
                         ):
                             state.claim_nonce(NONCE, **arguments)
 
+    def test_exact_nonce_pair_is_one_transaction_and_atomically_visible(self) -> None:
+        with SecureTemporaryDirectory() as directory:
+            database = directory / "authority.sqlite3"
+            state = AuthorityState(database, create=True)
+            first, second = exact_nonce_pair()
+            with GlobalExecutionLock(directory / "execution.lock") as lock:
+                held = lock.held_capability()
+                with (
+                    mock.patch.object(
+                        state,
+                        "_begin_immediate",
+                        wraps=state._begin_immediate,
+                    ) as begin,
+                    mock.patch.object(
+                        state,
+                        "_validate_path",
+                        wraps=state._validate_path,
+                    ) as validate_path,
+                ):
+                    claimed = state.claim_exact_nonce_pair(
+                        first,
+                        second,
+                        held_lock=held,
+                        allow_new_pair=True,
+                    )
+                self.assertEqual(begin.call_count, 1)
+                self.assertGreaterEqual(validate_path.call_count, 2)
+                self.assertTrue(
+                    state.inspect_nonce_claim(NONCE, held_lock=held).present
+                )
+                self.assertTrue(
+                    state.inspect_nonce_claim(
+                        SECOND_NONCE, held_lock=held
+                    ).present
+                )
+            self.assertEqual(claimed.result, "nonce_claimed")
+            self.assertEqual(claimed.first.result, "nonce_claimed")
+            self.assertEqual(claimed.second.result, "nonce_claimed")
+            self.assertEqual(claimed.first.claim_sha256, first.claim_sha256)
+            self.assertEqual(claimed.second.claim_sha256, second.claim_sha256)
+            raw = database.read_bytes()
+            self.assertNotIn(NONCE.encode("utf-8"), raw)
+            self.assertNotIn(SECOND_NONCE.encode("utf-8"), raw)
+
+    def test_exact_nonce_pair_is_atomic_under_thread_race(self) -> None:
+        with SecureTemporaryDirectory() as directory:
+            state = AuthorityState(directory / "authority.sqlite3", create=True)
+            first, second = exact_nonce_pair()
+            worker_count = 6
+            barrier = threading.Barrier(worker_count)
+            with GlobalExecutionLock(directory / "execution.lock") as lock:
+                held = lock.held_capability()
+
+                def claim() -> str:
+                    barrier.wait()
+                    return state.claim_exact_nonce_pair(
+                        first,
+                        second,
+                        held_lock=held,
+                        allow_new_pair=True,
+                    ).result
+
+                with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                    results = list(
+                        executor.map(lambda _index: claim(), range(worker_count))
+                    )
+            self.assertEqual(results.count("nonce_claimed"), 1)
+            self.assertEqual(
+                results.count("exact_execution_resumed"), worker_count - 1
+            )
+
+    def test_exact_nonce_pair_replay_and_expiry_policy_remain_caller_controlled(
+        self,
+    ) -> None:
+        with SecureTemporaryDirectory() as directory:
+            state = AuthorityState(directory / "authority.sqlite3", create=True)
+            first, second = exact_nonce_pair()
+            with GlobalExecutionLock(directory / "execution.lock") as lock:
+                held = lock.held_capability()
+                with self.assertRaisesRegex(
+                    AuthorityClaimNotAllowedError,
+                    "authority_new_pair_claim_not_allowed",
+                ):
+                    state.claim_exact_nonce_pair(
+                        first,
+                        second,
+                        held_lock=held,
+                        allow_new_pair=False,
+                    )
+                self.assertFalse(
+                    state.inspect_nonce_claim(NONCE, held_lock=held).present
+                )
+                self.assertFalse(
+                    state.inspect_nonce_claim(
+                        SECOND_NONCE, held_lock=held
+                    ).present
+                )
+                state.claim_exact_nonce_pair(
+                    first,
+                    second,
+                    held_lock=held,
+                    allow_new_pair=True,
+                )
+                resumed = state.claim_exact_nonce_pair(
+                    first,
+                    second,
+                    held_lock=held,
+                    allow_new_pair=False,
+                )
+            self.assertEqual(resumed.result, "exact_execution_resumed")
+            self.assertEqual(resumed.first.result, "exact_execution_resumed")
+            self.assertEqual(resumed.second.result, "exact_execution_resumed")
+
+    def test_exact_nonce_pair_refuses_mixed_durable_state_without_second_claim(
+        self,
+    ) -> None:
+        with SecureTemporaryDirectory() as directory:
+            state = AuthorityState(directory / "authority.sqlite3", create=True)
+            first, second = exact_nonce_pair()
+            with GlobalExecutionLock(directory / "execution.lock") as lock:
+                held = lock.held_capability()
+                state.claim_nonce(
+                    NONCE,
+                    operation="dormant_install",
+                    execution_sha256=EXECUTION,
+                    authorization_sha256=AUTHORIZATION,
+                    scope_sha256=SCOPE,
+                    trust_bundle_sha256=TRUST_BUNDLE,
+                    held_lock=held,
+                )
+                with self.assertRaisesRegex(
+                    AuthorityReplayError,
+                    "authority_nonce_pair_mixed_state",
+                ):
+                    state.claim_exact_nonce_pair(
+                        first,
+                        second,
+                        held_lock=held,
+                        allow_new_pair=True,
+                    )
+                self.assertTrue(
+                    state.inspect_nonce_claim(NONCE, held_lock=held).present
+                )
+                self.assertFalse(
+                    state.inspect_nonce_claim(
+                        SECOND_NONCE, held_lock=held
+                    ).present
+                )
+
+    def test_exact_nonce_pair_refuses_reverse_mixed_state_without_first_claim(
+        self,
+    ) -> None:
+        with SecureTemporaryDirectory() as directory:
+            state = AuthorityState(directory / "authority.sqlite3", create=True)
+            first, second = exact_nonce_pair()
+            with GlobalExecutionLock(directory / "execution.lock") as lock:
+                held = lock.held_capability()
+                state.claim_nonce(
+                    SECOND_NONCE,
+                    operation="empty_rollback",
+                    execution_sha256="8" * 64,
+                    authorization_sha256="9" * 64,
+                    scope_sha256="a" * 64,
+                    trust_bundle_sha256="b" * 64,
+                    held_lock=held,
+                )
+                with self.assertRaisesRegex(
+                    AuthorityReplayError,
+                    "authority_nonce_pair_mixed_state",
+                ):
+                    state.claim_exact_nonce_pair(
+                        first,
+                        second,
+                        held_lock=held,
+                        allow_new_pair=True,
+                    )
+                self.assertFalse(
+                    state.inspect_nonce_claim(NONCE, held_lock=held).present
+                )
+                self.assertTrue(
+                    state.inspect_nonce_claim(
+                        SECOND_NONCE, held_lock=held
+                    ).present
+                )
+
+    def test_exact_nonce_pair_refuses_binding_mismatch_and_duplicate_nonce(self) -> None:
+        with SecureTemporaryDirectory() as directory:
+            state = AuthorityState(directory / "authority.sqlite3", create=True)
+            first, second = exact_nonce_pair()
+            changed_second = derive_nonce_claim_identity(
+                SECOND_NONCE,
+                operation="empty_rollback",
+                execution_sha256="c" * 64,
+                authorization_sha256="9" * 64,
+                scope_sha256="a" * 64,
+                trust_bundle_sha256="b" * 64,
+            )
+            with GlobalExecutionLock(directory / "execution.lock") as lock:
+                held = lock.held_capability()
+                state.claim_exact_nonce_pair(
+                    first,
+                    second,
+                    held_lock=held,
+                    allow_new_pair=True,
+                )
+                with self.assertRaisesRegex(
+                    AuthorityReplayError,
+                    "authority_nonce_pair_replayed",
+                ):
+                    state.claim_exact_nonce_pair(
+                        first,
+                        changed_second,
+                        held_lock=held,
+                        allow_new_pair=True,
+                    )
+                resumed = state.claim_exact_nonce_pair(
+                    first,
+                    second,
+                    held_lock=held,
+                    allow_new_pair=False,
+                )
+                self.assertEqual(resumed.result, "exact_execution_resumed")
+                with self.assertRaisesRegex(
+                    AuthorityStateIntegrityError,
+                    "authority_nonce_pair_not_distinct",
+                ):
+                    state.claim_exact_nonce_pair(
+                        first,
+                        first,
+                        held_lock=held,
+                        allow_new_pair=True,
+                    )
+
+    def test_exact_nonce_pair_invalid_inputs_refuse_before_mutation(self) -> None:
+        with SecureTemporaryDirectory() as directory:
+            state = AuthorityState(directory / "authority.sqlite3", create=True)
+            first, second = exact_nonce_pair()
+            invalid = NonceClaimIdentity(
+                nonce_sha256=first.nonce_sha256,
+                operation_sha256=first.operation_sha256,
+                execution_sha256=first.execution_sha256,
+                authorization_sha256=first.authorization_sha256,
+                scope_sha256=first.scope_sha256,
+                trust_bundle_sha256=first.trust_bundle_sha256,
+                claim_sha256="f" * 64,
+            )
+            with GlobalExecutionLock(directory / "execution.lock") as lock:
+                held = lock.held_capability()
+                cases = (
+                    (invalid, second, True),
+                    (first, object(), True),
+                    (first, second, "yes"),
+                )
+                for candidate_first, candidate_second, policy in cases:
+                    with (
+                        self.subTest(policy=policy),
+                        self.assertRaises(AuthorityStateIntegrityError),
+                    ):
+                        state.claim_exact_nonce_pair(
+                            candidate_first,  # type: ignore[arg-type]
+                            candidate_second,  # type: ignore[arg-type]
+                            held_lock=held,
+                            allow_new_pair=policy,  # type: ignore[arg-type]
+                        )
+                self.assertFalse(
+                    state.inspect_nonce_claim(NONCE, held_lock=held).present
+                )
+                self.assertFalse(
+                    state.inspect_nonce_claim(
+                        SECOND_NONCE, held_lock=held
+                    ).present
+                )
+
+    def test_exact_nonce_pair_second_insert_failure_rolls_back_first(self) -> None:
+        with SecureTemporaryDirectory() as directory:
+            state = AuthorityState(directory / "authority.sqlite3", create=True)
+            first, second = exact_nonce_pair()
+            original = AuthorityState._insert_exact_nonce_identity
+            insertion_count = 0
+
+            def insert(
+                connection: sqlite3.Connection,
+                identity: tuple[str, str, str, str, str, str, str],
+            ) -> None:
+                nonlocal insertion_count
+                insertion_count += 1
+                if insertion_count == 2:
+                    raise sqlite3.IntegrityError("injected_second_insert_failure")
+                original(connection, identity)
+
+            with GlobalExecutionLock(directory / "execution.lock") as lock:
+                held = lock.held_capability()
+                with (
+                    mock.patch.object(
+                        AuthorityState,
+                        "_insert_exact_nonce_identity",
+                        side_effect=insert,
+                    ),
+                    self.assertRaisesRegex(
+                        AuthorityReplayError,
+                        "authority_nonce_pair_collision",
+                    ),
+                ):
+                    state.claim_exact_nonce_pair(
+                        first,
+                        second,
+                        held_lock=held,
+                        allow_new_pair=True,
+                    )
+                self.assertEqual(insertion_count, 2)
+                self.assertFalse(
+                    state.inspect_nonce_claim(NONCE, held_lock=held).present
+                )
+                self.assertFalse(
+                    state.inspect_nonce_claim(
+                        SECOND_NONCE, held_lock=held
+                    ).present
+                )
+
+    def test_exact_nonce_pair_lock_loss_before_commit_rolls_back_both(self) -> None:
+        with SecureTemporaryDirectory() as directory:
+            state = AuthorityState(directory / "authority.sqlite3", create=True)
+            first, second = exact_nonce_pair()
+            with GlobalExecutionLock(directory / "execution.lock") as lock:
+                held = lock.held_capability()
+                with (
+                    mock.patch(
+                        "tools.governed_memory_install.authority_state."
+                        "validate_held_execution_lock",
+                        side_effect=(
+                            None,
+                            ExecutionLockError("execution_lock_lost"),
+                        ),
+                    ),
+                    self.assertRaisesRegex(
+                        AuthorityStateSecurityError,
+                        "authority_nonce_pair_claim_lock_not_held",
+                    ),
+                ):
+                    state.claim_exact_nonce_pair(
+                        first,
+                        second,
+                        held_lock=held,
+                        allow_new_pair=True,
+                    )
+                self.assertFalse(
+                    state.inspect_nonce_claim(NONCE, held_lock=held).present
+                )
+                self.assertFalse(
+                    state.inspect_nonce_claim(
+                        SECOND_NONCE, held_lock=held
+                    ).present
+                )
+
     def test_state_creation_is_explicit_and_existing_state_is_not_recreated(
         self,
     ) -> None:
@@ -324,6 +708,48 @@ class AuthorityStateTests(unittest.TestCase):
             database.unlink()
             with self.assertRaises(AuthorityStateSecurityError):
                 AuthorityState(database)
+
+    def test_explicit_create_recovers_inode_left_before_schema_initialization(
+        self,
+    ) -> None:
+        with SecureTemporaryDirectory() as directory:
+            database = directory / "authority.sqlite3"
+            with mock.patch.object(
+                AuthorityState,
+                "_initialize_schema",
+                side_effect=SystemExit("synthetic_process_death"),
+            ):
+                with self.assertRaisesRegex(SystemExit, "synthetic_process_death"):
+                    AuthorityState(database, create=True)
+            metadata = database.stat(follow_symlinks=False)
+            self.assertEqual(metadata.st_size, 0)
+            self.assertEqual(metadata.st_nlink, 1)
+            recovered = AuthorityState(database, create=True)
+            reopened = AuthorityState(database)
+            self.assertTrue(recovered._schema_ready)
+            self.assertTrue(reopened._schema_ready)
+
+    def test_explicit_create_recovers_empty_sqlite_header_but_not_foreign_schema(
+        self,
+    ) -> None:
+        with SecureTemporaryDirectory() as directory:
+            empty = directory / "empty.sqlite3"
+            connection = sqlite3.connect(empty)
+            connection.close()
+            os.chmod(empty, 0o600)
+            with self.assertRaises(AuthorityStateIntegrityError):
+                AuthorityState(empty)
+            AuthorityState(empty, create=True)
+            AuthorityState(empty)
+
+            foreign = directory / "foreign.sqlite3"
+            connection = sqlite3.connect(foreign)
+            connection.execute("CREATE TABLE foreign_state (value TEXT)")
+            connection.commit()
+            connection.close()
+            os.chmod(foreign, 0o600)
+            with self.assertRaises(AuthorityStateIntegrityError):
+                AuthorityState(foreign, create=True)
 
     def test_anchor_cas_allows_only_exact_one_entry_recovery(self) -> None:
         with SecureTemporaryDirectory() as directory:
@@ -598,6 +1024,43 @@ class GlobalExecutionLockTests(unittest.TestCase):
                     GlobalExecutionLock(path)
             with GlobalExecutionLock(path) as reacquired:
                 reacquired.validate()
+
+    def test_only_contention_errnos_are_reported_as_lock_busy(self) -> None:
+        with SecureTemporaryDirectory() as directory:
+            path = directory / "execution.lock"
+
+            def fail_exclusive_lock(
+                unused_descriptor: int,
+                operation: int,
+            ) -> None:
+                if operation == fcntl.LOCK_EX | fcntl.LOCK_NB:
+                    raise OSError(self.selected_errno, "synthetic flock failure")
+
+            for selected_errno in (errno.EACCES, errno.EAGAIN):
+                with self.subTest(selected_errno=selected_errno):
+                    self.selected_errno = selected_errno
+                    with mock.patch.object(
+                        fcntl,
+                        "flock",
+                        side_effect=fail_exclusive_lock,
+                    ), self.assertRaisesRegex(
+                        ExecutionLockBusyError,
+                        "execution_lock_busy",
+                    ):
+                        GlobalExecutionLock(path)
+
+            for selected_errno in (errno.EBADF, errno.EINTR, errno.EIO):
+                with self.subTest(selected_errno=selected_errno):
+                    self.selected_errno = selected_errno
+                    with mock.patch.object(
+                        fcntl,
+                        "flock",
+                        side_effect=fail_exclusive_lock,
+                    ), self.assertRaisesRegex(
+                        ExecutionLockSecurityError,
+                        "execution_lock_acquire_failed",
+                    ):
+                        GlobalExecutionLock(path)
 
     def test_symlink_file_mode_and_directory_mode_are_refused(self) -> None:
         with SecureTemporaryDirectory() as directory:

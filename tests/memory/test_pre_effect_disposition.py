@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import errno
 import hashlib
 import json
 import os
@@ -342,6 +343,8 @@ class PreEffectFixture:
         capsule_raw = disposition.canonical_json_bytes(self.capsule)
         install_payload = self.capsule["install_authorization"]["payload"]
         rollback_payload = self.capsule["rollback_delegation"]["payload"]
+        state_snapshot = self._state_snapshot()
+        execution_snapshot = self._execution_snapshot()
         scalar = {
             key: value
             for key, value in self.capsule.items()
@@ -401,10 +404,18 @@ class PreEffectFixture:
                 "authorization_id": "pre-effect-disposition-000001",
                 "thread_id": "thread-000001",
                 "authorization_text_sha256": AUTHORIZATION_TEXT_SHA256,
-                "authorized_at": "2026-08-13T10:00:00Z",
+                "authority_materialized_at": "2026-08-13T10:00:00Z",
             },
             "predecessor": {
-                "attempt_identity_sha256": HASH_A,
+                "attempt_identity_sha256": (
+                    disposition.predecessor_attempt_identity_sha256(
+                        generation="000001",
+                        capsule_sha256=hashlib.sha256(capsule_raw).hexdigest(),
+                        authority_state_sha256=state_snapshot["sha256"],
+                        execution_id=execution_snapshot["execution_id"],
+                        scalar_bindings=scalar,
+                    )
+                ),
                 "generation": "000001",
                 "capsule": {
                     "path": str(self.capsule_path),
@@ -417,8 +428,8 @@ class PreEffectFixture:
                         disposition.canonical_json_bytes(rollback_payload)
                     ).hexdigest(),
                 },
-                "authority_state": self._state_snapshot(),
-                "execution": self._execution_snapshot(),
+                "authority_state": state_snapshot,
+                "execution": execution_snapshot,
             },
             "successor": {
                 "attempt_identity_sha256": HASH_B,
@@ -440,17 +451,15 @@ class PreEffectFixture:
             contract_sha256=hashlib.sha256(raw).hexdigest(),
             disposition_id="failed-attempt-000001-to-000002",
             authorization_text_sha256=AUTHORIZATION_TEXT_SHA256,
-            predecessor_attempt_identity_sha256=HASH_A,
+            predecessor_attempt_identity_sha256=self.contract["predecessor"][
+                "attempt_identity_sha256"
+            ],
             successor_attempt_identity_sha256=HASH_B,
             successor_generation="000002",
         )
 
     def refresh_contract(self) -> None:
-        self.contract["predecessor"]["capsule"] = self._build_contract()[
-            "predecessor"
-        ]["capsule"]
-        self.contract["predecessor"]["authority_state"] = self._state_snapshot()
-        self.contract["predecessor"]["execution"] = self._execution_snapshot()
+        self.contract["predecessor"] = self._build_contract()["predecessor"]
         self.expectation = self._write_contract()
 
 
@@ -508,6 +517,176 @@ class PreEffectDispositionTests(unittest.TestCase):
                 set(self.host_runner.calls)
             )
         )
+
+    def test_receipt_complete_staging_is_reconciled_exactly(self) -> None:
+        raw = b'{"receipt":"exact"}'
+        staging = self.fixture.receipt_path.with_name(
+            "." + self.fixture.receipt_path.name + ".publishing"
+        )
+        _write_exact(staging, raw, 0o400)
+        staged_inode = staging.stat().st_ino
+        disposition._write_create_once(
+            self.fixture.receipt_path,
+            raw,
+            expected_uid=self.fixture.uid,
+            expected_gid=self.fixture.gid,
+        )
+        self.assertFalse(staging.exists())
+        self.assertEqual(self.fixture.receipt_path.read_bytes(), raw)
+        self.assertEqual(self.fixture.receipt_path.stat().st_ino, staged_inode)
+        self.assertEqual(self.fixture.receipt_path.stat().st_nlink, 1)
+
+    def test_sigkill_partial_staging_and_foreign_final_are_untouched(self) -> None:
+        raw = b'{"receipt":"exact"}'
+        for kind in ("partial_staging", "foreign_staging", "foreign_final"):
+            with self.subTest(kind=kind):
+                path = self.fixture.receipt_path
+                staging = path.with_name("." + path.name + ".publishing")
+                selected = path if kind == "foreign_final" else staging
+                selected_raw = raw[:7] if kind == "partial_staging" else b"foreign"
+                _write_exact(selected, selected_raw, 0o400)
+                inode = selected.stat().st_ino
+                with self.assertRaises(disposition.PreEffectDispositionError):
+                    disposition._write_create_once(
+                        path,
+                        raw,
+                        expected_uid=self.fixture.uid,
+                        expected_gid=self.fixture.gid,
+                    )
+                self.assertEqual(selected.read_bytes(), selected_raw)
+                self.assertEqual(selected.stat().st_ino, inode)
+                if kind != "foreign_final":
+                    self.assertFalse(path.exists())
+                    staging.unlink()
+                else:
+                    path.chmod(0o600)
+                    path.unlink()
+
+    def test_receipt_short_writes_complete_before_publication(self) -> None:
+        raw = b'{"receipt":"exact-and-long-enough-for-short-writes"}'
+        original_write = os.write
+        calls = 0
+
+        def short_write(descriptor: int, value: object) -> int:
+            nonlocal calls
+            calls += 1
+            view = memoryview(value)
+            return original_write(descriptor, view[: max(1, len(view) // 3)])
+
+        with mock.patch.object(
+            disposition.os, "write", side_effect=short_write
+        ):
+            disposition._write_create_once(
+                self.fixture.receipt_path,
+                raw,
+                expected_uid=self.fixture.uid,
+                expected_gid=self.fixture.gid,
+            )
+        self.assertGreater(calls, 1)
+        self.assertEqual(self.fixture.receipt_path.read_bytes(), raw)
+
+    def test_receipt_enospc_preserves_partial_private_staging(self) -> None:
+        raw = b'{"receipt":"exact"}'
+        original_write = os.write
+        calls = 0
+
+        def fail_after_prefix(descriptor: int, value: object) -> int:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return original_write(descriptor, memoryview(value)[:6])
+            raise OSError(errno.ENOSPC, "full")
+
+        with (
+            mock.patch.object(
+                disposition.os, "write", side_effect=fail_after_prefix
+            ),
+            self.assertRaises(disposition.PreEffectDispositionSecurityError),
+        ):
+            disposition._write_create_once(
+                self.fixture.receipt_path,
+                raw,
+                expected_uid=self.fixture.uid,
+                expected_gid=self.fixture.gid,
+            )
+        staging = self.fixture.receipt_path.with_name(
+            "." + self.fixture.receipt_path.name + ".publishing"
+        )
+        self.assertEqual(staging.read_bytes(), raw[:6])
+        self.assertFalse(self.fixture.receipt_path.exists())
+
+    def test_receipt_fsync_failure_leaves_complete_reconcilable_staging(self) -> None:
+        raw = b'{"receipt":"exact"}'
+        original_fsync = os.fsync
+        failed = False
+
+        def fail_first(descriptor: int) -> None:
+            nonlocal failed
+            if not failed:
+                failed = True
+                raise OSError(errno.EIO, "fsync")
+            original_fsync(descriptor)
+
+        with mock.patch.object(
+            disposition.os, "fsync", side_effect=fail_first
+        ):
+            with self.assertRaises(disposition.PreEffectDispositionSecurityError):
+                disposition._write_create_once(
+                    self.fixture.receipt_path,
+                    raw,
+                    expected_uid=self.fixture.uid,
+                    expected_gid=self.fixture.gid,
+                )
+            staging = self.fixture.receipt_path.with_name(
+                "." + self.fixture.receipt_path.name + ".publishing"
+            )
+            self.assertEqual(staging.read_bytes(), raw)
+            self.assertFalse(self.fixture.receipt_path.exists())
+        disposition._write_create_once(
+            self.fixture.receipt_path,
+            raw,
+            expected_uid=self.fixture.uid,
+            expected_gid=self.fixture.gid,
+        )
+        self.assertFalse(staging.exists())
+        self.assertEqual(self.fixture.receipt_path.read_bytes(), raw)
+
+    def test_receipt_close_failure_leaves_complete_reconcilable_staging(self) -> None:
+        raw = b'{"receipt":"exact"}'
+        original_close = os.close
+        failed = False
+
+        def fail_regular_once(descriptor: int) -> None:
+            nonlocal failed
+            metadata = os.fstat(descriptor)
+            original_close(descriptor)
+            if stat.S_ISREG(metadata.st_mode) and not failed:
+                failed = True
+                raise OSError(errno.EIO, "close")
+
+        with mock.patch.object(
+            disposition.os, "close", side_effect=fail_regular_once
+        ):
+            with self.assertRaises(disposition.PreEffectDispositionSecurityError):
+                disposition._write_create_once(
+                    self.fixture.receipt_path,
+                    raw,
+                    expected_uid=self.fixture.uid,
+                    expected_gid=self.fixture.gid,
+                )
+            staging = self.fixture.receipt_path.with_name(
+                "." + self.fixture.receipt_path.name + ".publishing"
+            )
+            self.assertEqual(staging.read_bytes(), raw)
+            self.assertFalse(self.fixture.receipt_path.exists())
+        disposition._write_create_once(
+            self.fixture.receipt_path,
+            raw,
+            expected_uid=self.fixture.uid,
+            expected_gid=self.fixture.gid,
+        )
+        self.assertFalse(staging.exists())
+        self.assertEqual(self.fixture.receipt_path.read_bytes(), raw)
 
     def test_distinct_v5_execution_bindings_are_required_and_accepted(self) -> None:
         execution = self.fixture.contract["predecessor"]["execution"]
@@ -836,6 +1015,59 @@ class PreEffectDispositionTests(unittest.TestCase):
                     ),
                     baseline,
                 )
+
+    def test_tracked_production_contract_is_exact_and_complete(self) -> None:
+        contract_path = (
+            Path(__file__).resolve().parents[2]
+            / "ops/governed_memory/pre_effect_disposition_contract.json"
+        )
+        raw = contract_path.read_bytes()
+        successor_identity = (
+            disposition.production_successor_attempt_identity_sha256(
+                package_manifest_sha256=(
+                    "caa3f789003dd2100eca7e68514fcaa114c5c2f2fc12e17871d49973cc7dad63"
+                ),
+                controller_runtime_receipt_sha256=(
+                    "24b081b9eb48699b1242bc435a6f4bce756aee242a23a63c60e7ce79802d86ec"
+                ),
+            )
+        )
+        expectation = disposition.ReviewedDispositionExpectation(
+            contract_sha256=hashlib.sha256(raw).hexdigest(),
+            disposition_id=disposition.PRODUCTION_DISPOSITION_ID,
+            authorization_text_sha256=(
+                disposition.PRODUCTION_AUTHORIZATION_TEXT_SHA256
+            ),
+            predecessor_attempt_identity_sha256=(
+                disposition.PRODUCTION_PREDECESSOR_ATTEMPT_IDENTITY_SHA256
+            ),
+            successor_attempt_identity_sha256=successor_identity,
+            successor_generation=disposition.PRODUCTION_SUCCESSOR_GENERATION,
+        )
+        document = disposition._verify_contract(
+            raw,
+            paths=disposition.production_disposition_paths(),
+            expectation=expectation,
+        )
+        physical = {
+            (item["kind"], item["identity"])
+            for item in document["successor"]["physical_resources"]
+        }
+        probed = {
+            (item["kind"], item["identity"])
+            for item in document["host_resources"]
+            if item["owner"] == "successor"
+        }
+        self.assertEqual(
+            physical,
+            probed
+            - disposition._PRODUCTION_SUCCESSOR_TRANSIENT_REQUIRED_ABSENT_IDENTITIES,
+        )
+        self.assertEqual(len(physical), 16)
+        self.assertEqual(
+            hashlib.sha256(raw).hexdigest(),
+            disposition.PRODUCTION_CONTRACT_SHA256,
+        )
 
     def test_foreign_old_store_spec_tombstone_fails_old_i03_preflight(self) -> None:
         from tests.memory.test_linux_store_effects import LinuxStoreEffectsTests

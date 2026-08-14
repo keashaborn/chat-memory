@@ -113,6 +113,9 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
         mock._patch,
         mock._patch,
         mock._patch,
+        mock._patch,
+        mock._patch,
+        mock._patch,
     ]:
         guard = mock.Mock()
         guard.__enter__ = mock.Mock(return_value=guard)
@@ -135,12 +138,36 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
             mock.patch.object(
                 issuer,
                 "reconcile_capsule_publication",
-                return_value=(capsule, "a" * 64, (1, 2)),
+                return_value=issuer.CapsulePublicationObservation(
+                    state="published",
+                    capsule=capsule,
+                    capsule_sha256="a" * 64,
+                    inode=(1, 2),
+                ),
             ),
             mock.patch.object(
                 issuer,
                 "_require_production_pre_effect_disposition",
                 return_value=disposition_receipt(),
+            ),
+            mock.patch.object(issuer.runner, "_prepare_fixed_substrate"),
+            mock.patch.object(
+                issuer,
+                "_run_start_authority_pair_mode",
+                return_value={
+                    "result": "exact_execution_resumed",
+                    "recovery_capsule_sha256": "a" * 64,
+                    "recovery_capsule_device": 1,
+                    "recovery_capsule_inode": 2,
+                    "recovery_reservation_claim_sha256": "b" * 64,
+                    "install_authority_claim_sha256": "c" * 64,
+                    "start_authority_pair_claimed_atomically": True,
+                },
+            ),
+            mock.patch.object(
+                issuer.durable_live_proof_receipt,
+                "read_verified_promotable_live_receipt_if_present",
+                return_value=None,
             ),
         )
 
@@ -157,6 +184,190 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
                 "verify-absence",
             ),
         )
+
+    def test_cooperative_boundary_stop_is_fixed_and_aborts_before_next_effect(
+        self,
+    ) -> None:
+        cases = (
+            (
+                proof.WorkerMode.RESUME_INSTALL,
+                proof.process_death_arm_receipt.INSTALL_BOUNDARY_KIND,
+                proof.DurableJournal,
+                "append_journal",
+                proof.INSTALL_KILL_STEP,
+            ),
+            (
+                proof.WorkerMode.ROLLBACK,
+                proof.process_death_arm_receipt.EMPTY_ROLLBACK_BOUNDARY_KIND,
+                proof.DurableRollbackJournal,
+                "append",
+                proof.ROLLBACK_KILL_STEP,
+            ),
+        )
+        for mode, kind, journal_type, method_name, step_id in cases:
+            events: list[str] = []
+            record = mock.Mock(step_id=step_id, event=proof.JOURNAL_APPLIED_EVENT)
+
+            def original_append(
+                unused_instance: object,
+                observed_record: object,
+            ) -> None:
+                self.assertIs(observed_record, record)
+                events.append("durable-append-returned")
+
+            def dispatch(
+                unused_mode: proof.WorkerMode,
+                unused_context: object,
+            ) -> dict[str, object]:
+                getattr(journal_type, method_name)(object(), record)
+                events.append("next-effect-dispatched")
+                return {}
+
+            def stop_self(observed_pid: int, observed_signal: int) -> None:
+                self.assertEqual(observed_pid, os.getpid())
+                self.assertEqual(observed_signal, signal.SIGSTOP)
+                events.append("self-sigstop-returned")
+
+            with self.subTest(mode=mode, kind=kind), mock.patch.object(
+                journal_type,
+                method_name,
+                original_append,
+            ), mock.patch.object(
+                proof,
+                "_dispatch_worker",
+                side_effect=dispatch,
+            ), mock.patch.object(
+                proof.os,
+                "kill",
+                side_effect=stop_self,
+            ), self.assertRaisesRegex(
+                proof._CooperativeBoundaryStopAbort,
+                "unexpectedly_resumed",
+            ):
+                proof._dispatch_worker_with_cooperative_boundary_stop(
+                    mode,
+                    context(),
+                    boundary_kind=kind,
+                )
+            self.assertEqual(
+                events,
+                ["durable-append-returned", "self-sigstop-returned"],
+            )
+
+    def test_cooperative_boundary_stop_refuses_wrong_pair_and_is_absent_normally(
+        self,
+    ) -> None:
+        with self.assertRaisesRegex(
+            proof.LiveProofError,
+            "cooperative_stop_boundary_invalid",
+        ):
+            proof._cooperative_boundary_target(
+                proof.WorkerMode.VERIFY_ABSENCE,
+                proof.process_death_arm_receipt.INSTALL_BOUNDARY_KIND,
+            )
+        expected = {"result": True}
+        with mock.patch.object(
+            proof,
+            "_dispatch_worker",
+            return_value=expected,
+        ) as dispatch:
+            observed = proof._dispatch_worker_with_cooperative_boundary_stop(
+                proof.WorkerMode.VERIFY_ABSENCE,
+                context(),
+                boundary_kind=None,
+            )
+        self.assertIs(observed, expected)
+        dispatch.assert_called_once()
+
+        source = Path(proof.__file__).read_text(encoding="utf-8")
+        self.assertNotIn("os.kill(pid, signal.SIGSTOP)", source)
+
+    @unittest.skipUnless(
+        sys.platform == "linux" and hasattr(os, "fork"),
+        "Linux fork and stop semantics required",
+    )
+    def test_real_cooperative_boundary_self_stops_and_continuation_aborts(
+        self,
+    ) -> None:
+        read_fd, write_fd = os.pipe()
+        pid = os.fork()
+        if pid == 0:
+            os.close(read_fd)
+            record = mock.Mock(
+                step_id=proof.INSTALL_KILL_STEP,
+                event=proof.JOURNAL_APPLIED_EVENT,
+            )
+
+            def durable_append(
+                unused_instance: object,
+                unused_record: object,
+            ) -> None:
+                os.write(write_fd, b"D")
+
+            def dispatch(
+                unused_mode: proof.WorkerMode,
+                unused_context: proof.ProofContext,
+            ) -> dict[str, object]:
+                proof.DurableJournal.append_journal(object(), record)
+                os.write(write_fd, b"N")
+                return {}
+
+            try:
+                with (
+                    mock.patch.object(
+                        proof.DurableJournal,
+                        "append_journal",
+                        durable_append,
+                    ),
+                    mock.patch.object(
+                        proof,
+                        "_dispatch_worker",
+                        side_effect=dispatch,
+                    ),
+                ):
+                    proof._dispatch_worker_with_cooperative_boundary_stop(
+                        proof.WorkerMode.RESUME_INSTALL,
+                        context(),
+                        boundary_kind=(
+                            proof.process_death_arm_receipt.INSTALL_BOUNDARY_KIND
+                        ),
+                    )
+            except BaseException:
+                os.close(write_fd)
+                os._exit(7)
+            os.close(write_fd)
+            os._exit(0)
+
+        os.close(write_fd)
+        child_owned = True
+        try:
+            waited, stopped_status = os.waitpid(pid, os.WUNTRACED)
+            self.assertEqual(waited, pid)
+            self.assertTrue(os.WIFSTOPPED(stopped_status))
+            self.assertEqual(os.WSTOPSIG(stopped_status), signal.SIGSTOP)
+            ready, unused_write, unused_error = select.select(
+                [read_fd], [], [], 2.0
+            )
+            self.assertEqual(ready, [read_fd])
+            self.assertEqual(os.read(read_fd, 1), b"D")
+            os.kill(pid, signal.SIGCONT)
+            waited, exit_status = os.waitpid(pid, 0)
+            child_owned = False
+            self.assertEqual(waited, pid)
+            self.assertTrue(os.WIFEXITED(exit_status))
+            self.assertEqual(os.WEXITSTATUS(exit_status), 7)
+            self.assertEqual(os.read(read_fd, 2), b"")
+        finally:
+            if child_owned:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                try:
+                    os.waitpid(pid, 0)
+                except ChildProcessError:
+                    pass
+            os.close(read_fd)
 
     def test_release_cli_accepts_only_four_immutable_identities(self) -> None:
         mode, parsed = proof.parse_inputs(
@@ -307,6 +518,120 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
         self.assertGreater(recovery.index("_execute_rollback_locked("), lock)
         self.assertNotIn("_fork_worker(", recovery)
 
+    def test_recover_only_reports_pair_without_prior_install_effect(self) -> None:
+        selected_context = context()
+        execution_id = INSTALL_EXECUTION
+        state = mock.Mock()
+        state.inspect_nonce_claim.side_effect = (
+            mock.Mock(present=True),
+            mock.Mock(present=False),
+        )
+        lock = mock.MagicMock()
+        lock.__enter__.return_value = lock
+        lock.held_capability.return_value = object()
+        receipts = mock.Mock()
+        receipts.read_if_present.return_value = None
+        pair = {
+            "recovery_reservation_claim_sha256": "a" * 64,
+            "install_authority_claim_sha256": "b" * 64,
+            "start_authority_pair_claimed_atomically": True,
+        }
+        with (
+            mock.patch.object(proof, "GlobalExecutionLock", return_value=lock),
+            mock.patch.object(
+                proof, "_verify_host_clock_synchronized", return_value=True
+            ),
+            mock.patch.object(proof, "_authority_state", return_value=state),
+            mock.patch.object(
+                proof,
+                "recovery_reservation_binding",
+                return_value=mock.Mock(nonce="reservation"),
+            ),
+            mock.patch.object(
+                proof, "_exact_install_claim_present_locked", return_value=True
+            ),
+            mock.patch.object(
+                proof, "_expected_install_execution_id", return_value=execution_id
+            ),
+            mock.patch.object(
+                proof.DurableReceiptStore, "production", return_value=receipts
+            ),
+            mock.patch.object(
+                proof, "_claim_or_verify_start_authority_pair", return_value=pair
+            ),
+            mock.patch.object(proof, "_execution_directories", return_value=frozenset()),
+            mock.patch.object(proof, "_execute_install_locked") as execute_install,
+        ):
+            selection = proof._recovery_selection_worker(
+                selected_context,
+                allow_start=False,
+            )
+        self.assertEqual(selection["action"], "pair_only")
+        self.assertFalse(selection["install_execution_directory_present"])
+        self.assertFalse(selection["installation_receipt_present"])
+        self.assertFalse(selection["rollback_authority_claim_present"])
+        execute_install.assert_not_called()
+
+    def test_recover_only_resumes_exact_prior_install_execution(self) -> None:
+        selected_context = context()
+        execution_id = INSTALL_EXECUTION
+        state = mock.Mock()
+        state.inspect_nonce_claim.side_effect = (
+            mock.Mock(present=True),
+            mock.Mock(present=False),
+        )
+        lock = mock.MagicMock()
+        lock.__enter__.return_value = lock
+        lock.held_capability.return_value = object()
+        receipts = mock.Mock()
+        receipts.read_if_present.return_value = None
+        pair = {
+            "recovery_reservation_claim_sha256": "a" * 64,
+            "install_authority_claim_sha256": "b" * 64,
+            "start_authority_pair_claimed_atomically": True,
+        }
+        with (
+            mock.patch.object(proof, "GlobalExecutionLock", return_value=lock),
+            mock.patch.object(
+                proof, "_verify_host_clock_synchronized", return_value=True
+            ),
+            mock.patch.object(proof, "_authority_state", return_value=state),
+            mock.patch.object(
+                proof,
+                "recovery_reservation_binding",
+                return_value=mock.Mock(nonce="reservation"),
+            ),
+            mock.patch.object(
+                proof, "_exact_install_claim_present_locked", return_value=True
+            ),
+            mock.patch.object(
+                proof, "_expected_install_execution_id", return_value=execution_id
+            ),
+            mock.patch.object(
+                proof.DurableReceiptStore, "production", return_value=receipts
+            ),
+            mock.patch.object(
+                proof, "_claim_or_verify_start_authority_pair", return_value=pair
+            ),
+            mock.patch.object(
+                proof, "_execution_directories", return_value=frozenset({execution_id})
+            ),
+            mock.patch.object(
+                proof, "_install_journal_compensation_complete", return_value=False
+            ),
+            mock.patch.object(
+                proof,
+                "_execute_install_locked",
+                side_effect=proof.LiveProofError("resume_attempted"),
+            ) as execute_install,
+            self.assertRaisesRegex(proof.LiveProofError, "resume_attempted"),
+        ):
+            proof._recovery_selection_worker(
+                selected_context,
+                allow_start=False,
+            )
+        self.assertTrue(execute_install.call_args.kwargs["resume_only"])
+
     def test_exact_hashed_pretty_json_allowed_but_unsafe_json_refused(self) -> None:
         self.assertEqual(
             proof._parse_exact_hashed_json_object(b'{\n  "a": 1\n}\n', "bad"),
@@ -359,7 +684,10 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
             events.append("clock")
             return True
 
-        def invalid_authority(unused: object) -> object:
+        def invalid_authority(
+            unused: object, *, require_current: bool
+        ) -> object:
+            self.assertFalse(require_current)
             events.append("authority")
             raise proof.LiveProofError("test-invalid-authority")
 
@@ -421,6 +749,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
             "issuer_or_host_death_durable_cleanup_proven": False,
             "recovery_capsule_published_before_first_install_effect": True,
             "recovery_reservation_claimed_before_first_install_effect": True,
+            "start_authority_pair_claimed_atomically": True,
             "ephemeral_private_signer_retained_at_execution_start": False,
             "recovery_capsule_retained_at_terminal_observation": True,
         }
@@ -434,6 +763,111 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(proof.LiveProofError, "receipt_invalid"):
             proof.verify_live_proof_receipt(changed)
+        changed = dict(receipt, exact_rollback_resources_absent_count=15.0)
+        changed["receipt_sha256"] = proof._document_sha(
+            {key: value for key, value in changed.items() if key != "receipt_sha256"}
+        )
+        with self.assertRaisesRegex(proof.LiveProofError, "receipt_invalid"):
+            proof.verify_live_proof_receipt(changed)
+        for counter in (
+            "source_postgres_read_count",
+            "source_postgres_write_count",
+            "provider_calls",
+        ):
+            with self.subTest(counter=counter):
+                changed = dict(receipt, **{counter: False})
+                changed["receipt_sha256"] = proof._document_sha(
+                    {
+                        key: value
+                        for key, value in changed.items()
+                        if key != "receipt_sha256"
+                    }
+                )
+                with self.assertRaisesRegex(
+                    proof.LiveProofError, "receipt_invalid"
+                ):
+                    proof.verify_live_proof_receipt(changed)
+
+    def test_recovery_receipt_refuses_boolean_provider_counter(self) -> None:
+        receipt: dict[str, object] = {
+            "schema_version": proof.RECOVERY_RECEIPT_SCHEMA,
+            "result": "exact_reserved_install_recovered_and_rolled_back_empty",
+            "candidate_git_commit": COMMIT,
+            "candidate_git_tree": TREE,
+            "package_manifest_sha256": "a" * 64,
+            "controller_runtime_receipt_sha256": "b" * 64,
+            "recovery_capsule_sha256": "c" * 64,
+            "recovery_reservation_claim_sha256": "d" * 64,
+            "install_authority_claim_sha256": "e" * 64,
+            "start_authority_pair_claimed_atomically": True,
+            "installation_execution_id": INSTALL_EXECUTION,
+            "installation_receipt_sha256": "f" * 64,
+            "empty_rollback_execution_id": ROLLBACK_EXECUTION,
+            "empty_rollback_receipt_sha256": "0" * 64,
+            "exact_resources_absent": True,
+            "stores_installed": False,
+            "stores_supervisor_installed": False,
+            "install_initiated_by_recovery_mode": False,
+            "provider_calls": 0,
+            "production_data_read": False,
+            "activation_performed": False,
+        }
+        receipt["receipt_sha256"] = proof._document_sha(receipt)
+        self.assertEqual(
+            set(proof.verify_recovery_receipt(receipt)),
+            proof._RECOVERY_RECEIPT_KEYS,
+        )
+        forged = dict(receipt, provider_calls=False)
+        forged["receipt_sha256"] = proof._document_sha(
+            {
+                key: value
+                for key, value in forged.items()
+                if key != "receipt_sha256"
+            }
+        )
+        with self.assertRaisesRegex(
+            proof.LiveProofError, "recovery_receipt_invalid"
+        ):
+            proof.verify_recovery_receipt(forged)
+
+    def test_pair_only_receipt_is_exact_and_non_promotable(self) -> None:
+        selected_context = context()
+        selection = {
+            "action": "pair_only",
+            "recovery_reservation_claim_sha256": "a" * 64,
+            "install_authority_claim_sha256": "b" * 64,
+            "start_authority_pair_claimed_atomically": True,
+            "expected_installation_execution_id": INSTALL_EXECUTION,
+            "install_execution_directory_present": False,
+            "installation_receipt_present": False,
+            "rollback_authority_claim_present": False,
+        }
+        receipt = dict(
+            proof._pair_only_receipt(
+                context=selected_context,
+                selection=selection,
+            )
+        )
+        self.assertEqual(
+            set(proof.verify_pair_only_receipt(receipt)),
+            proof._PAIR_ONLY_RECEIPT_KEYS,
+        )
+        self.assertEqual(
+            receipt["result"],
+            "exact_start_pair_present_install_execution_absent",
+        )
+        forged = dict(receipt, provider_calls=False)
+        forged["receipt_sha256"] = proof._document_sha(
+            {
+                key: value
+                for key, value in forged.items()
+                if key != "receipt_sha256"
+            }
+        )
+        with self.assertRaisesRegex(
+            proof.LiveProofError, "pair_only_receipt_invalid"
+        ):
+            proof.verify_pair_only_receipt(forged)
 
     def test_recovery_capsule_is_deterministic_and_private_key_stays_external(self) -> None:
         private = Ed25519PrivateKey.from_private_bytes(bytes(range(32)))
@@ -514,8 +948,16 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
                 inputs=inputs(),
                 artifacts=artifacts(),
             )
-        self.assertEqual(result, (verified, hashlib.sha256(b"capsule").hexdigest(), (7, 8)))
-        self.assertEqual(verify.call_count, 2)
+        self.assertEqual(
+            result,
+            issuer.CapsulePublicationObservation(
+                state="published",
+                capsule=verified,
+                capsule_sha256=hashlib.sha256(b"capsule").hexdigest(),
+                inode=(7, 8),
+            ),
+        )
+        verify.assert_called_once()
 
     def test_reconcile_refuses_old_final_and_temp_on_different_inodes(self) -> None:
         final = mock.Mock(st_dev=7, st_ino=8, st_nlink=2)
@@ -749,7 +1191,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
                     issuer.Phase9ProofIssuerError,
                     "recovery_capsule_write_failed",
                 ):
-                    issuer.publish_fixed_recovery_capsule({"recovery_capsule": "fixed"})
+                    issuer.prepare_fixed_recovery_capsule({"recovery_capsule": "fixed"})
             self.assertFalse(capsule_path.exists())
 
             temporary_path = capsule_path.with_name(
@@ -769,7 +1211,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
                     issuer.Phase9ProofIssuerError,
                     "existing_recovery_capsule_temp_refused",
                 ):
-                    issuer.publish_fixed_recovery_capsule({"recovery_capsule": "fixed"})
+                    issuer.prepare_fixed_recovery_capsule({"recovery_capsule": "fixed"})
             after = temporary_path.stat()
             self.assertEqual((before.st_dev, before.st_ino), (after.st_dev, after.st_ino))
             self.assertEqual(temporary_path.read_bytes(), b"preexisting")
@@ -791,7 +1233,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
                 issuer.Phase9ProofIssuerError,
                 "recovery_capsule_write_failed",
             ):
-                issuer.publish_fixed_recovery_capsule({"recovery_capsule": "fixed"})
+                issuer.prepare_fixed_recovery_capsule({"recovery_capsule": "fixed"})
         named_stat.assert_called_with(
             proof.RECOVERY_CAPSULE_PATH.name
             + issuer.RECOVERY_CAPSULE_TEMP_SUFFIX,
@@ -839,9 +1281,9 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(
                 issuer.Phase9ProofIssuerError,
-                "recovery_capsule_publication_failed",
+                "recovery_capsule_write_failed",
             ):
-                issuer.publish_fixed_recovery_capsule({"recovery_capsule": "fixed"})
+                issuer.prepare_fixed_recovery_capsule({"recovery_capsule": "fixed"})
         unlink.assert_called_once_with(
             proof.RECOVERY_CAPSULE_PATH.name
             + issuer.RECOVERY_CAPSULE_TEMP_SUFFIX,
@@ -915,16 +1357,177 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
         terminate.assert_called_once_with(pid, descriptor)
 
     def test_bounded_worker_wait_drains_result_and_reaps_owned_child(self) -> None:
-        with mock.patch.object(
-            proof,
-            "_dispatch_worker",
-            return_value={"worker": "complete"},
+        guard = mock.MagicMock()
+        guard.__enter__.return_value = guard
+        with (
+            mock.patch.object(proof, "_arm_worker_parent_death"),
+            mock.patch.object(
+                proof,
+                "_adopt_inherited_live_proof_guard",
+                return_value=guard,
+            ),
+            mock.patch.object(
+                proof,
+                "_dispatch_worker",
+                return_value={"worker": "complete"},
+            ),
         ):
             pid, descriptor = proof._fork_worker(
                 proof.WorkerMode.INSTALL, context()
             )
             result = proof._wait_worker(pid, descriptor)
         self.assertEqual(dict(result), {"worker": "complete"})
+
+    def test_worker_parent_death_and_guard_fences_precede_dispatch(self) -> None:
+        source = Path(proof.__file__).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        function = next(
+            ast.get_source_segment(source, node)
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "_fork_worker"
+        )
+        dispatch = "_dispatch_worker_with_cooperative_boundary_stop("
+        self.assertLess(
+            function.index("_arm_worker_parent_death(expected_parent_pid)"),
+            function.index(dispatch),
+        )
+        self.assertLess(
+            function.index("with _adopt_inherited_live_proof_guard():"),
+            function.index(dispatch),
+        )
+
+    def test_linux_worker_parent_death_fence_uses_sigkill_and_parent_recheck(
+        self,
+    ) -> None:
+        prctl = mock.Mock(return_value=0)
+        library = mock.Mock(prctl=prctl)
+        with (
+            mock.patch.object(proof.sys, "platform", "linux"),
+            mock.patch.object(proof.ctypes, "CDLL", return_value=library),
+            mock.patch.object(proof.os, "getppid", return_value=321),
+        ):
+            proof._arm_worker_parent_death(321)
+        prctl.assert_called_once_with(
+            proof.PR_SET_PDEATHSIG,
+            int(signal.SIGKILL),
+            0,
+            0,
+            0,
+        )
+
+    @unittest.skipUnless(
+        sys.platform == "linux" and hasattr(os, "fork"),
+        "Linux prctl parent-death semantics required",
+    )
+    def test_real_stopped_worker_is_sigkilled_when_supervisor_dies(self) -> None:
+        pr_set_child_subreaper = 36
+        pr_get_child_subreaper = 37
+        library = proof.ctypes.CDLL(None, use_errno=True)
+        prctl = library.prctl
+        prctl.argtypes = (
+            proof.ctypes.c_int,
+            proof.ctypes.c_ulong,
+            proof.ctypes.c_ulong,
+            proof.ctypes.c_ulong,
+            proof.ctypes.c_ulong,
+        )
+        prctl.restype = proof.ctypes.c_int
+        prior = proof.ctypes.c_int()
+        self.assertEqual(
+            prctl(
+                pr_get_child_subreaper,
+                proof.ctypes.addressof(prior),
+                0,
+                0,
+                0,
+            ),
+            0,
+        )
+        self.assertEqual(prctl(pr_set_child_subreaper, 1, 0, 0, 0), 0)
+
+        read_fd, write_fd = os.pipe()
+        supervisor_pid = os.fork()
+        if supervisor_pid == 0:
+            os.close(read_fd)
+            worker_pid = os.fork()
+            if worker_pid == 0:
+                try:
+                    proof._arm_worker_parent_death(os.getppid())
+                    os.write(write_fd, f"W{os.getpid()}\n".encode("ascii"))
+                    os.kill(os.getpid(), signal.SIGSTOP)
+                finally:
+                    os.close(write_fd)
+                os._exit(91)
+            try:
+                waited, stopped_status = os.waitpid(worker_pid, os.WUNTRACED)
+                if (
+                    waited != worker_pid
+                    or not os.WIFSTOPPED(stopped_status)
+                    or os.WSTOPSIG(stopped_status) != signal.SIGSTOP
+                ):
+                    os._exit(92)
+                os.write(write_fd, b"S\n")
+                os.close(write_fd)
+                os._exit(0)
+            except BaseException:
+                try:
+                    os.kill(worker_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                os._exit(93)
+
+        os.close(write_fd)
+        worker_pid: int | None = None
+        supervisor_owned = True
+        worker_owned = True
+        try:
+            raw = b""
+            while True:
+                chunk = os.read(read_fd, 4096)
+                if not chunk:
+                    break
+                raw += chunk
+            lines = raw.decode("ascii").splitlines()
+            worker_lines = tuple(line for line in lines if line.startswith("W"))
+            self.assertEqual(lines[-1:], ["S"])
+            self.assertEqual(len(worker_lines), 1)
+            worker_pid = int(worker_lines[0][1:])
+
+            waited, supervisor_status = os.waitpid(supervisor_pid, 0)
+            supervisor_owned = False
+            self.assertEqual(waited, supervisor_pid)
+            self.assertTrue(os.WIFEXITED(supervisor_status))
+            self.assertEqual(os.WEXITSTATUS(supervisor_status), 0)
+
+            waited, worker_status = os.waitpid(worker_pid, 0)
+            worker_owned = False
+            self.assertEqual(waited, worker_pid)
+            self.assertTrue(os.WIFSIGNALED(worker_status))
+            self.assertEqual(os.WTERMSIG(worker_status), signal.SIGKILL)
+        finally:
+            if supervisor_owned:
+                try:
+                    os.kill(supervisor_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                try:
+                    os.waitpid(supervisor_pid, 0)
+                except ChildProcessError:
+                    pass
+            if worker_owned and worker_pid is not None:
+                try:
+                    os.kill(worker_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                try:
+                    os.waitpid(worker_pid, 0)
+                except ChildProcessError:
+                    pass
+            os.close(read_fd)
+            self.assertEqual(
+                prctl(pr_set_child_subreaper, int(prior.value), 0, 0, 0),
+                0,
+            )
 
     def test_issuer_refuses_before_effects_without_durable_recovery_authority(self) -> None:
         with (
@@ -944,7 +1547,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
             mock.patch.object(
                 issuer.Ed25519PrivateKey, "generate"
             ) as generate_key,
-            mock.patch.object(issuer, "publish_fixed_recovery_capsule") as publish,
+            mock.patch.object(issuer, "prepare_fixed_recovery_capsule") as publish,
             mock.patch.object(issuer, "_spawn_exact_runner") as spawn,
             self.assertRaisesRegex(
                 issuer.Phase9ProofIssuerError,
@@ -988,7 +1591,7 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
                 issuer.Ed25519PrivateKey, "generate"
             ) as generate_key,
             mock.patch.object(
-                issuer, "publish_fixed_recovery_capsule"
+                issuer, "prepare_fixed_recovery_capsule"
             ) as publish,
             mock.patch.object(issuer, "_spawn_exact_runner") as spawn,
             self.assertRaisesRegex(
@@ -1082,6 +1685,11 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
                 side_effect=lambda **unused: events.append("disposition") or disposition_receipt(),
             ) as disposition_check,
             mock.patch.object(
+                issuer.runner,
+                "_prepare_fixed_substrate",
+                side_effect=lambda: events.append("substrate"),
+            ) as substrate_check,
+            mock.patch.object(
                 issuer,
                 "reconcile_capsule_publication",
                 side_effect=lambda **unused: (_ for _ in ()).throw(
@@ -1094,13 +1702,81 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
         ):
             issuer.issue_and_supervise(inputs())
         disposition_check.assert_called_once_with(inputs=inputs())
+        substrate_check.assert_called_once_with()
         reconcile.assert_called_once()
-        self.assertEqual(events, ["guard-enter", "disposition"])
+        self.assertEqual(
+            events,
+            ["guard-enter", "disposition", "substrate"],
+        )
         construct_guard.assert_called_once_with(
             proof.LIVE_PROOF_GUARD_PATH,
             expected_uid=0,
             expected_gid=0,
         )
+
+    def test_issuer_refuses_invalid_substrate_before_capsule_or_worker(self) -> None:
+        guard = mock.Mock()
+        guard.__enter__ = mock.Mock(return_value=guard)
+        guard.__exit__ = mock.Mock(return_value=None)
+        guard.descriptor = 9
+        with (
+            mock.patch.object(issuer, "_require_closed_issuer_runtime"),
+            mock.patch.object(os, "geteuid", return_value=0),
+            mock.patch.object(issuer, "verify_exact_clean_candidate"),
+            mock.patch.object(
+                issuer.runner,
+                "_load_release",
+                return_value=(b"manifest", {}),
+            ),
+            mock.patch.object(
+                issuer.runner,
+                "DURABLE_PRE_EFFECT_ROLLBACK_AUTHORITY_PACKAGED",
+                True,
+            ),
+            mock.patch.object(issuer, "_ensure_live_proof_guard_parent"),
+            mock.patch.object(
+                issuer,
+                "GlobalExecutionLock",
+                return_value=guard,
+            ),
+            mock.patch.object(
+                issuer,
+                "_require_production_pre_effect_disposition",
+                return_value=disposition_receipt(),
+            ),
+            mock.patch.object(
+                issuer.runner,
+                "_prepare_fixed_substrate",
+                side_effect=proof.LiveProofError(
+                    "phase9_live_proof_substrate_invalid"
+                ),
+            ) as substrate_check,
+            mock.patch.object(
+                issuer, "reconcile_capsule_publication"
+            ) as reconcile,
+            mock.patch.object(
+                issuer.Ed25519PrivateKey, "generate"
+            ) as generate_key,
+            mock.patch.object(
+                issuer, "build_exact_recovery_capsule"
+            ) as build_capsule,
+            mock.patch.object(
+                issuer, "prepare_fixed_recovery_capsule"
+            ) as publish_capsule,
+            mock.patch.object(issuer, "_supervise_attempt") as supervise,
+            self.assertRaisesRegex(
+                issuer.Phase9ProofIssuerError,
+                "phase9_proof_issuer_substrate_invalid",
+            ),
+        ):
+            issuer.issue_and_supervise(inputs())
+        substrate_check.assert_called_once_with()
+        reconcile.assert_not_called()
+        generate_key.assert_not_called()
+        build_capsule.assert_not_called()
+        publish_capsule.assert_not_called()
+        supervise.assert_not_called()
+        guard.__exit__.assert_called_once()
 
     def test_unexpected_supervision_error_kills_and_reaps_exact_group(self) -> None:
         descriptors = [os.open(os.devnull, os.O_RDONLY) for unused in range(2)]
@@ -1197,15 +1873,25 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
             "controller_runtime_receipt_sha256": RUNTIME,
             "recovery_capsule_sha256": "a" * 64,
         }
-        runtime, guard_parent, guard_lock, reconcile, disposition = (
-            self._issuer_guard_mocks()
-        )
+        (
+            runtime,
+            guard_parent,
+            guard_lock,
+            reconcile,
+            disposition,
+            substrate,
+            pair,
+            durable,
+        ) = self._issuer_guard_mocks()
         with (
             runtime,
             guard_parent,
             guard_lock,
             reconcile,
             disposition,
+            substrate,
+            pair,
+            durable,
             mock.patch.object(os, "geteuid", return_value=0),
             mock.patch.object(
                 issuer.runner,
@@ -1217,11 +1903,6 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
                 issuer.runner,
                 "_load_release",
                 return_value=(b"manifest", {proof.LIVE_PROOF_RECEIPT_SCHEMA_RELATIVE: schema}),
-            ),
-            mock.patch.object(issuer.Ed25519PrivateKey, "generate", return_value=object()),
-            mock.patch.object(issuer, "build_exact_recovery_capsule", return_value={}),
-            mock.patch.object(
-                issuer, "publish_fixed_recovery_capsule", return_value=("a" * 64, (1, 2))
             ),
             mock.patch.object(
                 issuer,
@@ -1261,15 +1942,25 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
             "live_proof_receipt_schema_sha256": hashlib.sha256(schema).hexdigest(),
             "recovery_capsule_sha256": "a" * 64,
         }
-        runtime, guard_parent, guard_lock, reconcile, disposition = (
-            self._issuer_guard_mocks()
-        )
+        (
+            runtime,
+            guard_parent,
+            guard_lock,
+            reconcile,
+            disposition,
+            substrate,
+            pair,
+            durable,
+        ) = self._issuer_guard_mocks()
         with (
             runtime,
             guard_parent,
             guard_lock,
             reconcile,
             disposition,
+            substrate,
+            pair,
+            durable,
             mock.patch.object(os, "geteuid", return_value=0),
             mock.patch.object(
                 issuer.runner,
@@ -1284,17 +1975,6 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
                     b"manifest",
                     {proof.LIVE_PROOF_RECEIPT_SCHEMA_RELATIVE: schema},
                 ),
-            ),
-            mock.patch.object(
-                issuer.Ed25519PrivateKey,
-                "generate",
-                return_value=object(),
-            ),
-            mock.patch.object(issuer, "build_exact_recovery_capsule", return_value={}),
-            mock.patch.object(
-                issuer,
-                "publish_fixed_recovery_capsule",
-                return_value=("a" * 64, (1, 2)),
             ),
             mock.patch.object(
                 issuer,
@@ -1321,15 +2001,25 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
                 issuer.issue_and_supervise(inputs())
 
     def test_runner_nonzero_invokes_recovery_once_and_retains_capsule(self) -> None:
-        runtime, guard_parent, guard_lock, reconcile, disposition = (
-            self._issuer_guard_mocks()
-        )
+        (
+            runtime,
+            guard_parent,
+            guard_lock,
+            reconcile,
+            disposition,
+            substrate,
+            pair,
+            durable,
+        ) = self._issuer_guard_mocks()
         with (
             runtime,
             guard_parent,
             guard_lock,
             reconcile,
             disposition,
+            substrate,
+            pair,
+            durable,
             mock.patch.object(os, "geteuid", return_value=0),
             mock.patch.object(
                 issuer.runner,
@@ -1341,17 +2031,6 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
                 issuer.runner,
                 "_load_release",
                 return_value=(b"manifest", {}),
-            ),
-            mock.patch.object(
-                issuer.Ed25519PrivateKey,
-                "generate",
-                return_value=object(),
-            ),
-            mock.patch.object(issuer, "build_exact_recovery_capsule", return_value={}),
-            mock.patch.object(
-                issuer,
-                "publish_fixed_recovery_capsule",
-                return_value=("a" * 64, (1, 2)),
             ),
             mock.patch.object(
                 issuer,
@@ -1372,6 +2051,127 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
         self.assertIs(
             attempts.call_args_list[1].kwargs["mode"],
             proof.RunnerMode.RECOVER_ONLY,
+        )
+
+    def test_pair_only_retries_same_start_pair_once(self) -> None:
+        (
+            runtime,
+            guard_parent,
+            guard_lock,
+            reconcile,
+            disposition,
+            substrate,
+            pair,
+            durable,
+        ) = self._issuer_guard_mocks()
+        live = {"receipt_sha256": "d" * 64}
+        with (
+            runtime,
+            guard_parent,
+            guard_lock,
+            reconcile,
+            disposition,
+            substrate,
+            pair,
+            durable,
+            mock.patch.object(os, "geteuid", return_value=0),
+            mock.patch.object(
+                issuer.runner,
+                "DURABLE_PRE_EFFECT_ROLLBACK_AUTHORITY_PACKAGED",
+                True,
+            ),
+            mock.patch.object(issuer, "verify_exact_clean_candidate"),
+            mock.patch.object(
+                issuer.runner,
+                "_load_release",
+                return_value=(b"manifest", {}),
+            ),
+            mock.patch.object(
+                issuer,
+                "_supervise_attempt",
+                side_effect=(
+                    (1, b"", b"first\n"),
+                    (0, b"pair\n", b""),
+                    (0, b"live\n", b""),
+                ),
+            ) as attempts,
+            mock.patch.object(
+                issuer,
+                "_verify_supervised_receipt",
+                side_effect=(("pair_only", {}), ("live", live)),
+            ),
+        ):
+            self.assertEqual(dict(issuer.issue_and_supervise(inputs())), live)
+        self.assertEqual(
+            [call.kwargs["mode"] for call in attempts.call_args_list],
+            [
+                proof.RunnerMode.START_OR_RECOVER,
+                proof.RunnerMode.RECOVER_ONLY,
+                proof.RunnerMode.START_OR_RECOVER,
+            ],
+        )
+
+    def test_second_pair_only_stops_without_looping(self) -> None:
+        (
+            runtime,
+            guard_parent,
+            guard_lock,
+            reconcile,
+            disposition,
+            substrate,
+            pair,
+            durable,
+        ) = self._issuer_guard_mocks()
+        with (
+            runtime,
+            guard_parent,
+            guard_lock,
+            reconcile,
+            disposition,
+            substrate,
+            pair,
+            durable,
+            mock.patch.object(os, "geteuid", return_value=0),
+            mock.patch.object(
+                issuer.runner,
+                "DURABLE_PRE_EFFECT_ROLLBACK_AUTHORITY_PACKAGED",
+                True,
+            ),
+            mock.patch.object(issuer, "verify_exact_clean_candidate"),
+            mock.patch.object(
+                issuer.runner,
+                "_load_release",
+                return_value=(b"manifest", {}),
+            ),
+            mock.patch.object(
+                issuer,
+                "_supervise_attempt",
+                side_effect=(
+                    (1, b"", b"first\n"),
+                    (0, b"pair\n", b""),
+                    (1, b"", b"retry\n"),
+                    (0, b"pair\n", b""),
+                ),
+            ) as attempts,
+            mock.patch.object(
+                issuer,
+                "_verify_supervised_receipt",
+                side_effect=(("pair_only", {}), ("pair_only", {})),
+            ),
+            self.assertRaisesRegex(
+                issuer.Phase9ProofIssuerError,
+                "start_not_observed_pair_only_pristine",
+            ),
+        ):
+            issuer.issue_and_supervise(inputs())
+        self.assertEqual(
+            [call.kwargs["mode"] for call in attempts.call_args_list],
+            [
+                proof.RunnerMode.START_OR_RECOVER,
+                proof.RunnerMode.RECOVER_ONLY,
+                proof.RunnerMode.START_OR_RECOVER,
+                proof.RunnerMode.RECOVER_ONLY,
+            ],
         )
 
     def test_runner_output_framing_is_exact(self) -> None:
@@ -1424,7 +2224,20 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
                 proof, "_verify_host_clock_synchronized", return_value=True
             ),
             mock.patch.object(proof, "_prepare_fixed_substrate"),
-            mock.patch.object(proof, "_claim_recovery_reservation_before_install"),
+            mock.patch.object(
+                proof,
+                "preflight_anonymous_publication_capability",
+                return_value=None,
+            ),
+            mock.patch.object(
+                proof,
+                "_verify_start_authority_pair_before_install",
+                return_value={
+                    "recovery_reservation_claim_sha256": "a" * 64,
+                    "install_authority_claim_sha256": "b" * 64,
+                    "start_authority_pair_claimed_atomically": True,
+                },
+            ),
             mock.patch.object(
                 proof,
                 "_verified_install_context",
@@ -1488,16 +2301,534 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
             self.assertRaisesRegex(RuntimeError, "monitor-failure"),
         ):
             proof._kill_after_new_durable_boundary(
+                context=context(),
+                boundary_kind="install",
                 pid=pid,
                 read_fd=descriptor,
                 expected_execution_id=INSTALL_EXECUTION,
                 allowed_existing_directories=frozenset(),
                 journal_name="journal.jsonl",
                 step_id=proof.INSTALL_KILL_STEP,
+                recovery_reservation_claim_sha256="a" * 64,
+                install_authority_claim_sha256="b" * 64,
             )
         kill.assert_called_once_with(pid, signal.SIGKILL)
         self.assertEqual(waitpid.call_count, 2)
         close.assert_called_once_with(descriptor)
+
+    def test_boundary_kill_is_armed_durably_before_sigkill(self) -> None:
+        events: list[str] = []
+        evidence = proof.BoundaryJournalEvidence(
+            boundary_kind="install",
+            execution_id=INSTALL_EXECUTION,
+            journal_name="journal.jsonl",
+            plan_sha256="7" * 64,
+            attempt_id="install-" + "8" * 40,
+            boundary_step_id=proof.INSTALL_KILL_STEP,
+            boundary_record_sequence=8,
+            boundary_record_sha256="9" * 64,
+            journal_sequence_at_arm=8,
+            journal_head_sha256_at_arm="9" * 64,
+            journal_record_sha256s=tuple(str(index) * 64 for index in range(1, 9)),
+        )
+        arm = {"execution_id": INSTALL_EXECUTION, "receipt_sha256": "a" * 64}
+
+        def observe_stop(
+            unused_pid: int,
+            unused_options: int,
+        ) -> tuple[int, int]:
+            events.append("sigstop-observed")
+            return 321, (int(signal.SIGSTOP) << 8) | 0x7F
+
+        def read_boundary(**unused: object) -> proof.BoundaryJournalEvidence:
+            events.append("journal-reread")
+            return evidence
+
+        def exclude() -> bool:
+            events.append("global-lock-excluded")
+            return True
+
+        def exclude_children(unused_pid: int) -> bool:
+            events.append("worker-children-absent")
+            return True
+
+        def persist(unused: object) -> dict[str, object]:
+            events.append("arm-fsynced")
+            return arm
+
+        def kill(unused_pid: int, unused_fd: int | None) -> int:
+            events.append("sigkill-reaped")
+            return int(signal.SIGKILL)
+
+        with (
+            mock.patch.object(proof.time, "monotonic", return_value=0.0),
+            mock.patch.object(
+                proof.os,
+                "waitpid",
+                side_effect=observe_stop,
+            ),
+            mock.patch.object(
+                proof,
+                "_execution_directories",
+                return_value=frozenset({INSTALL_EXECUTION}),
+            ),
+            mock.patch.object(
+                proof, "_boundary_journal_evidence", side_effect=read_boundary
+            ),
+            mock.patch.object(
+                proof,
+                "_verify_stopped_worker_has_no_children",
+                side_effect=exclude_children,
+            ),
+            mock.patch.object(
+                proof,
+                "_verify_stopped_worker_holds_global_execution_lock",
+                side_effect=exclude,
+            ),
+            mock.patch.object(
+                proof,
+                "_build_process_death_arm_receipt",
+                return_value=arm,
+            ),
+            mock.patch.object(
+                proof.process_death_arm_receipt,
+                "persist_process_death_arm_receipt",
+                side_effect=persist,
+            ),
+            mock.patch.object(
+                proof, "_terminate_and_reap_worker", side_effect=kill
+            ),
+        ):
+            result = proof._kill_after_new_durable_boundary(
+                context=context(),
+                boundary_kind="install",
+                pid=321,
+                read_fd=654,
+                expected_execution_id=INSTALL_EXECUTION,
+                allowed_existing_directories=frozenset(),
+                journal_name="journal.jsonl",
+                step_id=proof.INSTALL_KILL_STEP,
+                recovery_reservation_claim_sha256="b" * 64,
+                install_authority_claim_sha256="c" * 64,
+            )
+        self.assertEqual(dict(result), arm)
+        self.assertEqual(
+            events,
+            [
+                "sigstop-observed",
+                "journal-reread",
+                "worker-children-absent",
+                "global-lock-excluded",
+                "arm-fsynced",
+                "sigkill-reaped",
+            ],
+        )
+
+    def test_nonempty_worker_child_set_refuses_before_arm_and_kills_worker(
+        self,
+    ) -> None:
+        pid = 321
+        descriptor = 654
+        evidence = proof.BoundaryJournalEvidence(
+            boundary_kind="install",
+            execution_id=INSTALL_EXECUTION,
+            journal_name="journal.jsonl",
+            plan_sha256="7" * 64,
+            attempt_id="install-" + "8" * 40,
+            boundary_step_id=proof.INSTALL_KILL_STEP,
+            boundary_record_sequence=8,
+            boundary_record_sha256="9" * 64,
+            journal_sequence_at_arm=8,
+            journal_head_sha256_at_arm="9" * 64,
+            journal_record_sha256s=tuple(str(index) * 64 for index in range(1, 9)),
+        )
+        with (
+            mock.patch.object(proof.time, "monotonic", return_value=0.0),
+            mock.patch.object(
+                proof.os,
+                "waitpid",
+                return_value=(pid, (int(signal.SIGSTOP) << 8) | 0x7F),
+            ),
+            mock.patch.object(
+                proof,
+                "_execution_directories",
+                return_value=frozenset({INSTALL_EXECUTION}),
+            ),
+            mock.patch.object(
+                proof,
+                "_boundary_journal_evidence",
+                return_value=evidence,
+            ),
+            mock.patch.object(
+                proof,
+                "_verify_stopped_worker_has_no_children",
+                side_effect=proof.LiveProofError(
+                    "phase9_live_proof_worker_child_exclusion_unproved"
+                ),
+            ),
+            mock.patch.object(
+                proof,
+                "_build_process_death_arm_receipt",
+            ) as build_arm,
+            mock.patch.object(
+                proof.process_death_arm_receipt,
+                "persist_process_death_arm_receipt",
+            ) as persist_arm,
+            mock.patch.object(
+                proof,
+                "_terminate_and_reap_worker",
+                return_value=int(signal.SIGKILL),
+            ) as terminate,
+            self.assertRaisesRegex(
+                proof.LiveProofError,
+                "worker_child_exclusion_unproved",
+            ),
+        ):
+            proof._kill_after_new_durable_boundary(
+                context=context(),
+                boundary_kind="install",
+                pid=pid,
+                read_fd=descriptor,
+                expected_execution_id=INSTALL_EXECUTION,
+                allowed_existing_directories=frozenset(),
+                journal_name="journal.jsonl",
+                step_id=proof.INSTALL_KILL_STEP,
+                recovery_reservation_claim_sha256="a" * 64,
+                install_authority_claim_sha256="b" * 64,
+            )
+        build_arm.assert_not_called()
+        persist_arm.assert_not_called()
+        terminate.assert_called_once_with(pid, descriptor)
+
+    def test_later_journal_head_refuses_before_arm_and_kills_worker(self) -> None:
+        pid = 321
+        descriptor = 654
+        later_head = proof.BoundaryJournalEvidence(
+            boundary_kind="install",
+            execution_id=INSTALL_EXECUTION,
+            journal_name="journal.jsonl",
+            plan_sha256="7" * 64,
+            attempt_id="install-" + "8" * 40,
+            boundary_step_id=proof.INSTALL_KILL_STEP,
+            boundary_record_sequence=8,
+            boundary_record_sha256="9" * 64,
+            journal_sequence_at_arm=9,
+            journal_head_sha256_at_arm="a" * 64,
+            journal_record_sha256s=tuple(str(index) * 64 for index in range(1, 10)),
+        )
+        with (
+            mock.patch.object(proof.time, "monotonic", return_value=0.0),
+            mock.patch.object(
+                proof.os,
+                "waitpid",
+                return_value=(pid, (int(signal.SIGSTOP) << 8) | 0x7F),
+            ),
+            mock.patch.object(
+                proof,
+                "_execution_directories",
+                return_value=frozenset({INSTALL_EXECUTION}),
+            ),
+            mock.patch.object(
+                proof,
+                "_boundary_journal_evidence",
+                return_value=later_head,
+            ),
+            mock.patch.object(
+                proof,
+                "_build_process_death_arm_receipt",
+            ) as build_arm,
+            mock.patch.object(
+                proof.process_death_arm_receipt,
+                "persist_process_death_arm_receipt",
+            ) as persist_arm,
+            mock.patch.object(
+                proof,
+                "_terminate_and_reap_worker",
+                return_value=int(signal.SIGKILL),
+            ) as terminate,
+            self.assertRaisesRegex(
+                proof.LiveProofError,
+                "cooperative_stop_boundary_invalid",
+            ),
+        ):
+            proof._kill_after_new_durable_boundary(
+                context=context(),
+                boundary_kind="install",
+                pid=pid,
+                read_fd=descriptor,
+                expected_execution_id=INSTALL_EXECUTION,
+                allowed_existing_directories=frozenset(),
+                journal_name="journal.jsonl",
+                step_id=proof.INSTALL_KILL_STEP,
+                recovery_reservation_claim_sha256="a" * 64,
+                install_authority_claim_sha256="b" * 64,
+            )
+        build_arm.assert_not_called()
+        persist_arm.assert_not_called()
+        terminate.assert_called_once_with(pid, descriptor)
+
+    @unittest.skipUnless(
+        sys.platform == "linux" and hasattr(os, "fork") and os.geteuid() == 0,
+        "root Linux lock ownership proof required",
+    )
+    def test_real_stopped_worker_has_no_children_holds_lock_and_is_sigkilled(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary) / "locks"
+            parent.mkdir(mode=0o700)
+            os.chmod(parent, 0o700)
+            path = parent / "phase9.lock"
+            read_fd, write_fd = os.pipe()
+            pid = os.fork()
+            if pid == 0:
+                os.close(read_fd)
+                lock = GlobalExecutionLock(
+                    path,
+                    expected_uid=0,
+                    expected_gid=0,
+                )
+                try:
+                    os.write(write_fd, b"L")
+                    os.kill(os.getpid(), signal.SIGSTOP)
+                finally:
+                    lock.close()
+                    os.close(write_fd)
+                os._exit(1)
+
+            os.close(write_fd)
+            child_owned = True
+            try:
+                self.assertEqual(os.read(read_fd, 1), b"L")
+                waited, stopped_status = os.waitpid(pid, os.WUNTRACED)
+                self.assertEqual(waited, pid)
+                self.assertTrue(os.WIFSTOPPED(stopped_status))
+                self.assertEqual(os.WSTOPSIG(stopped_status), signal.SIGSTOP)
+                with mock.patch.object(proof, "GLOBAL_LOCK_PATH", path):
+                    self.assertTrue(
+                        proof._verify_stopped_worker_has_no_children(pid)
+                    )
+                    self.assertTrue(
+                        proof._verify_stopped_worker_holds_global_execution_lock()
+                    )
+                os.kill(pid, signal.SIGKILL)
+                waited, killed_status = os.waitpid(pid, 0)
+                child_owned = False
+                self.assertEqual(waited, pid)
+                self.assertTrue(os.WIFSIGNALED(killed_status))
+                self.assertEqual(os.WTERMSIG(killed_status), signal.SIGKILL)
+            finally:
+                if child_owned:
+                    try:
+                        os.kill(pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    try:
+                        os.waitpid(pid, 0)
+                    except ChildProcessError:
+                        pass
+                os.close(read_fd)
+
+    def test_completed_journal_must_contain_exact_armed_boundary_and_head(
+        self,
+    ) -> None:
+        arm = {
+            "candidate_git_commit": COMMIT,
+            "candidate_git_tree": TREE,
+            "package_manifest_sha256": PACKAGE,
+            "controller_runtime_receipt_sha256": RUNTIME,
+            "recovery_capsule_sha256": proof._sha(b"{}"),
+            "execution_id": INSTALL_EXECUTION,
+            "journal_plan_sha256": "a" * 64,
+            "journal_attempt_id": "install-" + "b" * 40,
+            "journal_name": "journal.jsonl",
+            "boundary_step_id": proof.INSTALL_KILL_STEP,
+            "boundary_record_sequence": 2,
+            "boundary_record_sha256": "c" * 64,
+            "journal_sequence_at_arm": 2,
+            "journal_head_sha256_at_arm": "c" * 64,
+        }
+        completed = {
+            "execution_id": INSTALL_EXECUTION,
+            "plan_sha256": "a" * 64,
+            "attempt_id": "install-" + "b" * 40,
+            "journal_sequence": 3,
+            "journal_head_sha256": "d" * 64,
+        }
+        evidence = proof.BoundaryJournalEvidence(
+            boundary_kind="install",
+            execution_id=INSTALL_EXECUTION,
+            journal_name="journal.jsonl",
+            plan_sha256="a" * 64,
+            attempt_id="install-" + "b" * 40,
+            boundary_step_id=proof.INSTALL_KILL_STEP,
+            boundary_record_sequence=2,
+            boundary_record_sha256="c" * 64,
+            journal_sequence_at_arm=3,
+            journal_head_sha256_at_arm="d" * 64,
+            journal_record_sha256s=("e" * 64, "c" * 64, "d" * 64),
+        )
+        with (
+            mock.patch.object(
+                proof, "verify_install_receipt", side_effect=lambda value: dict(value)
+            ),
+            mock.patch.object(
+                proof.process_death_arm_receipt,
+                "verify_process_death_arm_receipt",
+                side_effect=lambda value, **unused: dict(value),
+            ),
+            mock.patch.object(
+                proof, "_boundary_journal_evidence", return_value=evidence
+            ),
+        ):
+            verified = proof._verify_death_arm_against_completed_journal(
+                context=context(),
+                arm_receipt=arm,
+                completed_receipt=completed,
+                boundary_kind="install",
+            )
+            self.assertEqual(dict(verified), arm)
+            with self.assertRaisesRegex(
+                proof.LiveProofError, "process_death_arm_mismatch"
+            ):
+                proof._verify_death_arm_against_completed_journal(
+                    context=context(),
+                    arm_receipt=dict(arm, journal_head_sha256_at_arm="f" * 64),
+                    completed_receipt=completed,
+                    boundary_kind="install",
+                )
+
+    def test_one_arm_is_cleanup_only_and_two_arms_reconstruct(self) -> None:
+        selected_context = context()
+        install = {"execution_id": INSTALL_EXECUTION}
+        rollback = {"execution_id": ROLLBACK_EXECUTION}
+        absence = {"exact_resources_absent": True}
+        install_arm = {"receipt_sha256": "a" * 64}
+        rollback_arm = {"receipt_sha256": "b" * 64}
+        pair = (
+            mock.Mock(claim_sha256="c" * 64),
+            mock.Mock(claim_sha256="d" * 64),
+        )
+        with (
+            mock.patch.object(
+                proof, "verify_install_receipt", side_effect=lambda value: dict(value)
+            ),
+            mock.patch.object(
+                proof,
+                "verify_empty_rollback_receipt",
+                side_effect=lambda value: dict(value),
+            ),
+            mock.patch.object(
+                proof.process_death_arm_receipt,
+                "read_process_death_arm_receipt_if_present",
+                side_effect=(install_arm, None),
+            ),
+            mock.patch.object(proof, "_build_rollback_documents") as build,
+            mock.patch.object(
+                proof, "persist_verified_promotable_live_receipt"
+            ) as persist,
+        ):
+            self.assertIsNone(
+                proof._reconstruct_promotable_live_receipt_from_retained_evidence(
+                    context=selected_context,
+                    install_receipt=install,
+                    rollback_receipt=rollback,
+                    absence=absence,
+                )
+            )
+        build.assert_not_called()
+        persist.assert_not_called()
+
+        live = {"receipt_sha256": "e" * 64}
+        with (
+            mock.patch.object(
+                proof, "verify_install_receipt", side_effect=lambda value: dict(value)
+            ),
+            mock.patch.object(
+                proof,
+                "verify_empty_rollback_receipt",
+                side_effect=lambda value: dict(value),
+            ),
+            mock.patch.object(
+                proof.process_death_arm_receipt,
+                "read_process_death_arm_receipt_if_present",
+                side_effect=(install_arm, rollback_arm),
+            ),
+            mock.patch.object(
+                proof, "_build_rollback_documents", return_value=mock.Mock()
+            ),
+            mock.patch.object(
+                proof, "_start_authority_pair_identities", return_value=pair
+            ),
+            mock.patch.object(proof, "_proof_receipt", return_value=live),
+            mock.patch.object(
+                proof,
+                "persist_verified_promotable_live_receipt",
+                return_value=live,
+            ) as persist,
+        ):
+            reconstructed = (
+                proof._reconstruct_promotable_live_receipt_from_retained_evidence(
+                    context=selected_context,
+                    install_receipt=install,
+                    rollback_receipt=rollback,
+                    absence=absence,
+                )
+            )
+        self.assertEqual(dict(reconstructed or {}), live)
+        persist.assert_called_once()
+
+    def test_recover_only_promotes_both_retained_arms_after_fresh_absence(
+        self,
+    ) -> None:
+        selected_context = context()
+        install = {"execution_id": INSTALL_EXECUTION}
+        rollback = {"execution_id": ROLLBACK_EXECUTION}
+        absence = {"exact_resources_absent": True}
+        live = {"receipt_sha256": "f" * 64}
+        with (
+            mock.patch.object(
+                proof, "_verify_host_clock_synchronized", return_value=True
+            ),
+            mock.patch.object(
+                proof,
+                "_verified_install_context",
+                return_value=(selected_context, object()),
+            ),
+            mock.patch.object(proof, "_prepare_fixed_substrate"),
+            mock.patch.object(proof, "_fork_worker", return_value=(1, 2)),
+            mock.patch.object(
+                proof,
+                "_wait_worker",
+                return_value={
+                    "action": "recovered",
+                    "install_receipt": install,
+                    "rollback_receipt": rollback,
+                    "absence": absence,
+                },
+            ),
+            mock.patch.object(
+                proof, "verify_install_receipt", side_effect=lambda value: dict(value)
+            ),
+            mock.patch.object(
+                proof,
+                "verify_empty_rollback_receipt",
+                side_effect=lambda value: dict(value),
+            ),
+            mock.patch.object(
+                proof,
+                "read_verified_promotable_live_receipt_if_present",
+                return_value=None,
+            ),
+            mock.patch.object(
+                proof,
+                "_reconstruct_promotable_live_receipt_from_retained_evidence",
+                return_value=live,
+            ) as reconstruct,
+        ):
+            result = proof.recover_live_proof(inputs())
+        self.assertEqual(dict(result), live)
+        reconstruct.assert_called_once()
 
     def test_partial_install_recovery_resumes_then_exactly_rolls_back(self) -> None:
         selected_context = context()
@@ -1515,7 +2846,11 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
         )
         modes: list[proof.WorkerMode] = []
 
-        def fork(mode: proof.WorkerMode, unused: object) -> tuple[int, int]:
+        def fork(
+            mode: proof.WorkerMode,
+            unused: object,
+            **unused_options: object,
+        ) -> tuple[int, int]:
             modes.append(mode)
             return len(modes), len(modes) + 10
 
@@ -1524,7 +2859,20 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
                 proof, "_verify_host_clock_synchronized", return_value=True
             ),
             mock.patch.object(proof, "_prepare_fixed_substrate"),
-            mock.patch.object(proof, "_claim_recovery_reservation_before_install"),
+            mock.patch.object(
+                proof,
+                "preflight_anonymous_publication_capability",
+                return_value=None,
+            ),
+            mock.patch.object(
+                proof,
+                "_verify_start_authority_pair_before_install",
+                return_value={
+                    "recovery_reservation_claim_sha256": "a" * 64,
+                    "install_authority_claim_sha256": "b" * 64,
+                    "start_authority_pair_claimed_atomically": True,
+                },
+            ),
             mock.patch.object(proof, "_verified_install_context", return_value=(selected_context, object())),
             mock.patch.object(proof, "_expected_install_execution_id", return_value=INSTALL_EXECUTION),
             mock.patch.object(proof, "_execution_directories", return_value=frozenset()),
@@ -1541,11 +2889,267 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
         self.assertEqual(
             modes,
             [
-                proof.WorkerMode.INSTALL,
+                proof.WorkerMode.RESUME_INSTALL,
                 proof.WorkerMode.ROLLBACK,
                 proof.WorkerMode.VERIFY_ABSENCE,
             ],
         )
+
+    def test_live_success_persists_promotable_receipt_before_return(self) -> None:
+        selected_context = context()
+        install_receipt = {
+            "execution_id": INSTALL_EXECUTION,
+        }
+        rollback_receipt = {
+            "execution_id": ROLLBACK_EXECUTION,
+        }
+        receipt = {"receipt_sha256": "c" * 64}
+        events: list[str] = []
+
+        def persist(**kwargs: object) -> dict[str, object]:
+            events.append("persist")
+            self.assertIs(kwargs["receipt"], receipt)
+            return receipt
+
+        with (
+            mock.patch.object(
+                proof, "_verify_host_clock_synchronized", return_value=True
+            ),
+            mock.patch.object(proof, "_prepare_fixed_substrate"),
+            mock.patch.object(
+                proof,
+                "preflight_anonymous_publication_capability",
+                return_value=None,
+            ),
+            mock.patch.object(
+                proof,
+                "_verify_start_authority_pair_before_install",
+                return_value={
+                    "recovery_reservation_claim_sha256": "a" * 64,
+                    "install_authority_claim_sha256": "b" * 64,
+                    "start_authority_pair_claimed_atomically": True,
+                },
+            ),
+            mock.patch.object(
+                proof,
+                "_verified_install_context",
+                return_value=(selected_context, object()),
+            ),
+            mock.patch.object(
+                proof,
+                "_expected_install_execution_id",
+                return_value=INSTALL_EXECUTION,
+            ),
+            mock.patch.object(
+                proof,
+                "_expected_rollback_execution_id",
+                return_value=ROLLBACK_EXECUTION,
+            ),
+            mock.patch.object(
+                proof,
+                "_execution_directories",
+                side_effect=(frozenset(), frozenset()),
+            ),
+            mock.patch.object(
+                proof,
+                "_fork_worker",
+                side_effect=((1, 11), (2, 12), (3, 13), (4, 14), (5, 15)),
+            ) as fork_worker,
+            mock.patch.object(
+                proof,
+                "_kill_after_new_durable_boundary",
+                side_effect=(
+                    {"execution_id": INSTALL_EXECUTION},
+                    {"execution_id": ROLLBACK_EXECUTION},
+                ),
+            ),
+            mock.patch.object(
+                proof,
+                "_wait_worker",
+                side_effect=(install_receipt, rollback_receipt, {"absent": True}),
+            ),
+            mock.patch.object(
+                proof,
+                "verify_install_receipt",
+                side_effect=lambda value: dict(value),
+            ),
+            mock.patch.object(
+                proof,
+                "verify_empty_rollback_receipt",
+                side_effect=lambda value: dict(value),
+            ),
+            mock.patch.object(proof, "_build_rollback_documents", return_value=mock.Mock()),
+            mock.patch.object(proof, "_proof_receipt", return_value=receipt),
+            mock.patch.object(
+                proof,
+                "persist_verified_promotable_live_receipt",
+                side_effect=persist,
+            ),
+        ):
+            result = proof.run_live_proof(inputs())
+            events.append("returned")
+        self.assertEqual(dict(result), receipt)
+        self.assertEqual(events, ["persist", "returned"])
+        self.assertEqual(
+            tuple(
+                (
+                    call.args[0],
+                    call.kwargs.get("cooperative_boundary_kind"),
+                )
+                for call in fork_worker.call_args_list
+            ),
+            (
+                (
+                    proof.WorkerMode.RESUME_INSTALL,
+                    proof.process_death_arm_receipt.INSTALL_BOUNDARY_KIND,
+                ),
+                (proof.WorkerMode.RESUME_INSTALL, None),
+                (
+                    proof.WorkerMode.ROLLBACK,
+                    proof.process_death_arm_receipt.EMPTY_ROLLBACK_BOUNDARY_KIND,
+                ),
+                (proof.WorkerMode.RESUME_ROLLBACK, None),
+                (proof.WorkerMode.VERIFY_ABSENCE, None),
+            ),
+        )
+
+    def test_live_receipt_persistence_failure_blocks_success(self) -> None:
+        source = Path(proof.__file__).read_text(encoding="utf-8")
+        persist_position = source.index(
+            "durable_live_receipt = persist_verified_promotable_live_receipt("
+        )
+        return_position = source.index(
+            "return MappingProxyType(dict(durable_live_receipt))",
+            persist_position,
+        )
+        stdout_position = source.index("sys.stdout.buffer.write(", return_position)
+        self.assertLess(persist_position, return_position)
+        self.assertLess(return_position, stdout_position)
+        self.assertIn(
+            '"phase9_live_proof_durable_receipt_persistence_failed"',
+            source[persist_position:return_position],
+        )
+
+    def test_durable_publication_preflight_failure_precedes_authority_and_workers(
+        self,
+    ) -> None:
+        selected_context = context()
+        with (
+            mock.patch.object(
+                proof, "_verify_host_clock_synchronized", return_value=True
+            ),
+            mock.patch.object(proof, "_prepare_fixed_substrate"),
+            mock.patch.object(
+                proof,
+                "_verified_install_context",
+                return_value=(selected_context, object()),
+            ),
+            mock.patch.object(
+                proof,
+                "preflight_anonymous_publication_capability",
+                side_effect=proof.DurableLiveProofReceiptError("unavailable"),
+            ),
+            mock.patch.object(
+                proof, "_verify_start_authority_pair_before_install"
+            ) as claim,
+            mock.patch.object(proof, "_fork_worker") as fork,
+            self.assertRaisesRegex(
+                proof.LiveProofError, "durable_receipt_preflight_failed"
+            ),
+        ):
+            proof.run_live_proof(inputs())
+        claim.assert_not_called()
+        fork.assert_not_called()
+
+    def test_persistence_exception_cannot_return_live_success(self) -> None:
+        selected_context = context()
+        install_receipt = {"execution_id": INSTALL_EXECUTION}
+        rollback_receipt = {"execution_id": ROLLBACK_EXECUTION}
+        with (
+            mock.patch.object(
+                proof, "_verify_host_clock_synchronized", return_value=True
+            ),
+            mock.patch.object(proof, "_prepare_fixed_substrate"),
+            mock.patch.object(
+                proof,
+                "preflight_anonymous_publication_capability",
+                return_value=None,
+            ),
+            mock.patch.object(
+                proof,
+                "_verify_start_authority_pair_before_install",
+                return_value={
+                    "recovery_reservation_claim_sha256": "a" * 64,
+                    "install_authority_claim_sha256": "b" * 64,
+                    "start_authority_pair_claimed_atomically": True,
+                },
+            ),
+            mock.patch.object(
+                proof,
+                "_verified_install_context",
+                return_value=(selected_context, object()),
+            ),
+            mock.patch.object(
+                proof,
+                "_expected_install_execution_id",
+                return_value=INSTALL_EXECUTION,
+            ),
+            mock.patch.object(
+                proof,
+                "_expected_rollback_execution_id",
+                return_value=ROLLBACK_EXECUTION,
+            ),
+            mock.patch.object(
+                proof,
+                "_execution_directories",
+                side_effect=(frozenset(), frozenset()),
+            ),
+            mock.patch.object(
+                proof,
+                "_fork_worker",
+                side_effect=((1, 11), (2, 12), (3, 13), (4, 14), (5, 15)),
+            ),
+            mock.patch.object(
+                proof,
+                "_kill_after_new_durable_boundary",
+                side_effect=(
+                    {"execution_id": INSTALL_EXECUTION},
+                    {"execution_id": ROLLBACK_EXECUTION},
+                ),
+            ),
+            mock.patch.object(
+                proof,
+                "_wait_worker",
+                side_effect=(install_receipt, rollback_receipt, {"absent": True}),
+            ),
+            mock.patch.object(
+                proof,
+                "verify_install_receipt",
+                side_effect=lambda value: dict(value),
+            ),
+            mock.patch.object(
+                proof,
+                "verify_empty_rollback_receipt",
+                side_effect=lambda value: dict(value),
+            ),
+            mock.patch.object(proof, "_build_rollback_documents", return_value=mock.Mock()),
+            mock.patch.object(
+                proof, "_proof_receipt", return_value={"receipt_sha256": "c" * 64}
+            ),
+            mock.patch.object(
+                proof,
+                "persist_verified_promotable_live_receipt",
+                side_effect=proof.DurableLiveProofReceiptError("fsync"),
+            ),
+            mock.patch.object(
+                proof, "_complete_exact_rollback_recovery"
+            ) as recovery,
+            self.assertRaisesRegex(
+                proof.LiveProofError, "durable_receipt_persistence_failed"
+            ),
+        ):
+            proof.run_live_proof(inputs())
+        recovery.assert_called_once()
 
     def test_authority_and_issuer_are_not_package_artifacts(self) -> None:
         from tools.governed_memory_install import package
@@ -1702,6 +3306,376 @@ class DisposableInstallationLiveProofTests(unittest.TestCase):
         ):
             self.assertTrue(
                 proof._install_journal_compensation_complete(journal)
+            )
+
+    def test_start_authority_pair_uses_one_clock_read_and_resumes_after_expiry(
+        self,
+    ) -> None:
+        selected = context()
+        selected.recovery_capsule.document.update(
+            {
+                "not_before": "2026-08-13T10:00:00Z",
+                "expires_at": "2026-08-13T10:15:00Z",
+            }
+        )
+        reservation_identity = mock.Mock(claim_sha256="a" * 64)
+        install_identity = mock.Mock(claim_sha256="b" * 64)
+        pair = mock.Mock(
+            result="exact_execution_resumed",
+            first=mock.Mock(
+                claim_sha256="a" * 64,
+                operation_sha256=proof.authority_operation_sha256(
+                    proof.RECOVERY_RESERVATION_OPERATION
+                ),
+            ),
+            second=mock.Mock(
+                claim_sha256="b" * 64,
+                operation_sha256=proof.authority_operation_sha256(
+                    proof.authority.AUTHORIZATION_OPERATION
+                ),
+            ),
+        )
+        state = mock.Mock()
+        state.claim_exact_nonce_pair.return_value = pair
+        reading = mock.Mock(
+            observed_at=datetime(2026, 8, 13, 10, 16, tzinfo=timezone.utc)
+        )
+        with (
+            mock.patch.object(
+                proof,
+                "_start_authority_pair_identities",
+                return_value=(reservation_identity, install_identity),
+            ),
+            mock.patch.object(
+                proof, "read_trusted_utc", return_value=reading
+            ) as clock,
+        ):
+            result = proof._claim_or_verify_start_authority_pair(
+                selected,
+                state=state,
+                held_lock=object(),
+                allow_new_pair=True,
+            )
+        self.assertEqual(result["result"], "exact_execution_resumed")
+        self.assertTrue(result["start_authority_pair_claimed_atomically"])
+        clock.assert_called_once()
+        self.assertFalse(
+            state.claim_exact_nonce_pair.call_args.kwargs["allow_new_pair"]
+        )
+
+    def test_expired_unclaimed_start_authority_pair_is_refused(self) -> None:
+        selected = context()
+        selected.recovery_capsule.document.update(
+            {
+                "not_before": "2026-08-13T10:00:00Z",
+                "expires_at": "2026-08-13T10:15:00Z",
+            }
+        )
+        state = mock.Mock()
+        state.claim_exact_nonce_pair.side_effect = (
+            proof.AuthorityClaimNotAllowedError("absent")
+        )
+        with (
+            mock.patch.object(
+                proof,
+                "_start_authority_pair_identities",
+                return_value=(mock.Mock(), mock.Mock()),
+            ),
+            mock.patch.object(
+                proof,
+                "read_trusted_utc",
+                return_value=mock.Mock(
+                    observed_at=datetime(
+                        2026, 8, 13, 10, 16, tzinfo=timezone.utc
+                    )
+                ),
+            ),
+            self.assertRaisesRegex(
+                proof.LiveProofError, "start_authority_pair_expired"
+            ),
+        ):
+            proof._claim_or_verify_start_authority_pair(
+                selected,
+                state=state,
+                held_lock=object(),
+                allow_new_pair=True,
+            )
+
+    def test_new_capsule_preflights_durable_publication_before_pair_claim(
+        self,
+    ) -> None:
+        events: list[str] = []
+        verified_capsule = proof.VerifiedRecoveryCapsule(
+            raw=b"capsule",
+            document={},
+            install_documents=proof.InstallDocuments(
+                b"{}", b"{}", b"{}", "7" * 64
+            ),
+            rollback_delegation={},
+            key_id="7" * 64,
+            rollback_nonce="8" * 64,
+        )
+        base_pair = {
+            "recovery_reservation_claim_sha256": "b" * 64,
+            "install_authority_claim_sha256": "c" * 64,
+            "start_authority_pair_claimed_atomically": True,
+        }
+
+        def run_pair(**kwargs: object) -> dict[str, object]:
+            mode = kwargs["mode"]
+            events.append(str(mode.value))
+            return {
+                **base_pair,
+                "result": (
+                    "nonce_claimed"
+                    if mode is proof.RunnerMode.PRECLAIM_STAGED_START
+                    else "exact_execution_resumed"
+                ),
+            }
+
+        with (
+            mock.patch.object(
+                issuer.Ed25519PrivateKey, "generate", return_value=object()
+            ),
+            mock.patch.object(
+                issuer, "build_exact_recovery_capsule", return_value={}
+            ),
+            mock.patch.object(issuer, "verify_exact_clean_candidate"),
+            mock.patch.object(
+                issuer,
+                "prepare_fixed_recovery_capsule",
+                side_effect=lambda unused: (
+                    events.append("prepare") or ("a" * 64, (1, 2))
+                ),
+            ),
+            mock.patch.object(
+                issuer.durable_live_proof_receipt,
+                "preflight_anonymous_publication_capability",
+                side_effect=lambda **unused: events.append("preflight"),
+            ),
+            mock.patch.object(
+                issuer, "_run_start_authority_pair_mode", side_effect=run_pair
+            ),
+            mock.patch.object(
+                issuer,
+                "commit_preclaimed_recovery_capsule",
+                side_effect=lambda **unused: events.append("publish"),
+            ),
+            mock.patch.object(
+                issuer.runner,
+                "_load_verified_recovery_capsule",
+                return_value=verified_capsule,
+            ),
+            mock.patch.object(
+                issuer, "_sha", return_value="a" * 64
+            ),
+        ):
+            observation, pair = issuer._prepare_preclaim_publish_new_capsule(
+                inputs=inputs(), artifacts={}, guard_descriptor=9
+            )
+        self.assertEqual(
+            events,
+            [
+                "prepare",
+                "preflight",
+                proof.RunnerMode.PRECLAIM_STAGED_START.value,
+                "publish",
+                proof.RunnerMode.VERIFY_PUBLISHED_START_PAIR.value,
+            ],
+        )
+        self.assertEqual(observation.state, "published")
+        self.assertEqual(pair["install_authority_claim_sha256"], "c" * 64)
+
+    def test_durable_preflight_failure_cleans_only_staged_capsule_before_claim(
+        self,
+    ) -> None:
+        events: list[str] = []
+        with (
+            mock.patch.object(
+                issuer.Ed25519PrivateKey, "generate", return_value=object()
+            ),
+            mock.patch.object(
+                issuer, "build_exact_recovery_capsule", return_value={}
+            ),
+            mock.patch.object(issuer, "verify_exact_clean_candidate"),
+            mock.patch.object(
+                issuer,
+                "prepare_fixed_recovery_capsule",
+                side_effect=lambda unused: (
+                    events.append("prepare") or ("a" * 64, (1, 2))
+                ),
+            ),
+            mock.patch.object(
+                issuer.durable_live_proof_receipt,
+                "preflight_anonymous_publication_capability",
+                side_effect=lambda **unused: (
+                    events.append("preflight")
+                    or (_ for _ in ()).throw(
+                        issuer.durable_live_proof_receipt.DurableLiveProofReceiptError(
+                            "unavailable"
+                        )
+                    )
+                ),
+            ),
+            mock.patch.object(
+                issuer,
+                "_remove_exact_staged_capsule_after_pristine_proof",
+                side_effect=lambda **unused: events.append("cleanup"),
+            ),
+            mock.patch.object(
+                issuer, "_run_start_authority_pair_mode"
+            ) as claim,
+            self.assertRaisesRegex(
+                issuer.Phase9ProofIssuerError,
+                "durable_receipt_preflight_failed",
+            ),
+        ):
+            issuer._prepare_preclaim_publish_new_capsule(
+                inputs=inputs(), artifacts={}, guard_descriptor=9
+            )
+        self.assertEqual(events, ["prepare", "preflight", "cleanup"])
+        claim.assert_not_called()
+
+    def test_reconcile_retains_linked_capsule_until_pair_reverification(
+        self,
+    ) -> None:
+        verified = proof.VerifiedRecoveryCapsule(
+            raw=b"capsule",
+            document={},
+            install_documents=proof.InstallDocuments(
+                b"{}", b"{}", b"{}", "7" * 64
+            ),
+            rollback_delegation={},
+            key_id="7" * 64,
+            rollback_nonce="8" * 64,
+        )
+        metadata = mock.Mock(st_dev=7, st_ino=8, st_nlink=2)
+        with (
+            mock.patch.object(
+                issuer, "_ensure_recovery_capsule_parent", return_value=77
+            ),
+            mock.patch.object(
+                issuer,
+                "_read_optional_capsule_member",
+                side_effect=(
+                    (b"capsule", metadata),
+                    (b"capsule", metadata),
+                ),
+            ),
+            mock.patch.object(
+                issuer.runner,
+                "_verify_recovery_capsule_raw",
+                return_value=verified,
+            ),
+            mock.patch.object(issuer, "_unlink_exact_member") as unlink,
+            mock.patch.object(os, "fsync"),
+            mock.patch.object(os, "close"),
+        ):
+            observation = issuer.reconcile_capsule_publication(
+                inputs=inputs(), artifacts={}
+            )
+        self.assertIsNotNone(observation)
+        assert observation is not None
+        self.assertEqual(observation.state, "linked")
+        unlink.assert_not_called()
+
+    def test_partial_staging_cleanup_requires_pristine_proof(self) -> None:
+        metadata = mock.Mock(st_dev=7, st_ino=8, st_nlink=1)
+        events: list[str] = []
+        with (
+            mock.patch.object(
+                issuer, "_ensure_recovery_capsule_parent", return_value=77
+            ),
+            mock.patch.object(
+                issuer,
+                "_read_optional_capsule_member",
+                side_effect=(None, (b"", metadata), None),
+            ),
+            mock.patch.object(
+                issuer.runner,
+                "_verify_recovery_capsule_raw",
+                side_effect=proof.LiveProofError("invalid"),
+            ),
+            mock.patch.object(
+                issuer,
+                "_require_pristine_staged_cleanup_state",
+                side_effect=lambda **unused: events.append("pristine"),
+            ),
+            mock.patch.object(
+                issuer,
+                "_unlink_exact_member",
+                side_effect=lambda *unused, **kwargs: events.append("unlink"),
+            ),
+            mock.patch.object(os, "close"),
+        ):
+            result = issuer.reconcile_capsule_publication(
+                inputs=inputs(), artifacts={}
+            )
+        self.assertIsNone(result)
+        self.assertEqual(events, ["pristine", "unlink"])
+
+    def test_durable_adoption_requires_fresh_absence_and_exact_claim_bindings(
+        self,
+    ) -> None:
+        durable = {
+            "candidate_git_commit": COMMIT,
+            "candidate_git_tree": TREE,
+            "package_manifest_sha256": PACKAGE,
+            "controller_runtime_receipt_sha256": RUNTIME,
+            "recovery_capsule_sha256": "a" * 64,
+            "recovery_reservation_claim_sha256": "b" * 64,
+            "install_authority_claim_sha256": "c" * 64,
+            "installation_execution_id": INSTALL_EXECUTION,
+            "installation_receipt_sha256": "d" * 64,
+            "empty_rollback_execution_id": ROLLBACK_EXECUTION,
+            "empty_rollback_receipt_sha256": "e" * 64,
+        }
+        recovery = {
+            **durable,
+            "exact_resources_absent": True,
+            "stores_installed": False,
+            "stores_supervisor_installed": False,
+            "start_authority_pair_claimed_atomically": True,
+        }
+        with (
+            mock.patch.object(
+                issuer, "_supervise_attempt", return_value=(0, b"{}\n", b"")
+            ),
+            mock.patch.object(
+                issuer,
+                "_verify_supervised_receipt",
+                return_value=("recovery", recovery),
+            ),
+        ):
+            adopted = issuer._adopt_durable_success_after_fresh_absence_recheck(
+                inputs=inputs(),
+                artifacts={},
+                capsule_sha256="a" * 64,
+                durable_receipt=durable,
+                guard_descriptor=9,
+            )
+        self.assertEqual(dict(adopted), durable)
+        drifted = dict(recovery, install_authority_claim_sha256="f" * 64)
+        with (
+            mock.patch.object(
+                issuer, "_supervise_attempt", return_value=(0, b"{}\n", b"")
+            ),
+            mock.patch.object(
+                issuer,
+                "_verify_supervised_receipt",
+                return_value=("recovery", drifted),
+            ),
+            self.assertRaisesRegex(
+                issuer.Phase9ProofIssuerError,
+                "durable_receipt_adoption_invalid",
+            ),
+        ):
+            issuer._adopt_durable_success_after_fresh_absence_recheck(
+                inputs=inputs(),
+                artifacts={},
+                capsule_sha256="a" * 64,
+                durable_receipt=durable,
+                guard_descriptor=9,
             )
 
 

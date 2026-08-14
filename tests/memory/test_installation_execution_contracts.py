@@ -374,7 +374,7 @@ class DormantStoreInstallExecutionContractTests(unittest.TestCase):
         )
         self.assertEqual(
             schema["$id"],
-            "urn:governed-memory:phase9:disposable-live-proof-receipt:v3",
+            "urn:governed-memory:phase9:disposable-live-proof-receipt:v4",
         )
         self.assertFalse(schema["additionalProperties"])
         self.assertEqual(set(schema["required"]), set(schema["properties"]))
@@ -383,6 +383,11 @@ class DormantStoreInstallExecutionContractTests(unittest.TestCase):
             properties["exact_rollback_resources_absent_count"]["const"],
             15,
         )
+        for key in (
+            "install_process_death_arm_receipt_sha256",
+            "rollback_process_death_arm_receipt_sha256",
+        ):
+            self.assertEqual(properties[key]["$ref"], "#/$defs/sha256")
         for key in (
             "recovery_capsule_published_before_first_install_effect",
             "recovery_reservation_claimed_before_first_install_effect",

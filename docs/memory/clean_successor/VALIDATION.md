@@ -13,7 +13,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 -I -B -m unittest discover -s tests/memory -p 
 git diff --check
 ```
 
-The package verifier must report schema v5, Phase 9J inactive state, exactly 74
+The package verifier must report schema v6, Phase 9J inactive state, exactly 74
 artifacts, no proof receipt inside the sealed package, no installation, no
 secret access, no image staging, and no activation. The release guard must
 still refuse production release with

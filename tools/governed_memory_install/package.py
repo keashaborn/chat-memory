@@ -73,10 +73,10 @@ EMPTY_ROLLBACK_RECEIPT_SCHEMA_RELATIVE: Final = (
 )
 
 EXPECTED_CONTRACT_CANONICAL_SHA256: Final = (
-    "74731a53895902096c9593fe514d4de959237f8b06013f77c3e1ce57545345ec"
+    "d59c0328af94f241f4765e751bdf28a1a6c3d7c6ab841ac3a3e7d6fe3be4a9ea"
 )
 EXPECTED_PLAN_CANONICAL_SHA256: Final = (
-    "bbf65fd4435413632a2b6834b54371aa8f0c0033242339183a541bef259b90eb"
+    "b66fc26740e48013a4d7818442fa773baac4738ddcd06e31e3c34a777c2f8253"
 )
 EXPECTED_CONTROLLER_SOURCE_SHA256: Final = (
     "5a18628c85aab814360667341f685f809ac240b484a5fe6e10c727f54a752de5"
@@ -85,7 +85,7 @@ EXPECTED_CONTROLLER_MODEL_SHA256: Final = (
     "d3701a21b827da66122906e1dcc2828ce69f06e1048164df1c4d0ca0321c3de8"
 )
 EXPECTED_EXECUTION_CONTRACT_CANONICAL_SHA256: Final = (
-    "f76e1fd9116116c5282f933bfe4f3b1dcdddbf6246325ad90c39bf741bd7b856"
+    "76e951689cb8ef77a17c01a9e3f4cbe4df69363d9d41c6afe0755be3000238c1"
 )
 EXPECTED_CONTROLLER_RUNTIME_CONTRACT_CANONICAL_SHA256: Final = (
     "60580592361d52b6af3d57d023d7bdd3f0876d677f736e6ee00aeb85841d79ac"
@@ -94,13 +94,13 @@ EXPECTED_POSTGRES_NATIVE_STAGE_CONTRACT_CANONICAL_SHA256: Final = (
     "82f35d96260fdef0a7ba959499af8563d38a5c681ad2bb864ec413528778d8d8"
 )
 EXPECTED_PROOF_CONTRACT_CANONICAL_SHA256: Final = (
-    "c1b8a0e882bf8a35a9d4df6bdac385bb33f129ea8684a0a00092a7feb00bd862"
+    "072ad9a0c4f10ef45e0a5287780b2f4b9334eb8741744b9bc15da74260e07d2f"
 )
 EXPECTED_SYNTHETIC_PROOF_RECEIPT_SCHEMA_CANONICAL_SHA256: Final = (
     "5fa4b98974b7c1652c931abd7b630bbca11fd92fde15ee4d099ae6132f3dfe1d"
 )
 EXPECTED_LIVE_PROOF_RECEIPT_SCHEMA_CANONICAL_SHA256: Final = (
-    "9d6468948e7066d4aeae04d47eabc7613627f55af28cf9d1a2b78e751a0c0f62"
+    "167ada117aa0a3bb69ce62c1c19469cd7cdfad0e85a338b3c891cfd33be4b3b9"
 )
 EXPECTED_INSTALL_RECEIPT_SCHEMA_CANONICAL_SHA256: Final = (
     "6a76bcf802ba72257bb5fa524010de5182f85c6dbee2b490d46f92faf159a395"
@@ -185,6 +185,24 @@ REQUIRED_ROLLBACK_RECOVERY_INVARIANTS: Final = frozenset(
         "resume_install_and_resume_rollback_never_create_missing_claims",
         "start_reserved_rollback_requires_exact_preclaimed_recovery_reservation_and_is_the_only_post_expiry_first_claim_path",
         "install_recovery_reservation_and_rollback_nonces_are_pairwise_distinct_and_recovery_delegation_is_bound_to_the_exact_derived_install_execution_id",
+    }
+)
+REQUIRED_START_AUTHORITY_PAIR_INVARIANTS: Final = frozenset(
+    {
+        "recovery_reservation_and_install_authority_claimed_atomically_before_capsule_publication_and_first_install_effect",
+        "published_recovery_capsule_requires_exact_preclaimed_start_authority_pair",
+        "fresh_first_install_worker_uses_exact_resume_only",
+    }
+)
+REQUIRED_PROOF_FAULT_BARRIER_INVARIANTS: Final = frozenset(
+    {
+        "proof_fault_barrier_is_process_local_and_fixed_to_first_install_i04_and_first_empty_rollback_r05_workers",
+        "proof_fault_worker_self_stops_only_after_durable_journal_append_readback_and_anchor_reconciliation",
+        "proof_parent_never_issues_sigstop",
+        "process_death_arm_requires_boundary_as_exact_journal_head",
+        "process_death_arm_requires_single_worker_task_and_empty_child_process_set",
+        "sigkill_and_exact_reap_required_before_stopped_worker_can_resume",
+        "public_install_and_rollback_entrypoints_are_unmodified_by_proof_fault_barrier",
     }
 )
 
@@ -402,6 +420,8 @@ EXPECTED_ARTIFACTS: Final = frozenset(
         "tools/governed_memory_release/runtime_input_stager.py",
         "tools/governed_memory_release/runtime_publication_transport.py",
         "tools/governed_memory_validation/generate_installation_package_manifest.py",
+        "tools/governed_memory_validation/durable_live_proof_receipt.py",
+        "tools/governed_memory_validation/process_death_arm_receipt.py",
         "tools/governed_memory_validation/run_disposable_installation_live_proof.py",
         "tools/governed_memory_validation/run_installation_synthetic_proof.py",
         "tools/governed_memory_validation/verify_store_migration_manifest.py",
@@ -902,6 +922,15 @@ def _verify_contract(contract: dict[str, object]) -> None:
             "durable_recovery_reservation_claim_required_before_first_install_effect"
         )
         is not True
+        or not _requires_true_invariants(
+            authority,
+            frozenset(
+                {
+                    "recovery_reservation_and_install_authority_claimed_atomically_before_capsule_publication_and_first_install_effect",
+                    "published_recovery_capsule_requires_exact_preclaimed_start_authority_pair",
+                }
+            ),
+        )
         or authority.get("ephemeral_private_signer_retained_for_execution")
         is not False
         or authority.get("persistent_trusted_owner_key_file_required") is not False
@@ -949,6 +978,10 @@ def _verify_contract(contract: dict[str, object]) -> None:
         is not True
         or recovery.get("fresh_process_recovery_without_ephemeral_signer_packaged")
         is not True
+        or not _requires_true_invariants(
+            recovery,
+            REQUIRED_PROOF_FAULT_BARRIER_INVARIANTS,
+        )
         or recovery.get(
             "expired_recovery_delegation_usable_only_with_matching_preclaimed_reservation"
         )
@@ -1130,9 +1163,21 @@ def _verify_contract(contract: dict[str, object]) -> None:
         )
         is not True
         or proof_policy.get(
+            "sealed_runner_packages_atomic_start_authority_pair_claim_and_reverification"
+        )
+        is not True
+        or proof_policy.get(
             "sealed_runner_packages_fresh_process_recovery_without_ephemeral_signer"
         )
         is not True
+        or proof_policy.get(
+            "sealed_runner_packages_process_local_post_fsync_cooperative_sigstop_barrier"
+        )
+        is not True
+        or not _requires_true_invariants(
+            proof_policy,
+            REQUIRED_PROOF_FAULT_BARRIER_INVARIANTS,
+        )
         or proof_policy.get(
             "sealed_runner_packages_inherited_supervision_lock_validator"
         )
@@ -1190,6 +1235,10 @@ def _verify_contract(contract: dict[str, object]) -> None:
         is not True
         or receipts.get(
             "live_proof_receipt_binds_recovery_capsule_and_pre_effect_reservation"
+        )
+        is not True
+        or receipts.get(
+            "live_proof_receipt_binds_install_authority_claim_and_atomic_start_pair"
         )
         is not True
         or receipts.get(
@@ -1337,6 +1386,13 @@ def _verify_plan(plan: dict[str, object]) -> None:
             "durable_recovery_reservation_claim_required_before_first_install_effect"
         )
         is not True
+        or not _requires_true_invariants(
+            invariants, REQUIRED_START_AUTHORITY_PAIR_INVARIANTS
+        )
+        or not _requires_true_invariants(
+            invariants,
+            REQUIRED_PROOF_FAULT_BARRIER_INVARIANTS,
+        )
         or invariants.get(
             "derived_rollback_authority_binds_post_effect_exact_ledger_and_empty_eligibility"
         )
@@ -1397,7 +1453,22 @@ def _verify_plan(plan: dict[str, object]) -> None:
             "exact_distinct_proof_authority_required": True,
             "sealed_runner_packages_fixed_capsule_reader_and_signed_delegation_verifier": True,
             "sealed_runner_packages_pre_effect_recovery_reservation_claim_and_verifier": True,
+            "sealed_runner_packages_atomic_start_authority_pair_claim_and_reverification": True,
+            "live_proof_receipt_binds_install_authority_claim_and_atomic_start_pair": True,
+            "live_proof_receipt_binds_install_and_rollback_process_death_arm_receipts": True,
             "sealed_runner_packages_fresh_process_recovery_without_ephemeral_signer": True,
+            "sealed_runner_packages_worker_parent_death_sigkill_fence": True,
+            "sealed_runner_packages_process_local_post_fsync_cooperative_sigstop_barrier": True,
+            "proof_fault_barrier_is_process_local_and_fixed_to_first_install_i04_and_first_empty_rollback_r05_workers": True,
+            "proof_fault_worker_self_stops_only_after_durable_journal_append_readback_and_anchor_reconciliation": True,
+            "proof_parent_never_issues_sigstop": True,
+            "process_death_arm_requires_boundary_as_exact_journal_head": True,
+            "process_death_arm_requires_single_worker_task_and_empty_child_process_set": True,
+            "sigkill_and_exact_reap_required_before_stopped_worker_can_resume": True,
+            "public_install_and_rollback_entrypoints_are_unmodified_by_proof_fault_barrier": True,
+            "sealed_runner_packages_create_once_process_death_arm_receipts": True,
+            "sealed_runner_packages_two_arm_exact_live_receipt_reconstruction": True,
+            "recover_only_pair_without_execution_never_initiates_install": True,
             "sealed_runner_packages_inherited_supervision_lock_validator": True,
             "repository_only_issuer_is_excluded_from_sealed_release": True,
             "recovery_capsule_is_external_retained_state_not_package_artifact": True,
@@ -1819,6 +1890,15 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
             "durable_recovery_reservation_claim_required_before_first_install_effect"
         )
         is not True
+        or not _requires_true_invariants(
+            binding,
+            frozenset(
+                {
+                    "recovery_reservation_and_install_authority_claimed_atomically_before_capsule_publication_and_first_install_effect",
+                    "published_recovery_capsule_requires_exact_preclaimed_start_authority_pair",
+                }
+            ),
+        )
         or binding.get(
             "derived_rollback_authority_binds_post_effect_exact_ledger_and_empty_eligibility"
         )
@@ -1859,6 +1939,10 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
         is not True
         or durability.get("fresh_process_recovery_without_ephemeral_signer_packaged")
         is not True
+        or not _requires_true_invariants(
+            durability,
+            REQUIRED_PROOF_FAULT_BARRIER_INVARIANTS,
+        )
         or durability.get(
             "expired_recovery_delegation_usable_only_with_matching_preclaimed_reservation"
         )
@@ -1965,6 +2049,10 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
             "live_proof_receipt_binds_recovery_capsule_and_pre_effect_reservation"
         )
         is not True
+        or receipt.get(
+            "live_proof_receipt_binds_install_authority_claim_and_atomic_start_pair"
+        )
+        is not True
         or host.get(
             "store_supervisor_reverifies_exact_nonsecret_command_health_ports_capabilities_restart_logging_tmpfs_mount_network_and_state"
         )
@@ -2041,6 +2129,14 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
         is not True
         or proof_boundary.get("disposable_linux_proof_runner")
         != "tools/governed_memory_validation/run_disposable_installation_live_proof.py"
+        or proof_boundary.get(
+            "sealed_runner_packages_process_local_post_fsync_cooperative_sigstop_barrier"
+        )
+        is not True
+        or not _requires_true_invariants(
+            proof_boundary,
+            REQUIRED_PROOF_FAULT_BARRIER_INVARIANTS,
+        )
         or proof_boundary.get(
             "disposable_linux_proof_runner_executed_before_package_sealing"
         )
@@ -2272,9 +2368,21 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
         )
         is not True
         or live_proof_harness.get(
+            "sealed_runner_packages_atomic_start_authority_pair_claim_and_reverification"
+        )
+        is not True
+        or live_proof_harness.get(
             "sealed_runner_packages_fresh_process_recovery_without_ephemeral_signer"
         )
         is not True
+        or live_proof_harness.get(
+            "sealed_runner_packages_process_local_post_fsync_cooperative_sigstop_barrier"
+        )
+        is not True
+        or not _requires_true_invariants(
+            live_proof_harness,
+            REQUIRED_PROOF_FAULT_BARRIER_INVARIANTS,
+        )
         or live_proof_harness.get(
             "sealed_runner_packages_inherited_supervision_lock_validator"
         )
@@ -2344,6 +2452,12 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
             )
         )
         or type(proof_claims) is not dict
+        or proof_claims.get(
+            "sealed_runner_supports_process_local_post_fsync_cooperative_sigstop_barrier"
+        )
+        is not True
+        or proof_claims.get("process_death_arm_receipt_schema_version")
+        != "governed-memory-phase9-process-death-arm-receipt-v2"
         or any(
             proof_claims.get(key) is not False
             for key in (
@@ -2363,30 +2477,50 @@ def _verify_extension_contracts(observed: dict[str, str]) -> None:
         is not True
         or proof_package_context.get("fixed_loopback_store_readiness_adapter_packaged")
         is not True
+        or proof_package_context.get(
+            "sealed_runner_packages_process_local_post_fsync_cooperative_sigstop_barrier"
+        )
+        is not True
+        or not _requires_true_invariants(
+            proof_package_context,
+            REQUIRED_PROOF_FAULT_BARRIER_INVARIANTS,
+        )
         or proof_schema.get("additionalProperties") is not False
         or proof_schema.get("$id")
         != "urn:governed-memory:dormant-store-install:disposable-proof-receipt:v2"
         or live_proof_schema.get("additionalProperties") is not False
         or live_proof_schema.get("$id")
-        != "urn:governed-memory:phase9:disposable-live-proof-receipt:v3"
+        != "urn:governed-memory:phase9:disposable-live-proof-receipt:v4"
         or live_proof_schema.get("properties", {}).get(
             "schema_version", {}
         ).get("const")
-        != "governed-memory-phase9-live-proof-receipt-v3"
+        != "governed-memory-phase9-live-proof-receipt-v4"
         or live_proof_schema.get("properties", {}).get(
             "host_clock_synchronization_preflight_passed", {}
         ).get("const")
         is not True
         or "host_clock_synchronization_preflight_passed"
         not in live_proof_schema.get("required", ())
+        or live_proof_schema.get("properties", {}).get(
+            "start_authority_pair_claimed_atomically", {}
+        ).get("const")
+        is not True
+        or live_proof_schema.get("properties", {}).get(
+            "install_authority_claim_sha256", {}
+        ).get("$ref")
+        != "#/$defs/sha256"
         or not {
             "recovery_capsule_sha256",
             "recovery_reservation_claim_sha256",
+            "install_authority_claim_sha256",
+            "start_authority_pair_claimed_atomically",
             "recovery_capsule_published_before_first_install_effect",
             "recovery_reservation_claimed_before_first_install_effect",
             "ephemeral_private_signer_retained_at_execution_start",
             "recovery_capsule_retained_at_terminal_observation",
             "exact_rollback_resources_absent_count",
+            "install_process_death_arm_receipt_sha256",
+            "rollback_process_death_arm_receipt_sha256",
         }
         <= set(live_proof_schema.get("required", ()))
         or live_proof_schema.get("properties", {}).get(
