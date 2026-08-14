@@ -116,6 +116,23 @@ class AdmissionTests(unittest.TestCase):
             ):
                 review(proposal, value)
 
+    def test_proposal_policy_surface_is_explicit_and_closed(self) -> None:
+        for field, replacement in (
+            ("projectable", False),
+            ("domains", ["personal"]),
+            ("intents", ["recall"]),
+            ("surface", "explicit_only"),
+            ("requires_explicit", True),
+            ("valid_from", NOW),
+            ("valid_to", NOW),
+        ):
+            proposal = make_proposal()
+            proposal[field] = replacement
+            with self.subTest(field=field), self.assertRaisesRegex(
+                ContractViolation, "proposal_policy_contract_mismatch"
+            ):
+                review(proposal)
+
     def test_operation_outcome_contract_has_no_unused_noop_state(self) -> None:
         self.assertEqual(
             tuple((outcome.name, outcome.value) for outcome in OperationOutcome),

@@ -48,10 +48,20 @@ _AUTOMATIC_ADMIT_REASON_CODES = ("automatic_low_risk_owner_assertion",)
 _REJECT_REASON_CODES = frozenset(
     {"duplicate_existing", "not_durable", "proposal_incorrect"}
 )
+_PROPOSAL_POLICY_FIELDS = (
+    "projectable",
+    "domains",
+    "intents",
+    "surface",
+    "requires_explicit",
+    "valid_from",
+    "valid_to",
+)
 AUTHORITATIVE_PROPOSAL_RECORD_FIELDS = tuple(
     sorted(
         set(COMPLETE_EXTRACTION_ITEM_FIELDS)
         | set(PROPOSAL_HASH_BINDING_FIELDS)
+        | set(_PROPOSAL_POLICY_FIELDS)
         | {"review_state", "expires_at"}
     )
 )
@@ -416,7 +426,9 @@ CLAIM_HASH_TEST_VECTORS = MappingProxyType(
 
 def _split_proposal_record(
     value: Mapping[str, Any],
-) -> tuple[dict[str, object], dict[str, object], datetime]:
+) -> tuple[
+    dict[str, object], dict[str, object], dict[str, object], datetime
+]:
     if not isinstance(value, Mapping) or tuple(sorted(value)) != (
         AUTHORITATIVE_PROPOSAL_RECORD_FIELDS
     ):
@@ -433,7 +445,32 @@ def _split_proposal_record(
         item,
         allow_null_fact_index=purpose == ProposalPurpose.CORRECTION.value,
     )
-    return item, binding, require_utc(expires_at, "invalid_proposal_expiry")
+    sensitivity_policy = policy_for_sensitivity(item["sensitivity"])
+    policy = {field: value[field] for field in _PROPOSAL_POLICY_FIELDS}
+    expected_policy: dict[str, object] = {
+        "projectable": True,
+        "domains": [],
+        "intents": [],
+        "surface": sensitivity_policy["surface"],
+        "requires_explicit": sensitivity_policy["requires_explicit"],
+        "valid_from": None,
+        "valid_to": None,
+    }
+    if (
+        type(policy["projectable"]) is not bool
+        or type(policy["domains"]) is not list
+        or type(policy["intents"]) is not list
+        or type(policy["surface"]) is not str
+        or type(policy["requires_explicit"]) is not bool
+        or policy != expected_policy
+    ):
+        raise ContractViolation("proposal_policy_contract_mismatch")
+    return (
+        item,
+        binding,
+        policy,
+        require_utc(expires_at, "invalid_proposal_expiry"),
+    )
 
 
 def _validate_catalog_fact(item: Mapping[str, Any], catalog: PredicateCatalog) -> None:
@@ -464,8 +501,8 @@ def _revision_sha256(
     proposal_sha256: str,
     item: Mapping[str, Any],
     binding: Mapping[str, Any],
+    policy: Mapping[str, Any],
 ) -> str:
-    policy = policy_for_sensitivity(item["sensitivity"])
     identity = claim_identity_sha256(
         subject_entity_key=str(item["subject_entity_key"]),
         predicate=str(item["predicate"]),
@@ -491,13 +528,13 @@ def _revision_sha256(
             "object_literal": item["object_literal"],
             "epistemic_state": item["epistemic_state"],
             "sensitivity": item["sensitivity"],
-            "projectable": True,
-            "domains": [],
-            "intents": [],
+            "projectable": policy["projectable"],
+            "domains": policy["domains"],
+            "intents": policy["intents"],
             "surface": policy["surface"],
             "requires_explicit": policy["requires_explicit"],
-            "valid_from": None,
-            "valid_to": None,
+            "valid_from": policy["valid_from"],
+            "valid_to": policy["valid_to"],
             "source_sha256": binding["source_sha256"],
             "selected_sha256": binding["selected_sha256"],
             "selection_binding_sha256": binding["selection_binding_sha256"],
@@ -554,7 +591,9 @@ def apply_review(
     transaction_time: datetime,
 ) -> dict[str, object]:
     catalog = parse_predicate_catalog(predicate_catalog)
-    item, binding, expires_at = _split_proposal_record(proposal_record)
+    item, binding, policy, expires_at = _split_proposal_record(
+        proposal_record
+    )
     review = _parse_review_command(command)
     reviewed_at = require_utc(transaction_time, "invalid_review_transaction_time")
     owner = _uuid(binding["owner_user_id"], "invalid_proposal_owner")
@@ -645,6 +684,13 @@ def apply_review(
         or item["subject_entity_key"] != "self"
         or item["epistemic_state"] != "supported"
         or item["sensitivity"] != "ordinary"
+        or policy["projectable"] is not True
+        or policy["domains"] != []
+        or policy["intents"] != []
+        or policy["surface"] != "normal"
+        or policy["requires_explicit"] is not False
+        or policy["valid_from"] is not None
+        or policy["valid_to"] is not None
     ):
         raise ContractViolation("automatic_admission_policy_denied")
 
@@ -707,7 +753,6 @@ def apply_review(
         ) + 2
     revision_id = _derived_uuid(operation_id, "revision")
     projection_id = _derived_uuid(operation_id, "projection")
-    policy = policy_for_sensitivity(item["sensitivity"])
     subject, object_value = relational_fact_from_row(item)
     retrieval_text = render_relational_fact(
         subject=subject,
@@ -728,6 +773,7 @@ def apply_review(
         proposal_sha256=proposal_sha256,
         item=item,
         binding=binding,
+        policy=policy,
     )
     claim: dict[str, object] = {
         "owner_user_id": str(owner),
@@ -738,7 +784,7 @@ def apply_review(
         "projection_sequence": projection_sequence,
         "lifecycle_state": ClaimLifecycleState.ACTIVE.value,
         "is_current": True,
-        "projectable": True,
+        "projectable": policy["projectable"],
         "predicate_catalog_sha256": catalog_sha256,
         "predicate": item["predicate"],
         "subject_entity_type": item["subject_entity_type"],
@@ -751,14 +797,14 @@ def apply_review(
         "object_literal": item["object_literal"],
         "epistemic_state": item["epistemic_state"],
         "sensitivity": item["sensitivity"],
-        "domains": [],
-        "intents": [],
+        "domains": policy["domains"],
+        "intents": policy["intents"],
         "surface": policy["surface"],
         "requires_explicit": policy["requires_explicit"],
         "selection_binding_sha256": binding["selection_binding_sha256"],
         "source_sha256": binding["source_sha256"],
-        "valid_from": None,
-        "valid_to": None,
+        "valid_from": policy["valid_from"],
+        "valid_to": policy["valid_to"],
         "updated_at": reviewed_at,
         "retrieval_text": retrieval_text,
         "retrieval_text_sha256": retrieval_text_sha256,
@@ -866,7 +912,9 @@ def expire_proposal(
     """Plan trusted-clock expiry, including correction restoration."""
 
     catalog = parse_predicate_catalog(predicate_catalog)
-    item, binding, expires_at = _split_proposal_record(proposal_record)
+    item, binding, _policy, expires_at = _split_proposal_record(
+        proposal_record
+    )
     expired_at = require_utc(
         transaction_time, "invalid_expiration_transaction_time"
     )

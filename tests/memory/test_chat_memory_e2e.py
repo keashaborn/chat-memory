@@ -111,6 +111,13 @@ class SyntheticChatMemoryFlowTests(unittest.IsolatedAsyncioTestCase):
         proposal = {
             **batch["proposals"][0],
             **batch["proposal_hash_binding"],
+            "projectable": True,
+            "domains": [],
+            "intents": [],
+            "surface": "normal",
+            "requires_explicit": False,
+            "valid_from": None,
+            "valid_to": None,
             "review_state": "pending_review",
             "expires_at": NOW + timedelta(hours=24),
         }
