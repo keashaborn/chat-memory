@@ -33,7 +33,7 @@
     },
     {
       "path": "schema_contract.json",
-      "sha256": "ce8d00393e900ba2850d12cd07107e55ca490b22f7cc9fa480fdb48255678ea0"
+      "sha256": "9297e8ba9b72b0435990573a2d5254d2f06b690797561d8b9aca7cf605ba8828"
     },
     {
       "path": "predicate_catalog.json",
@@ -89,11 +89,11 @@
     },
     {
       "path": "0002_conversation_bridge/package.json",
-      "sha256": "54da2722e568c073bd045ccda684607a0c69cad025473b0e9a6aaf12c6791f70"
+      "sha256": "a9ebd353f21681c1ce55c347d8d151e3a1080c86a83d06719447d30feb4dce6f"
     },
     {
       "path": "0002_conversation_bridge/forward.pgsql",
-      "sha256": "05c1f81051795b92a2e186d3f31aca043bf1d6d69312702ac1d335c27ea885c1"
+      "sha256": "a0bd3e3bde5d009cc7ec4779399669e698697600df06ed74e77bbc41d904a3f1"
     },
     {
       "path": "0002_conversation_bridge/rollback.pgsql",

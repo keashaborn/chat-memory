@@ -338,7 +338,7 @@
     "historical_scan_or_backfill": false,
     "operation_id_is_message_id": true,
     "pilot_capture_limit_per_owner_rolling_24h": 20,
-    "pilot_capture_limit_count_scope": "all_outbox_states_by_source_created_at",
+    "pilot_capture_limit_count_scope": "non_exempt_outbox_states_by_source_created_at",
     "pilot_capture_limit_lock": "owner_scoped_transaction_advisory_lock",
     "pilot_capture_limit_result": "pilot_limit_reached_null_outbox_id",
     "pilot_capture_replay_consumes_new_slot": false,

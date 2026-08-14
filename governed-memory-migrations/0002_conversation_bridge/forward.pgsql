@@ -2912,6 +2912,7 @@ BEGIN
     SELECT pg_catalog.count(*)
     FROM memory_ingest_private.memory_ingest_outbox AS value
     WHERE value.owner_user_id = actor
+      AND value.state NOT IN ('skipped', 'expired', 'erasure_cancelled')
       AND value.source_created_at >= captured_at - interval '24 hours'
       AND value.source_created_at <= captured_at
   ) >= 20 THEN

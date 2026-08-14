@@ -22,7 +22,7 @@
   },
   "forward": {
     "path": "forward.pgsql",
-    "sha256": "05c1f81051795b92a2e186d3f31aca043bf1d6d69312702ac1d335c27ea885c1"
+    "sha256": "a0bd3e3bde5d009cc7ec4779399669e698697600df06ed74e77bbc41d904a3f1"
   },
   "rollback": {
     "path": "rollback.pgsql",
@@ -61,6 +61,7 @@
     "direct_runtime_table_access": false,
     "bounded_context_reviews": 1,
     "pilot_capture_limit_per_owner_rolling_24h": 20,
+    "pilot_capture_limit_count_scope": "non_exempt_outbox_states_by_source_created_at",
     "pilot_capture_limit_lock": "owner_scoped_transaction_advisory_lock",
     "pilot_capture_limit_result": "pilot_limit_reached_null_outbox_id",
     "pilot_capture_replay_consumes_new_slot": false,

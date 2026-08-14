@@ -384,12 +384,15 @@ class ConversationBridgeMigrationTests(unittest.TestCase):
         cap = enqueue[count_at:limit_return_at]
         self.assertIn("value.owner_user_id = actor", cap)
         self.assertIn(
+            "value.state NOT IN ('skipped', 'expired', 'erasure_cancelled')",
+            cap,
+        )
+        self.assertIn(
             "value.source_created_at >= captured_at - interval '24 hours'",
             cap,
         )
         self.assertIn("value.source_created_at <= captured_at", cap)
         self.assertIn(") >= 20 THEN", enqueue)
-        self.assertNotRegex(cap, r"\bstate\b")
 
     def test_enqueue_accepts_no_caller_owner_content_or_lineage(self) -> None:
         signature = self.forward.split(

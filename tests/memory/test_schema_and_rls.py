@@ -1186,7 +1186,7 @@ class SchemaContractTests(unittest.TestCase):
         self.assertEqual(bridge["pilot_capture_limit_per_owner_rolling_24h"], 20)
         self.assertEqual(
             bridge["pilot_capture_limit_count_scope"],
-            "all_outbox_states_by_source_created_at",
+            "non_exempt_outbox_states_by_source_created_at",
         )
         self.assertEqual(
             bridge["pilot_capture_limit_lock"],
@@ -1466,7 +1466,7 @@ class PackageIntegrityTests(unittest.TestCase):
         )
         self.assertEqual(
             sha256(ROOT_MANIFEST_PATH.read_bytes()).hexdigest(),
-            "d8a954d048cf1df775cc614da01964348620df86eb3ed88c078812f44a655dc0",
+            "f75039efcc27319146f79d38f44ad3556cffe40c1595d5953a794e683581a85b",
         )
         receipt = verifier["verify"](MIGRATIONS)
         self.assertEqual(receipt["result"], "artifact_integrity_verified")
