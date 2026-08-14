@@ -168,6 +168,43 @@ class ExactRebuildQdrantStore:
         self._source: str | None = None
         self._target: str | None = None
 
+    async def bind_existing_generations(
+        self,
+        *,
+        source_collection: str,
+        target_collection: str,
+        expected_active_collection: str,
+    ) -> None:
+        if (
+            source_collection == target_collection
+            or expected_active_collection not in {source_collection, target_collection}
+        ):
+            raise ContractViolation("rebuild_qdrant_identity_mismatch")
+        source = await self._inspect(source_collection)
+        target = await self._inspect(target_collection)
+        if source is None or target is None:
+            raise ContractViolation("rebuild_qdrant_generation_absent")
+        for _count, indexes in (source, target):
+            if any(
+                indexes.get(field) != expected
+                for field, expected in QDRANT_REQUIRED_PAYLOAD_INDEXES.items()
+            ):
+                raise ContractViolation("rebuild_qdrant_generation_index_mismatch")
+        inactive = (
+            target_collection
+            if expected_active_collection == source_collection
+            else source_collection
+        )
+        if await self._aliases(expected_active_collection) != (
+            {
+                "alias_name": QDRANT_ALIAS,
+                "collection_name": expected_active_collection,
+            },
+        ) or await self._aliases(inactive):
+            raise ContractViolation("rebuild_qdrant_active_alias_mismatch")
+        self._source = source_collection
+        self._target = target_collection
+
     async def _aliases(self, collection: str) -> tuple[dict[str, Any], ...]:
         response = await self._transport.request(
             "GET", f"/collections/{collection}/aliases"

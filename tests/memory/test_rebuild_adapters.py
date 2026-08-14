@@ -325,6 +325,28 @@ class RebuildAdapterTests(unittest.IsolatedAsyncioTestCase):
                 expected_manifest_sha256=manifest,
             )
 
+    async def test_bind_existing_generations_requires_one_exact_active_alias(self) -> None:
+        transport = FakeAdminTransport()
+        transport.collections[TARGET] = {
+            "indexes": dict(QDRANT_REQUIRED_PAYLOAD_INDEXES),
+            "points": {},
+        }
+        store = ExactRebuildQdrantStore(transport)
+        await store.bind_existing_generations(
+            source_collection=QDRANT_PHYSICAL_COLLECTION,
+            target_collection=TARGET,
+            expected_active_collection=QDRANT_PHYSICAL_COLLECTION,
+        )
+        transport.aliases[QDRANT_ALIAS] = TARGET
+        with self.assertRaisesRegex(
+            ContractViolation, "rebuild_qdrant_active_alias_mismatch"
+        ):
+            await store.bind_existing_generations(
+                source_collection=QDRANT_PHYSICAL_COLLECTION,
+                target_collection=TARGET,
+                expected_active_collection=QDRANT_PHYSICAL_COLLECTION,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
