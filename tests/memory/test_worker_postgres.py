@@ -35,6 +35,9 @@ from rag_engine.governed_memory.runtime.qdrant_adapter import (
     QDRANT_PHYSICAL_COLLECTION,
     QdrantUpsertReceipt,
 )
+from rag_engine.governed_memory.runtime.qdrant_transport import (
+    QdrantTransportFailure,
+)
 from rag_engine.governed_memory.runtime.pilot_marker import (
     pilot_marker_receipt_sha256,
 )
@@ -317,6 +320,16 @@ class ProjectionLeaseTests(unittest.IsolatedAsyncioTestCase):
                 "d" * 64,
                 embedding_request_sha256(receipt),
             ),
+        )
+
+    def test_local_qdrant_serialization_failure_is_not_unavailability(self) -> None:
+        self.assertEqual(
+            PostgresOnceWorkerRepository._projection_failure(
+                QdrantTransportFailure(
+                    "qdrant_request_rejected_before_send"
+                )
+            ),
+            ("failed_terminal", "projection_contract_violation"),
         )
 
     def test_unknown_embedding_dispatch_is_terminal_not_retryable(self) -> None:

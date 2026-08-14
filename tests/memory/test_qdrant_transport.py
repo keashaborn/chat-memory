@@ -82,6 +82,23 @@ def transport() -> LoopbackQdrantTransport:
 
 
 class QdrantRuntimeTransportTests(unittest.IsolatedAsyncioTestCase):
+    def test_finite_embedding_vector_has_deterministic_wire_json(self) -> None:
+        encoded = transport()._request_body(
+            {"points": [{"vector": [0.0, -1.25, 3]}]}
+        )
+        self.assertEqual(
+            encoded,
+            b'{"points":[{"vector":[0.0,-1.25,3]}]}',
+        )
+
+    def test_nonfinite_embedding_vector_is_rejected_before_send(self) -> None:
+        for value in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(value=value), self.assertRaisesRegex(
+                QdrantTransportFailure,
+                "qdrant_request_rejected_before_send",
+            ):
+                transport()._request_body({"vector": [value]})
+
     def test_only_exact_loopback_target_is_constructible(self) -> None:
         with self.assertRaisesRegex(ContractViolation, "qdrant_runtime_target_mismatch"):
             LoopbackQdrantTransport(

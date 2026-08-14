@@ -711,6 +711,8 @@ class PostgresOnceWorkerRepository:
     @staticmethod
     def _projection_failure(error: Exception) -> tuple[str, str]:
         if isinstance(error, QdrantTransportFailure):
+            if str(error) == "qdrant_request_rejected_before_send":
+                return "failed_terminal", "projection_contract_violation"
             return "retryable", "qdrant_unavailable"
         if isinstance(error, QdrantWriteOutcomeUnknown):
             return "retryable", "qdrant_verification_inconclusive"

@@ -5,10 +5,11 @@ from __future__ import annotations
 import asyncio
 import http.client
 import json
+import math
 import re
 from typing import Any, Mapping
 
-from ..contracts import ContractViolation, canonical_json_bytes
+from ..contracts import ContractViolation
 from .qdrant_adapter import QdrantWriteOutcomeUnknown
 
 
@@ -32,6 +33,25 @@ def _closed_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
             raise ValueError("duplicate_json_key")
         result[key] = value
     return result
+
+
+def _qdrant_wire_value(value: object) -> object:
+    if value is None or type(value) in {bool, int, str}:
+        return value
+    if type(value) is float:
+        if not math.isfinite(value):
+            raise ContractViolation("qdrant_nonfinite_number")
+        return value
+    if isinstance(value, Mapping):
+        result: dict[str, object] = {}
+        for key, item in value.items():
+            if type(key) is not str:
+                raise ContractViolation("qdrant_non_string_key")
+            result[key] = _qdrant_wire_value(item)
+        return result
+    if isinstance(value, (list, tuple)):
+        return [_qdrant_wire_value(item) for item in value]
+    raise ContractViolation("qdrant_unsupported_wire_value")
 
 
 class LoopbackQdrantTransport:
@@ -68,8 +88,14 @@ class LoopbackQdrantTransport:
         if body is None:
             return None
         try:
-            encoded = canonical_json_bytes(body)
-        except ContractViolation as error:
+            encoded = json.dumps(
+                _qdrant_wire_value(body),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        except (ContractViolation, TypeError, ValueError) as error:
             raise QdrantTransportFailure(
                 "qdrant_request_rejected_before_send"
             ) from error
