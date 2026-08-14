@@ -57,9 +57,9 @@ exact current Phase 9J controller runtime and release are published on seebx
 as a dormant controller substrate; the promoted root-owned publication receipt is
 `ops/governed_memory/phase9j_controller_runtime_release_receipt.json`. Its
 exact package identity is
-`634669dbca4f2ccfed929951bcdd0d555d19e53f9b736ee21b42217e8e8cd629`
+`aff26c82b1c566104f969b02f1bc821badaab0a74945456aaa0f527620994425`
 and its exact runtime-receipt identity is
-`ed0b3518484eec292f35f8b996bccefd01e13038105634016b4253a8c2a732a7`. No
+`0c19395ccfcab313c59792c81303f3d0257a78292dd0255596f203688985ff4d`. No
 persistent PostgreSQL or Qdrant store was created, no production state changed,
 and the external Phase 9J disposable Linux proof receipt is not yet present.
 The package verifier itself never builds a runtime, runs Docker, reads secrets,

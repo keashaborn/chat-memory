@@ -544,14 +544,13 @@ class StagedPrefixDispositionTests(unittest.TestCase):
 
 
 class ProductionContractFactsTests(unittest.TestCase):
-    @unittest.skip("P5/R5/C5 are intentionally unsealed")
     def test_generator_binds_exact_failed_000004_tree_and_000005_namespace(self) -> None:
         document = generator.generate()
         generated = subject.canonical_json_bytes(document)
         self.assertEqual(CHECKED_IN_CONTRACT.read_bytes(), generated)
         self.assertEqual(
             hashlib.sha256(generated).hexdigest(),
-            "daf64a4a6a17d6666d408f0beb216f44ba7d755efab4b43835ec0c7e3ad11f15",
+            "c6997cf3e7076fc0f72c0dc9bd9709310b39391c3af00bb36aa39a9fcb0c45a8",
         )
         failed = document["failed_attempt"]
         files = {item["role"]: item for item in failed["evidence_files"]}
@@ -561,17 +560,17 @@ class ProductionContractFactsTests(unittest.TestCase):
         self.assertEqual(failed["generation"], "000004")
         self.assertEqual(
             failed["package_manifest_sha256"],
-            "5addc8e4ab40b6bc700fde57b67579f8caa3d21077715bcdaf61d5714b52743e",
+            "634669dbca4f2ccfed929951bcdd0d555d19e53f9b736ee21b42217e8e8cd629",
         )
         self.assertEqual(
             failed["controller_runtime_receipt_sha256"],
-            "9dda4d93a1bcfecf4305736feffafb578e4629cd32594cec6b2d6d72cb90a4d3",
+            "ed0b3518484eec292f35f8b996bccefd01e13038105634016b4253a8c2a732a7",
         )
         self.assertEqual(failed["tag"]["commit"], subject.PRODUCTION_OLD_TAG_COMMIT)
-        self.assertEqual(files["failed_permit"]["inode"], 1652272)
+        self.assertEqual(files["failed_permit"]["inode"], 1608996)
         self.assertEqual(
             files["failed_store_spec_v3_tombstone"]["sha256"],
-            "57e07d7ce65e79503982e3c87297f644a347b41394a40cf56127f3536524130d",
+            "00e8770895fbc7a6d400895093c1d2de57eaf3910728eb9381fb5f42e067d1e1",
         )
         self.assertEqual(files["failed_authority_state_v4"]["mode"], 0o600)
         self.assertEqual(files["failed_execution_journal"]["size"], 0)
@@ -595,15 +594,15 @@ class ProductionContractFactsTests(unittest.TestCase):
         self.assertEqual(successor["generation"], "000005")
         self.assertEqual(
             successor["package_manifest_sha256"],
-            "634669dbca4f2ccfed929951bcdd0d555d19e53f9b736ee21b42217e8e8cd629",
+            "aff26c82b1c566104f969b02f1bc821badaab0a74945456aaa0f527620994425",
         )
         self.assertEqual(
             successor["controller_runtime_receipt_sha256"],
-            "ed0b3518484eec292f35f8b996bccefd01e13038105634016b4253a8c2a732a7",
+            "0c19395ccfcab313c59792c81303f3d0257a78292dd0255596f203688985ff4d",
         )
         self.assertEqual(
             successor["attempt_identity_sha256"],
-            "7d36e9326e1b333b4203d167f776ef75759ff295f943f79ae5838b068c3b8ba5",
+            "877d152d868515a8b60d3cbc43c8af0b95482d7dff1511a91e606e3bff19b646",
         )
         self.assertEqual(
             subject._TCP_IDENTITIES["127.0.0.1:55436@000005"], "55436"

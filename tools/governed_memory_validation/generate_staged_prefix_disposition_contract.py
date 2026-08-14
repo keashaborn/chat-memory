@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-"""Emit the draft 000004-failure to 000005-successor contract.
+"""Emit the reviewed 000004-failure to 000005-successor contract.
 
-P5 and R5 are intentionally zero-bound until the package and dormant runtime
-are independently frozen. Live execution remains permit- and manager-gated;
-generating this draft does not authorize or perform an effect.
+P5 and R5 are independently frozen and bound here. Live execution remains
+permit- and manager-gated; generating this contract does not authorize or
+perform an effect.
 """
 
 import sys
@@ -15,8 +15,12 @@ from tools.governed_memory_validation import staged_prefix_disposition as staged
 
 
 DISPOSITION_ID: Final = "phase9-v8-staged-to-v9-000005"
-CORRECTED_PACKAGE_MANIFEST_SHA256: Final = "0" * 64
-CORRECTED_CONTROLLER_RUNTIME_RECEIPT_SHA256: Final = "0" * 64
+CORRECTED_PACKAGE_MANIFEST_SHA256: Final = (
+    "aff26c82b1c566104f969b02f1bc821badaab0a74945456aaa0f527620994425"
+)
+CORRECTED_CONTROLLER_RUNTIME_RECEIPT_SHA256: Final = (
+    "0c19395ccfcab313c59792c81303f3d0257a78292dd0255596f203688985ff4d"
+)
 _DEVICE: Final = 66305
 
 

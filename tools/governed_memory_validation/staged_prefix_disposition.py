@@ -136,9 +136,11 @@ PRODUCTION_LIVE_GUARD_PATH: Final = Path(
 PRODUCTION_PRESERVED_GENERATION: Final = "000002"
 PRODUCTION_FAILED_GENERATION: Final = "000004"
 PRODUCTION_CORRECTED_GENERATION: Final = "000005"
-# C5 remains deliberately unsealed until the reviewed P5 package and dormant
-# R5 runtime exist.  A production disposition cannot pass with this sentinel.
-PRODUCTION_CONTRACT_SHA256: Final[str | None] = None
+# C5 binds the reviewed failed 000004 evidence to the independently published
+# P5/R5 corrected 000005 successor.
+PRODUCTION_CONTRACT_SHA256: Final[str | None] = (
+    "c6997cf3e7076fc0f72c0dc9bd9709310b39391c3af00bb36aa39a9fcb0c45a8"
+)
 PRODUCTION_FAILED_PACKAGE_MANIFEST_SHA256: Final = (
     "634669dbca4f2ccfed929951bcdd0d555d19e53f9b736ee21b42217e8e8cd629"
 )

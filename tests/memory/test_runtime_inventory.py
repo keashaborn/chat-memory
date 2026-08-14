@@ -65,16 +65,16 @@ EXPECTED_CURRENT_RUNTIME_RECEIPT_SHA256 = (
     "25ca53e683e53f79b726909ef64bc8afad30269cce3f59804cf66335667a8108"
 )
 EXPECTED_PHASE9J_CONTROLLER_RUNTIME_RELEASE_RECEIPT_SHA256 = (
-    "ed0b3518484eec292f35f8b996bccefd01e13038105634016b4253a8c2a732a7"
+    "0c19395ccfcab313c59792c81303f3d0257a78292dd0255596f203688985ff4d"
 )
-EXPECTED_PHASE9M_PACKAGE_MANIFEST_SHA256 = (
-    "634669dbca4f2ccfed929951bcdd0d555d19e53f9b736ee21b42217e8e8cd629"
+EXPECTED_PHASE9J_PACKAGE_MANIFEST_SHA256 = (
+    "aff26c82b1c566104f969b02f1bc821badaab0a74945456aaa0f527620994425"
 )
-EXPECTED_PHASE9M_RUNTIME_TREE_SHA256 = (
-    "6b664845055126fe0f8fd646d9a583bc364de9ba9e8865a855ad220bc669ee16"
+EXPECTED_PHASE9J_RUNTIME_TREE_SHA256 = (
+    "0e1b1afec04d2432620ac9ba701048e25fb40a789acaf0ba68ddb1facdd84c47"
 )
-EXPECTED_PHASE9M_RELEASE_TREE_SHA256 = (
-    "2f4146db1590f92454a851d1e35d2368ca87101526b1777f81d0d04091d8c08a"
+EXPECTED_PHASE9J_RELEASE_TREE_SHA256 = (
+    "33ecf0a0cdca8c085d7c67ea05ef6decbad8703791baa8cc9b742629a31307a0"
 )
 EXPECTED_HISTORICAL_PHASE7C_RUNTIME_RECEIPT_SHA256 = (
     "210cd0fe1bdaf60089668b3d2c8d37be760ed9b867e0909d4e83ebcc204e84b2"
@@ -457,7 +457,7 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         )
         self.assertEqual(
             publication["package_manifest_sha256"],
-            EXPECTED_PHASE9M_PACKAGE_MANIFEST_SHA256,
+            EXPECTED_PHASE9J_PACKAGE_MANIFEST_SHA256,
         )
         self.assertEqual(
             publication["runtime_root"],
@@ -466,16 +466,16 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         )
         self.assertEqual(
             publication["runtime_tree_sha256"],
-            EXPECTED_PHASE9M_RUNTIME_TREE_SHA256,
+            EXPECTED_PHASE9J_RUNTIME_TREE_SHA256,
         )
         self.assertEqual(
             publication["release_root"],
             "/opt/governed-memory-controller/releases/"
-            + EXPECTED_PHASE9M_PACKAGE_MANIFEST_SHA256,
+            + EXPECTED_PHASE9J_PACKAGE_MANIFEST_SHA256,
         )
         self.assertEqual(
             publication["release_tree_sha256"],
-            EXPECTED_PHASE9M_RELEASE_TREE_SHA256,
+            EXPECTED_PHASE9J_RELEASE_TREE_SHA256,
         )
         self.assertEqual(
             hashlib.sha256(
@@ -719,19 +719,19 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         self.assertEqual(current["package_artifact_count"], 76)
         self.assertEqual(
             current["package_manifest_sha256"],
-            EXPECTED_PHASE9M_PACKAGE_MANIFEST_SHA256,
+            EXPECTED_PHASE9J_PACKAGE_MANIFEST_SHA256,
         )
         self.assertEqual(
             current["contract_canonical_sha256"],
-            "1c93dbef0c6b72b36825087522e11639c62c9daed1c31a6f735600a57c25a03d",
+            "e1c47edb4e1e4f2354563bb0842a44e4f57a96579d72cb99394be787ff78fd2a",
         )
         self.assertEqual(
             current["controller_plan_canonical_sha256"],
-            "fa0090fda942d875cc021e19e36cb5bfb22298c637d58a276acb9b367e164a4d",
+            "f80c6de2352168242d3bfe3fdceb24051313984b813e062df322a8e7295f8603",
         )
         self.assertEqual(
             current["execution_contract_canonical_sha256"],
-            "943defc0441b6ad888b4d1bd60e135eab178e1c9cd37f9a415f988fdd6abe0c6",
+            "8fe3a1e4b03a8a2a23c4b89899288c244111f47327a3c3aa51d41599ab2d12c6",
         )
         self.assertEqual(
             current["controller_runtime_contract_canonical_sha256"],
@@ -743,11 +743,11 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         )
         self.assertEqual(
             current["postgres_native_stage_contract_canonical_sha256"],
-            "c58eb56e5c51651d0e5e66c1ff0c06a29c047824c2a6d3adeab39c3e223cfd25",
+            "da99f9e10e2ed5227d6ee743145bb6d05b8afe240cbbf3432626b63879ca7997",
         )
         self.assertEqual(
             current["store_migration_manifest_sha256"],
-            "f2477f593b624d3850392becae19440c1f1d68172fe3e1d70994714f768ec144",
+            "9b9ba0316fb874a1ebd79de4a1dbf656d64c39b247bc25354ee41a24520e294a",
         )
         self.assertEqual(current["store_migration_file_count"], 9)
         self.assertTrue(current["static_package_verification_complete"])

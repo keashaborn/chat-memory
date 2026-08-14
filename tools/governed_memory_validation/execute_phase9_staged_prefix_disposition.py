@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-"""Execute the exact Phase 9 v7 staged-prefix-to-v8 disposition."""
+"""Execute the exact Phase 9 v8 staged-prefix-to-v9 disposition."""
 
 import os
 import sys
 
 
 _PREIMPORT_CONTROLLER_RUNTIME_RECEIPT_SHA256 = (
-    "ed0b3518484eec292f35f8b996bccefd01e13038105634016b4253a8c2a732a7"
+    "0c19395ccfcab313c59792c81303f3d0257a78292dd0255596f203688985ff4d"
 )
 _PREIMPORT_CONTROLLER_PYTHON = (
     "/opt/governed-memory-controller/runtimes/"
@@ -184,19 +184,27 @@ _SOURCE_PATHS: Final = (
 if _ENTRYPOINT_PATH.relative_to(_REPOSITORY_ROOT).as_posix() != _ENTRYPOINT_RELATIVE:
     raise SystemExit("phase9_staged_prefix_disposition_invocation_invalid")
 
-PACKAGE_MANIFEST_SHA256: Final = "0" * 64
-CONTROLLER_RUNTIME_RECEIPT_SHA256: Final = "0" * 64
-CONTRACT_SHA256: Final = "0" * 64
+PACKAGE_MANIFEST_SHA256: Final = (
+    "aff26c82b1c566104f969b02f1bc821badaab0a74945456aaa0f527620994425"
+)
+CONTROLLER_RUNTIME_RECEIPT_SHA256: Final = (
+    "0c19395ccfcab313c59792c81303f3d0257a78292dd0255596f203688985ff4d"
+)
+CONTRACT_SHA256: Final = (
+    "c6997cf3e7076fc0f72c0dc9bd9709310b39391c3af00bb36aa39a9fcb0c45a8"
+)
 PREDECESSOR_ATTEMPT_IDENTITY_SHA256: Final = (
     "942d1d443617c16b161b254a033fc7b0273a0fb26842e5f4d7d93c2fbfda8156"
 )
-SUCCESSOR_ATTEMPT_IDENTITY_SHA256: Final = "0" * 64
+SUCCESSOR_ATTEMPT_IDENTITY_SHA256: Final = (
+    "877d152d868515a8b60d3cbc43c8af0b95482d7dff1511a91e606e3bff19b646"
+)
 AUTHORIZATION_TEXT_SHA256: Final = (
     "063891fc0189b3c4a0fe393200ae50f59b04f5488800dc27a5ce3020880f3e44"
 )
 THREAD_ID: Final = "019fe927-8367-7f52-86f2-e2b5b43a2390"
-BASE_CANDIDATE_COMMIT: Final = "e93a5ff85629fc20e2bfb3cc81182974531570cc"
-BASE_CANDIDATE_TREE: Final = "416d3c2c45d8fdf06d4fb78a99c1ad93651bae17"
+BASE_CANDIDATE_COMMIT: Final = "a390df9d367a700691e032ce4ea39a5abc9f2eee"
+BASE_CANDIDATE_TREE: Final = "02add3871b90c8336861cd904a175a8ce8dbdf3f"
 PERMIT_SCHEMA: Final = "governed-memory-phase9j-staged-prefix-permit-v2"
 PERMIT_RESULT: Final = (
     "exact_staged_prefix_disposition_and_disposable_proof_permitted"
