@@ -43,6 +43,7 @@ from rag_engine.response_policy_v0_2 import (
     SafetyAssessmentV0_2,
     decide_response_policy_v0_2,
 )
+from rag_engine.response_source_awareness_v1 import MemorySourceStatusV1
 from rag_engine.search_capability_manifest_v1 import SearchCapabilityManifestV1
 from rag_engine.voice_language_v1 import (
     DEFAULT_VOICE_LANGUAGE,
@@ -50,13 +51,13 @@ from rag_engine.voice_language_v1 import (
 )
 
 
-TRUSTED_REQUEST_VERSION = "trusted_response_request_v0_4"
-TRUSTED_PLAN_VERSION = "trusted_response_plan_v0_5"
+TRUSTED_REQUEST_VERSION = "trusted_response_request_v0_5"
+TRUSTED_PLAN_VERSION = "trusted_response_plan_v0_6"
 TRUSTED_POLICY_SIGNALS_ENVELOPE_VERSION = (
     "trusted_response_policy_signals_envelope_v0_3"
 )
-SHADOW_TRACE_VERSION = "resse_response_shadow_trace_v0_5"
-ORCHESTRATOR_VERSION = "trusted_response_orchestrator_v0_5"
+SHADOW_TRACE_VERSION = "resse_response_shadow_trace_v0_6"
+ORCHESTRATOR_VERSION = "trusted_response_orchestrator_v0_6"
 TRUSTED_SAFETY_ASSESSOR_COMPONENTS_V0_2 = (
     "openai_moderation_adapter_v0_2",
 )
@@ -186,6 +187,9 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
         repr=False,
         exclude_if=lambda value: value is None,
     )
+    memory_source_status: MemorySourceStatusV1 = (
+        MemorySourceStatusV1.NOT_APPLICABLE
+    )
     prior_web_provenance: PriorWebProvenanceEnvelopeV1 | None = Field(
         default=None,
         repr=False,
@@ -243,6 +247,10 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
                 raise ValueError(
                     "successor Memory context differs from trusted request"
                 )
+        if (
+            self.memory_source_status is MemorySourceStatusV1.SELECTED
+        ) != (self.successor_memory_context_block is not None):
+            raise ValueError("Memory source status differs from trusted request")
         if self.prior_web_provenance is not None:
             provenance = self.prior_web_provenance
             if (
@@ -305,6 +313,9 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
             TrustedPolicySignalsEnvelopeV0_2 | None
         ) = None,
         successor_memory_context_block: PromptReferenceContextBlockV1 | None = None,
+        memory_source_status: MemorySourceStatusV1 = (
+            MemorySourceStatusV1.NOT_APPLICABLE
+        ),
         prior_web_provenance: PriorWebProvenanceEnvelopeV1 | None = None,
         attachment_context_block: PromptReferenceContextBlockV1 | None = None,
         fm_token_budget: int | None = None,
@@ -353,6 +364,7 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
             legacy_request_field_names=tuple(sorted(set(request_field_names))),
             trusted_policy_signals_envelope=signal_envelope,
             successor_memory_context_block=successor_memory_context_block,
+            memory_source_status=memory_source_status,
             prior_web_provenance=prior_web_provenance,
             attachment_context_block=attachment_context_block,
             fm_token_budget=fm_token_budget,
@@ -792,6 +804,7 @@ class TrustedResponseOrchestratorV0_2:
                     successor_memory_context_block=(
                         request.successor_memory_context_block
                     ),
+                    memory_source_status=request.memory_source_status,
                     fm_selection=fm,
                     prior_web_provenance=request.prior_web_provenance,
                     attachment_context_block=request.attachment_context_block,

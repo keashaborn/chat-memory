@@ -32,6 +32,7 @@ from rag_engine.response_composition_root_v0_4 import (
 from rag_engine.response_lifeswitch_integration_v2 import (
     TrustedLifeSwitchResponsePlanV2,
 )
+from rag_engine.response_source_awareness_v1 import MemorySourceStatusV1
 from rag_engine.response_persistence_v1 import persist_finalized_response_v1
 from rag_engine.successor_memory_chat_adapter_v1 import (
     SuccessorMemoryChatAdapterV1,
@@ -125,6 +126,7 @@ class OneRequestSuccessorLifecycle:
         snapshot = kwargs["conversation_snapshot"]
         self.selected = True
         return GovernedMemoryAssemblyV1(
+            source_status=MemorySourceStatusV1.SELECTED,
             successor_memory_context_block=successor_block(
                 snapshot.current_request_id,  # type: ignore[attr-defined]
                 snapshot.messages[-1].content,  # type: ignore[attr-defined]

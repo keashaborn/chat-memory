@@ -36,6 +36,12 @@ from rag_engine.response_policy_v0_2 import (
     SafetyAssessmentV0_2,
     decide_response_policy_v0_2,
 )
+from rag_engine.response_source_awareness_v1 import (
+    MemorySourceStatusV1,
+    WebSourceStatusV1,
+    render_base_source_awareness_v1,
+    web_source_status_v1,
+)
 from rag_engine.search_capability_manifest_v1 import SearchCapabilityManifestV1
 from rag_engine.voice_language_v1 import (
     DEFAULT_VOICE_LANGUAGE,
@@ -44,12 +50,12 @@ from rag_engine.voice_language_v1 import (
 )
 
 
-ASSEMBLY_REQUEST_VERSION = "prompt_assembly_request_v2"
-ASSEMBLY_RESULT_VERSION = "assembled_prompt_v2"
-ASSEMBLY_MANIFEST_VERSION = "prompt_assembly_manifest_v5"
+ASSEMBLY_REQUEST_VERSION = "prompt_assembly_request_v3"
+ASSEMBLY_RESULT_VERSION = "assembled_prompt_v3"
+ASSEMBLY_MANIFEST_VERSION = "prompt_assembly_manifest_v6"
 CONTEXT_BLOCK_VERSION = "prompt_reference_context_block_v1"
 CONTEXT_FRAGMENT_VERSION = "prompt_reference_fragment_v1"
-ASSEMBLER_VERSION = "typed_prompt_assembler_v4"
+ASSEMBLER_VERSION = "typed_prompt_assembler_v5"
 TOKEN_ESTIMATOR_VERSION = "utf8_bytes_div4_v1"
 
 HARD_MAX_CONVERSATION_MESSAGES = 256
@@ -161,6 +167,9 @@ class PromptAssemblyRequestV1(_StrictFrozenModel):
         repr=False,
         exclude_if=lambda value: value is None,
     )
+    memory_source_status: MemorySourceStatusV1 = (
+        MemorySourceStatusV1.NOT_APPLICABLE
+    )
     fm_selection: FMSelectionEnvelopeV02 | None = Field(default=None, repr=False)
     prior_web_provenance: PriorWebProvenanceEnvelopeV1 | None = Field(
         default=None,
@@ -182,6 +191,14 @@ class PromptAssemblyRequestV1(_StrictFrozenModel):
         if value not in SUPPORTED_VOICE_LANGUAGE_IDS:
             raise ValueError("response language is unsupported")
         return value
+
+    @model_validator(mode="after")
+    def memory_source_pairing(self) -> "PromptAssemblyRequestV1":
+        if (
+            self.memory_source_status is MemorySourceStatusV1.SELECTED
+        ) != (self.successor_memory_context_block is not None):
+            raise ValueError("Memory source status differs from selected context")
+        return self
 
     def canonical_json_bytes(self) -> bytes:
         return _canonical_json_bytes(self)
@@ -329,6 +346,8 @@ class PromptAssemblyManifestV1(_StrictFrozenModel):
     policy_decision_sha256: str
     policy_prompt_sha256: str
     search_capability_manifest_sha256: str | None = None
+    memory_source_status: MemorySourceStatusV1
+    web_source_status: WebSourceStatusV1
     response_mode: ResponseMode
     interaction_version: str
     interaction: Interaction
@@ -449,6 +468,7 @@ class AssembledPromptV1(_StrictFrozenModel):
         manifest = self.manifest
         expected_system = _render_system_prompt(
             prompt,
+            source.memory_source_status,
             search_capability_manifest,
             source.response_language,
         )
@@ -490,6 +510,13 @@ class AssembledPromptV1(_StrictFrozenModel):
                 search_capability_manifest.manifest_sha256
                 if search_capability_manifest is not None
                 else None,
+            ),
+            (manifest.memory_source_status, source.memory_source_status),
+            (
+                manifest.web_source_status,
+                web_source_status_v1(
+                    authorized=search_capability_manifest is not None
+                ),
             ),
             (manifest.response_mode, decision.response_mode),
             (manifest.interaction_version, prompt.interaction_version),
@@ -578,6 +605,7 @@ _SYSTEM_BASELINE = (
 
 def _render_system_prompt(
     policy_prompt: ResponsePolicyPromptV0_2,
+    memory_source_status: MemorySourceStatusV1,
     search_capability_manifest: SearchCapabilityManifestV1 | None = None,
     response_language: str = DEFAULT_VOICE_LANGUAGE,
 ) -> str:
@@ -586,9 +614,16 @@ def _render_system_prompt(
         if search_capability_manifest is not None
         else ""
     )
+    source_awareness = render_base_source_awareness_v1(
+        memory_status=memory_source_status,
+        web_status=web_source_status_v1(
+            authorized=search_capability_manifest is not None
+        ),
+    )
     language = response_language_instruction(response_language)
     return (
         f"{_SYSTEM_BASELINE}{capability}\n\n"
+        f"{source_awareness}\n\n"
         f"Response language:\n{language}\n\n{policy_prompt.content}"
     )
 
@@ -1015,6 +1050,7 @@ def assemble_prompt(request: PromptAssemblyRequestV1) -> AssembledPromptV1:
     )
     system_prompt = _render_system_prompt(
         policy_prompt,
+        request.memory_source_status,
         search_capability_manifest,
         request.response_language,
     )
@@ -1046,6 +1082,10 @@ def assemble_prompt(request: PromptAssemblyRequestV1) -> AssembledPromptV1:
             search_capability_manifest.manifest_sha256
             if search_capability_manifest is not None
             else None
+        ),
+        "memory_source_status": request.memory_source_status,
+        "web_source_status": web_source_status_v1(
+            authorized=search_capability_manifest is not None
         ),
         "response_mode": decision.response_mode,
         "interaction_version": policy_prompt.interaction_version,

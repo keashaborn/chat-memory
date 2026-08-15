@@ -121,6 +121,10 @@ class InactiveSuccessorMemoryProviderV1:
     def has_selected_claims(self) -> bool:
         return False
 
+    @property
+    def not_applicable_reason(self) -> SuccessorMemoryNotApplicableReason:
+        return self._reason
+
     def discard_selected_state(self) -> None:
         if self._prepared:
             self._terminal = True

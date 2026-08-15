@@ -52,6 +52,7 @@ from rag_engine.response_policy_v0_2 import (
     ResponsePolicyInputV0_2,
     ResponsePolicySignalsV0_2,
 )
+from rag_engine.response_source_awareness_v1 import MemorySourceStatusV1
 from rag_engine.server_response_signal_classifier_v0_2 import (
     OpenAIServerResponseSignalClassifierV0_2,
 )
@@ -141,6 +142,7 @@ class AuthenticatedResponseCommandV0_2(_StrictFrozenModel):
 
 
 class GovernedMemoryAssemblyV1(_StrictFrozenModel):
+    source_status: MemorySourceStatusV1 = MemorySourceStatusV1.NOT_APPLICABLE
     successor_memory_context_block: PromptReferenceContextBlockV1 | None = Field(
         default=None,
         repr=False,
@@ -149,6 +151,10 @@ class GovernedMemoryAssemblyV1(_StrictFrozenModel):
 
     @model_validator(mode="after")
     def successor_context_only(self) -> "GovernedMemoryAssemblyV1":
+        if (
+            self.source_status is MemorySourceStatusV1.SELECTED
+        ) != (self.successor_memory_context_block is not None):
+            raise ValueError("Memory source status differs from selected context")
         if self.successor_memory_context_block is not None and (
             self.successor_memory_context_block.block_id
             != "governed_memory_successor_v1"
@@ -567,6 +573,7 @@ class InactiveResponseCompositionRootV0_2:
                 successor_memory_context_block=(
                     memory.successor_memory_context_block
                 ),
+                memory_source_status=memory.source_status,
                 prior_web_provenance=prior_web_provenance,
                 attachment_context_block=command.attachment_context_block,
                 fm_token_budget=command.fm_token_budget,

@@ -31,6 +31,7 @@ from rag_engine.response_policy_v0_2 import (
     ResponsePolicySignalsV0_2,
     SafetyAssessmentV0_2,
 )
+from rag_engine.response_source_awareness_v1 import MemorySourceStatusV1
 from tests.test_prompt_assembler_v1 import successor_memory_block
 
 
@@ -72,6 +73,8 @@ def trusted_request(**kwargs: object) -> TrustedResponseRequestV0_2:
         conversation_snapshot=snapshot,
         signals=signals if isinstance(signals, ResponsePolicySignalsV0_2) else None,
     )
+    if kwargs.get("successor_memory_context_block") is not None:
+        kwargs.setdefault("memory_source_status", MemorySourceStatusV1.SELECTED)
     return TrustedResponseRequestV0_2.create_from_snapshot(
         authenticated_actor_user_id=actor,
         conversation_snapshot=snapshot,

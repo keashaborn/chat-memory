@@ -45,6 +45,7 @@ from rag_engine.response_policy_v0_2 import (
     SafetyAssessmentV0_2,
     decide_response_policy_v0_2,
 )
+from rag_engine.response_source_awareness_v1 import MemorySourceStatusV1
 from rag_engine.search_capability_manifest_v1 import (
     TEXT_SEARCH_AUTHORIZATION_BASIS,
     SearchCapabilityManifestV1,
@@ -282,6 +283,10 @@ class TypedPromptAssemblerV1Tests(unittest.TestCase):
             "Do not claim that research ran for this response",
             assembled.system_prompt,
         )
+        self.assertIn(
+            "Bounded server-mediated research is authorized for this response",
+            assembled.system_prompt,
+        )
         self.assertEqual(
             assembled.manifest.search_capability_manifest_sha256,
             capability.manifest_sha256,
@@ -289,6 +294,30 @@ class TypedPromptAssemblerV1Tests(unittest.TestCase):
         self.assertEqual(
             AssembledPromptV1.from_wire_json(assembled.canonical_json_bytes()),
             assembled,
+        )
+
+    def test_checked_empty_memory_is_explicit_and_turn_specific(self) -> None:
+        request = assembly_request("What is my preferred validation mineral?").model_copy(
+            update={"memory_source_status": MemorySourceStatusV1.CHECKED_EMPTY}
+        )
+
+        assembled = assemble_prompt(request)
+
+        self.assertIn(
+            "Saved Memory was checked, but no relevant saved claims were selected",
+            assembled.system_prompt,
+        )
+        self.assertIn(
+            "No web research was authorized for this response",
+            assembled.system_prompt,
+        )
+        self.assertIn(
+            "Do not say information must appear in the visible chat",
+            assembled.system_prompt,
+        )
+        self.assertIs(
+            assembled.manifest.memory_source_status,
+            MemorySourceStatusV1.CHECKED_EMPTY,
         )
 
     def test_ordinary_assembly_has_only_backend_system_and_conversation(self) -> None:
@@ -396,7 +425,10 @@ class TypedPromptAssemblerV1Tests(unittest.TestCase):
         block = successor_memory_block(message)
         assembled = assemble_prompt(
             assembly_request(message).model_copy(
-                update={"successor_memory_context_block": block}
+                update={
+                    "successor_memory_context_block": block,
+                    "memory_source_status": MemorySourceStatusV1.SELECTED,
+                }
             )
         )
 
@@ -408,6 +440,13 @@ class TypedPromptAssemblerV1Tests(unittest.TestCase):
         )
         self.assertNotIn("memory_input", PromptAssemblyRequestV1.model_fields)
         self.assertNotIn("memory_application", PromptAssemblyRequestV1.model_fields)
+
+    def test_selected_memory_status_without_context_is_rejected(self) -> None:
+        payload = assembly_request().model_dump(mode="json")
+        payload["memory_source_status"] = MemorySourceStatusV1.SELECTED.value
+
+        with self.assertRaises(ValidationError):
+            PromptAssemblyRequestV1.model_validate(payload)
 
     def test_legacy_memory_block_identity_is_rejected(self) -> None:
         payload = successor_memory_block(
@@ -601,7 +640,7 @@ class TypedPromptAssemblerV1Tests(unittest.TestCase):
         wire = assembled.canonical_json_bytes().decode("utf-8")
         duplicate = wire.replace(
             '"contract_version":',
-            '"contract_version":"assembled_prompt_v2","contract_version":',
+            '"contract_version":"assembled_prompt_v3","contract_version":',
             1,
         )
         with self.assertRaises(PromptAssemblyError):
@@ -617,7 +656,7 @@ class TypedPromptAssemblerV1Tests(unittest.TestCase):
         request_wire = assembly_request().canonical_json_bytes().decode("utf-8")
         duplicate_request = request_wire.replace(
             '"contract_version":',
-            '"contract_version":"prompt_assembly_request_v2","contract_version":',
+            '"contract_version":"prompt_assembly_request_v3","contract_version":',
             1,
         )
         with self.assertRaises(PromptAssemblyError):

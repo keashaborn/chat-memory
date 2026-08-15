@@ -25,9 +25,12 @@ from rag_engine.lifeswitch_prior_answer_provenance_runtime_v1 import (
     PriorLifeSwitchPreparedContextV1,
 )
 from rag_engine.response_orchestration_v0_2 import TrustedResponsePlanV0_2
+from rag_engine.response_source_awareness_v1 import (
+    lifeswitch_source_status_v1,
+)
 
 
-TRUSTED_LIFESWITCH_RESPONSE_PLAN_V2_VERSION = "trusted_response_plan_v0_7"
+TRUSTED_LIFESWITCH_RESPONSE_PLAN_V2_VERSION = "trusted_response_plan_v0_8"
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -113,6 +116,13 @@ class TrustedLifeSwitchResponsePlanV2(_StrictFrozenModel):
             raise ValueError("LifeSwitch plan differs from prepared context")
         if self.assembled_prompt_sha256 != assembled.manifest.assembly_sha256:
             raise ValueError("LifeSwitch plan differs from assembled prompt")
+        if (
+            assembled.source_request.lifeswitch_source_status
+            is not lifeswitch_source_status_v1(self.lifeswitch_context.status)
+            or assembled.source_request.lifeswitch_database_accessed
+            is not self.lifeswitch_context.database_accessed
+        ):
+            raise ValueError("LifeSwitch source status differs from prepared context")
         prior = self.prior_lifeswitch_provenance
         if self.prior_lifeswitch_status == "SELECTED":
             if prior is None or not self.prior_lifeswitch_database_accessed:
@@ -164,6 +174,10 @@ class TrustedLifeSwitchResponsePlanV2(_StrictFrozenModel):
             trusted_thread_id=base.thread_id,
             conversation_snapshot_sha256=base.conversation_snapshot_sha256,
             base_assembly=base.assembled_prompt,
+            lifeswitch_source_status=lifeswitch_source_status_v1(
+                lifeswitch_context.status
+            ),
+            lifeswitch_database_accessed=lifeswitch_context.database_accessed,
             lifeswitch_envelope=envelope,
             lifeswitch_rendered=lifeswitch_context.rendered,
             prior_lifeswitch_provenance=prior_lifeswitch_context.envelope,

@@ -2,10 +2,10 @@ from __future__ import annotations
 
 """Versioned prompt augmentation for independently governed LifeSwitch data.
 
-The existing V1 prompt assembly remains byte-for-byte and hash compatible.
-This boundary accepts a fully validated V1 assembly plus an independently
-selected LifeSwitch envelope and produces a new V3 assembly.  It performs no
-database access and does not place LifeSwitch data inside Memory V1.
+This boundary accepts a fully validated base assembly plus an independently
+selected LifeSwitch envelope and backend-owned source status, then produces a
+new assembly. It performs no database access and does not place LifeSwitch data
+inside governed Memory.
 """
 
 import hashlib
@@ -40,13 +40,17 @@ from rag_engine.prompt_assembler_v1 import (
     AssembledPromptV1,
     ConversationMessageV1,
 )
+from rag_engine.response_source_awareness_v1 import (
+    LifeSwitchSourceStatusV1,
+    append_lifeswitch_source_awareness_v1,
+)
 
 
-LIFESWITCH_PROMPT_REQUEST_V2_VERSION = "lifeswitch_prompt_augmentation_request_v2"
+LIFESWITCH_PROMPT_REQUEST_V2_VERSION = "lifeswitch_prompt_augmentation_request_v3"
 LIFESWITCH_PROMPT_BLOCK_V3_VERSION = "prompt_reference_context_block_v3"
-LIFESWITCH_PROMPT_MANIFEST_V3_VERSION = "prompt_assembly_manifest_v7"
-LIFESWITCH_ASSEMBLED_PROMPT_V3_VERSION = "assembled_prompt_v4"
-LIFESWITCH_PROMPT_ASSEMBLER_V2_VERSION = "typed_prompt_assembler_v6"
+LIFESWITCH_PROMPT_MANIFEST_V3_VERSION = "prompt_assembly_manifest_v8"
+LIFESWITCH_ASSEMBLED_PROMPT_V3_VERSION = "assembled_prompt_v5"
+LIFESWITCH_PROMPT_ASSEMBLER_V2_VERSION = "typed_prompt_assembler_v7"
 
 LIFESWITCH_MAX_TOKENS = 1_000
 WEB_PROVENANCE_MAX_BYTES = 16_384
@@ -187,6 +191,8 @@ class LifeSwitchPromptAugmentationRequestV2(_StrictFrozenModel):
     trusted_thread_id: UUID = Field(repr=False)
     conversation_snapshot_sha256: str
     base_assembly: AssembledPromptV1 = Field(repr=False)
+    lifeswitch_source_status: LifeSwitchSourceStatusV1
+    lifeswitch_database_accessed: bool
     lifeswitch_envelope: LifeSwitchDomainContextEnvelopeV1 | None = Field(
         default=None,
         repr=False,
@@ -221,6 +227,28 @@ class LifeSwitchPromptAugmentationRequestV2(_StrictFrozenModel):
         if (envelope is None) != (rendered is None):
             if envelope is None or envelope.status in {"SELECTED", "PARTIAL"}:
                 raise ValueError("LifeSwitch envelope and render must be paired")
+        status = self.lifeswitch_source_status
+        if status is LifeSwitchSourceStatusV1.NOT_APPLICABLE:
+            if self.lifeswitch_database_accessed or envelope or rendered:
+                raise ValueError("LifeSwitch NOT_APPLICABLE source state is inconsistent")
+        elif status is LifeSwitchSourceStatusV1.UNAVAILABLE:
+            if not self.lifeswitch_database_accessed or envelope or rendered:
+                raise ValueError("LifeSwitch UNAVAILABLE source state is inconsistent")
+        elif status is LifeSwitchSourceStatusV1.CHECKED_EMPTY:
+            if (
+                not self.lifeswitch_database_accessed
+                or envelope is None
+                or envelope.status != "EMPTY"
+            ):
+                raise ValueError("LifeSwitch CHECKED_EMPTY source state is inconsistent")
+        else:
+            if (
+                not self.lifeswitch_database_accessed
+                or envelope is None
+                or rendered is None
+                or envelope.status != status.value
+            ):
+                raise ValueError("LifeSwitch selected source state is inconsistent")
         if envelope is not None:
             policy = base.source_request.policy_input
             if envelope.request_id != policy.request_id:
@@ -260,6 +288,8 @@ class LifeSwitchPromptAugmentationRequestV2(_StrictFrozenModel):
         trusted_thread_id: UUID,
         conversation_snapshot_sha256: str,
         base_assembly: AssembledPromptV1,
+        lifeswitch_source_status: LifeSwitchSourceStatusV1,
+        lifeswitch_database_accessed: bool,
         lifeswitch_envelope: LifeSwitchDomainContextEnvelopeV1 | None,
         lifeswitch_rendered: LifeSwitchRenderedContextV1 | None,
         prior_lifeswitch_provenance: PriorLifeSwitchProvenanceEnvelopeV1 | None,
@@ -269,6 +299,8 @@ class LifeSwitchPromptAugmentationRequestV2(_StrictFrozenModel):
             "trusted_thread_id": trusted_thread_id,
             "conversation_snapshot_sha256": conversation_snapshot_sha256,
             "base_assembly": base_assembly,
+            "lifeswitch_source_status": lifeswitch_source_status,
+            "lifeswitch_database_accessed": lifeswitch_database_accessed,
             "lifeswitch_envelope": lifeswitch_envelope,
             "lifeswitch_rendered": lifeswitch_rendered,
             "prior_lifeswitch_provenance": prior_lifeswitch_provenance,
@@ -285,6 +317,8 @@ class PromptAssemblyManifestV3(_StrictFrozenModel):
     )
     source_v1_assembly_sha256: str
     augmentation_request_sha256: str
+    lifeswitch_source_status: LifeSwitchSourceStatusV1
+    lifeswitch_database_accessed: bool
     context_order: tuple[str, ...]
     context_block_count: int = Field(ge=0, le=6)
     lifeswitch_envelope_sha256: str | None = None
@@ -344,8 +378,22 @@ class AssembledPromptV3(_StrictFrozenModel):
             _canonical_json_bytes(self.source_request)
         )
         base = request.base_assembly
-        if self.system_prompt != base.system_prompt or self.conversation != base.conversation:
-            raise ValueError("V3 changed the V1 system prompt or conversation")
+        expected_system_prompt = append_lifeswitch_source_awareness_v1(
+            base.system_prompt,
+            status=request.lifeswitch_source_status,
+        )
+        if (
+            self.system_prompt != expected_system_prompt
+            or self.conversation != base.conversation
+        ):
+            raise ValueError("V3 changed protected prompt content")
+        if (
+            self.manifest.lifeswitch_source_status
+            is not request.lifeswitch_source_status
+            or self.manifest.lifeswitch_database_accessed
+            is not request.lifeswitch_database_accessed
+        ):
+            raise ValueError("V3 source status differs from request")
         order = tuple(block.block_id for block in self.context_blocks)
         if order != self.manifest.context_order:
             raise ValueError("V3 context order differs from manifest")
@@ -438,7 +486,7 @@ def _prior_lifeswitch_block(
 def assemble_prompt_with_lifeswitch_v2(
     request: LifeSwitchPromptAugmentationRequestV2,
 ) -> AssembledPromptV3:
-    """Insert LifeSwitch after Memory and before FM without changing V1."""
+    """Insert LifeSwitch after Memory and add its exact turn-specific status."""
 
     try:
         source = LifeSwitchPromptAugmentationRequestV2.model_validate_json(
@@ -490,8 +538,13 @@ def assemble_prompt_with_lifeswitch_v2(
     ):
         raise LifeSwitchPromptIntegrationError("web provenance budget exceeded")
 
-    contents = (
+    system_prompt = append_lifeswitch_source_awareness_v1(
         base.system_prompt,
+        status=source.lifeswitch_source_status,
+    )
+
+    contents = (
+        system_prompt,
         *(item.content for item in blocks),
         *(item.content for item in base.conversation),
     )
@@ -523,6 +576,8 @@ def assemble_prompt_with_lifeswitch_v2(
         "assembler_version": LIFESWITCH_PROMPT_ASSEMBLER_V2_VERSION,
         "source_v1_assembly_sha256": base.manifest.assembly_sha256,
         "augmentation_request_sha256": source.request_manifest_sha256,
+        "lifeswitch_source_status": source.lifeswitch_source_status,
+        "lifeswitch_database_accessed": source.lifeswitch_database_accessed,
         "context_order": tuple(item.block_id for item in blocks),
         "context_block_count": len(blocks),
         "lifeswitch_envelope_sha256": envelope.envelope_sha256 if envelope else None,
@@ -549,7 +604,7 @@ def assemble_prompt_with_lifeswitch_v2(
     )
     return AssembledPromptV3(
         source_request=source,
-        system_prompt=base.system_prompt,
+        system_prompt=system_prompt,
         context_blocks=blocks,
         conversation=base.conversation,
         manifest=manifest,

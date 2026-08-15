@@ -14,6 +14,7 @@ from rag_engine.governed_memory.response_postgres import (
     SuccessorResponsePostgresError,
 )
 from rag_engine.governed_memory.response_provider import (
+    InactiveSuccessorMemoryProviderV1,
     SuccessorResponseConfigurationError,
 )
 from rag_engine.governed_memory.response_contracts import (
@@ -35,6 +36,7 @@ from rag_engine.response_conversation_snapshot_v1 import (
     create_current_only_conversation_snapshot_v1,
 )
 from rag_engine.response_policy_v0_2 import ResponsePolicySignalsV0_2
+from rag_engine.response_source_awareness_v1 import MemorySourceStatusV1
 from rag_engine.successor_memory_chat_adapter_v1 import (
     SuccessorMemoryChatAdapterV1,
 )
@@ -138,6 +140,26 @@ class FailingCoreProvider:
         raise AssertionError("degraded persistence reached unavailable provider")
 
 
+class EmptyCoreProvider:
+    @property
+    def has_selected_claims(self) -> bool:
+        return False
+
+    def prepare(
+        self,
+        *,
+        request: SuccessorResponseRequestV1,
+    ) -> SuccessorMemoryAssemblyV1:
+        del request
+        return SuccessorMemoryAssemblyV1()
+
+    def discard_selected_state(self) -> None:
+        return None
+
+    async def persist_dispatched_answer_binding(self, **_kwargs: object) -> object:
+        raise AssertionError("persistence is outside this source-status test")
+
+
 class SuccessorMemoryChatAdapterTests(unittest.IsolatedAsyncioTestCase):
     @staticmethod
     def host_input() -> tuple[object, ResponsePolicySignalsV0_2]:
@@ -169,6 +191,7 @@ class SuccessorMemoryChatAdapterTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertIsInstance(assembly, GovernedMemoryAssemblyV1)
+        self.assertIs(assembly.source_status, MemorySourceStatusV1.SELECTED)
         block = assembly.successor_memory_context_block
         self.assertIsNotNone(block)
         assert block is not None
@@ -191,6 +214,42 @@ class SuccessorMemoryChatAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(adapter.has_selected_claims)
         adapter.discard_selected_state()
         self.assertFalse(adapter.has_selected_claims)
+
+    async def test_active_provider_without_selection_reports_checked_empty(self) -> None:
+        adapter = SuccessorMemoryChatAdapterV1(EmptyCoreProvider())  # type: ignore[arg-type]
+        snapshot, signals = self.host_input()
+
+        assembly = await adapter.prepare(
+            authenticated_actor_user_id=ACTOR,
+            conversation_snapshot=snapshot,  # type: ignore[arg-type]
+            trusted_policy_signals=signals,
+        )
+
+        self.assertIsNone(assembly.successor_memory_context_block)
+        self.assertIs(
+            assembly.source_status,
+            MemorySourceStatusV1.CHECKED_EMPTY,
+        )
+
+    async def test_inactive_provider_reports_not_applicable(self) -> None:
+        adapter = SuccessorMemoryChatAdapterV1(
+            InactiveSuccessorMemoryProviderV1(
+                SuccessorMemoryNotApplicableReason.ATTACHMENT
+            )
+        )
+        snapshot, signals = self.host_input()
+
+        assembly = await adapter.prepare(
+            authenticated_actor_user_id=ACTOR,
+            conversation_snapshot=snapshot,  # type: ignore[arg-type]
+            trusted_policy_signals=signals,
+        )
+
+        self.assertIsNone(assembly.successor_memory_context_block)
+        self.assertIs(
+            assembly.source_status,
+            MemorySourceStatusV1.NOT_APPLICABLE,
+        )
 
     async def test_invalid_host_policy_never_reaches_core(self) -> None:
         core = RecordingCoreProvider()
@@ -234,6 +293,10 @@ class SuccessorMemoryChatAdapterTests(unittest.IsolatedAsyncioTestCase):
                     trusted_policy_signals=signals,
                 )
                 self.assertIsNone(assembly.successor_memory_context_block)
+                self.assertIs(
+                    assembly.source_status,
+                    MemorySourceStatusV1.UNAVAILABLE,
+                )
                 self.assertFalse(adapter.has_selected_claims)
                 self.assertTrue(core.discarded)
                 provenance = await adapter.persist_dispatched_answer_binding(

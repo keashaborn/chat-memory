@@ -33,6 +33,7 @@ from rag_engine.prompt_assembler_v1 import PromptReferenceContextBlockV1
 from rag_engine.response_composition_root_v0_2 import GovernedMemoryAssemblyV1
 from rag_engine.response_conversation_snapshot_v1 import ConversationSnapshotV1
 from rag_engine.response_policy_v0_2 import ResponsePolicySignalsV0_2
+from rag_engine.response_source_awareness_v1 import MemorySourceStatusV1
 
 
 _RUNTIME_UNAVAILABLE_CONFIGURATION_CODES = frozenset(
@@ -185,7 +186,21 @@ class SuccessorMemoryChatAdapterV1:
                 )
             except Exception:
                 raise ContractViolation("invalid_response_memory_context_block") from None
+        if local_block is not None:
+            source_status = MemorySourceStatusV1.SELECTED
+        elif self._degraded_provider is not None:
+            source_status = MemorySourceStatusV1.UNAVAILABLE
+        elif isinstance(self._core_provider, InactiveSuccessorMemoryProviderV1):
+            source_status = (
+                MemorySourceStatusV1.UNAVAILABLE
+                if self._core_provider.not_applicable_reason
+                is SuccessorMemoryNotApplicableReason.RUNTIME_UNAVAILABLE
+                else MemorySourceStatusV1.NOT_APPLICABLE
+            )
+        else:
+            source_status = MemorySourceStatusV1.CHECKED_EMPTY
         return GovernedMemoryAssemblyV1(
+            source_status=source_status,
             successor_memory_context_block=host_block,
         )
 
