@@ -11,6 +11,7 @@ from rag_engine.governed_memory.chat_commands import (
     explicit_preference_retraction_target_v1,
 )
 from rag_engine.governed_memory.preference_correction_interpreter import (
+    InterpretedPreferenceRetractionV1,
     PreferenceCorrectionInterpretationUnavailableV1,
 )
 from rag_engine.governed_memory_chat_lifecycle_v1 import (
@@ -44,6 +45,9 @@ CORRECTION_MESSAGE = (
 FLEXIBLE_CORRECTION_MESSAGE = (
     "My preferred memory validation instrument is now the vibraphone, "
     "replacing the celesta. Please update this memory."
+)
+FLEXIBLE_RETRACTION_MESSAGE = (
+    "I no longer have a go-to natural-memory test tea."
 )
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -170,16 +174,29 @@ class FakeTransport:
 
 
 class FakeCorrectionInterpreter:
-    def __init__(self, *, unavailable: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        unavailable: bool = False,
+        retraction: bool = False,
+    ) -> None:
         self.unavailable = unavailable
+        self.retraction = retraction
         self.calls: list[dict[str, object]] = []
 
     async def interpret(
         self, **kwargs: object
-    ) -> ExplicitPreferenceCorrectionCommandV1:
+    ) -> (
+        ExplicitPreferenceCorrectionCommandV1
+        | InterpretedPreferenceRetractionV1
+    ):
         self.calls.append(dict(kwargs))
         if self.unavailable:
             raise PreferenceCorrectionInterpretationUnavailableV1("synthetic")
+        if self.retraction:
+            return InterpretedPreferenceRetractionV1(
+                previous_literal="genmaicha"
+            )
         return ExplicitPreferenceCorrectionCommandV1(
             preference_label="preferred memory validation instrument",
             previous_literal="celesta",
@@ -489,14 +506,47 @@ class ChatMemoryLifecycleRuntimeTests(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-    async def test_flexible_interpreter_failure_fails_closed(self) -> None:
+    async def test_flexible_retraction_uses_existing_atomic_path(self) -> None:
+        transport = FakeTransport(
+            [
+                result([summary(CLAIM_A), summary(CLAIM_B)]),
+                result(detail(CLAIM_A, literal="genmaicha")),
+                result(detail(CLAIM_B, literal="vibraphone")),
+                result([summary(CLAIM_A), summary(CLAIM_B)]),
+                result(detail(CLAIM_A, literal="genmaicha")),
+                result(detail(CLAIM_B, literal="vibraphone")),
+                result({"outcome": "retracted", "outbox_id": str(OUTBOX)}),
+            ]
+        )
+        receipt = await self.runtime(
+            transport,
+            interpreter=FakeCorrectionInterpreter(retraction=True),
+        ).apply_if_requested(
+            owner_user_id=CLAIM_B,
+            message=FLEXIBLE_RETRACTION_MESSAGE,
+            authorization=AUTHORIZATION,
+        )
+        self.assertIsNotNone(receipt)
+        assert receipt is not None
+        self.assertEqual(receipt.action, "retraction")
+        self.assertEqual(receipt.claim_id, CLAIM_A)
+        self.assertEqual(receipt.outcome, "retracted")
+        self.assertEqual(transport.calls[-1]["method"], "POST")
+        self.assertEqual(
+            transport.calls[-1]["path"],
+            f"/memory/claims/{CLAIM_A}/retract",
+        )
+
+    async def test_flexible_interpreter_failure_preserves_chat_without_mutation(
+        self,
+    ) -> None:
         transport = FakeTransport(
             [
                 result([summary(CLAIM_A)]),
                 result(detail(CLAIM_A, literal="celesta")),
             ]
         )
-        with self.assertRaises(ChatMemoryLifecycleError) as raised:
+        self.assertIsNone(
             await self.runtime(
                 transport,
                 interpreter=FakeCorrectionInterpreter(unavailable=True),
@@ -505,10 +555,6 @@ class ChatMemoryLifecycleRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 message=FLEXIBLE_CORRECTION_MESSAGE,
                 authorization=AUTHORIZATION,
             )
-        self.assertEqual(raised.exception.status_code, 503)
-        self.assertEqual(
-            raised.exception.code,
-            "memory_correction_interpreter_unavailable",
         )
         self.assertNotIn(
             "POST", {str(call["method"]) for call in transport.calls}

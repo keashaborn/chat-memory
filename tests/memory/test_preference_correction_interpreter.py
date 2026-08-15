@@ -9,6 +9,7 @@ from uuid import UUID
 
 from rag_engine.governed_memory.preference_correction_interpreter import (
     FLEXIBLE_CORRECTIONS_ENABLED_ENV,
+    InterpretedPreferenceRetractionV1,
     OpenAIPreferenceCorrectionInterpreterV1,
     PreferenceCorrectionClaimV1,
     PreferenceCorrectionInterpretationUnavailableV1,
@@ -44,9 +45,13 @@ class FakeClient:
         return self
 
 
-def claim(value: str = "celesta") -> PreferenceCorrectionClaimV1:
+def claim(
+    value: str = "celesta",
+    *,
+    claim_id: UUID = CLAIM,
+) -> PreferenceCorrectionClaimV1:
     return PreferenceCorrectionClaimV1(
-        claim_id=CLAIM,
+        claim_id=claim_id,
         lifecycle_state="active",
         current_value=value,
     )
@@ -83,6 +88,35 @@ class PreferenceCorrectionInterpreterTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertNotIn(str(OWNER), call["input"][1]["content"])
         self.assertNotIn(str(CLAIM), call["input"][1]["content"])
+
+    async def test_natural_language_retraction_is_strictly_bound(self) -> None:
+        client = FakeClient(
+            {
+                "action": "retract",
+                "previous_value": "genmaicha",
+                "replacement_value": None,
+            }
+        )
+        interpreter = OpenAIPreferenceCorrectionInterpreterV1(client=client)
+        command = await interpreter.interpret(
+            owner_user_id=OWNER,
+            message="I no longer have a go-to natural-memory test tea.",
+            claims=(
+                claim("genmaicha"),
+                claim(
+                    "vibraphone",
+                    claim_id=UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
+                ),
+            ),
+        )
+        self.assertIsInstance(command, InterpretedPreferenceRetractionV1)
+        assert isinstance(command, InterpretedPreferenceRetractionV1)
+        self.assertEqual(command.previous_literal, "genmaicha")
+        payload = json.loads(client.responses.calls[0]["input"][1]["content"])
+        self.assertEqual(
+            payload["contract"],
+            "owner_preference_lifecycle_interpretation_v2",
+        )
 
     async def test_none_and_unknown_target_never_create_command(self) -> None:
         cases = (
@@ -154,6 +188,7 @@ class PreferenceCorrectionInterpreterTests(unittest.IsolatedAsyncioTestCase):
             "Vibraphone has replaced celesta for me.",
             "Use vibraphone instead.",
             "I prefer vibraphone these days.",
+            "I no longer have a go-to natural-memory test tea.",
         ):
             with self.subTest(message=message):
                 self.assertTrue(potential_preference_correction_v1(message))

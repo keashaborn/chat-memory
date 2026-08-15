@@ -20,6 +20,7 @@ from rag_engine.governed_memory.chat_commands import (
     normalized_preference_value_v1,
 )
 from rag_engine.governed_memory.preference_correction_interpreter import (
+    InterpretedPreferenceRetractionV1,
     PreferenceCorrectionClaimV1,
     PreferenceCorrectionInterpretationUnavailableV1,
     PreferenceCorrectionInterpreterV1,
@@ -765,11 +766,15 @@ class ChatMemoryLifecycleRuntimeV1:
             )
         except PreferenceCorrectionInterpretationUnavailableV1:
             logger.error("[memory_correction] interpreter unavailable")
-            raise ChatMemoryLifecycleError(
-                "memory_correction_interpreter_unavailable", 503
-            ) from None
+            return None
         if interpreted is None:
             return None
+        if isinstance(interpreted, InterpretedPreferenceRetractionV1):
+            return await self._apply_retraction(
+                message=message,
+                target=interpreted.previous_literal,
+                authorization=authorization,
+            )
         return await self._apply_correction(
             message=message,
             command=interpreted,
