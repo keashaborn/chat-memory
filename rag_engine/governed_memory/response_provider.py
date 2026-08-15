@@ -200,7 +200,18 @@ def _is_explicit_preference_recall(query: str) -> bool:
         return False
     preference_language = any(
         token in normalized
-        for token in (" prefer", "preferred", "favorite", "favourite")
+        for token in (
+            " prefer",
+            "preferred",
+            "favorite",
+            "favourite",
+            "go-to",
+            "go to",
+            "usual choice",
+            "first choice",
+            "typically choose",
+            "normally choose",
+        )
     )
     if not preference_language:
         return False
@@ -215,12 +226,82 @@ def _is_explicit_preference_recall(query: str) -> bool:
     )
 
 
+def _is_explicit_personal_recall(query: str) -> bool:
+    if not isinstance(query, str):
+        return False
+    normalized = " ".join(query.replace("’", "'").casefold().split())
+    if (
+        not normalized.endswith("?")
+        or len(normalized) > 256
+        or " or " in normalized
+    ):
+        return False
+    if normalized.startswith(
+        (
+            "what should i ",
+            "what could i ",
+            "what can i ",
+            "what would i ",
+            "what will i ",
+            "which should i ",
+            "which could i ",
+            "which can i ",
+            "which would i ",
+            "which will i ",
+            "who should i ",
+            "where should i ",
+            "when should i ",
+        )
+    ):
+        return False
+    if normalized.startswith(("do you remember ", "can you recall ")):
+        return any(
+            marker in normalized
+            for marker in (" my ", " our ", " i ", " we ")
+        )
+    if normalized.startswith(
+        (
+            "what is my ",
+            "what's my ",
+            "who is my ",
+            "who's my ",
+            "which is my ",
+            "where is my ",
+            "when is my ",
+        )
+    ):
+        return True
+    return normalized.startswith(
+        (
+            "what do i ",
+            "what did i ",
+            "what have i ",
+            "which do i ",
+            "which did i ",
+            "who do i ",
+            "where do i ",
+            "when do i ",
+        )
+    )
+
+
 def _explicit_preference_policy(policy: RetrievalPolicy) -> RetrievalPolicy:
     if "preference.personal" not in policy.allowed_predicates:
         raise ContractViolation("preference_recall_predicate_unavailable")
     return RetrievalPolicy(
         explicit_recall=True,
         allowed_predicates=("preference.personal",),
+        domains=policy.domains,
+        intents=policy.intents,
+        max_records=policy.max_records,
+        policy_revision=policy.policy_revision,
+    )
+
+
+def _explicit_personal_policy(policy: RetrievalPolicy) -> RetrievalPolicy:
+    return RetrievalPolicy(
+        explicit_recall=True,
+        allowed_predicates=policy.allowed_predicates,
         domains=policy.domains,
         intents=policy.intents,
         max_records=policy.max_records,
@@ -364,6 +445,8 @@ class SuccessorGovernedMemoryAssemblyProviderV1:
             raise ContractViolation("invalid_response_memory_retrieval_policy")
         if _is_explicit_preference_recall(query):
             policy = _explicit_preference_policy(policy)
+        elif _is_explicit_personal_recall(query):
+            policy = _explicit_personal_policy(policy)
         self._policy = policy
         query_vector = await _await_embedding(self._embedder.embed(query))
         candidates = await self._vector_index.search_owner_candidates(

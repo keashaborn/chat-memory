@@ -306,6 +306,7 @@ class SuccessorResponseProviderTests(unittest.IsolatedAsyncioTestCase):
             ("What is my preferred test animal?", True),
             ("Which synthetic interface theme do I prefer?", True),
             ("Do you remember my favorite color?", True),
+            ("What is my go-to natural-memory test tea?", True),
             ("Which should I prefer, cobalt or amber?", False),
             ("Compare my preferences with this plan.", False),
         ):
@@ -327,6 +328,24 @@ class SuccessorResponseProviderTests(unittest.IsolatedAsyncioTestCase):
                         else tuple(sorted(PREDICATE_CATALOG["predicates"]))
                     ),
                 )
+
+    async def test_bounded_personal_recall_detection(self) -> None:
+        allowed = tuple(sorted(PREDICATE_CATALOG["predicates"]))
+        for query, expected in (
+            ("Who is my father?", True),
+            ("What do I collect?", True),
+            ("Can you recall what I collect?", True),
+            ("What should I do about my project?", False),
+            ("Which could I use for my project?", False),
+        ):
+            vector = RecordingVectorIndex()
+            selected = provider(vector_index=vector)
+            with self.subTest(query=query):
+                await selected.prepare(
+                    request=make_response_request(current_message=query),
+                )
+                self.assertEqual(vector.calls[0]["explicit_recall"], expected)
+                self.assertEqual(vector.calls[0]["allowed_predicates"], allowed)
 
     async def test_no_selection_returns_typed_receipt_without_persistence(self) -> None:
         repository = RecordingRepository()
