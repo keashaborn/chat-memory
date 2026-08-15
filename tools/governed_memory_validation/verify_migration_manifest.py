@@ -408,19 +408,20 @@ def verify(root: Path) -> dict[str, object]:
         raise ValueError("personal object disposable proof shape differs")
     if (
         proof.get("schema_version")
-        != "governed-memory-personal-object-location-disposable-proof-v1"
+        != "governed-memory-personal-object-location-disposable-proof-v2"
         or proof.get("proof_scope")
-        != "inactive_personal_object_location_admission_migration_0007"
+        != "inactive_personal_object_location_admission_migration_0007_with_activation_cutoff"
         or proof.get("proof_receipt_canonicalization")
         != "utf8_json_sorted_keys_compact_no_newline_v1"
     ):
         raise ValueError("personal object disposable proof contract differs")
     receipt = proof.get("proof_receipt")
     if not isinstance(receipt, dict) or set(receipt) != {
-        "candidate_head", "candidate_tree", "clean_rollback",
-        "forward_sha256", "helper_boundary", "image_id", "pipeline",
+        "candidate_base_head", "forward_sha256", "rollback_sha256",
+        "image_id", "migration_chain", "activation_cutoff",
+        "prior_full_pipeline_proof",
         "production_data_read", "production_state_changed", "provider_calls",
-        "reapply", "result", "rollback_refusal", "rollback_sha256",
+        "result",
     }:
         raise ValueError("personal object disposable receipt shape differs")
     if canonical_json_sha256(receipt) != proof.get(
@@ -429,43 +430,61 @@ def verify(root: Path) -> dict[str, object]:
         raise ValueError("personal object disposable receipt hash differs")
     package_forward = personal_package.get("forward")
     package_rollback = personal_package.get("rollback")
-    pipeline = receipt.get("pipeline")
+    policy = personal_package.get("policy")
+    cutoff = receipt.get("activation_cutoff")
+    prior_pipeline = receipt.get("prior_full_pipeline_proof")
     if (
         not isinstance(package_forward, dict)
         or not isinstance(package_rollback, dict)
-        or not isinstance(pipeline, dict)
-        or receipt.get("candidate_head")
-        != "97e8f8175b3dde5c9cfab4866eb83c549bfab535"
-        or receipt.get("candidate_tree")
-        != "d012fff876fac8fb962d987699eaefe1f77bce21"
+        or not isinstance(policy, dict)
+        or not isinstance(cutoff, dict)
+        or not isinstance(prior_pipeline, dict)
+        or receipt.get("candidate_base_head")
+        != "be543dc10c5b6f65495cdc9068501c9f125c92ae"
         or receipt.get("forward_sha256") != package_forward.get("sha256")
         or receipt.get("rollback_sha256") != package_rollback.get("sha256")
+        or policy.get("pre_activation_proposals_eligible") is not False
+        or policy.get("activation_boundary_source")
+        != "migration_transaction_timestamp"
         or receipt.get("result") != "pass"
         or receipt.get("production_data_read") is not False
         or receipt.get("production_state_changed") is not False
         or receipt.get("provider_calls") != 0
-        or receipt.get("clean_rollback") != "helper-absent|legacy-restored"
-        or receipt.get("rollback_refusal") != "helper-present|1|1"
-        or receipt.get("reapply")
-        != "helper-present|automatic_low_risk_personal_object_location"
-        or pipeline.get("admission_outcome") != "admitted"
-        or pipeline.get("external_provider_calls_performed") != 0
-        or pipeline.get("owner_a_visible_claims") != 1
-        or pipeline.get("owner_b_visible_claims") != 0
-        or pipeline.get("projection_operation") != "upsert"
-        or pipeline.get("projection_state") != "pending"
-        or pipeline.get("reason")
+        or cutoff != {
+            "policy_rows": 1,
+            "pre_activation_eligible": False,
+            "post_activation_eligible": True,
+            "selector_gate_present": True,
+            "worker_policy_table_select": False,
+            "api_policy_table_select": False,
+            "existing_self_reason": "automatic_low_risk_owner_assertion",
+            "personal_object_location_reason":
+                "automatic_low_risk_personal_object_location",
+            "clean_rollback": "policy-absent|helper-absent|legacy-restored",
+            "reapply": "policy-present|policy-rows-1|helper-present",
+        }
+        or prior_pipeline.get("proof_promotion_head")
+        != "be543dc10c5b6f65495cdc9068501c9f125c92ae"
+        or prior_pipeline.get("proof_file_sha256")
+        != "82403108a5461fb517dd061eb687977cdc240edaba72676af98cd4a98a665b2b"
+        or prior_pipeline.get("proof_receipt_canonical_sha256")
+        != "6d02304831fcb662801fc866d312ccb240b7d7a4d7d4d920eee3de2cc99cf92a"
+        or prior_pipeline.get("admission_outcome") != "admitted"
+        or prior_pipeline.get("owner_a_visible_claims") != 1
+        or prior_pipeline.get("owner_b_visible_claims") != 0
+        or prior_pipeline.get("projection_operation") != "upsert"
+        or prior_pipeline.get("projection_state") != "pending"
+        or prior_pipeline.get("reason")
         != "automatic_low_risk_personal_object_location"
     ):
         raise ValueError("personal object disposable receipt evidence differs")
     closing = proof.get("closing_verification")
     if not isinstance(closing, dict) or closing != {
-        "active_lease_count": 0,
-        "candidate_clean": True,
         "disposable_resources_absent": True,
         "live_head": "38b978208b70f670bf2e9416de57e35ac8b905a9",
         "live_tree": "d7d6b9bb979c1f5d21feac9383d6322e445efbdb",
         "production_checkout_changed": False,
+        "production_claims_or_conversations_read": False,
         "temporary_validation_artifacts_absent": True,
     }:
         raise ValueError("personal object disposable closing proof differs")

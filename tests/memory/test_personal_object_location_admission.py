@@ -47,7 +47,7 @@ class PersonalObjectLocationAdmissionTests(unittest.TestCase):
         self.assertEqual(binding["sha256"], sha256(PROOF.read_bytes()).hexdigest())
         self.assertEqual(
             self.proof["schema_version"],
-            "governed-memory-personal-object-location-disposable-proof-v1",
+            "governed-memory-personal-object-location-disposable-proof-v2",
         )
         receipt = self.proof["proof_receipt"]
         canonical = json.dumps(
@@ -65,9 +65,14 @@ class PersonalObjectLocationAdmissionTests(unittest.TestCase):
         self.assertFalse(receipt["production_data_read"])
         self.assertFalse(receipt["production_state_changed"])
         self.assertEqual(receipt["provider_calls"], 0)
-        self.assertEqual(receipt["pipeline"]["owner_a_visible_claims"], 1)
-        self.assertEqual(receipt["pipeline"]["owner_b_visible_claims"], 0)
-        self.assertTrue(self.proof["closing_verification"]["candidate_clean"])
+        prior = receipt["prior_full_pipeline_proof"]
+        self.assertEqual(prior["owner_a_visible_claims"], 1)
+        self.assertEqual(prior["owner_b_visible_claims"], 0)
+        cutoff = receipt["activation_cutoff"]
+        self.assertEqual(cutoff["policy_rows"], 1)
+        self.assertFalse(cutoff["pre_activation_eligible"])
+        self.assertTrue(cutoff["post_activation_eligible"])
+        self.assertTrue(cutoff["selector_gate_present"])
         self.assertTrue(
             self.proof["closing_verification"]["disposable_resources_absent"]
         )
@@ -138,6 +143,39 @@ class PersonalObjectLocationAdmissionTests(unittest.TestCase):
         ):
             with self.subTest(required=required):
                 self.assertIn(required, self.forward)
+
+    def test_personal_object_locations_require_post_activation_evidence(self) -> None:
+        self.assertFalse(
+            self.package["policy"]["pre_activation_proposals_eligible"]
+        )
+        self.assertEqual(
+            self.package["policy"]["activation_boundary_source"],
+            "migration_transaction_timestamp",
+        )
+        self.assertIn(
+            "CREATE TABLE memory_private.personal_object_location_admission_policy",
+            self.forward,
+        )
+        self.assertIn(
+            "VALUES (true, pg_catalog.transaction_timestamp())",
+            self.forward,
+        )
+        self.assertIn(
+            "evidence.source_created_at >= (",
+            self.forward,
+        )
+        self.assertIn(
+            "FROM memory_private.personal_object_location_admission_policy AS policy",
+            self.forward,
+        )
+        self.assertIn(
+            "<> 'automatic_low_risk_personal_object_location'",
+            self.forward,
+        )
+        self.assertIn(
+            "DROP TABLE memory_private.personal_object_location_admission_policy",
+            self.rollback,
+        )
 
     def test_rollback_refuses_new_rows_and_restores_old_policy(self) -> None:
         self.assertIn("FROM memory.proposal", self.rollback)

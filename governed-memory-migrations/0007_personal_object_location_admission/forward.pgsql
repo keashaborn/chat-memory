@@ -1,6 +1,20 @@
 SET ROLE governed_memory_owner;
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '30s';
+
+CREATE TABLE memory_private.personal_object_location_admission_policy (
+  singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
+  activated_at timestamptz NOT NULL
+);
+ALTER TABLE memory_private.personal_object_location_admission_policy
+  OWNER TO governed_memory_owner;
+REVOKE ALL ON TABLE
+  memory_private.personal_object_location_admission_policy
+  FROM PUBLIC, governed_memory_api, governed_memory_worker;
+INSERT INTO memory_private.personal_object_location_admission_policy(
+  singleton, activated_at
+) VALUES (true, pg_catalog.transaction_timestamp());
+
 ALTER TABLE memory.proposal
   DROP CONSTRAINT proposal_review_shape,
   DROP CONSTRAINT proposal_review_reason_codes;
@@ -988,6 +1002,18 @@ BEGIN
       WHERE marker.pilot_ever_started
         AND evidence.source_created_at >= marker.started_at
     )
+    AND (
+      memory_private.automatic_admission_reason(
+        proposal.subject_entity_type, proposal.subject_entity_key,
+        proposal.subject_display_name, proposal.predicate,
+        proposal.object_kind, evidence.review_excerpt
+      ) <> 'automatic_low_risk_personal_object_location'
+      OR evidence.source_created_at >= (
+        SELECT policy.activated_at
+        FROM memory_private.personal_object_location_admission_policy AS policy
+        WHERE policy.singleton
+      )
+    )
     AND NOT EXISTS (
       SELECT 1 FROM memory.claim AS existing_claim
       WHERE existing_claim.owner_user_id = proposal.owner_user_id
@@ -1033,6 +1059,15 @@ BEGIN
   IF pg_catalog.to_regprocedure(
        'memory_private.auto_admit_one_ordinary_proposal()'
      ) IS NULL
+     OR pg_catalog.to_regclass(
+       'memory_private.personal_object_location_admission_policy'
+     ) IS NULL
+     OR (
+       SELECT pg_catalog.count(*) <> 1
+       FROM memory_private.personal_object_location_admission_policy
+       WHERE singleton
+         AND activated_at = pg_catalog.transaction_timestamp()
+     )
      OR pg_catalog.to_regprocedure(
        'memory_private.automatic_admission_reason(text,text,text,text,text,text)'
      ) IS NULL
@@ -1044,6 +1079,14 @@ BEGIN
        'governed_memory_worker',
        'memory_private.review_proposal(uuid,uuid,text,text,text,text,text,text,text[])',
        'EXECUTE'
+     )
+     OR pg_catalog.has_table_privilege(
+       'governed_memory_worker',
+       'memory_private.personal_object_location_admission_policy', 'SELECT'
+     )
+     OR pg_catalog.has_table_privilege(
+       'governed_memory_api',
+       'memory_private.personal_object_location_admission_policy', 'SELECT'
      ) THEN
     RAISE EXCEPTION 'bounded automatic admission postflight failed';
   END IF;

@@ -979,6 +979,7 @@ GRANT EXECUTE ON FUNCTION memory_private.review_proposal(
 DROP FUNCTION memory_private.automatic_admission_reason(
   text,text,text,text,text,text
 );
+DROP TABLE memory_private.personal_object_location_admission_policy;
 
 DO $postflight$
 BEGIN
@@ -987,6 +988,9 @@ BEGIN
      ) IS NULL
      OR pg_catalog.to_regprocedure(
        'memory_private.automatic_admission_reason(text,text,text,text,text,text)'
+     ) IS NOT NULL
+     OR pg_catalog.to_regclass(
+       'memory_private.personal_object_location_admission_policy'
      ) IS NOT NULL
      OR NOT pg_catalog.has_function_privilege(
        'governed_memory_worker',

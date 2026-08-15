@@ -38,7 +38,7 @@
     },
     {
       "path": "schema_contract.json",
-      "sha256": "b88ef05bce57d4432920d3cee7727b2881a5cf341e1c742fdcd636da5f08d45e"
+      "sha256": "0f67935024051eebe3ad1072823fe29832d568a0845f8a90281712bb875d87b0"
     },
     {
       "path": "predicate_catalog.json",
@@ -106,19 +106,19 @@
     },
     {
       "path": "0007_personal_object_location_admission/package.json",
-      "sha256": "c97ec7e6643d4ff456007ccbd852afa007215faac4354a689a8e35ed1a93dad5"
+      "sha256": "746ddf81abc8cb3c6d331a36872355e4fea701e4476e70537050f47652ad0ed5"
     },
     {
       "path": "0007_personal_object_location_admission/disposable_proof_receipt.json",
-      "sha256": "82403108a5461fb517dd061eb687977cdc240edaba72676af98cd4a98a665b2b"
+      "sha256": "2b55cdcf34b36955f8e83267038b2858d28581a104c62d83c543a396dfb2e7c3"
     },
     {
       "path": "0007_personal_object_location_admission/forward.pgsql",
-      "sha256": "a6329cb7fec10304ff9248cc293bc57c25e8fabfa64d4e70b5b9cf9bc95cd277"
+      "sha256": "0e065edcce8d301c5cbcdc83d7718d598c2f18dd4fbf2693472cd2894c4c05e1"
     },
     {
       "path": "0007_personal_object_location_admission/rollback.pgsql",
-      "sha256": "8969c2e030e360f5701728b804928f37820baf73677c85e5065905813624debe"
+      "sha256": "ca49a506910229b9885eafd8a2c780be6e256078bd240ecede9c5fecd2f0f02e"
     },
     {
       "path": "0002_conversation_bridge/package.json",

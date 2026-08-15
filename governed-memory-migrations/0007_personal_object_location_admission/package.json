@@ -19,11 +19,11 @@
   },
   "forward": {
     "path": "forward.pgsql",
-    "sha256": "a6329cb7fec10304ff9248cc293bc57c25e8fabfa64d4e70b5b9cf9bc95cd277"
+    "sha256": "0e065edcce8d301c5cbcdc83d7718d598c2f18dd4fbf2693472cd2894c4c05e1"
   },
   "rollback": {
     "path": "rollback.pgsql",
-    "sha256": "8969c2e030e360f5701728b804928f37820baf73677c85e5065905813624debe",
+    "sha256": "ca49a506910229b9885eafd8a2c780be6e256078bd240ecede9c5fecd2f0f02e",
     "empty_only": false,
     "personal_object_location_admission_rows_must_be_absent": true
   },
@@ -42,6 +42,8 @@
     "epistemic_state": "supported",
     "projectable": true,
     "requires_explicit": false,
+    "pre_activation_proposals_eligible": false,
+    "activation_boundary_source": "migration_transaction_timestamp",
     "people_auto_admitted": false,
     "corrections_auto_admitted": false,
     "provider_calls_added": 0
@@ -55,7 +57,7 @@
   },
   "disposable_proof": {
     "path": "disposable_proof_receipt.json",
-    "sha256": "82403108a5461fb517dd061eb687977cdc240edaba72676af98cd4a98a665b2b"
+    "sha256": "2b55cdcf34b36955f8e83267038b2858d28581a104c62d83c543a396dfb2e7c3"
   },
   "object_contract": {
     "cascade_ddl": false

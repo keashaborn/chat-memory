@@ -1477,7 +1477,7 @@ class PackageIntegrityTests(unittest.TestCase):
         )
         self.assertEqual(
             sha256(ROOT_MANIFEST_PATH.read_bytes()).hexdigest(),
-            "0f7fc863d71cb08af897e6a395810683c2f1e8e1eaec8600332de9e743893400",
+            "17c7b1e3e10a51e22dee1d41d1233d5014d3d21cd25d55649ef7a2ca8140113c",
         )
         receipt = verifier["verify"](MIGRATIONS)
         self.assertEqual(receipt["result"], "artifact_integrity_verified")

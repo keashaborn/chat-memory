@@ -704,6 +704,11 @@
       "automatic_low_risk_personal_object_location"
     ]
   },
+  "automatic_admission_policy": {
+    "personal_object_location_activation_boundary": "migration_transaction_timestamp",
+    "pre_activation_personal_object_location_proposals_eligible": false,
+    "existing_self_admission_cutoff_changed": false
+  },
   "transport_contract": {
     "extended_query_bind_parameters_required": true,
     "answer_memory_block_is_transient_parameter_only": true,
