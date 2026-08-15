@@ -40,6 +40,7 @@ EXPECTED_FILES = {
     "0006_source_erasure_projection_recovery/rollback.pgsql",
     "0007_personal_object_location_admission/package.json",
     "0007_personal_object_location_admission/disposable_proof_receipt.json",
+    "0007_personal_object_location_admission/live_activation_receipt.json",
     "0007_personal_object_location_admission/forward.pgsql",
     "0007_personal_object_location_admission/rollback.pgsql",
     "0002_conversation_bridge/package.json",
@@ -66,6 +67,10 @@ EXPECTED_ROLLBACK_ORDER = [
     "0001_foundation/rollback.pgsql",
 ]
 VALIDATED_STATUS = "isolated_candidate_disposable_validated_not_production_applied"
+PERSONAL_ACTIVE_STATUS = "production_database_applied_live_acceptance_pending"
+PERSONAL_MANIFEST_STATUS = (
+    "personal_object_location_production_applied_live_acceptance_pending"
+)
 EXPECTED_PACKAGE_CONTRACTS = {
     "0001_foundation/package.json": {
         "status": VALIDATED_STATUS,
@@ -121,13 +126,15 @@ EXPECTED_PACKAGE_CONTRACTS = {
         },
     },
     "0007_personal_object_location_admission/package.json": {
-        "status": "inactive_candidate_pending_live_authorization",
+        "status": PERSONAL_ACTIVE_STATUS,
         "rollback_empty_only": False,
         "activation": {
-            "production_authorized": False,
-            "production_database_applied": False,
+            "production_authorized": True,
+            "production_database_applied": True,
             "production_services_changed": False,
             "disposable_database_validated": True,
+            "worker_timer_quiesced_and_restored": True,
+            "live_catalog_verified": True,
             "live_acceptance_pending": True,
         },
     },
@@ -234,11 +241,11 @@ def verify(root: Path) -> dict[str, object]:
     candidate_id = manifest.get("candidate_id")
     if not isinstance(candidate_id, str) or not candidate_id:
         raise ValueError("missing migration candidate id")
-    if manifest.get("status") != VALIDATED_STATUS:
+    if manifest.get("status") != PERSONAL_MANIFEST_STATUS:
         raise ValueError("unexpected migration candidate status")
     expected_authority = {
-        "production_apply_authorized": False,
-        "production_service_change_authorized": False,
+        "production_apply_authorized": True,
+        "production_service_change_authorized": True,
         "production_provider_call_authorized": False,
         "production_qdrant_change_authorized": False,
         "legacy_import_authorized": False,
@@ -261,13 +268,14 @@ def verify(root: Path) -> dict[str, object]:
         "pilot_marker_rollback_empty_only": True,
         "cascade_ddl_allowed": False,
         "disposable_database_execution_performed": True,
-        "production_database_execution_performed": False,
-        "production_checkout_files_changed": False,
+        "production_database_execution_performed": True,
+        "production_checkout_files_changed": True,
         "production_data_read": False,
         "provider_external_calls": 0,
         "bounded_automatic_admission_live_acceptance_pending": True,
         "personal_object_location_admission_synthetic_tests_performed": True,
         "personal_object_location_admission_disposable_database_execution_performed": True,
+        "personal_object_location_admission_production_database_execution_performed": True,
         "personal_object_location_admission_live_acceptance_pending": True,
     }
     if manifest.get("safety") != expected_safety:
@@ -489,6 +497,73 @@ def verify(root: Path) -> dict[str, object]:
     }:
         raise ValueError("personal object disposable closing proof differs")
 
+    live_relative = (
+        "0007_personal_object_location_admission/live_activation_receipt.json"
+    )
+    live_path = checked_path(root, live_relative)
+    live_file_sha256 = sha256_file(live_path)
+    if personal_package.get("live_activation_proof") != {
+        "path": "live_activation_receipt.json",
+        "sha256": live_file_sha256,
+    }:
+        raise ValueError("personal object live activation proof binding differs")
+    if expected.get(live_relative) != live_file_sha256:
+        raise ValueError("personal object live activation proof manifest differs")
+    live = load_json(live_path)
+    if live != {
+        "schema_version": "governed-memory-personal-object-location-live-activation-v1",
+        "migration_id": "governed_memory_personal_object_location_admission_0007",
+        "server": "seebx",
+        "database": "governed_memory",
+        "result": "pass_live_acceptance_pending",
+        "activated_at": "2026-08-15T23:06:17.801691Z",
+        "source": {
+            "live_head": "31a3ccbd93317b859c05f01445980514d19feef4",
+            "live_tree": "3fcbf0b5de7a45049515de8c8d0c696b880cb690",
+            "forward_sha256": "0e065edcce8d301c5cbcdc83d7718d598c2f18dd4fbf2693472cd2894c4c05e1",
+            "manifest_sha256": "17c7b1e3e10a51e22dee1d41d1233d5014d3d21cd25d55649ef7a2ca8140113c",
+        },
+        "database_proof": {
+            "transaction_committed": True,
+            "execution_session_role": "governed_memory_bootstrap",
+            "execution_current_role": "governed_memory_owner",
+            "advisory_lock_used": True,
+            "policy_rows": 1,
+            "activation_timestamp_matches_migration_transaction": True,
+            "helper_present": True,
+            "worker_execute": True,
+            "reason_constraints_present": 3,
+            "pre_activation_pending_location_proposals": 1,
+            "post_activation_pending_location_proposals": 0,
+            "admitted_location_proposals": 0,
+            "location_claim_evidence_rows": 0,
+        },
+        "service_proof": {
+            "worker_timer_before": "enabled_active_waiting",
+            "worker_timer_during": "inactive_dead",
+            "worker_timer_after": "enabled_active_waiting",
+            "worker_after": "inactive_success",
+            "http_after": "active",
+            "brains_after": "active",
+            "persistent_service_configuration_changed": False,
+        },
+        "authority_boundary": {
+            "provider_calls_performed": 0,
+            "production_claim_or_conversation_content_read": False,
+            "production_aggregate_counts_read": True,
+            "qdrant_direct_changes": False,
+            "runtime_rebuilt": False,
+            "frontend_changed": False,
+            "provider_secrets_read": False,
+        },
+        "rollback": {
+            "executed_live": False,
+            "currently_schema_eligible": True,
+            "becomes_guarded_after_first_location_admission": True,
+        },
+    }:
+        raise ValueError("personal object live activation receipt differs")
+
     return {
         "file_count": len(expected),
         "manifest_sha256": sha256_file(manifest_path),
@@ -496,11 +571,12 @@ def verify(root: Path) -> dict[str, object]:
             candidate_id.encode("utf-8")
         ).hexdigest(),
         "result": "artifact_integrity_verified",
-        "schema_version": "governed-memory-migration-verification-v8",
-        "validation_state": "personal_object_location_admission_disposable_validated",
+        "schema_version": "governed-memory-migration-verification-v9",
+        "validation_state": PERSONAL_MANIFEST_STATUS,
         "current_disposable_validation_complete": True,
         "disposable_revalidation_required": False,
         "historical_phase7c_proof_reusable_for_current_candidate": False,
+        "production_database_applied": True,
         "production_state_changed": False,
     }
 

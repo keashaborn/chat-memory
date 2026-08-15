@@ -1,4 +1,4 @@
-"""Static synthetic contract tests for inactive migration 0007."""
+"""Static synthetic and proof-binding tests for migration 0007."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ MIGRATION = (
     / "0007_personal_object_location_admission"
 )
 PROOF = MIGRATION / "disposable_proof_receipt.json"
+LIVE_PROOF = MIGRATION / "live_activation_receipt.json"
 
 
 class PersonalObjectLocationAdmissionTests(unittest.TestCase):
@@ -26,20 +27,57 @@ class PersonalObjectLocationAdmissionTests(unittest.TestCase):
             (MIGRATION / "package.json").read_text(encoding="utf-8")
         )
         cls.proof = json.loads(PROOF.read_text(encoding="utf-8"))
+        cls.live_proof = json.loads(LIVE_PROOF.read_text(encoding="utf-8"))
 
-    def test_candidate_is_inactive_and_adds_no_provider_calls(self) -> None:
+    def test_production_database_is_applied_and_live_acceptance_is_pending(self) -> None:
         self.assertEqual(
             self.package["status"],
-            "inactive_candidate_pending_live_authorization",
+            "production_database_applied_live_acceptance_pending",
         )
-        self.assertFalse(self.package["activation"]["production_authorized"])
-        self.assertFalse(
+        self.assertTrue(self.package["activation"]["production_authorized"])
+        self.assertTrue(
             self.package["activation"]["production_database_applied"]
         )
         self.assertTrue(
             self.package["activation"]["disposable_database_validated"]
         )
+        self.assertFalse(
+            self.package["activation"]["production_services_changed"]
+        )
+        self.assertTrue(
+            self.package["activation"]["worker_timer_quiesced_and_restored"]
+        )
+        self.assertTrue(self.package["activation"]["live_catalog_verified"])
+        self.assertTrue(self.package["activation"]["live_acceptance_pending"])
         self.assertEqual(self.package["policy"]["provider_calls_added"], 0)
+
+    def test_live_activation_receipt_is_hash_bound(self) -> None:
+        binding = self.package["live_activation_proof"]
+        self.assertEqual(binding["path"], LIVE_PROOF.name)
+        self.assertEqual(
+            binding["sha256"], sha256(LIVE_PROOF.read_bytes()).hexdigest()
+        )
+        self.assertEqual(self.live_proof["result"], "pass_live_acceptance_pending")
+        self.assertTrue(
+            self.live_proof["database_proof"]["transaction_committed"]
+        )
+        self.assertEqual(
+            self.live_proof["database_proof"][
+                "pre_activation_pending_location_proposals"
+            ],
+            1,
+        )
+        self.assertEqual(
+            self.live_proof["database_proof"][
+                "post_activation_pending_location_proposals"
+            ],
+            0,
+        )
+        self.assertFalse(
+            self.live_proof["authority_boundary"][
+                "production_claim_or_conversation_content_read"
+            ]
+        )
 
     def test_disposable_proof_is_hash_bound_and_inactive(self) -> None:
         binding = self.package["disposable_proof"]

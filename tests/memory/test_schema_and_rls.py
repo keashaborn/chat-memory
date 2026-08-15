@@ -1413,6 +1413,7 @@ class PackageIntegrityTests(unittest.TestCase):
             "0006_source_erasure_projection_recovery/rollback.pgsql",
             "0007_personal_object_location_admission/disposable_proof_receipt.json",
             "0007_personal_object_location_admission/forward.pgsql",
+            "0007_personal_object_location_admission/live_activation_receipt.json",
             "0007_personal_object_location_admission/package.json",
             "0007_personal_object_location_admission/rollback.pgsql",
         }
@@ -1473,27 +1474,28 @@ class PackageIntegrityTests(unittest.TestCase):
         manifest = _load_json(ROOT_MANIFEST_PATH)
         self.assertEqual(
             manifest["status"],
-            "isolated_candidate_disposable_validated_not_production_applied",
+            "personal_object_location_production_applied_live_acceptance_pending",
         )
         self.assertEqual(
             sha256(ROOT_MANIFEST_PATH.read_bytes()).hexdigest(),
-            "17c7b1e3e10a51e22dee1d41d1233d5014d3d21cd25d55649ef7a2ca8140113c",
+            "412032b9ded977e536d1634a53b5e2d78ff1bff574e877dae1cca8e9daaf245d",
         )
         receipt = verifier["verify"](MIGRATIONS)
         self.assertEqual(receipt["result"], "artifact_integrity_verified")
         self.assertEqual(
             receipt["schema_version"],
-            "governed-memory-migration-verification-v8",
+            "governed-memory-migration-verification-v9",
         )
         self.assertEqual(
             receipt["validation_state"],
-            "personal_object_location_admission_disposable_validated",
+            "personal_object_location_production_applied_live_acceptance_pending",
         )
         self.assertTrue(receipt["current_disposable_validation_complete"])
         self.assertFalse(receipt["disposable_revalidation_required"])
         self.assertFalse(
             receipt["historical_phase7c_proof_reusable_for_current_candidate"]
         )
+        self.assertTrue(receipt["production_database_applied"])
         self.assertFalse(receipt["production_state_changed"])
 
     def test_current_stores_only_manifest_is_exact_and_excludes_bridge(self) -> None:

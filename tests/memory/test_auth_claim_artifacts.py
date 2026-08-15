@@ -21,6 +21,7 @@ HTTP_VERTICAL_SLICE = (
 )
 CURRENT_STATUS = "isolated_candidate_disposable_validated_not_production_applied"
 ROOT_STATUS = CURRENT_STATUS
+MANIFEST_STATUS = "personal_object_location_production_applied_live_acceptance_pending"
 
 
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -376,7 +377,7 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
         self.assertFalse(package["rollback"]["data_mutation"])
 
         manifest = _load_json(MIGRATIONS / "manifest.json")
-        self.assertEqual(manifest["status"], ROOT_STATUS)
+        self.assertEqual(manifest["status"], MANIFEST_STATUS)
         self.assertEqual(package["status"], CURRENT_STATUS)
         self.assertTrue(
             manifest["safety"]["disposable_database_execution_performed"]

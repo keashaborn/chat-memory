@@ -1,0 +1,52 @@
+{
+  "schema_version": "governed-memory-personal-object-location-live-activation-v1",
+  "migration_id": "governed_memory_personal_object_location_admission_0007",
+  "server": "seebx",
+  "database": "governed_memory",
+  "result": "pass_live_acceptance_pending",
+  "activated_at": "2026-08-15T23:06:17.801691Z",
+  "source": {
+    "live_head": "31a3ccbd93317b859c05f01445980514d19feef4",
+    "live_tree": "3fcbf0b5de7a45049515de8c8d0c696b880cb690",
+    "forward_sha256": "0e065edcce8d301c5cbcdc83d7718d598c2f18dd4fbf2693472cd2894c4c05e1",
+    "manifest_sha256": "17c7b1e3e10a51e22dee1d41d1233d5014d3d21cd25d55649ef7a2ca8140113c"
+  },
+  "database_proof": {
+    "transaction_committed": true,
+    "execution_session_role": "governed_memory_bootstrap",
+    "execution_current_role": "governed_memory_owner",
+    "advisory_lock_used": true,
+    "policy_rows": 1,
+    "activation_timestamp_matches_migration_transaction": true,
+    "helper_present": true,
+    "worker_execute": true,
+    "reason_constraints_present": 3,
+    "pre_activation_pending_location_proposals": 1,
+    "post_activation_pending_location_proposals": 0,
+    "admitted_location_proposals": 0,
+    "location_claim_evidence_rows": 0
+  },
+  "service_proof": {
+    "worker_timer_before": "enabled_active_waiting",
+    "worker_timer_during": "inactive_dead",
+    "worker_timer_after": "enabled_active_waiting",
+    "worker_after": "inactive_success",
+    "http_after": "active",
+    "brains_after": "active",
+    "persistent_service_configuration_changed": false
+  },
+  "authority_boundary": {
+    "provider_calls_performed": 0,
+    "production_claim_or_conversation_content_read": false,
+    "production_aggregate_counts_read": true,
+    "qdrant_direct_changes": false,
+    "runtime_rebuilt": false,
+    "frontend_changed": false,
+    "provider_secrets_read": false
+  },
+  "rollback": {
+    "executed_live": false,
+    "currently_schema_eligible": true,
+    "becomes_guarded_after_first_location_admission": true
+  }
+}

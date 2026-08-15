@@ -1,10 +1,10 @@
 {
   "schema_version": "governed-memory-migration-manifest-v2",
   "candidate_id": "clean-governed-memory-successor-2026-08-10",
-  "status": "isolated_candidate_disposable_validated_not_production_applied",
+  "status": "personal_object_location_production_applied_live_acceptance_pending",
   "authority": {
-    "production_apply_authorized": false,
-    "production_service_change_authorized": false,
+    "production_apply_authorized": true,
+    "production_service_change_authorized": true,
     "production_provider_call_authorized": false,
     "production_qdrant_change_authorized": false,
     "legacy_import_authorized": false,
@@ -106,11 +106,15 @@
     },
     {
       "path": "0007_personal_object_location_admission/package.json",
-      "sha256": "746ddf81abc8cb3c6d331a36872355e4fea701e4476e70537050f47652ad0ed5"
+      "sha256": "7bd00e36ee3d6a08822a25e3365bfd043e4c8768ac3b332428eadd0a4cb7aaae"
     },
     {
       "path": "0007_personal_object_location_admission/disposable_proof_receipt.json",
       "sha256": "2b55cdcf34b36955f8e83267038b2858d28581a104c62d83c543a396dfb2e7c3"
+    },
+    {
+      "path": "0007_personal_object_location_admission/live_activation_receipt.json",
+      "sha256": "f3827afb069eda15ee1d1c2725e1dc9eb31731abe11ef43c3c31cdf59e4f900e"
     },
     {
       "path": "0007_personal_object_location_admission/forward.pgsql",
@@ -142,13 +146,14 @@
     "pilot_marker_rollback_empty_only": true,
     "cascade_ddl_allowed": false,
     "disposable_database_execution_performed": true,
-    "production_database_execution_performed": false,
-    "production_checkout_files_changed": false,
+    "production_database_execution_performed": true,
+    "production_checkout_files_changed": true,
     "production_data_read": false,
     "provider_external_calls": 0,
     "bounded_automatic_admission_live_acceptance_pending": true,
     "personal_object_location_admission_synthetic_tests_performed": true,
     "personal_object_location_admission_disposable_database_execution_performed": true,
+    "personal_object_location_admission_production_database_execution_performed": true,
     "personal_object_location_admission_live_acceptance_pending": true
   }
 }

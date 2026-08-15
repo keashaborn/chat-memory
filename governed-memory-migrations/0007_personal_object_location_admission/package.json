@@ -1,7 +1,7 @@
 {
   "schema_version": "governed-memory-migration-package-v2",
   "migration_id": "governed_memory_personal_object_location_admission_0007",
-  "status": "inactive_candidate_pending_live_authorization",
+  "status": "production_database_applied_live_acceptance_pending",
   "target": {
     "server": "seebx",
     "database": "governed_memory",
@@ -49,11 +49,17 @@
     "provider_calls_added": 0
   },
   "activation": {
-    "production_authorized": false,
-    "production_database_applied": false,
+    "production_authorized": true,
+    "production_database_applied": true,
     "production_services_changed": false,
     "disposable_database_validated": true,
+    "worker_timer_quiesced_and_restored": true,
+    "live_catalog_verified": true,
     "live_acceptance_pending": true
+  },
+  "live_activation_proof": {
+    "path": "live_activation_receipt.json",
+    "sha256": "f3827afb069eda15ee1d1c2725e1dc9eb31731abe11ef43c3c31cdf59e4f900e"
   },
   "disposable_proof": {
     "path": "disposable_proof_receipt.json",
