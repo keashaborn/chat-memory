@@ -80,12 +80,14 @@ ADDITIVE_PACKAGE_DIRS = (
     MIGRATIONS / "0003_owner_claim_detail",
     MIGRATIONS / "0004_pilot_marker",
     MIGRATIONS / "0005_bounded_auto_admission",
+    MIGRATIONS / "0006_source_erasure_projection_recovery",
 )
 ALL_PACKAGE_DIRS = (
     PACKAGE_DIRS[0],
     ADDITIVE_PACKAGE_DIRS[0],
     ADDITIVE_PACKAGE_DIRS[1],
     ADDITIVE_PACKAGE_DIRS[2],
+    ADDITIVE_PACKAGE_DIRS[3],
     PACKAGE_DIRS[1],
 )
 FOUNDATION_TABLES = (
@@ -1404,6 +1406,9 @@ class PackageIntegrityTests(unittest.TestCase):
             "0005_bounded_auto_admission/forward.pgsql",
             "0005_bounded_auto_admission/package.json",
             "0005_bounded_auto_admission/rollback.pgsql",
+            "0006_source_erasure_projection_recovery/forward.pgsql",
+            "0006_source_erasure_projection_recovery/package.json",
+            "0006_source_erasure_projection_recovery/rollback.pgsql",
         }
         observed = {
             path.relative_to(MIGRATIONS).as_posix()
@@ -1466,7 +1471,7 @@ class PackageIntegrityTests(unittest.TestCase):
         )
         self.assertEqual(
             sha256(ROOT_MANIFEST_PATH.read_bytes()).hexdigest(),
-            "f75039efcc27319146f79d38f44ad3556cffe40c1595d5953a794e683581a85b",
+            "f1be143940c3d40197a9f959e5b6d476ae70763972baa9e769419bba7c2e5a70",
         )
         receipt = verifier["verify"](MIGRATIONS)
         self.assertEqual(receipt["result"], "artifact_integrity_verified")
@@ -4909,6 +4914,33 @@ class StaticSQLPolicyTests(unittest.TestCase):
             lease,
             r"(?s)earlier\.state\s*=\s*'failed_terminal'.*?"
             r"earlier\.embedding_request_sha256\s+IS\s+NOT\s+NULL",
+        )
+        recovery_definitions = _function_definitions(
+            (MIGRATIONS / "0006_source_erasure_projection_recovery"
+             / "forward.pgsql").read_text(encoding="utf-8")
+        )
+        recovery_lease = recovery_definitions[
+            "memory_private.lease_projection_jobs"
+        ]
+        self.assertRegex(
+            recovery_lease,
+            r"(?s)earlier\.state\s*=\s*'failed_terminal'.*?"
+            r"AND\s+NOT\s+\(.*?outbox\.operation\s*=\s*'delete'.*?"
+            r"memory\.source_erasure_claim.*?"
+            r"erasure_claim\.claim_delete_operation_id.*?"
+            r"outbox\.operation_id.*?claim_deletion_pending",
+        )
+        seal = recovery_definitions["memory_private.seal_source_erasure"]
+        self.assertRegex(seal, r"outbox\.state\s*=\s*'claimed'")
+        self.assertNotRegex(
+            seal,
+            r"outbox\.state\s+IN\s+\('claimed',\s*'failed_terminal'\)",
+        )
+        self.assertRegex(
+            seal,
+            r"(?s)dispatched_count\s*:=\s*dispatched_count\s*\+.*?"
+            r"outbox\.state\s*=\s*'failed_terminal'.*?"
+            r"outbox\.embedding_dispatched_at\s+IS\s+NOT\s+NULL",
         )
 
         finish = definitions["memory_private.finish_projection_job"]

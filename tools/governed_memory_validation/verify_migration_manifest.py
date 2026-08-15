@@ -15,6 +15,7 @@ EXPECTED_PACKAGES = (
     "0003_owner_claim_detail/package.json",
     "0004_pilot_marker/package.json",
     "0005_bounded_auto_admission/package.json",
+    "0006_source_erasure_projection_recovery/package.json",
     "0002_conversation_bridge/package.json",
 )
 EXPECTED_FILES = {
@@ -33,6 +34,9 @@ EXPECTED_FILES = {
     "0005_bounded_auto_admission/package.json",
     "0005_bounded_auto_admission/forward.pgsql",
     "0005_bounded_auto_admission/rollback.pgsql",
+    "0006_source_erasure_projection_recovery/package.json",
+    "0006_source_erasure_projection_recovery/forward.pgsql",
+    "0006_source_erasure_projection_recovery/rollback.pgsql",
     "0002_conversation_bridge/package.json",
     "0002_conversation_bridge/forward.pgsql",
     "0002_conversation_bridge/rollback.pgsql",
@@ -43,10 +47,12 @@ EXPECTED_EXECUTION_ORDER = [
     "0003_owner_claim_detail/forward.pgsql",
     "0004_pilot_marker/forward.pgsql",
     "0005_bounded_auto_admission/forward.pgsql",
+    "0006_source_erasure_projection_recovery/forward.pgsql",
     "0002_conversation_bridge/forward.pgsql",
 ]
 EXPECTED_ROLLBACK_ORDER = [
     "0002_conversation_bridge/rollback.pgsql",
+    "0006_source_erasure_projection_recovery/rollback.pgsql",
     "0005_bounded_auto_admission/rollback.pgsql",
     "0004_pilot_marker/rollback.pgsql",
     "0003_owner_claim_detail/rollback.pgsql",
@@ -88,6 +94,16 @@ EXPECTED_PACKAGE_CONTRACTS = {
         },
     },
     "0005_bounded_auto_admission/package.json": {
+        "status": "authorized_candidate_pending_live_application",
+        "rollback_empty_only": False,
+        "activation": {
+            "production_authorized": True,
+            "production_database_applied": False,
+            "production_services_changed": False,
+            "live_acceptance_pending": True,
+        },
+    },
+    "0006_source_erasure_projection_recovery/package.json": {
         "status": "authorized_candidate_pending_live_application",
         "rollback_empty_only": False,
         "activation": {

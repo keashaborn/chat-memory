@@ -86,7 +86,7 @@ EXPECTED_CURRENT_CANDIDATE_PYTHON_SHA256 = (
     "1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118"
 )
 EXPECTED_DISPOSABLE_RUNNER_SHA256 = (
-    "72006c10f9176d80fbf4c22bc567b31a363785156751118a736a59aa8d4389ee"
+    "e98a3214e20be1e2cdea4fed1160e50a5dce10af140dbacfa2bc2a7f38c19df0"
 )
 EXPECTED_PROOF_EXECUTION_RUNNER_SHA256 = (
     "72006c10f9176d80fbf4c22bc567b31a363785156751118a736a59aa8d4389ee"
@@ -1418,12 +1418,12 @@ class CurrentRuntimeInventoryTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn(
             "readonly EXPECTED_MANIFEST_SHA256='"
-            "cb0633096bdd7f961dcb05881d722e7c0a53cb0661f66b5aca6f0dfde632ca5c'",
+            "f1be143940c3d40197a9f959e5b6d476ae70763972baa9e769419bba7c2e5a70'",
             runner,
         )
         self.assertIn(
             "[[ \"${fields[5]}\" == "
-            "'phase8f_disposable_revalidation_required' ]]",
+            "'phase8g_current_candidate_disposable_validated' ]]",
             runner,
         )
         self.assertNotIn(

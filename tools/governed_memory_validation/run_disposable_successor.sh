@@ -33,7 +33,7 @@ readonly REQUIRED_CANDIDATE_BRANCH='codex/governed-memory-phase8d-retirement-202
 readonly RUN_ID='019fe927'
 readonly AUTHORIZATION_VALUE='019fe927:SUCCESSOR_DISPOSABLE_ONLY:NO_PRODUCTION_DATA:NO_PROVIDER_CALLS'
 readonly CURRENT_DELETION_INTEGRATION_READY='true'
-readonly EXPECTED_MANIFEST_SHA256='cb0633096bdd7f961dcb05881d722e7c0a53cb0661f66b5aca6f0dfde632ca5c'
+readonly EXPECTED_MANIFEST_SHA256='f1be143940c3d40197a9f959e5b6d476ae70763972baa9e769419bba7c2e5a70'
 readonly EXPECTED_POSTGRES_BOOTSTRAP_SHA256='9cdda41a1056bec45409e13002bcdd5a234b13d6a4cc18306668bd38085ca5eb'
 readonly EXPECTED_RUNTIME_PACKAGES_SHA256='ed9273d6bd6dad6cf5680c478dff1beab453f66ab607914994fe8dc2b9d4e882'
 readonly EXPECTED_RUNTIME_BUILD_RECEIPT_SHA256='25ca53e683e53f79b726909ef64bc8afad30269cce3f59804cf66335667a8108'
@@ -760,7 +760,7 @@ assert_candidate_binding() {
   commit_count="$(
     git -C "${ROOT}" rev-list --count "${EXPECTED_BASE}..${actual_head}"
   )" || die 'candidate_commit_count_unreadable'
-  [[ "${commit_count}" == '1' ]] || die 'candidate_not_single_commit'
+  [[ "${commit_count}" == '2' ]] || die 'candidate_commit_count_invalid'
 
   actual_status="$(git -C "${ROOT}" status --porcelain=v1 --untracked-files=all)" \
     || die 'candidate_status_unreadable'
@@ -827,20 +827,20 @@ print(str(value.get("production_state_changed", "")).lower())
 PY
   )
   [[ "${#fields[@]}" -eq 10 ]] || die 'migration_verification_receipt_invalid'
-  [[ "${fields[0]}" == 'governed-memory-migration-verification-v5' ]] \
+  [[ "${fields[0]}" == 'governed-memory-migration-verification-v6' ]] \
     || die 'migration_verification_schema_invalid'
   [[ "${fields[1]}" == 'artifact_integrity_verified' ]] \
     || die 'migration_verification_not_verified'
   [[ "${fields[2]}" =~ ^[0-9a-f]{64}$ ]] \
     || die 'migration_package_id_sha256_invalid'
-  [[ "${fields[3]}" == '15' ]] || die 'migration_file_count_mismatch'
+  [[ "${fields[3]}" == '21' ]] || die 'migration_file_count_mismatch'
   [[ "${fields[4]}" =~ ^[0-9a-f]{64}$ ]] \
     || die 'migration_manifest_sha256_invalid'
   [[ "${fields[4]}" == "${EXPECTED_MANIFEST_SHA256}" ]] \
     || die 'migration_manifest_sha256_mismatch'
-  [[ "${fields[5]}" == 'phase8f_disposable_revalidation_required' ]] \
+  [[ "${fields[5]}" == 'phase8g_current_candidate_disposable_validated' ]] \
     || die 'migration_validation_state_mismatch'
-  [[ "${fields[6]}" == 'false' && "${fields[7]}" == 'true' \
+  [[ "${fields[6]}" == 'true' && "${fields[7]}" == 'false' \
      && "${fields[8]}" == 'false' && "${fields[9]}" == 'false' ]] \
     || die 'migration_revalidation_contract_mismatch'
   MIGRATION_MANIFEST_SHA256="${fields[4]}"
@@ -1419,6 +1419,9 @@ apply_migrations() {
   run_migration governed_memory governed_memory_owner \
     governed_memory_bounded_auto_admission_0005 \
     "${MIGRATIONS}/0005_bounded_auto_admission/forward.pgsql"
+  run_migration governed_memory governed_memory_owner \
+    governed_memory_source_erasure_projection_recovery_0006 \
+    "${MIGRATIONS}/0006_source_erasure_projection_recovery/forward.pgsql"
   run_migration memory sage \
     governed_memory_conversation_bridge_0002 \
     "${MIGRATIONS}/0002_conversation_bridge/forward.pgsql"
@@ -1531,6 +1534,9 @@ rollback_migrations() {
   run_migration memory sage \
     governed_memory_conversation_bridge_0002 \
     "${MIGRATIONS}/0002_conversation_bridge/rollback.pgsql"
+  run_migration governed_memory governed_memory_owner \
+    governed_memory_source_erasure_projection_recovery_0006_rollback \
+    "${MIGRATIONS}/0006_source_erasure_projection_recovery/rollback.pgsql"
   run_migration governed_memory governed_memory_owner \
     governed_memory_bounded_auto_admission_0005_rollback \
     "${MIGRATIONS}/0005_bounded_auto_admission/rollback.pgsql"
@@ -2565,6 +2571,7 @@ run_integration() {
       GM_VALIDATION_SERVICE_TOKEN="${SERVICE_TOKEN}" \
       "${TEST_PYTHON}" -B -P -m unittest \
         tests.memory_integration.test_governed_memory_http_vertical_slice.GovernedMemoryHttpVerticalSliceTests.test_http_chat_a_to_chat_b_rebuild_and_deletion \
+        tests.memory_integration.test_conversation_deletion_disposable.ConversationDeletionDisposableTests.test_terminal_projection_failure_does_not_lock_chat_deletion \
         tests.memory_integration.test_conversation_deletion_disposable.ConversationDeletionDisposableTests.test_deletion_resilience_boundaries \
         tests.memory_integration.test_conversation_deletion_disposable.ConversationDeletionDisposableTests.test_exact_chat_only_deletion_and_protected_store_retention \
         -v

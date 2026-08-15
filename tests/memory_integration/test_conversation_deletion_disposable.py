@@ -132,6 +132,14 @@ EXHAUSTED_OWNER = UUID("73000000-0000-4000-8000-000000000001")
 EXHAUSTED_THREAD = UUID("73000000-0000-4000-8000-000000000002")
 EXHAUSTED_MESSAGE = UUID("73000000-0000-4000-8000-000000000003")
 EXHAUSTED_OPERATION = UUID("73000000-0000-4000-8000-000000000004")
+TERMINAL_OWNER = UUID("75000000-0000-4000-8000-000000000001")
+TERMINAL_THREAD = UUID("75000000-0000-4000-8000-000000000002")
+TERMINAL_USER_MESSAGE = UUID("75000000-0000-4000-8000-000000000003")
+TERMINAL_ASSISTANT_MESSAGE = UUID("75000000-0000-4000-8000-000000000004")
+TERMINAL_MESSAGE_ATTACHMENT = UUID("75000000-0000-4000-8000-000000000005")
+TERMINAL_THREAD_ATTACHMENT = UUID("75000000-0000-4000-8000-000000000006")
+TERMINAL_RESPONSE = UUID("75000000-0000-4000-8000-000000000007")
+TERMINAL_DELETE_OPERATION = UUID("75000000-0000-4000-8000-000000000008")
 RESILIENCE_MESSAGE_IDS = tuple(
     UUID(f"74000000-0000-4000-8000-{ordinal:012d}")
     for ordinal in range(1, 502)
@@ -744,6 +752,7 @@ class ConversationDeletionDisposableTests(unittest.IsolatedAsyncioTestCase):
         thread_attachment_id: UUID,
         response_id: UUID,
         exact_qdrant: ExactQdrantAdapter,
+        terminal_projection_failure: bool = False,
     ) -> dict[str, Any]:
         async with self._owner_context(self.brains, owner_user_id):
             source_created_at = await self.brains.fetchval(
@@ -967,23 +976,35 @@ class ConversationDeletionDisposableTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(projection["owner_user_id"], owner_user_id)
         self.assertEqual(projection["claim_id"], claim_id)
         await self._mark_embedding_dispatch(projection)
-        point = build_projection_point(
-            claim, self._projection_outbox(projection), deterministic_vector()
-        )
-        upsert = await exact_qdrant.upsert_projection_point(point)
-        self.assertEqual(upsert.physical_collection, PHYSICAL_COLLECTION)
-        finish = await self.successor_worker.fetchrow(
-            "SELECT * FROM memory_private.finish_projection_job("
-            "$1::uuid,$2::uuid,'applied'::text,$3::text,$4::text,"
-            "NULL::text,NULL::text,NULL::text)",
-            projection["outbox_id"],
-            projection["lease_token"],
-            PHYSICAL_COLLECTION,
-            point["payload"]["vector_sha256"],
-        )
-        self.assertEqual(finish["outcome"], "applied")
-        self.assertFalse(finish["deletion_ready"])
-        self.assertEqual(len(self.qdrant.retrieve(ALIAS, claim_id)), 1)
+        if terminal_projection_failure:
+            finish = await self.successor_worker.fetchrow(
+                "SELECT * FROM memory_private.finish_projection_job("
+                "$1::uuid,$2::uuid,'retryable'::text,NULL::text,NULL::text,"
+                "NULL::text,NULL::text,'qdrant_unavailable'::text)",
+                projection["outbox_id"],
+                projection["lease_token"],
+            )
+            self.assertEqual(finish["outcome"], "failed_terminal")
+            self.assertFalse(finish["deletion_ready"])
+            self.assertFalse(self.qdrant.retrieve(ALIAS, claim_id))
+        else:
+            point = build_projection_point(
+                claim, self._projection_outbox(projection), deterministic_vector()
+            )
+            upsert = await exact_qdrant.upsert_projection_point(point)
+            self.assertEqual(upsert.physical_collection, PHYSICAL_COLLECTION)
+            finish = await self.successor_worker.fetchrow(
+                "SELECT * FROM memory_private.finish_projection_job("
+                "$1::uuid,$2::uuid,'applied'::text,$3::text,$4::text,"
+                "NULL::text,NULL::text,NULL::text)",
+                projection["outbox_id"],
+                projection["lease_token"],
+                PHYSICAL_COLLECTION,
+                point["payload"]["vector_sha256"],
+            )
+            self.assertEqual(finish["outcome"], "applied")
+            self.assertFalse(finish["deletion_ready"])
+            self.assertEqual(len(self.qdrant.retrieve(ALIAS, claim_id)), 1)
 
         # Associate synthetic attachments only after the text-only Memory
         # chain is complete. They are present for chat deletion proof but
@@ -1303,6 +1324,7 @@ class ConversationDeletionDisposableTests(unittest.IsolatedAsyncioTestCase):
         *,
         expected_claim_id: UUID,
         exact_qdrant: ExactQdrantAdapter,
+        owner_user_id: UUID = OWNER_A,
     ) -> tuple[str, str]:
         lease = await self.successor_worker.fetchrow(
             "SELECT * FROM memory_private.lease_projection_jobs("
@@ -1336,7 +1358,7 @@ class ConversationDeletionDisposableTests(unittest.IsolatedAsyncioTestCase):
         deletion_state = await self.successor_admin.fetchrow(
             "SELECT current_state_sha256 FROM memory.claim "
             "WHERE owner_user_id=$1::uuid AND claim_id=$2::uuid",
-            OWNER_A,
+            owner_user_id,
             expected_claim_id,
         )
         async with self.successor_worker.transaction():
@@ -1361,7 +1383,7 @@ class ConversationDeletionDisposableTests(unittest.IsolatedAsyncioTestCase):
                 "$7::text,$8::integer,$9::text,$10::text,$11::timestamptz,"
                 "$12::timestamptz,$13::text,$14::text)",
                 lease["operation_id"],
-                OWNER_A,
+                owner_user_id,
                 lease["claim_id"],
                 deletion_state["current_state_sha256"],
                 lease["outbox_id"],
@@ -1379,7 +1401,7 @@ class ConversationDeletionDisposableTests(unittest.IsolatedAsyncioTestCase):
         retained = await self.successor_admin.fetchval(
             "SELECT receipt_sha256 FROM memory.claim_deletion_receipt "
             "WHERE owner_user_id=$1::uuid AND claim_id=$2::uuid",
-            OWNER_A,
+            owner_user_id,
             expected_claim_id,
         )
         self.assertRegex(retained, r"^[0-9a-f]{64}$")
@@ -2007,6 +2029,89 @@ class ConversationDeletionDisposableTests(unittest.IsolatedAsyncioTestCase):
             "SUCCESSOR_DELETION_RESILIENCE_RECEIPT="
             + json.dumps(receipt, sort_keys=True)
         )
+
+    async def test_terminal_projection_failure_does_not_lock_chat_deletion(
+        self,
+    ) -> None:
+        self.qdrant.create_collection(PHYSICAL_COLLECTION)
+        self.qdrant.create_alias(ALIAS, PHYSICAL_COLLECTION)
+        exact_qdrant = ExactQdrantAdapter(
+            AsyncQdrantRestTransport(self.qdrant)
+        )
+        seeded = await self._seed_owner_chain(
+            owner_user_id=TERMINAL_OWNER,
+            thread_id=TERMINAL_THREAD,
+            user_message_id=TERMINAL_USER_MESSAGE,
+            assistant_message_id=TERMINAL_ASSISTANT_MESSAGE,
+            message_attachment_id=TERMINAL_MESSAGE_ATTACHMENT,
+            thread_attachment_id=TERMINAL_THREAD_ATTACHMENT,
+            response_id=TERMINAL_RESPONSE,
+            exact_qdrant=exact_qdrant,
+            terminal_projection_failure=True,
+        )
+        owner_repository = PostgresConversationDeletionRepository(
+            self.conversation_api
+        )
+        await owner_repository.request_erasure(
+            self._deletion_command(
+                owner_user_id=TERMINAL_OWNER,
+                operation_id=TERMINAL_DELETE_OPERATION,
+                thread_id=TERMINAL_THREAD,
+            )
+        )
+        coordinator = InactiveDeletionCoordinator(
+            conversation=PostgresConversationDeletionRepository(
+                self.conversation_worker
+            ),
+            successor=PostgresSuccessorDeletionRepository(
+                self.successor_worker
+            ),
+        )
+        prepared = await coordinator.advance_one()
+        self.assertEqual(
+            prepared.outcome, DeletionCoordinatorOutcome.PROCESSING
+        )
+        self.assertEqual(prepared.affected_claim_count, 1)
+        self.assertEqual(prepared.pending_claim_deletions, 1)
+        await self._finish_source_claim_qdrant_deletion(
+            expected_claim_id=seeded["claim_id"],
+            exact_qdrant=exact_qdrant,
+            owner_user_id=TERMINAL_OWNER,
+        )
+        governed_deleted = await coordinator.advance_one()
+        self.assertEqual(
+            governed_deleted.conversation_state,
+            ConversationErasureState.GOVERNED_DELETED,
+        )
+        completed = await coordinator.advance_one()
+        self.assertEqual(completed.outcome, DeletionCoordinatorOutcome.COMPLETED)
+        successor_receipt = await self.successor_admin.fetchrow(
+            "SELECT pre_fence_provider_dispatch_count,state "
+            "FROM memory.source_erasure_operation "
+            "WHERE operation_id=$1::uuid",
+            TERMINAL_DELETE_OPERATION,
+        )
+        self.assertEqual(successor_receipt["state"], "completed")
+        self.assertEqual(
+            successor_receipt["pre_fence_provider_dispatch_count"], 2
+        )
+        self.assertEqual(
+            await self.conversation_admin.fetchval(
+                "SELECT pg_catalog.count(*) FROM public.threads "
+                "WHERE owner_user_id=$1::uuid",
+                TERMINAL_OWNER,
+            ),
+            0,
+        )
+        self.assertEqual(
+            await self.successor_admin.fetchval(
+                "SELECT pg_catalog.count(*) FROM memory.claim "
+                "WHERE owner_user_id=$1::uuid",
+                TERMINAL_OWNER,
+            ),
+            0,
+        )
+        self.assertIsNone(await coordinator.advance_one())
 
     async def test_exact_chat_only_deletion_and_protected_store_retention(
         self,

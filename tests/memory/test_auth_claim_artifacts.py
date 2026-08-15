@@ -399,6 +399,7 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
                 "0003_owner_claim_detail/forward.pgsql",
                 "0004_pilot_marker/forward.pgsql",
                 "0005_bounded_auto_admission/forward.pgsql",
+                "0006_source_erasure_projection_recovery/forward.pgsql",
                 "0002_conversation_bridge/forward.pgsql",
             ],
         )
@@ -406,6 +407,7 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
             manifest["rollback_order"],
             [
                 "0002_conversation_bridge/rollback.pgsql",
+                "0006_source_erasure_projection_recovery/rollback.pgsql",
                 "0005_bounded_auto_admission/rollback.pgsql",
                 "0004_pilot_marker/rollback.pgsql",
                 "0003_owner_claim_detail/rollback.pgsql",
@@ -500,7 +502,7 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
         )
         self.assertIn(
             "readonly EXPECTED_MANIFEST_SHA256="
-            "'cb0633096bdd7f961dcb05881d722e7c0a53cb0661f66b5aca6f0dfde632ca5c'",
+            "'f1be143940c3d40197a9f959e5b6d476ae70763972baa9e769419bba7c2e5a70'",
             runner,
         )
         postgres_digest = (
@@ -660,6 +662,7 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
         ]
         rollback_paths = [
             "0002_conversation_bridge/rollback.pgsql",
+            "0006_source_erasure_projection_recovery/rollback.pgsql",
             "0005_bounded_auto_admission/rollback.pgsql",
             "0004_pilot_marker/rollback.pgsql",
             "0003_owner_claim_detail/rollback.pgsql",
@@ -769,7 +772,7 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
                     integration,
                 )
             ),
-            3,
+            4,
         )
         self.assertNotRegex(
             integration,
