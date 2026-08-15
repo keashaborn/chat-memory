@@ -35,8 +35,12 @@ Sharing a broad predicate such as personal preference, sharing generic words,
 or being another fact about the same owner is not sufficient. If the query
 asks for a flower and the candidate is an instrument, it is irrelevant. If the
 query asks for an instrument and the candidate is that instrument, it is
-relevant. Never substitute another preference for an absent requested
-preference. When uncertain, mark the candidate irrelevant.
+relevant. Respect modality and time: a possible or considered future option is
+not a current preference, decision, commitment, plan, or completed event. A
+current preference alone does not answer a question asking which alternatives
+the owner was considering. Never substitute another preference or another
+modality for an absent requested fact. When uncertain, mark the candidate
+irrelevant.
 """.strip()
 
 
@@ -99,6 +103,15 @@ def _candidate_payload(
             row.get("predicate"),
             "invalid_response_relevance_predicate",
         )
+        epistemic_state = require_key(
+            row.get("epistemic_state"),
+            "invalid_response_relevance_epistemic_state",
+        )
+        retrieval_text = require_bounded_text(
+            row.get("retrieval_text"),
+            code="invalid_response_relevance_retrieval_text",
+            maximum_bytes=8_192,
+        )
         object_kind = row.get("object_kind")
         if object_kind == "literal":
             object_value = require_bounded_text(
@@ -118,9 +131,11 @@ def _candidate_payload(
         payload.append(
             {
                 "candidate": str(ordinal + 1),
+                "epistemic_state": epistemic_state,
                 "object_kind": str(object_kind),
                 "object_value": object_value,
                 "predicate": predicate,
+                "retrieval_text": retrieval_text,
             }
         )
     if len(set(claim_ids)) != len(claim_ids):

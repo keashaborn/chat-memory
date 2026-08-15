@@ -161,6 +161,10 @@ class OpenAIResponsesAdapterTests(unittest.TestCase):
         )
         self.assertEqual(assets.output_schema_asset_bytes, schema_bytes)
         self.assertNotIn("usage", assets.output_schema["properties"])
+        self.assertIn("Decompose the evidence into atomic facts", assets.instructions)
+        self.assertIn("up to the schema limit of eight", assets.instructions)
+        self.assertIn("predicate entity.attribute", assets.instructions)
+        self.assertIn("current preference", assets.instructions)
         with self.assertRaises(TypeError):
             assets.output_schema["properties"]["facts"] = {}  # type: ignore[index]
         required = assets.output_schema["properties"]["facts"]["items"][  # type: ignore[index]

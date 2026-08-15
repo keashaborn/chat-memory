@@ -126,6 +126,50 @@ class EligibilityTests(unittest.TestCase):
         self.assertEqual(evidence["category"], "life_preference")
         self.assertEqual(evidence["assertion_mode"], "uncertain")
 
+    def test_explicit_project_deliberation_is_selected_as_owner_evidence(self) -> None:
+        text = (
+            "For my memory project, I am considering a local model for private "
+            "summaries. Another direction I am exploring is a smaller hosted "
+            "model for ordinary claims."
+        )
+        result = self.evaluate(text)
+        evidence = result["selected_evidence"]
+
+        self.assertEqual(result["decision"], EligibilityDecision.SEND_EXTERNAL.value)
+        self.assertEqual(result["reason_codes"], ["owner_declaration_selected"])
+        self.assertEqual(evidence["selected_text"], text)
+        self.assertEqual(evidence["assertion_mode"], "uncertain")
+
+    def test_project_work_remains_excluded_without_owner_deliberation(self) -> None:
+        result = self.evaluate(
+            "I am implementing a new retrieval route in my memory project."
+        )
+
+        self.assertEqual(result["decision"], EligibilityDecision.ROUTE_INTERNAL.value)
+        self.assertEqual(result["reason_codes"], ["project_scope_excluded"])
+        self.assertFalse(result["provider_allowed"])
+        self.assertIsNone(result["selected_evidence"])
+
+    def test_considered_direction_question_remains_zero_call(self) -> None:
+        result = self.evaluate(
+            "What possible project directions am I considering?"
+        )
+
+        self.assertEqual(result["decision"], EligibilityDecision.SKIP_ZERO_CALL.value)
+        self.assertEqual(result["reason_codes"], ["pure_question"])
+        self.assertFalse(result["provider_allowed"])
+        self.assertIsNone(result["selected_evidence"])
+
+    def test_project_deliberation_memory_denial_remains_zero_call(self) -> None:
+        result = self.evaluate(
+            "Do not remember that I am considering a hosted model for my project."
+        )
+
+        self.assertEqual(result["decision"], EligibilityDecision.SKIP_ZERO_CALL.value)
+        self.assertEqual(result["reason_codes"], ["no_durable_fact"])
+        self.assertFalse(result["provider_allowed"])
+        self.assertIsNone(result["selected_evidence"])
+
     def test_remember_is_optional_emphasis_not_required_syntax(self) -> None:
         text = (
             "Remember that marimba is a possible future option for memory "

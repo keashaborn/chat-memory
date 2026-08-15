@@ -225,6 +225,15 @@ _PROJECT_RE = re.compile(
     r"\b(?:my|our|the)\s+(?:project|app|system)\b|\b(?:building|implementing|deploying)\b",
     re.I,
 )
+_CONSIDERED_DIRECTION_RE = re.compile(
+    r"(?:\b(?:i|we)\s+(?:(?:am|are|was|were)\s+|(?:'m|'re)\s+)?"
+    r"(?:currently\s+)?(?:considering|exploring|weighing|thinking\s+about)\b|"
+    r"\b(?:possible|potential|future)\s+"
+    r"(?:option|direction|approach|path|alternative)s?\b|"
+    r"\b(?:option|direction|approach|path|alternative)s?\s+"
+    r"(?:i|we)\s+(?:might|may|could|(?:am|are|was|were)\s+considering)\b)",
+    re.I,
+)
 _SENSITIVE_RE = re.compile(
     r"\b(?:diagnos(?:is|ed)|dementia|diabetes|cancer|depression|anxiety|"
     r"pregnan(?:t|cy)|assault(?:ed)?|abus(?:e|ed)|surgery|hospital|died|dead)\b",
@@ -622,12 +631,12 @@ def classify_eligibility(
             EligibilityDecision.ROUTE_INTERNAL,
             EligibilityReason.ASSISTANT_PREFERENCE,
         )
-    if _PROJECT_RE.search(text):
+    if _MEMORY_DENIAL_RE.search(text):
         return source, _result(
             source,
             selected_policy,
-            EligibilityDecision.ROUTE_INTERNAL,
-            EligibilityReason.PROJECT_SCOPE_EXCLUDED,
+            EligibilityDecision.SKIP_ZERO_CALL,
+            EligibilityReason.NO_DURABLE_FACT,
         )
     if _SENSITIVE_RE.search(text):
         return source, _result(
@@ -678,15 +687,6 @@ def classify_eligibility(
             EligibilityDecision.SKIP_ZERO_CALL,
             EligibilityReason.TASK_REQUEST,
         )
-
-    if _MEMORY_DENIAL_RE.search(text):
-        return source, _result(
-            source,
-            selected_policy,
-            EligibilityDecision.SKIP_ZERO_CALL,
-            EligibilityReason.NO_DURABLE_FACT,
-        )
-
     if explicit_preference_correction_command_v1(text) is not None:
         return source, _result(
             source,
@@ -694,7 +694,6 @@ def classify_eligibility(
             EligibilityDecision.SKIP_ZERO_CALL,
             EligibilityReason.EXPLICIT_CORRECTION_COMMAND,
         )
-
     remember = _REMEMBER_RE.match(text)
     if remember is not None:
         start = remember.end()
@@ -716,6 +715,32 @@ def classify_eligibility(
                 EligibilityReason.EXPLICIT_REMEMBER_SELECTED,
                 selected,
             )
+    if (
+        _OWNER_DECLARATION_RE.search(text)
+        and _CONSIDERED_DIRECTION_RE.search(text)
+    ):
+        start = len(text) - len(text.lstrip())
+        end = len(text.rstrip())
+        selected = _message_evidence(
+            source,
+            start_character=start,
+            end_character=end,
+        )
+        return source, _result(
+            source,
+            selected_policy,
+            EligibilityDecision.SEND_EXTERNAL,
+            EligibilityReason.OWNER_DECLARATION_SELECTED,
+            selected,
+        )
+    if _PROJECT_RE.search(text):
+        return source, _result(
+            source,
+            selected_policy,
+            EligibilityDecision.ROUTE_INTERNAL,
+            EligibilityReason.PROJECT_SCOPE_EXCLUDED,
+        )
+
     if _ALLOWLISTED_FACT_RE.fullmatch(text):
         start = len(text) - len(text.lstrip())
         end = len(text.rstrip())
