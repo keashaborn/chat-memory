@@ -41,6 +41,7 @@ except KeyError as exc:
     raise RuntimeError("unsupported_projection_distance") from exc
 QDRANT_VECTOR_SIZE = DEFAULT_DIMENSIONS
 QDRANT_MAX_SEARCH_LIMIT = 8
+EXPLICIT_RECALL_MINIMUM_SCORE_MICROS = 200_000
 QDRANT_REQUIRED_PAYLOAD_INDEXES = MappingProxyType(
     {
         "is_current": "bool",
@@ -437,7 +438,11 @@ class ExactQdrantAdapter:
             code="invalid_calibration_threshold",
             maximum=SCORE_SCALE,
         )
-        threshold = 0 if explicit_recall else calibrated_threshold
+        threshold = (
+            EXPLICIT_RECALL_MINIMUM_SCORE_MICROS
+            if explicit_recall
+            else calibrated_threshold
+        )
         owner = require_uuid(owner_user_id, "invalid_qdrant_search_owner")
         record_limit = require_exact_int(
             limit,

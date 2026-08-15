@@ -275,7 +275,7 @@ class QdrantSearchTests(unittest.IsolatedAsyncioTestCase):
             body["filter"]["must"],  # type: ignore[index]
         )
 
-    async def test_explicit_recall_is_owner_filtered_and_bypasses_similarity_gate(
+    async def test_explicit_recall_is_owner_filtered_and_uses_minimum_relevance_gate(
         self,
     ) -> None:
         point = projection_point()
@@ -301,7 +301,7 @@ class QdrantSearchTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(len(result), 1)
         body = transport.calls[-1][2]
-        self.assertEqual(body["score_threshold"], 0.0)  # type: ignore[index]
+        self.assertEqual(body["score_threshold"], 0.2)  # type: ignore[index]
         self.assertNotIn(
             {"key": "requires_explicit", "match": {"value": False}},
             body["filter"]["must"],  # type: ignore[index]
@@ -310,6 +310,35 @@ class QdrantSearchTests(unittest.IsolatedAsyncioTestCase):
             {"key": "owner_user_id", "match": {"value": str(OWNER_A)}},
             body["filter"]["must"],  # type: ignore[index]
         )
+
+    async def test_explicit_recall_refuses_candidates_below_minimum_relevance_gate(
+        self,
+    ) -> None:
+        point = projection_point()
+        payload = {
+            field: point["payload"][field]  # type: ignore[index]
+            for field in QDRANT_SEARCH_PAYLOAD_FIELDS
+        }
+        transport = FakeQdrantTransport()
+        transport.search_results = [
+            {
+                "id": point["point_id"],
+                "payload": payload,
+                "score": 0.199999,
+            }
+        ]
+        with self.assertRaisesRegex(
+            ContractViolation,
+            "qdrant_search_score_below_threshold",
+        ):
+            await ExactQdrantAdapter(transport).search_owner_candidates(
+                allowed_predicates=("preference.personal",),
+                calibration=approved_calibration(),
+                explicit_recall=True,
+                limit=8,
+                owner_user_id=OWNER_A,
+                query_vector=deterministic_vector(),
+            )
 
     async def test_search_refuses_vector_payload_expansion_and_scores_below_gate(self) -> None:
         point = projection_point()
