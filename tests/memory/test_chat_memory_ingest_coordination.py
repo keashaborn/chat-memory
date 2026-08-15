@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 OWNER = UUID("11111111-1111-4111-8111-111111111111")
 MESSAGE = UUID("22222222-2222-4222-8222-222222222222")
 THREAD = UUID("33333333-3333-4333-8333-333333333333")
+REQUEST_ID = "44444444-4444-4444-8444-444444444444"
 
 
 class FakeTransaction:
@@ -47,15 +48,33 @@ class ChatMemoryIngestCoordinationTests(unittest.IsolatedAsyncioTestCase):
             connection,
             owner_user_id=OWNER,
             message_id=MESSAGE,
+            request_id=REQUEST_ID,
             thread_id=THREAD,
             message="ordinary chat",
             resolution="release",
         )
         self.assertEqual(outcome, "released")
         self.assertEqual(connection.calls[0][1], (str(OWNER),))
-        self.assertEqual(connection.calls[1][1][0:2], (MESSAGE, THREAD))
-        self.assertRegex(str(connection.calls[1][1][2]), r"^[0-9a-f]{64}$")
-        self.assertEqual(connection.calls[1][1][3], "release")
+        self.assertEqual(
+            connection.calls[1][1][0:3],
+            (MESSAGE, REQUEST_ID, THREAD),
+        )
+        self.assertRegex(str(connection.calls[1][1][3]), r"^[0-9a-f]{64}$")
+        self.assertEqual(connection.calls[1][1][4], "release")
+
+    async def test_request_id_alone_can_validate_exact_logged_source(self) -> None:
+        connection = FakeConnection("validated")
+        outcome = await coordinate_chat_memory_ingest_v1(
+            connection,
+            owner_user_id=OWNER,
+            message_id=None,
+            request_id=REQUEST_ID,
+            thread_id=THREAD,
+            message="replace the old preference",
+            resolution="validate",
+        )
+        self.assertEqual(outcome, "validated")
+        self.assertEqual(connection.calls[1][1][0:3], (None, REQUEST_ID, THREAD))
 
     async def test_suppress_accepts_terminal_receipts_only(self) -> None:
         for outcome in ("absent", "replayed", "suppressed"):
@@ -65,6 +84,7 @@ class ChatMemoryIngestCoordinationTests(unittest.IsolatedAsyncioTestCase):
                         FakeConnection(outcome),
                         owner_user_id=OWNER,
                         message_id=MESSAGE,
+                        request_id=REQUEST_ID,
                         thread_id=THREAD,
                         message="replace the old preference",
                         resolution="suppress",
@@ -76,9 +96,22 @@ class ChatMemoryIngestCoordinationTests(unittest.IsolatedAsyncioTestCase):
                 FakeConnection("claimed"),
                 owner_user_id=OWNER,
                 message_id=MESSAGE,
+                request_id=REQUEST_ID,
                 thread_id=THREAD,
                 message="replace the old preference",
                 resolution="suppress",
+            )
+
+    async def test_missing_message_and_request_identifiers_fails_closed(self) -> None:
+        with self.assertRaises(ChatMemoryIngestCoordinationErrorV1):
+            await coordinate_chat_memory_ingest_v1(
+                FakeConnection(),
+                owner_user_id=OWNER,
+                message_id=None,
+                request_id=None,
+                thread_id=THREAD,
+                message="replace the old preference",
+                resolution="validate",
             )
 
     def test_source_migration_is_bounded_and_reversible(self) -> None:
@@ -94,6 +127,8 @@ class ChatMemoryIngestCoordinationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("session_user <> 'brains_app'", forward)
         self.assertIn("source.owner_user_id = actor", forward)
         self.assertIn("source.thread_id = p_thread_id", forward)
+        self.assertIn("source.request_id = p_request_id", forward)
+        self.assertIn("INTO STRICT source_row", forward)
         self.assertIn("p_content_sha256", forward)
         self.assertIn("p_resolution IS NULL", forward)
         self.assertIn("eligibility_decision = 'skip_zero_call'", forward)

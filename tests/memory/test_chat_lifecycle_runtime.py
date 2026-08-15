@@ -638,10 +638,15 @@ class ChatMemoryLifecycleRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("CHAT_MEMORY_LIFECYCLE_RUNTIME.apply_if_requested(", function)
         self.assertIn("owner_user_id=owner", function)
         self.assertIn("coordinate_chat_memory_ingest_v1(", function)
-        self.assertIn('"memory_ingest_coordination_required"', function)
+        self.assertIn('resolution="validate"', function)
+        self.assertIn("request_id=request_id", function)
         self.assertIn('"suppress"', function)
         self.assertIn('"release"', function)
         self.assertIn('"message_id",', function)
+        self.assertLess(
+            function.index('resolution="validate"'),
+            function.index("CHAT_MEMORY_LIFECYCLE_RUNTIME.apply_if_requested("),
+        )
         self.assertLess(
             function.index("CHAT_MEMORY_LIFECYCLE_RUNTIME.apply_if_requested("),
             function.index("openai_client = get_openai_client()"),

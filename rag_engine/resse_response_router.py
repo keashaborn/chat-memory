@@ -402,11 +402,38 @@ async def resse_response_query(
             payload.message
         )
     )
-    if requires_ingest_coordination and payload.message_id is None:
-        raise _no_store_http_exception(
-            503,
-            "memory_ingest_coordination_required",
-        )
+    coordination_message_id = (
+        payload.message_id or payload.attachment_message_id
+    )
+
+    # A correction must bind to the exact transcript row before any memory
+    # mutation.  The frontend already supplies one request id to both /log and
+    # /response/query, and /log persists it in chat_log.  A future frontend may
+    # additionally provide message_id; when both are present the database
+    # requires both references to identify the same row.
+    if requires_ingest_coordination:
+        coordination_connection = None
+        try:
+            coordination_connection = await asyncpg.connect(
+                DSN, command_timeout=15
+            )
+            await coordinate_chat_memory_ingest_v1(
+                coordination_connection,
+                owner_user_id=owner,
+                message_id=coordination_message_id,
+                request_id=request_id,
+                thread_id=thread_id,
+                message=payload.message,
+                resolution="validate",
+            )
+        except ChatMemoryIngestCoordinationErrorV1:
+            raise _no_store_http_exception(
+                503,
+                "memory_ingest_coordination_unavailable",
+            ) from None
+        finally:
+            if coordination_connection is not None:
+                await coordination_connection.close()
 
     lifecycle_receipt = None
     if tentative_successor_eligible:
@@ -421,7 +448,7 @@ async def resse_response_query(
                 )
             )
         except ChatMemoryLifecycleError as exc:
-            if payload.message_id is not None and requires_ingest_coordination:
+            if requires_ingest_coordination:
                 coordination_connection = None
                 try:
                     coordination_connection = await asyncpg.connect(
@@ -430,7 +457,8 @@ async def resse_response_query(
                     await coordinate_chat_memory_ingest_v1(
                         coordination_connection,
                         owner_user_id=owner,
-                        message_id=payload.message_id,
+                        message_id=coordination_message_id,
+                        request_id=request_id,
                         thread_id=thread_id,
                         message=payload.message,
                         resolution="suppress",
@@ -450,12 +478,13 @@ async def resse_response_query(
 
     conn = await asyncpg.connect(DSN, command_timeout=90)
     try:
-        if payload.message_id is not None:
+        if not payload.no_store and payload.thread_id is not None:
             try:
                 await coordinate_chat_memory_ingest_v1(
                     conn,
                     owner_user_id=owner,
-                    message_id=payload.message_id,
+                    message_id=coordination_message_id,
+                    request_id=request_id,
                     thread_id=thread_id,
                     message=payload.message,
                     resolution=(

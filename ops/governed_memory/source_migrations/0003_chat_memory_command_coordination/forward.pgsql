@@ -19,7 +19,7 @@ BEGIN
     RAISE EXCEPTION 'chat memory command coordination prerequisite absent';
   END IF;
   IF to_regprocedure(
-       'memory_ingest_private.resolve_chat_memory_command(uuid,uuid,text,text)'
+       'memory_ingest_private.resolve_chat_memory_command(uuid,text,uuid,text,text)'
      ) IS NOT NULL
      OR EXISTS (
        SELECT 1
@@ -69,6 +69,7 @@ CREATE TRIGGER defer_chat_memory_ingest_until_response
 
 CREATE FUNCTION memory_ingest_private.resolve_chat_memory_command(
   p_message_id uuid,
+  p_request_id text,
   p_thread_id uuid,
   p_content_sha256 text,
   p_resolution text
@@ -96,34 +97,43 @@ BEGIN
   actor := NULLIF(
     pg_catalog.current_setting('app.user_id', true), ''
   )::uuid;
-  IF actor IS NULL OR p_message_id IS NULL OR p_thread_id IS NULL
+  IF actor IS NULL OR (p_message_id IS NULL AND p_request_id IS NULL)
+     OR p_thread_id IS NULL
+     OR (p_request_id IS NOT NULL AND (
+       p_request_id <> pg_catalog.btrim(p_request_id)
+       OR pg_catalog.length(p_request_id) NOT BETWEEN 1 AND 128
+     ))
      OR p_content_sha256 IS NULL
      OR p_content_sha256 !~ '^[0-9a-f]{64}$'
      OR p_resolution IS NULL
-     OR p_resolution NOT IN ('release', 'suppress') THEN
+     OR p_resolution NOT IN ('validate', 'release', 'suppress') THEN
     RAISE EXCEPTION 'invalid chat memory command coordination input'
       USING ERRCODE = '22023';
   END IF;
 
-  SELECT source.* INTO source_row
-  FROM public.chat_log AS source
-  WHERE source.id = p_message_id
-    AND source.owner_user_id = actor
-    AND source.thread_id = p_thread_id
-  FOR KEY SHARE;
-  IF NOT FOUND OR source_row.source IS DISTINCT FROM 'frontend/chat:user'
-     OR source_row.text IS NULL
-     OR pg_catalog.encode(pg_catalog.sha256(
-       pg_catalog.convert_to(source_row.text, 'UTF8')
-     ), 'hex') <> p_content_sha256 THEN
-    RAISE EXCEPTION 'chat memory command source binding mismatch'
-      USING ERRCODE = '23514';
-  END IF;
+  BEGIN
+    SELECT source.* INTO STRICT source_row
+    FROM public.chat_log AS source
+    WHERE source.owner_user_id = actor
+      AND source.thread_id = p_thread_id
+      AND source.source = 'frontend/chat:user'
+      AND source.text IS NOT NULL
+      AND (p_message_id IS NULL OR source.id = p_message_id)
+      AND (p_request_id IS NULL OR source.request_id = p_request_id)
+      AND pg_catalog.encode(pg_catalog.sha256(
+        pg_catalog.convert_to(source.text, 'UTF8')
+      ), 'hex') = p_content_sha256
+    FOR KEY SHARE;
+  EXCEPTION
+    WHEN NO_DATA_FOUND OR TOO_MANY_ROWS THEN
+      RAISE EXCEPTION 'chat memory command source binding mismatch'
+        USING ERRCODE = '23514';
+  END;
 
   SELECT value.* INTO target
   FROM memory_ingest_private.memory_ingest_outbox AS value
   WHERE value.owner_user_id = actor
-    AND value.message_id = p_message_id
+    AND value.message_id = source_row.id
     AND value.thread_id = p_thread_id
   FOR UPDATE;
   IF NOT FOUND THEN
@@ -133,6 +143,10 @@ BEGIN
      AND target.content_sha256 <> p_content_sha256 THEN
     RAISE EXCEPTION 'chat memory command outbox binding mismatch'
       USING ERRCODE = '23514';
+  END IF;
+
+  IF p_resolution = 'validate' THEN
+    RETURN 'validated';
   END IF;
 
   IF p_resolution = 'release' THEN
@@ -185,23 +199,23 @@ BEGIN
 END;
 $function$;
 ALTER FUNCTION memory_ingest_private.resolve_chat_memory_command(
-  uuid,uuid,text,text
+  uuid,text,uuid,text,text
 ) OWNER TO sage;
 REVOKE ALL ON FUNCTION memory_ingest_private.resolve_chat_memory_command(
-  uuid,uuid,text,text
+  uuid,text,uuid,text,text
 ) FROM PUBLIC, memory_ingest_writer, governed_memory_worker;
 GRANT EXECUTE ON FUNCTION
-  memory_ingest_private.resolve_chat_memory_command(uuid,uuid,text,text)
+  memory_ingest_private.resolve_chat_memory_command(uuid,text,uuid,text,text)
   TO memory_ingest_writer;
 
 DO $postflight$
 BEGIN
   IF to_regprocedure(
-       'memory_ingest_private.resolve_chat_memory_command(uuid,uuid,text,text)'
+       'memory_ingest_private.resolve_chat_memory_command(uuid,text,uuid,text,text)'
      ) IS NULL
      OR NOT pg_catalog.has_function_privilege(
        'memory_ingest_writer',
-       'memory_ingest_private.resolve_chat_memory_command(uuid,uuid,text,text)',
+       'memory_ingest_private.resolve_chat_memory_command(uuid,text,uuid,text,text)',
        'EXECUTE'
      )
      OR NOT EXISTS (
