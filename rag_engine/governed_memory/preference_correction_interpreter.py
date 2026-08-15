@@ -21,7 +21,6 @@ from rag_engine.governed_memory.chat_commands import (
     ExplicitPreferenceCorrectionCommandV1,
     normalized_preference_value_v1,
 )
-from rag_engine.openai_client import get_openai_client
 
 
 FLEXIBLE_CORRECTIONS_ENABLED_ENV = (
@@ -315,6 +314,11 @@ def openai_preference_correction_interpreter_from_environment_v1(
     if raw_enabled != "1":
         raise RuntimeError("flexible correction feature flag is invalid")
     model = os.getenv(FLEXIBLE_CORRECTIONS_MODEL_ENV, DEFAULT_MODEL).strip()
+    # This module is also packaged in the isolated worker runtime, which must
+    # remain importable without Brains-only provider modules. The factory is
+    # called only by the Brains chat lifecycle when the feature is enabled.
+    from rag_engine.openai_client import get_openai_client
+
     return OpenAIPreferenceCorrectionInterpreterV1(
         client=get_openai_client(),
         model=model,
