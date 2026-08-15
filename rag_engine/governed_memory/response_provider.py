@@ -231,10 +231,38 @@ def _has_mixed_personal_recall_scope(normalized: str) -> bool:
     )
 
 
+_SOURCE_ATTRIBUTION_CLAUSE_MARKERS = (
+    " and did that information come from",
+    " and did this information come from",
+    " and did that answer come from",
+    " and did this answer come from",
+    " and did you get that from",
+    " and did you get this from",
+    " and where did that information come from",
+    " and where did this information come from",
+    " and where did you get that",
+    " and where did you get this",
+    " and what source did you use",
+    " and which source did you use",
+)
+
+
+def _recall_subject_query(normalized: str) -> str:
+    """Remove a trailing source-attribution question from a recall query."""
+
+    for marker in _SOURCE_ATTRIBUTION_CLAUSE_MARKERS:
+        index = normalized.find(marker)
+        if index > 0:
+            subject = normalized[:index].rstrip(" ,;:")
+            return f"{subject}?"
+    return normalized
+
+
 def _is_explicit_preference_recall(query: str) -> bool:
     if not isinstance(query, str):
         return False
     normalized = " ".join(query.replace("’", "'").casefold().split())
+    normalized = _recall_subject_query(normalized)
     if (
         not normalized.endswith("?")
         or len(normalized) > 256
@@ -273,6 +301,7 @@ def _is_explicit_personal_recall(query: str) -> bool:
     if not isinstance(query, str):
         return False
     normalized = " ".join(query.replace("’", "'").casefold().split())
+    normalized = _recall_subject_query(normalized)
     if (
         not normalized.endswith("?")
         or len(normalized) > 256

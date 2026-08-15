@@ -329,7 +329,23 @@ class SuccessorResponseProviderTests(unittest.IsolatedAsyncioTestCase):
             ("Which synthetic interface theme do I prefer?", True),
             ("Do you remember my favorite color?", True),
             ("What is my go-to natural-memory test tea?", True),
+            (
+                "What is my preferred memory-validation instrument, and did "
+                "that information come from this chat, saved memory, or "
+                "LifeSwitch data?",
+                True,
+            ),
             ("Which should I prefer, cobalt or amber?", False),
+            (
+                "Which should I prefer, cobalt or amber, and did you get "
+                "that from saved memory or this chat?",
+                False,
+            ),
+            (
+                "Did that answer come from this chat, saved memory, or "
+                "LifeSwitch data?",
+                False,
+            ),
             ("Compare my preferences with this plan.", False),
         ):
             vector = RecordingVectorIndex()
