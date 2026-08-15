@@ -106,11 +106,11 @@
     },
     {
       "path": "0007_personal_object_location_admission/package.json",
-      "sha256": "82523ce83a12d5cc163170a658d20631c646c3eabf9f71999c6017d75587b947"
+      "sha256": "b09e04c64ca77d93db8609b4d19716220a0c8556cc2c66daa3e3e64ca8ae6fd8"
     },
     {
       "path": "0007_personal_object_location_admission/forward.pgsql",
-      "sha256": "03955b46efa42ad6f7a885cc2c81fb44fb4a1931010d105a752ffe729fd4ac61"
+      "sha256": "a6329cb7fec10304ff9248cc293bc57c25e8fabfa64d4e70b5b9cf9bc95cd277"
     },
     {
       "path": "0007_personal_object_location_admission/rollback.pgsql",

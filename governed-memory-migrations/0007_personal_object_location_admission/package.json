@@ -19,7 +19,7 @@
   },
   "forward": {
     "path": "forward.pgsql",
-    "sha256": "03955b46efa42ad6f7a885cc2c81fb44fb4a1931010d105a752ffe729fd4ac61"
+    "sha256": "a6329cb7fec10304ff9248cc293bc57c25e8fabfa64d4e70b5b9cf9bc95cd277"
   },
   "rollback": {
     "path": "rollback.pgsql",

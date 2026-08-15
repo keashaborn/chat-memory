@@ -85,8 +85,8 @@ AS $function$
       AND pg_catalog.strpos(p_review_excerpt, pg_catalog.chr(10)) = 0
       AND pg_catalog.strpos(p_review_excerpt, pg_catalog.chr(13)) = 0
       AND (
-        p_review_excerpt ~* '^[[:space:]]*i[[:space:]]+(keep|store|leave|put)[[:space:]]+my[[:space:]]+[^.?!]{1,256}[[:space:]]+(in|inside|at|on)[[:space:]]+[^.?!]{1,256}[.]?[[:space:]]*$'
-        OR p_review_excerpt ~* '^[[:space:]]*my[[:space:]]+[^.?!]{1,256}[[:space:]]+(is|stays|remains)[[:space:]]+(in|inside|at|on)[[:space:]]+[^.?!]{1,256}[.]?[[:space:]]*$'
+        p_review_excerpt ~* '^[[:space:]]*i[[:space:]]+(keep|store|leave|put)[[:space:]]+my[[:space:]]+[^.?!]{1,255}[^.?!]?[[:space:]]+(in|inside|at|on)[[:space:]]+[^.?!]{1,255}[^.?!]?[.]?[[:space:]]*$'
+        OR p_review_excerpt ~* '^[[:space:]]*my[[:space:]]+[^.?!]{1,255}[^.?!]?[[:space:]]+(is|stays|remains)[[:space:]]+(in|inside|at|on)[[:space:]]+[^.?!]{1,255}[^.?!]?[.]?[[:space:]]*$'
       )
     THEN 'automatic_low_risk_personal_object_location'
     ELSE NULL::text

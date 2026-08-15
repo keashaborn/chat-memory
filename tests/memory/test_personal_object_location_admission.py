@@ -60,6 +60,17 @@ class PersonalObjectLocationAdmissionTests(unittest.TestCase):
         self.assertIn("pg_catalog.chr(10)", self.forward)
         self.assertIn("pg_catalog.chr(13)", self.forward)
 
+    def test_postgresql_regex_repetition_bounds_are_supported(self) -> None:
+        self.assertNotIn("{1,256}", self.forward)
+        self.assertEqual(
+            self.forward.count("[^.?!]{1,255}[^.?!]?"),
+            4,
+        )
+        for lower, upper in re.findall(r"\{(\d+),(\d+)\}", self.forward):
+            with self.subTest(lower=lower, upper=upper):
+                self.assertLessEqual(int(lower), int(upper))
+                self.assertLessEqual(int(upper), 255)
+
     def test_selector_and_locked_review_recompute_the_same_reason(self) -> None:
         self.assertGreaterEqual(
             self.forward.count(
