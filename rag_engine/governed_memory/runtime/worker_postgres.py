@@ -75,7 +75,7 @@ WORKER_RUNTIME_CONTRACT_SHA256 = sha256(
 
 _READ_PILOT_MARKER_SQL = "SELECT * FROM memory_private.read_pilot_marker()"
 _READ_PILOT_CLOCK_SQL = "SELECT pg_catalog.transaction_timestamp()"
-PILOT_MAXIMUM_DURATION = timedelta(hours=24)
+PILOT_MAXIMUM_DURATION = timedelta(days=14)
 _NEXT_WORKER_LANE_SQL = "SELECT memory_private.next_worker_lane()"
 _AUTO_ADMIT_SQL = (
     "SELECT * FROM memory_private.auto_admit_one_ordinary_proposal()"

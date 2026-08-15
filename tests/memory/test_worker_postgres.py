@@ -42,6 +42,7 @@ from rag_engine.governed_memory.runtime.pilot_marker import (
     pilot_marker_receipt_sha256,
 )
 from rag_engine.governed_memory.runtime.worker_postgres import (
+    PILOT_MAXIMUM_DURATION,
     PROJECTION_LEASE_FIELDS,
     WORKER_RUNTIME_CONTRACT_SHA256,
     PostgresOnceWorkerRepository,
@@ -457,9 +458,10 @@ class PersistentLaneSchedulerTests(unittest.IsolatedAsyncioTestCase):
 
 class PilotIdentityTests(unittest.IsolatedAsyncioTestCase):
     async def test_exact_marker_is_accepted_only_inside_authorized_window(self) -> None:
+        self.assertEqual(PILOT_MAXIMUM_DURATION, timedelta(days=14))
         connection = FakeConnection(
             fetch_results=[[pilot_marker_row()]],
-            fetchval_results=[NOW + timedelta(hours=23, minutes=59)],
+            fetchval_results=[NOW + timedelta(days=13, hours=23, minutes=59)],
         )
         self.assertTrue(await repository(connection).pilot_ever_started())
         self.assertEqual(len(connection.fetch_calls), 2)
@@ -472,7 +474,7 @@ class PilotIdentityTests(unittest.IsolatedAsyncioTestCase):
     async def test_stale_or_future_marker_refuses_before_claim(self) -> None:
         cases = (
             (NOW - timedelta(days=365), NOW, "stale"),
-            (NOW, NOW + timedelta(hours=24), "boundary"),
+            (NOW, NOW + timedelta(days=14), "boundary"),
             (NOW + timedelta(microseconds=1), NOW, "future"),
         )
         for started_at, transaction_time, label in cases:
