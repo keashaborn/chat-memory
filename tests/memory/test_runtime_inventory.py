@@ -120,6 +120,7 @@ EXPECTED_PACKAGE_FILES = {
     "api.py",
     "auth.py",
     "contracts.py",
+    "chat_commands.py",
     "conversation_capture.py",
     "conversation_deletion.py",
     "conversation_erasure_http.py",

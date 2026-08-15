@@ -9,7 +9,7 @@ import re
 from typing import Any, Mapping
 from uuid import UUID
 
-from rag_engine.governed_memory_chat_commands_v1 import (
+from .chat_commands import (
     explicit_preference_correction_command_v1,
 )
 

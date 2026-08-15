@@ -11,7 +11,7 @@ import re
 from typing import Mapping
 from uuid import NAMESPACE_URL, UUID, uuid5
 
-from rag_engine.governed_memory_chat_commands_v1 import (
+from rag_engine.governed_memory.chat_commands import (
     ExplicitPreferenceCorrectionCommandV1,
     explicit_preference_correction_command_v1,
     explicit_preference_retraction_target_v1,

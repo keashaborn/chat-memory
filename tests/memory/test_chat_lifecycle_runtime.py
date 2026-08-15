@@ -5,7 +5,7 @@ from pathlib import Path
 import unittest
 from uuid import UUID
 
-from rag_engine.governed_memory_chat_commands_v1 import (
+from rag_engine.governed_memory.chat_commands import (
     explicit_preference_correction_command_v1,
     explicit_preference_retraction_target_v1,
 )
