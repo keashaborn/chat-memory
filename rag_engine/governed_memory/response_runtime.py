@@ -18,8 +18,6 @@ import threading
 from typing import Any
 from urllib.parse import urlsplit
 
-from openai import OpenAI
-
 from rag_engine.governed_memory.contracts import (
     ContractViolation,
     require_sha256,
@@ -555,6 +553,11 @@ class SuccessorResponseRuntime:
             assert self._predicate_catalog is not None
             assert self._calibration is not None
             if self._openai_client is None:
+                # This module is packaged in the isolated worker runtime,
+                # which deliberately excludes the Brains-only OpenAI SDK.
+                # Import it only when Brains constructs a response provider.
+                from openai import OpenAI
+
                 self._openai_client = OpenAI(api_key=settings.openai_api_key)
             openai_client = self._openai_client
             catalog_copy = json.loads(
