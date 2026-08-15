@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from hashlib import sha256
 import json
 import re
 import unittest
@@ -13,6 +14,7 @@ MIGRATION = (
     ROOT / "governed-memory-migrations"
     / "0007_personal_object_location_admission"
 )
+PROOF = MIGRATION / "disposable_proof_receipt.json"
 
 
 class PersonalObjectLocationAdmissionTests(unittest.TestCase):
@@ -23,6 +25,7 @@ class PersonalObjectLocationAdmissionTests(unittest.TestCase):
         cls.package = json.loads(
             (MIGRATION / "package.json").read_text(encoding="utf-8")
         )
+        cls.proof = json.loads(PROOF.read_text(encoding="utf-8"))
 
     def test_candidate_is_inactive_and_adds_no_provider_calls(self) -> None:
         self.assertEqual(
@@ -33,7 +36,41 @@ class PersonalObjectLocationAdmissionTests(unittest.TestCase):
         self.assertFalse(
             self.package["activation"]["production_database_applied"]
         )
+        self.assertTrue(
+            self.package["activation"]["disposable_database_validated"]
+        )
         self.assertEqual(self.package["policy"]["provider_calls_added"], 0)
+
+    def test_disposable_proof_is_hash_bound_and_inactive(self) -> None:
+        binding = self.package["disposable_proof"]
+        self.assertEqual(binding["path"], PROOF.name)
+        self.assertEqual(binding["sha256"], sha256(PROOF.read_bytes()).hexdigest())
+        self.assertEqual(
+            self.proof["schema_version"],
+            "governed-memory-personal-object-location-disposable-proof-v1",
+        )
+        receipt = self.proof["proof_receipt"]
+        canonical = json.dumps(
+            receipt,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("utf-8")
+        self.assertEqual(
+            sha256(canonical).hexdigest(),
+            self.proof["proof_receipt_canonical_sha256"],
+        )
+        self.assertEqual(receipt["result"], "pass")
+        self.assertFalse(receipt["production_data_read"])
+        self.assertFalse(receipt["production_state_changed"])
+        self.assertEqual(receipt["provider_calls"], 0)
+        self.assertEqual(receipt["pipeline"]["owner_a_visible_claims"], 1)
+        self.assertEqual(receipt["pipeline"]["owner_b_visible_claims"], 0)
+        self.assertTrue(self.proof["closing_verification"]["candidate_clean"])
+        self.assertTrue(
+            self.proof["closing_verification"]["disposable_resources_absent"]
+        )
 
     def test_existing_self_path_and_new_reason_are_separate(self) -> None:
         self.assertIn("automatic_low_risk_owner_assertion", self.forward)

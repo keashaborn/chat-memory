@@ -39,6 +39,7 @@ EXPECTED_FILES = {
     "0006_source_erasure_projection_recovery/forward.pgsql",
     "0006_source_erasure_projection_recovery/rollback.pgsql",
     "0007_personal_object_location_admission/package.json",
+    "0007_personal_object_location_admission/disposable_proof_receipt.json",
     "0007_personal_object_location_admission/forward.pgsql",
     "0007_personal_object_location_admission/rollback.pgsql",
     "0002_conversation_bridge/package.json",
@@ -126,6 +127,7 @@ EXPECTED_PACKAGE_CONTRACTS = {
             "production_authorized": False,
             "production_database_applied": False,
             "production_services_changed": False,
+            "disposable_database_validated": True,
             "live_acceptance_pending": True,
         },
     },
@@ -202,6 +204,17 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def canonical_json_sha256(value: object) -> str:
+    encoded = json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def checked_path(root: Path, relative: str) -> Path:
     if not relative or Path(relative).is_absolute():
         raise ValueError(f"unsafe manifest path: {relative!r}")
@@ -254,7 +267,7 @@ def verify(root: Path) -> dict[str, object]:
         "provider_external_calls": 0,
         "bounded_automatic_admission_live_acceptance_pending": True,
         "personal_object_location_admission_synthetic_tests_performed": True,
-        "personal_object_location_admission_disposable_database_execution_performed": False,
+        "personal_object_location_admission_disposable_database_execution_performed": True,
         "personal_object_location_admission_live_acceptance_pending": True,
     }
     if manifest.get("safety") != expected_safety:
@@ -371,6 +384,92 @@ def verify(root: Path) -> dict[str, object]:
             ):
                 raise ValueError(f"CASCADE DDL present: {relative}")
 
+    proof_relative = (
+        "0007_personal_object_location_admission/disposable_proof_receipt.json"
+    )
+    proof_path = checked_path(root, proof_relative)
+    proof_file_sha256 = sha256_file(proof_path)
+    personal_package = load_json(
+        root / "0007_personal_object_location_admission/package.json"
+    )
+    if personal_package.get("disposable_proof") != {
+        "path": "disposable_proof_receipt.json",
+        "sha256": proof_file_sha256,
+    }:
+        raise ValueError("personal object disposable proof binding differs")
+    if expected.get(proof_relative) != proof_file_sha256:
+        raise ValueError("personal object disposable proof manifest differs")
+    proof = load_json(proof_path)
+    if set(proof) != {
+        "schema_version", "proof_scope", "proof_receipt_canonicalization",
+        "proof_receipt_canonical_sha256", "proof_receipt",
+        "closing_verification",
+    }:
+        raise ValueError("personal object disposable proof shape differs")
+    if (
+        proof.get("schema_version")
+        != "governed-memory-personal-object-location-disposable-proof-v1"
+        or proof.get("proof_scope")
+        != "inactive_personal_object_location_admission_migration_0007"
+        or proof.get("proof_receipt_canonicalization")
+        != "utf8_json_sorted_keys_compact_no_newline_v1"
+    ):
+        raise ValueError("personal object disposable proof contract differs")
+    receipt = proof.get("proof_receipt")
+    if not isinstance(receipt, dict) or set(receipt) != {
+        "candidate_head", "candidate_tree", "clean_rollback",
+        "forward_sha256", "helper_boundary", "image_id", "pipeline",
+        "production_data_read", "production_state_changed", "provider_calls",
+        "reapply", "result", "rollback_refusal", "rollback_sha256",
+    }:
+        raise ValueError("personal object disposable receipt shape differs")
+    if canonical_json_sha256(receipt) != proof.get(
+        "proof_receipt_canonical_sha256"
+    ):
+        raise ValueError("personal object disposable receipt hash differs")
+    package_forward = personal_package.get("forward")
+    package_rollback = personal_package.get("rollback")
+    pipeline = receipt.get("pipeline")
+    if (
+        not isinstance(package_forward, dict)
+        or not isinstance(package_rollback, dict)
+        or not isinstance(pipeline, dict)
+        or receipt.get("candidate_head")
+        != "97e8f8175b3dde5c9cfab4866eb83c549bfab535"
+        or receipt.get("candidate_tree")
+        != "d012fff876fac8fb962d987699eaefe1f77bce21"
+        or receipt.get("forward_sha256") != package_forward.get("sha256")
+        or receipt.get("rollback_sha256") != package_rollback.get("sha256")
+        or receipt.get("result") != "pass"
+        or receipt.get("production_data_read") is not False
+        or receipt.get("production_state_changed") is not False
+        or receipt.get("provider_calls") != 0
+        or receipt.get("clean_rollback") != "helper-absent|legacy-restored"
+        or receipt.get("rollback_refusal") != "helper-present|1|1"
+        or receipt.get("reapply")
+        != "helper-present|automatic_low_risk_personal_object_location"
+        or pipeline.get("admission_outcome") != "admitted"
+        or pipeline.get("external_provider_calls_performed") != 0
+        or pipeline.get("owner_a_visible_claims") != 1
+        or pipeline.get("owner_b_visible_claims") != 0
+        or pipeline.get("projection_operation") != "upsert"
+        or pipeline.get("projection_state") != "pending"
+        or pipeline.get("reason")
+        != "automatic_low_risk_personal_object_location"
+    ):
+        raise ValueError("personal object disposable receipt evidence differs")
+    closing = proof.get("closing_verification")
+    if not isinstance(closing, dict) or closing != {
+        "active_lease_count": 0,
+        "candidate_clean": True,
+        "disposable_resources_absent": True,
+        "live_head": "38b978208b70f670bf2e9416de57e35ac8b905a9",
+        "live_tree": "d7d6b9bb979c1f5d21feac9383d6322e445efbdb",
+        "production_checkout_changed": False,
+        "temporary_validation_artifacts_absent": True,
+    }:
+        raise ValueError("personal object disposable closing proof differs")
+
     return {
         "file_count": len(expected),
         "manifest_sha256": sha256_file(manifest_path),
@@ -378,10 +477,10 @@ def verify(root: Path) -> dict[str, object]:
             candidate_id.encode("utf-8")
         ).hexdigest(),
         "result": "artifact_integrity_verified",
-        "schema_version": "governed-memory-migration-verification-v7",
-        "validation_state": "personal_object_location_admission_candidate_synthetic_validated",
-        "current_disposable_validation_complete": False,
-        "disposable_revalidation_required": True,
+        "schema_version": "governed-memory-migration-verification-v8",
+        "validation_state": "personal_object_location_admission_disposable_validated",
+        "current_disposable_validation_complete": True,
+        "disposable_revalidation_required": False,
         "historical_phase7c_proof_reusable_for_current_candidate": False,
         "production_state_changed": False,
     }

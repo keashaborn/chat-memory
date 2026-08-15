@@ -1,0 +1,40 @@
+{
+  "schema_version": "governed-memory-personal-object-location-disposable-proof-v1",
+  "proof_scope": "inactive_personal_object_location_admission_migration_0007",
+  "proof_receipt_canonicalization": "utf8_json_sorted_keys_compact_no_newline_v1",
+  "proof_receipt_canonical_sha256": "6d02304831fcb662801fc866d312ccb240b7d7a4d7d4d920eee3de2cc99cf92a",
+  "proof_receipt": {
+    "candidate_head": "97e8f8175b3dde5c9cfab4866eb83c549bfab535",
+    "candidate_tree": "d012fff876fac8fb962d987699eaefe1f77bce21",
+    "clean_rollback": "helper-absent|legacy-restored",
+    "forward_sha256": "a6329cb7fec10304ff9248cc293bc57c25e8fabfa64d4e70b5b9cf9bc95cd277",
+    "helper_boundary": "automatic_low_risk_personal_object_location|automatic_low_risk_personal_object_location|automatic_low_risk_owner_assertion|rejected|rejected|rejected|rejected",
+    "image_id": "sha256:de3a4eab8fdfa507ea92aac488b916b08089e515db49b055fe71dfa271ba3a28",
+    "pipeline": {
+      "admission_outcome": "admitted",
+      "claim_id": "04e3a851-5a49-426b-ab46-f437fc809409",
+      "external_provider_calls_performed": 0,
+      "owner_a_visible_claims": 1,
+      "owner_b_visible_claims": 0,
+      "projection_operation": "upsert",
+      "projection_state": "pending",
+      "reason": "automatic_low_risk_personal_object_location"
+    },
+    "production_data_read": false,
+    "production_state_changed": false,
+    "provider_calls": 0,
+    "reapply": "helper-present|automatic_low_risk_personal_object_location",
+    "result": "pass",
+    "rollback_refusal": "helper-present|1|1",
+    "rollback_sha256": "8969c2e030e360f5701728b804928f37820baf73677c85e5065905813624debe"
+  },
+  "closing_verification": {
+    "active_lease_count": 0,
+    "candidate_clean": true,
+    "disposable_resources_absent": true,
+    "live_head": "38b978208b70f670bf2e9416de57e35ac8b905a9",
+    "live_tree": "d7d6b9bb979c1f5d21feac9383d6322e445efbdb",
+    "production_checkout_changed": false,
+    "temporary_validation_artifacts_absent": true
+  }
+}

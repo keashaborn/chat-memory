@@ -50,7 +50,12 @@
     "production_authorized": false,
     "production_database_applied": false,
     "production_services_changed": false,
+    "disposable_database_validated": true,
     "live_acceptance_pending": true
+  },
+  "disposable_proof": {
+    "path": "disposable_proof_receipt.json",
+    "sha256": "82403108a5461fb517dd061eb687977cdc240edaba72676af98cd4a98a665b2b"
   },
   "object_contract": {
     "cascade_ddl": false

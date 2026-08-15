@@ -106,7 +106,11 @@
     },
     {
       "path": "0007_personal_object_location_admission/package.json",
-      "sha256": "b09e04c64ca77d93db8609b4d19716220a0c8556cc2c66daa3e3e64ca8ae6fd8"
+      "sha256": "c97ec7e6643d4ff456007ccbd852afa007215faac4354a689a8e35ed1a93dad5"
+    },
+    {
+      "path": "0007_personal_object_location_admission/disposable_proof_receipt.json",
+      "sha256": "82403108a5461fb517dd061eb687977cdc240edaba72676af98cd4a98a665b2b"
     },
     {
       "path": "0007_personal_object_location_admission/forward.pgsql",
@@ -144,7 +148,7 @@
     "provider_external_calls": 0,
     "bounded_automatic_admission_live_acceptance_pending": true,
     "personal_object_location_admission_synthetic_tests_performed": true,
-    "personal_object_location_admission_disposable_database_execution_performed": false,
+    "personal_object_location_admission_disposable_database_execution_performed": true,
     "personal_object_location_admission_live_acceptance_pending": true
   }
 }

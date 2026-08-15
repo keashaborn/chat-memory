@@ -1411,6 +1411,7 @@ class PackageIntegrityTests(unittest.TestCase):
             "0006_source_erasure_projection_recovery/forward.pgsql",
             "0006_source_erasure_projection_recovery/package.json",
             "0006_source_erasure_projection_recovery/rollback.pgsql",
+            "0007_personal_object_location_admission/disposable_proof_receipt.json",
             "0007_personal_object_location_admission/forward.pgsql",
             "0007_personal_object_location_admission/package.json",
             "0007_personal_object_location_admission/rollback.pgsql",
@@ -1476,20 +1477,20 @@ class PackageIntegrityTests(unittest.TestCase):
         )
         self.assertEqual(
             sha256(ROOT_MANIFEST_PATH.read_bytes()).hexdigest(),
-            "d2ed41b7956cde6dd08908d3d48a05c829b64e211b9492374020514701b744ea",
+            "0f7fc863d71cb08af897e6a395810683c2f1e8e1eaec8600332de9e743893400",
         )
         receipt = verifier["verify"](MIGRATIONS)
         self.assertEqual(receipt["result"], "artifact_integrity_verified")
         self.assertEqual(
             receipt["schema_version"],
-            "governed-memory-migration-verification-v7",
+            "governed-memory-migration-verification-v8",
         )
         self.assertEqual(
             receipt["validation_state"],
-            "personal_object_location_admission_candidate_synthetic_validated",
+            "personal_object_location_admission_disposable_validated",
         )
-        self.assertFalse(receipt["current_disposable_validation_complete"])
-        self.assertTrue(receipt["disposable_revalidation_required"])
+        self.assertTrue(receipt["current_disposable_validation_complete"])
+        self.assertFalse(receipt["disposable_revalidation_required"])
         self.assertFalse(
             receipt["historical_phase7c_proof_reusable_for_current_candidate"]
         )
