@@ -17,8 +17,8 @@ _RETRACTION_SENTENCE_RE = re.compile(
 _CORRECTION_SENTENCE_RE = re.compile(
     r"^\s*my\s+"
     r"(?P<label>(?:preferred|favorite)\s+[^,!?\n]{1,120}?)\s+"
-    r"is\s+now\s+(?P<replacement>[^,!?\n]{1,160}?)\s*,\s*"
-    r"replacing\s+(?P<previous>[^,!?\n]{1,160}?)\s*[.!]?\s*\Z",
+    r"is\s+now\s+(?P<replacement>[^.,!?\n]{1,160}?)\s*,\s*"
+    r"replacing\s+(?P<previous>[^.,!?\n]{1,160}?)\s*[.!]?\s*\Z",
     re.IGNORECASE,
 )
 _LEADING_ARTICLE_RE = re.compile(r"^(?:a|an|the)\s+", re.IGNORECASE)

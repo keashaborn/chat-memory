@@ -6,8 +6,12 @@ import unittest
 from uuid import UUID
 
 from rag_engine.governed_memory.chat_commands import (
+    ExplicitPreferenceCorrectionCommandV1,
     explicit_preference_correction_command_v1,
     explicit_preference_retraction_target_v1,
+)
+from rag_engine.governed_memory.preference_correction_interpreter import (
+    PreferenceCorrectionInterpretationUnavailableV1,
 )
 from rag_engine.governed_memory_chat_lifecycle_v1 import (
     ChatMemoryLifecycleError,
@@ -36,6 +40,10 @@ MESSAGE = (
 )
 CORRECTION_MESSAGE = (
     "My preferred correction test fruit is now a kiwi, replacing the mango."
+)
+FLEXIBLE_CORRECTION_MESSAGE = (
+    "My preferred memory validation instrument is now the vibraphone, "
+    "replacing the celesta. Please update this memory."
 )
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -161,11 +169,35 @@ class FakeTransport:
         return self.responses.pop(0)
 
 
+class FakeCorrectionInterpreter:
+    def __init__(self, *, unavailable: bool = False) -> None:
+        self.unavailable = unavailable
+        self.calls: list[dict[str, object]] = []
+
+    async def interpret(
+        self, **kwargs: object
+    ) -> ExplicitPreferenceCorrectionCommandV1:
+        self.calls.append(dict(kwargs))
+        if self.unavailable:
+            raise PreferenceCorrectionInterpretationUnavailableV1("synthetic")
+        return ExplicitPreferenceCorrectionCommandV1(
+            preference_label="preferred memory validation instrument",
+            previous_literal="celesta",
+            replacement_literal="vibraphone",
+        )
+
+
 class ChatMemoryLifecycleRuntimeTests(unittest.IsolatedAsyncioTestCase):
-    def runtime(self, transport: FakeTransport) -> ChatMemoryLifecycleRuntimeV1:
+    def runtime(
+        self,
+        transport: FakeTransport,
+        *,
+        interpreter: FakeCorrectionInterpreter | None = None,
+    ) -> ChatMemoryLifecycleRuntimeV1:
         return ChatMemoryLifecycleRuntimeV1(
             service_token="synthetic-service-token",
             transport=transport,
+            correction_interpreter=interpreter,
         )
 
     async def test_ordinary_questions_and_hypotheticals_make_no_calls(self) -> None:
@@ -185,6 +217,27 @@ class ChatMemoryLifecycleRuntimeTests(unittest.IsolatedAsyncioTestCase):
                     )
                 )
         self.assertEqual(transport.calls, [])
+
+    def test_flexible_candidate_requires_ingest_coordination(self) -> None:
+        runtime = self.runtime(
+            FakeTransport([]), interpreter=FakeCorrectionInterpreter()
+        )
+        self.assertTrue(
+            runtime.requires_ingest_coordination(
+                FLEXIBLE_CORRECTION_MESSAGE
+            )
+        )
+        self.assertTrue(runtime.requires_ingest_coordination(MESSAGE))
+        self.assertTrue(
+            runtime.requires_ingest_coordination(
+                "My preferred memory validation instrument is a celesta."
+            )
+        )
+        self.assertFalse(
+            runtime.requires_ingest_coordination(
+                "I played the celesta during rehearsal today."
+            )
+        )
 
     async def test_explicit_unique_active_preference_is_retracted(self) -> None:
         transport = FakeTransport(
@@ -374,6 +427,93 @@ class ChatMemoryLifecycleRuntimeTests(unittest.IsolatedAsyncioTestCase):
             },
         )
 
+    async def test_flexible_correction_uses_existing_atomic_path(self) -> None:
+        transport = FakeTransport(
+            [
+                result([summary(CLAIM_A)]),
+                result(detail(CLAIM_A, literal="celesta")),
+                result(
+                    {
+                        "outcome": "correction_pending",
+                        "proposal_id": str(PROPOSAL),
+                        "proposal_sha256": HASH_B,
+                        "review_operation_id": str(REVIEW_OPERATION),
+                    }
+                ),
+                result([correction_proposal(literal="vibraphone")]),
+                result(
+                    {
+                        "outcome": "admitted",
+                        "claim_id": str(CLAIM_A),
+                        "revision_id": str(REVISION),
+                        "outbox_id": str(OUTBOX),
+                    }
+                ),
+            ]
+        )
+        interpreter = FakeCorrectionInterpreter()
+        receipt = await self.runtime(
+            transport, interpreter=interpreter
+        ).apply_if_requested(
+            owner_user_id=CLAIM_B,
+            message=FLEXIBLE_CORRECTION_MESSAGE,
+            authorization=AUTHORIZATION,
+        )
+        self.assertIsNotNone(receipt)
+        assert receipt is not None
+        self.assertEqual(receipt.outcome, "admitted")
+        self.assertEqual(len(interpreter.calls), 1)
+        claims = interpreter.calls[0]["claims"]
+        self.assertEqual(claims[0].current_value, "celesta")
+        self.assertEqual(
+            [(call["method"], call["path"]) for call in transport.calls],
+            [
+                ("GET", "/memory/claims"),
+                ("GET", f"/memory/claims/{CLAIM_A}"),
+                ("POST", f"/memory/claims/{CLAIM_A}/correct"),
+                ("GET", "/memory/proposals"),
+                ("POST", f"/memory/proposals/{PROPOSAL}/review"),
+            ],
+        )
+        correction = json.loads(bytes(transport.calls[2]["body"]))
+        self.assertEqual(
+            correction["replacement"]["object_literal"], "vibraphone"
+        )
+        self.assertEqual(
+            correction["operation_id"],
+            str(
+                correction_operation_id_v1(
+                    claim_id=CLAIM_A,
+                    message=FLEXIBLE_CORRECTION_MESSAGE,
+                )
+            ),
+        )
+
+    async def test_flexible_interpreter_failure_fails_closed(self) -> None:
+        transport = FakeTransport(
+            [
+                result([summary(CLAIM_A)]),
+                result(detail(CLAIM_A, literal="celesta")),
+            ]
+        )
+        with self.assertRaises(ChatMemoryLifecycleError) as raised:
+            await self.runtime(
+                transport,
+                interpreter=FakeCorrectionInterpreter(unavailable=True),
+            ).apply_if_requested(
+                owner_user_id=CLAIM_B,
+                message=FLEXIBLE_CORRECTION_MESSAGE,
+                authorization=AUTHORIZATION,
+            )
+        self.assertEqual(raised.exception.status_code, 503)
+        self.assertEqual(
+            raised.exception.code,
+            "memory_correction_interpreter_unavailable",
+        )
+        self.assertNotIn(
+            "POST", {str(call["method"]) for call in transport.calls}
+        )
+
     async def test_completed_correction_is_idempotent_without_mutation(self) -> None:
         transport = FakeTransport(
             [
@@ -480,6 +620,11 @@ class ChatMemoryLifecycleRuntimeTests(unittest.IsolatedAsyncioTestCase):
         assert correction is not None
         self.assertEqual(correction.replacement_literal, "a kiwi")
         self.assertEqual(correction.previous_literal, "the mango")
+        self.assertIsNone(
+            explicit_preference_correction_command_v1(
+                FLEXIBLE_CORRECTION_MESSAGE
+            )
+        )
         for message in (
             "What if my preferred fruit is now kiwi, replacing mango?",
             "My preferred fruit might be kiwi, replacing mango.",
@@ -491,6 +636,12 @@ class ChatMemoryLifecycleRuntimeTests(unittest.IsolatedAsyncioTestCase):
         route = (ROOT / "rag_engine/resse_response_router.py").read_text()
         function = route[route.index("async def resse_response_query(") :]
         self.assertIn("CHAT_MEMORY_LIFECYCLE_RUNTIME.apply_if_requested(", function)
+        self.assertIn("owner_user_id=owner", function)
+        self.assertIn("coordinate_chat_memory_ingest_v1(", function)
+        self.assertIn('"memory_ingest_coordination_required"', function)
+        self.assertIn('"suppress"', function)
+        self.assertIn('"release"', function)
+        self.assertIn('"message_id",', function)
         self.assertLess(
             function.index("CHAT_MEMORY_LIFECYCLE_RUNTIME.apply_if_requested("),
             function.index("openai_client = get_openai_client()"),

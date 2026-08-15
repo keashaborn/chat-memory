@@ -17,6 +17,10 @@ from rag_engine.chat_attachment_context_v1 import (
     MAX_ATTACHMENT_COUNT,
     build_attachment_context_block_v1,
 )
+from rag_engine.chat_memory_ingest_coordination_v1 import (
+    ChatMemoryIngestCoordinationErrorV1,
+    coordinate_chat_memory_ingest_v1,
+)
 from rag_engine.governed_memory.exclusive_cutover import (
     exclusive_memory_mode,
 )
@@ -233,6 +237,7 @@ class ResseResponseRequestV1(BaseModel):
     user_id: UUID
     message: str = Field(min_length=1, max_length=32_768)
     thread_id: UUID | None = None
+    message_id: UUID | None = None
     no_store: bool = False
     include_inspection: bool = False
     attachment_ids: tuple[UUID, ...] = Field(
@@ -241,7 +246,13 @@ class ResseResponseRequestV1(BaseModel):
     )
     attachment_message_id: UUID | None = None
 
-    @field_validator("user_id", "thread_id", "attachment_message_id", mode="before")
+    @field_validator(
+        "user_id",
+        "thread_id",
+        "message_id",
+        "attachment_message_id",
+        mode="before",
+    )
     @classmethod
     def parse_wire_uuid(cls, value: object) -> object:
         if value is None or isinstance(value, UUID):
@@ -376,16 +387,62 @@ async def resse_response_query(
         raise HTTPException(status_code=400, detail="invalid_attachment_context")
     if payload.attachment_message_id is not None and not payload.attachment_ids:
         raise HTTPException(status_code=400, detail="invalid_attachment_context")
+    if payload.message_id is not None and (
+        payload.no_store or payload.thread_id is None
+    ):
+        raise HTTPException(status_code=400, detail="invalid_message_context")
+    if payload.attachment_ids and payload.message_id is not None and (
+        payload.message_id != payload.attachment_message_id
+    ):
+        raise HTTPException(status_code=400, detail="invalid_message_context")
 
+    requires_ingest_coordination = (
+        tentative_successor_eligible
+        and CHAT_MEMORY_LIFECYCLE_RUNTIME.requires_ingest_coordination(
+            payload.message
+        )
+    )
+    if requires_ingest_coordination and payload.message_id is None:
+        raise _no_store_http_exception(
+            503,
+            "memory_ingest_coordination_required",
+        )
+
+    lifecycle_receipt = None
     if tentative_successor_eligible:
         try:
-            await CHAT_MEMORY_LIFECYCLE_RUNTIME.apply_if_requested(
-                message=payload.message,
-                authorization=(
-                    req.headers.get("authorization") or ""
-                ).strip(),
+            lifecycle_receipt = (
+                await CHAT_MEMORY_LIFECYCLE_RUNTIME.apply_if_requested(
+                    owner_user_id=owner,
+                    message=payload.message,
+                    authorization=(
+                        req.headers.get("authorization") or ""
+                    ).strip(),
+                )
             )
         except ChatMemoryLifecycleError as exc:
+            if payload.message_id is not None and requires_ingest_coordination:
+                coordination_connection = None
+                try:
+                    coordination_connection = await asyncpg.connect(
+                        DSN, command_timeout=15
+                    )
+                    await coordinate_chat_memory_ingest_v1(
+                        coordination_connection,
+                        owner_user_id=owner,
+                        message_id=payload.message_id,
+                        thread_id=thread_id,
+                        message=payload.message,
+                        resolution="suppress",
+                    )
+                except ChatMemoryIngestCoordinationErrorV1:
+                    raise _no_store_http_exception(
+                        503,
+                        "memory_ingest_coordination_unavailable",
+                    ) from None
+                finally:
+                    if coordination_connection is not None:
+                        await coordination_connection.close()
             raise _no_store_http_exception(
                 exc.status_code,
                 exc.code,
@@ -393,6 +450,25 @@ async def resse_response_query(
 
     conn = await asyncpg.connect(DSN, command_timeout=90)
     try:
+        if payload.message_id is not None:
+            try:
+                await coordinate_chat_memory_ingest_v1(
+                    conn,
+                    owner_user_id=owner,
+                    message_id=payload.message_id,
+                    thread_id=thread_id,
+                    message=payload.message,
+                    resolution=(
+                        "suppress"
+                        if lifecycle_receipt is not None
+                        else "release"
+                    ),
+                )
+            except ChatMemoryIngestCoordinationErrorV1:
+                raise _no_store_http_exception(
+                    503,
+                    "memory_ingest_coordination_unavailable",
+                ) from None
         attachment_context_block = None
         if payload.attachment_ids:
             await conn.execute("SELECT set_config('app.user_id', $1, false)", str(owner))
@@ -489,6 +565,7 @@ async def resse_response_query(
                     set(payload.model_fields_set)
                     - {
                         "include_inspection",
+                        "message_id",
                         "attachment_ids",
                         "attachment_message_id",
                     }

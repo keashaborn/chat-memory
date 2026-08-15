@@ -6,6 +6,7 @@ import asyncio
 from dataclasses import dataclass
 from hashlib import sha256
 import json
+import logging
 import os
 import re
 from typing import Mapping
@@ -18,6 +19,13 @@ from rag_engine.governed_memory.chat_commands import (
     normalized_chat_text_v1,
     normalized_preference_value_v1,
 )
+from rag_engine.governed_memory.preference_correction_interpreter import (
+    PreferenceCorrectionClaimV1,
+    PreferenceCorrectionInterpretationUnavailableV1,
+    PreferenceCorrectionInterpreterV1,
+    openai_preference_correction_interpreter_from_environment_v1,
+    potential_preference_correction_v1,
+)
 from rag_engine.governed_memory_erasure_proxy_v1 import (
     ErasureProxyTransport,
     ProxyResult,
@@ -26,6 +34,7 @@ from rag_engine.governed_memory_erasure_proxy_v1 import (
 )
 
 
+logger = logging.getLogger("uvicorn.error")
 SERVICE_TOKEN_ENV = "GOVERNED_MEMORY_SERVICE_TOKEN"
 MAX_PREFERENCE_CLAIMS = 32
 MAX_RESPONSE_BODY_BYTES = 131_072
@@ -335,6 +344,7 @@ class ChatMemoryLifecycleRuntimeV1:
         *,
         service_token: str | None,
         transport: ErasureProxyTransport | None = None,
+        correction_interpreter: PreferenceCorrectionInterpreterV1 | None = None,
     ) -> None:
         self._service_token = (
             service_token
@@ -342,10 +352,16 @@ class ChatMemoryLifecycleRuntimeV1:
             else ""
         )
         self._transport = transport or UnixSocketErasureTransport()
+        self._correction_interpreter = correction_interpreter
 
     @classmethod
     def from_environment(cls) -> "ChatMemoryLifecycleRuntimeV1":
-        return cls(service_token=os.getenv(SERVICE_TOKEN_ENV))
+        return cls(
+            service_token=os.getenv(SERVICE_TOKEN_ENV),
+            correction_interpreter=(
+                openai_preference_correction_interpreter_from_environment_v1()
+            ),
+        )
 
     async def _request(
         self,
@@ -574,11 +590,13 @@ class ChatMemoryLifecycleRuntimeV1:
         message: str,
         command: ExplicitPreferenceCorrectionCommandV1,
         authorization: str,
+        claims: list[Mapping[str, object]] | None = None,
     ) -> ChatMemoryLifecycleReceiptV1:
-        claims = await self._preference_claims(
-            authorization=authorization,
-            ambiguous_code="memory_correction_target_ambiguous",
-        )
+        if claims is None:
+            claims = await self._preference_claims(
+                authorization=authorization,
+                ambiguous_code="memory_correction_target_ambiguous",
+            )
         old = [
             claim
             for claim in claims
@@ -692,10 +710,17 @@ class ChatMemoryLifecycleRuntimeV1:
         *,
         message: str,
         authorization: str,
+        owner_user_id: UUID | None = None,
     ) -> ChatMemoryLifecycleReceiptV1 | None:
         correction = explicit_preference_correction_command_v1(message)
         retraction = explicit_preference_retraction_target_v1(message)
-        if correction is None and retraction is None:
+        flexible_candidate = (
+            correction is None
+            and retraction is None
+            and self._correction_interpreter is not None
+            and potential_preference_correction_v1(message)
+        )
+        if correction is None and retraction is None and not flexible_candidate:
             return None
         if not self._service_token:
             raise ChatMemoryLifecycleError("memory_lifecycle_unconfigured", 503)
@@ -707,11 +732,61 @@ class ChatMemoryLifecycleRuntimeV1:
                 command=correction,
                 authorization=authorization,
             )
-        assert retraction is not None
-        return await self._apply_retraction(
-            message=message,
-            target=retraction,
+        if retraction is not None:
+            return await self._apply_retraction(
+                message=message,
+                target=retraction,
+                authorization=authorization,
+            )
+        if owner_user_id is None or self._correction_interpreter is None:
+            raise ChatMemoryLifecycleError("memory_lifecycle_unconfigured", 503)
+        claims = await self._preference_claims(
             authorization=authorization,
+            ambiguous_code="memory_correction_target_ambiguous",
+        )
+        if not claims:
+            return None
+        interpreter_claims = tuple(
+            PreferenceCorrectionClaimV1(
+                claim_id=_uuid(claim["claim_id"]),
+                lifecycle_state=str(claim["lifecycle_state"]),
+                current_value=_claim_target_text(claim),
+            )
+            for claim in claims
+            if claim["lifecycle_state"] in {"active", "correction_pending"}
+        )
+        if not interpreter_claims:
+            return None
+        try:
+            interpreted = await self._correction_interpreter.interpret(
+                owner_user_id=owner_user_id,
+                message=message,
+                claims=interpreter_claims,
+            )
+        except PreferenceCorrectionInterpretationUnavailableV1:
+            logger.error("[memory_correction] interpreter unavailable")
+            raise ChatMemoryLifecycleError(
+                "memory_correction_interpreter_unavailable", 503
+            ) from None
+        if interpreted is None:
+            return None
+        return await self._apply_correction(
+            message=message,
+            command=interpreted,
+            authorization=authorization,
+            claims=claims,
+        )
+
+    def requires_ingest_coordination(self, message: str) -> bool:
+        """Whether this runtime may synchronously consume the chat message."""
+
+        if explicit_preference_correction_command_v1(message) is not None:
+            return True
+        if explicit_preference_retraction_target_v1(message) is not None:
+            return True
+        return (
+            self._correction_interpreter is not None
+            and potential_preference_correction_v1(message)
         )
 
 
