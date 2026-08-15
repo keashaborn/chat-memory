@@ -104,6 +104,21 @@ class RecordingEmbedder:
         return deterministic_vector()
 
 
+@dataclass
+class RecordingRelevanceGate:
+    claim_ids: tuple[UUID, ...] | None = None
+    fail: bool = False
+    calls: list[dict[str, Any]] = field(default_factory=list)
+
+    async def relevant_claim_ids(self, **kwargs: Any) -> tuple[UUID, ...]:
+        self.calls.append(dict(kwargs))
+        if self.fail:
+            raise RuntimeError("synthetic relevance failure")
+        if self.claim_ids is not None:
+            return self.claim_ids
+        return tuple(UUID(str(row["claim_id"])) for row in kwargs["claims"])
+
+
 class ResourceTrap:
     def __getattr__(self, name: str) -> Any:
         raise AssertionError(f"successor resource accessed: {name}")
@@ -115,6 +130,7 @@ def provider(
     repository: RecordingRepository | None = None,
     vector_index: RecordingVectorIndex | None = None,
     embedder: RecordingEmbedder | None = None,
+    relevance_gate: RecordingRelevanceGate | None = None,
     decision: CalibrationDecision | None = None,
 ) -> SuccessorGovernedMemoryAssemblyProviderV1:
     return SuccessorGovernedMemoryAssemblyProviderV1(
@@ -122,6 +138,7 @@ def provider(
         repository=repository or RecordingRepository(),
         vector_index=vector_index or RecordingVectorIndex(),
         embedder=embedder or RecordingEmbedder(),
+        relevance_gate=relevance_gate or RecordingRelevanceGate(),
         predicate_catalog=PREDICATE_CATALOG,
         calibration=decision or calibration(),
         clock=lambda: NOW,
@@ -188,6 +205,7 @@ class SuccessorResponseProviderTests(unittest.IsolatedAsyncioTestCase):
             repository=ResourceTrap(),
             vector_index=ResourceTrap(),
             embedder=ResourceTrap(),
+            relevance_gate=ResourceTrap(),
             predicate_catalog=PREDICATE_CATALOG,
             calibration=calibration(),
             clock=lambda: NOW,
@@ -231,10 +249,12 @@ class SuccessorResponseProviderTests(unittest.IsolatedAsyncioTestCase):
         repository = RecordingRepository()
         vector = RecordingVectorIndex()
         embedder = RecordingEmbedder()
+        relevance_gate = RecordingRelevanceGate()
         selected = provider(
             repository=repository,
             vector_index=vector,
             embedder=embedder,
+            relevance_gate=relevance_gate,
         )
         assembly = await selected.prepare(
             request=make_response_request(),
@@ -252,6 +272,8 @@ class SuccessorResponseProviderTests(unittest.IsolatedAsyncioTestCase):
             ("preference.personal",),
         )
         self.assertEqual(repository.reads[0][1], (CLAIM_A,))
+        self.assertEqual(len(relevance_gate.calls), 1)
+        self.assertEqual(relevance_gate.calls[0]["query"], QUERY)
         self.assertTrue(selected.has_selected_claims)
 
         escaped_memory = canonical_json_bytes(block.content)
@@ -366,6 +388,42 @@ class SuccessorResponseProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(provenance.binding_outcome, "no_memory_selected")
         self.assertEqual(provenance.references, ())
         self.assertEqual(repository.persisted, [])
+
+    async def test_language_relevance_rejection_exposes_no_memory(self) -> None:
+        repository = RecordingRepository()
+        relevance_gate = RecordingRelevanceGate(claim_ids=())
+        selected = provider(
+            repository=repository,
+            relevance_gate=relevance_gate,
+        )
+        assembly = await selected.prepare(request=make_response_request())
+        self.assertIsNone(assembly.successor_memory_context_block)
+        self.assertFalse(selected.has_selected_claims)
+        self.assertEqual(repository.persisted, [])
+        self.assertEqual(len(relevance_gate.calls), 1)
+
+    async def test_language_relevance_failure_or_fabrication_fails_closed(
+        self,
+    ) -> None:
+        gates = (
+            RecordingRelevanceGate(fail=True),
+            RecordingRelevanceGate(
+                claim_ids=(UUID("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"),)
+            ),
+        )
+        for relevance_gate in gates:
+            repository = RecordingRepository()
+            selected = provider(
+                repository=repository,
+                relevance_gate=relevance_gate,
+            )
+            with self.subTest(gate=relevance_gate):
+                assembly = await selected.prepare(
+                    request=make_response_request()
+                )
+                self.assertIsNone(assembly.successor_memory_context_block)
+                self.assertFalse(selected.has_selected_claims)
+                self.assertEqual(repository.persisted, [])
 
     async def test_stale_postgres_row_is_never_injected(self) -> None:
         repository = RecordingRepository(

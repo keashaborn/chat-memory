@@ -18,6 +18,8 @@ import threading
 from typing import Any
 from urllib.parse import urlsplit
 
+from openai import OpenAI
+
 from rag_engine.governed_memory.contracts import (
     ContractViolation,
     require_sha256,
@@ -37,6 +39,9 @@ from rag_engine.governed_memory.response_contracts import SuccessorResponseActor
 from rag_engine.governed_memory.response_provider import (
     SuccessorGovernedMemoryAssemblyProviderV1,
     SuccessorResponseConfigurationError,
+)
+from rag_engine.governed_memory.response_relevance import (
+    OpenAIResponseRelevanceGateV1,
 )
 from rag_engine.governed_memory.runtime.calibration import (
     CalibrationDecision,
@@ -524,6 +529,7 @@ class SuccessorResponseRuntime:
         self._predicate_catalog: dict[str, object] | None = None
         self._calibration: CalibrationDecision | None = None
         self._pool: Any | None = None
+        self._openai_client: Any | None = None
 
     def provider(
         self,
@@ -548,6 +554,9 @@ class SuccessorResponseRuntime:
                 )
             assert self._predicate_catalog is not None
             assert self._calibration is not None
+            if self._openai_client is None:
+                self._openai_client = OpenAI(api_key=settings.openai_api_key)
+            openai_client = self._openai_client
             catalog_copy = json.loads(
                 json.dumps(
                     self._predicate_catalog,
@@ -571,6 +580,9 @@ class SuccessorResponseRuntime:
                 ),
                 embedder=OneShotOpenAIResponseEmbedder(
                     settings.openai_api_key
+                ),
+                relevance_gate=OpenAIResponseRelevanceGateV1(
+                    client=openai_client
                 ),
                 predicate_catalog=catalog_copy,
                 calibration=calibration,
@@ -645,6 +657,11 @@ class SuccessorResponseRuntime:
             self._pool = None
             if pool is not None:
                 await pool.close()
+        with self._configuration_lock:
+            client = self._openai_client
+            self._openai_client = None
+        if client is not None:
+            await asyncio.to_thread(client.close)
 
 
 __all__ = [

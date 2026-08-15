@@ -97,6 +97,16 @@ class SuccessorResponseEmbedder(Protocol):
     def embed(self, text: str) -> Sequence[float] | Awaitable[Sequence[float]]: ...
 
 
+class SuccessorResponseRelevanceGate(Protocol):
+    async def relevant_claim_ids(
+        self,
+        *,
+        owner_user_id: UUID,
+        query: str,
+        claims: tuple[Mapping[str, object], ...],
+    ) -> tuple[UUID, ...]: ...
+
+
 class InactiveSuccessorMemoryProviderV1:
     """No-resource successor provider for explicitly excluded chat surfaces."""
 
@@ -331,6 +341,7 @@ class SuccessorGovernedMemoryAssemblyProviderV1:
         repository: SuccessorResponseRepository,
         vector_index: SuccessorResponseVectorIndex,
         embedder: SuccessorResponseEmbedder,
+        relevance_gate: SuccessorResponseRelevanceGate,
         predicate_catalog: Mapping[str, object],
         calibration: CalibrationDecision,
         policy_factory: Callable[[Mapping[str, object]], RetrievalPolicy] = (
@@ -341,7 +352,12 @@ class SuccessorGovernedMemoryAssemblyProviderV1:
     ) -> None:
         if not isinstance(actor, SuccessorResponseActorBinding):
             raise ContractViolation("invalid_response_memory_actor")
-        if repository is None or vector_index is None or embedder is None:
+        if (
+            repository is None
+            or vector_index is None
+            or embedder is None
+            or relevance_gate is None
+        ):
             raise ContractViolation("response_memory_adapter_required")
         if not isinstance(predicate_catalog, Mapping):
             raise ContractViolation("invalid_response_memory_predicate_catalog")
@@ -351,6 +367,7 @@ class SuccessorGovernedMemoryAssemblyProviderV1:
         self._repository = repository
         self._vector_index = vector_index
         self._embedder = embedder
+        self._relevance_gate = relevance_gate
         self._predicate_catalog = dict(predicate_catalog)
         self._calibration = calibration
         self._policy_factory = policy_factory
@@ -478,6 +495,36 @@ class SuccessorGovernedMemoryAssemblyProviderV1:
         )
         if not selected:
             return self._finish_without_selection()
+        try:
+            relevant_claim_ids = await self._relevance_gate.relevant_claim_ids(
+                owner_user_id=self._actor.owner_user_id,
+                query=query,
+                claims=tuple(selected),
+            )
+            if (
+                not isinstance(relevant_claim_ids, tuple)
+                or len(set(relevant_claim_ids)) != len(relevant_claim_ids)
+            ):
+                return self._finish_without_selection()
+            selected_ids = {
+                UUID(str(item["claim_id"])) for item in selected
+            }
+            if any(
+                not isinstance(claim_id, UUID)
+                or claim_id not in selected_ids
+                for claim_id in relevant_claim_ids
+            ):
+                return self._finish_without_selection()
+        except Exception:
+            return self._finish_without_selection()
+        relevant_set = set(relevant_claim_ids)
+        selected = tuple(
+            item
+            for item in selected
+            if UUID(str(item["claim_id"])) in relevant_set
+        )
+        if not selected:
+            return self._finish_without_selection()
         rendered = render_memory_context(
             self._actor.owner_user_id,
             selected,
@@ -597,6 +644,7 @@ __all__ = [
     "SuccessorResponseConfigurationError",
     "SuccessorResponseEmbedder",
     "SuccessorResponseRepository",
+    "SuccessorResponseRelevanceGate",
     "SuccessorResponseVectorIndex",
     "choose_response_memory_provider",
     "response_mode_from_environment",
