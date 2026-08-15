@@ -400,6 +400,7 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
                 "0004_pilot_marker/forward.pgsql",
                 "0005_bounded_auto_admission/forward.pgsql",
                 "0006_source_erasure_projection_recovery/forward.pgsql",
+                "0007_personal_object_location_admission/forward.pgsql",
                 "0002_conversation_bridge/forward.pgsql",
             ],
         )
@@ -407,6 +408,7 @@ class OwnerClaimDetailMigrationTests(unittest.TestCase):
             manifest["rollback_order"],
             [
                 "0002_conversation_bridge/rollback.pgsql",
+                "0007_personal_object_location_admission/rollback.pgsql",
                 "0006_source_erasure_projection_recovery/rollback.pgsql",
                 "0005_bounded_auto_admission/rollback.pgsql",
                 "0004_pilot_marker/rollback.pgsql",

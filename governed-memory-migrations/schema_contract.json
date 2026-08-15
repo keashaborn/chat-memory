@@ -700,7 +700,8 @@
       "successor_receipt_mismatch"
     ],
     "automatic_admission": [
-      "automatic_low_risk_owner_assertion"
+      "automatic_low_risk_owner_assertion",
+      "automatic_low_risk_personal_object_location"
     ]
   },
   "transport_contract": {

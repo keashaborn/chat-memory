@@ -1,0 +1,58 @@
+{
+  "schema_version": "governed-memory-migration-package-v2",
+  "migration_id": "governed_memory_personal_object_location_admission_0007",
+  "status": "inactive_candidate_pending_live_authorization",
+  "target": {
+    "server": "seebx",
+    "database": "governed_memory",
+    "execution_role": "governed_memory_owner"
+  },
+  "dependencies": [
+    "governed_memory_bounded_auto_admission_0005",
+    "governed_memory_source_erasure_projection_recovery_0006"
+  ],
+  "transaction": {
+    "required": true,
+    "runner_supplies_begin_commit": true,
+    "runner_supplies_timeouts": true,
+    "runner_supplies_advisory_lock": true
+  },
+  "forward": {
+    "path": "forward.pgsql",
+    "sha256": "03955b46efa42ad6f7a885cc2c81fb44fb4a1931010d105a752ffe729fd4ac61"
+  },
+  "rollback": {
+    "path": "rollback.pgsql",
+    "sha256": "8969c2e030e360f5701728b804928f37820baf73677c85e5065905813624debe",
+    "empty_only": false,
+    "personal_object_location_admission_rows_must_be_absent": true
+  },
+  "policy": {
+    "existing_self_admission_unchanged": true,
+    "new_reason_code": "automatic_low_risk_personal_object_location",
+    "subject_entity_type": "other",
+    "subject_entity_key": "owner_local",
+    "predicate": "location.association",
+    "object_kinds": [
+      "entity",
+      "literal"
+    ],
+    "source_assertion": "explicit_first_person_possession_or_first_person_possessive_location",
+    "sensitivity": "ordinary",
+    "epistemic_state": "supported",
+    "projectable": true,
+    "requires_explicit": false,
+    "people_auto_admitted": false,
+    "corrections_auto_admitted": false,
+    "provider_calls_added": 0
+  },
+  "activation": {
+    "production_authorized": false,
+    "production_database_applied": false,
+    "production_services_changed": false,
+    "live_acceptance_pending": true
+  },
+  "object_contract": {
+    "cascade_ddl": false
+  }
+}

@@ -9,7 +9,8 @@
     "production_qdrant_change_authorized": false,
     "legacy_import_authorized": false,
     "disposable_validation_authorized": false,
-    "bounded_automatic_admission_authorized": true
+    "bounded_automatic_admission_authorized": true,
+    "personal_object_location_admission_candidate_authorized": true
   },
   "execution_order": [
     "roles_preflight.pgsql",
@@ -18,10 +19,12 @@
     "0004_pilot_marker/forward.pgsql",
     "0005_bounded_auto_admission/forward.pgsql",
     "0006_source_erasure_projection_recovery/forward.pgsql",
+    "0007_personal_object_location_admission/forward.pgsql",
     "0002_conversation_bridge/forward.pgsql"
   ],
   "rollback_order": [
     "0002_conversation_bridge/rollback.pgsql",
+    "0007_personal_object_location_admission/rollback.pgsql",
     "0006_source_erasure_projection_recovery/rollback.pgsql",
     "0005_bounded_auto_admission/rollback.pgsql",
     "0004_pilot_marker/rollback.pgsql",
@@ -35,7 +38,7 @@
     },
     {
       "path": "schema_contract.json",
-      "sha256": "9297e8ba9b72b0435990573a2d5254d2f06b690797561d8b9aca7cf605ba8828"
+      "sha256": "b88ef05bce57d4432920d3cee7727b2881a5cf341e1c742fdcd636da5f08d45e"
     },
     {
       "path": "predicate_catalog.json",
@@ -102,6 +105,18 @@
       "sha256": "a2ee1e15def9192e34924dffb6e13d1e91aa364c0ea7773083e1e49cba473db8"
     },
     {
+      "path": "0007_personal_object_location_admission/package.json",
+      "sha256": "82523ce83a12d5cc163170a658d20631c646c3eabf9f71999c6017d75587b947"
+    },
+    {
+      "path": "0007_personal_object_location_admission/forward.pgsql",
+      "sha256": "03955b46efa42ad6f7a885cc2c81fb44fb4a1931010d105a752ffe729fd4ac61"
+    },
+    {
+      "path": "0007_personal_object_location_admission/rollback.pgsql",
+      "sha256": "8969c2e030e360f5701728b804928f37820baf73677c85e5065905813624debe"
+    },
+    {
       "path": "0002_conversation_bridge/package.json",
       "sha256": "a9ebd353f21681c1ce55c347d8d151e3a1080c86a83d06719447d30feb4dce6f"
     },
@@ -127,6 +142,9 @@
     "production_checkout_files_changed": false,
     "production_data_read": false,
     "provider_external_calls": 0,
-    "bounded_automatic_admission_live_acceptance_pending": true
+    "bounded_automatic_admission_live_acceptance_pending": true,
+    "personal_object_location_admission_synthetic_tests_performed": true,
+    "personal_object_location_admission_disposable_database_execution_performed": false,
+    "personal_object_location_admission_live_acceptance_pending": true
   }
 }

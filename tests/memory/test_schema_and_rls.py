@@ -81,6 +81,7 @@ ADDITIVE_PACKAGE_DIRS = (
     MIGRATIONS / "0004_pilot_marker",
     MIGRATIONS / "0005_bounded_auto_admission",
     MIGRATIONS / "0006_source_erasure_projection_recovery",
+    MIGRATIONS / "0007_personal_object_location_admission",
 )
 ALL_PACKAGE_DIRS = (
     PACKAGE_DIRS[0],
@@ -88,6 +89,7 @@ ALL_PACKAGE_DIRS = (
     ADDITIVE_PACKAGE_DIRS[1],
     ADDITIVE_PACKAGE_DIRS[2],
     ADDITIVE_PACKAGE_DIRS[3],
+    ADDITIVE_PACKAGE_DIRS[4],
     PACKAGE_DIRS[1],
 )
 FOUNDATION_TABLES = (
@@ -1409,6 +1411,9 @@ class PackageIntegrityTests(unittest.TestCase):
             "0006_source_erasure_projection_recovery/forward.pgsql",
             "0006_source_erasure_projection_recovery/package.json",
             "0006_source_erasure_projection_recovery/rollback.pgsql",
+            "0007_personal_object_location_admission/forward.pgsql",
+            "0007_personal_object_location_admission/package.json",
+            "0007_personal_object_location_admission/rollback.pgsql",
         }
         observed = {
             path.relative_to(MIGRATIONS).as_posix()
@@ -1460,7 +1465,7 @@ class PackageIntegrityTests(unittest.TestCase):
                 relative,
             )
 
-    def test_fail_closed_manifest_verifier_accepts_only_exact_phase8g_state(self) -> None:
+    def test_fail_closed_manifest_verifier_accepts_only_current_candidate(self) -> None:
         verifier = runpy.run_path(str(MANIFEST_VERIFIER_PATH))
         with self.assertRaisesRegex(ValueError, "duplicate JSON key"):
             verifier["reject_duplicate_keys"]([("scope", 1), ("scope", 2)])
@@ -1471,20 +1476,20 @@ class PackageIntegrityTests(unittest.TestCase):
         )
         self.assertEqual(
             sha256(ROOT_MANIFEST_PATH.read_bytes()).hexdigest(),
-            "f1be143940c3d40197a9f959e5b6d476ae70763972baa9e769419bba7c2e5a70",
+            "4598f903f1d9011eb1db9da21fa243a9d7bb6936b698daf8f97ee9c1a3579b9c",
         )
         receipt = verifier["verify"](MIGRATIONS)
         self.assertEqual(receipt["result"], "artifact_integrity_verified")
         self.assertEqual(
             receipt["schema_version"],
-            "governed-memory-migration-verification-v6",
+            "governed-memory-migration-verification-v7",
         )
         self.assertEqual(
             receipt["validation_state"],
-            "phase8g_current_candidate_disposable_validated",
+            "personal_object_location_admission_candidate_synthetic_validated",
         )
-        self.assertTrue(receipt["current_disposable_validation_complete"])
-        self.assertFalse(receipt["disposable_revalidation_required"])
+        self.assertFalse(receipt["current_disposable_validation_complete"])
+        self.assertTrue(receipt["disposable_revalidation_required"])
         self.assertFalse(
             receipt["historical_phase7c_proof_reusable_for_current_candidate"]
         )

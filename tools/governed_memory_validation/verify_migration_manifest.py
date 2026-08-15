@@ -16,6 +16,7 @@ EXPECTED_PACKAGES = (
     "0004_pilot_marker/package.json",
     "0005_bounded_auto_admission/package.json",
     "0006_source_erasure_projection_recovery/package.json",
+    "0007_personal_object_location_admission/package.json",
     "0002_conversation_bridge/package.json",
 )
 EXPECTED_FILES = {
@@ -37,6 +38,9 @@ EXPECTED_FILES = {
     "0006_source_erasure_projection_recovery/package.json",
     "0006_source_erasure_projection_recovery/forward.pgsql",
     "0006_source_erasure_projection_recovery/rollback.pgsql",
+    "0007_personal_object_location_admission/package.json",
+    "0007_personal_object_location_admission/forward.pgsql",
+    "0007_personal_object_location_admission/rollback.pgsql",
     "0002_conversation_bridge/package.json",
     "0002_conversation_bridge/forward.pgsql",
     "0002_conversation_bridge/rollback.pgsql",
@@ -48,10 +52,12 @@ EXPECTED_EXECUTION_ORDER = [
     "0004_pilot_marker/forward.pgsql",
     "0005_bounded_auto_admission/forward.pgsql",
     "0006_source_erasure_projection_recovery/forward.pgsql",
+    "0007_personal_object_location_admission/forward.pgsql",
     "0002_conversation_bridge/forward.pgsql",
 ]
 EXPECTED_ROLLBACK_ORDER = [
     "0002_conversation_bridge/rollback.pgsql",
+    "0007_personal_object_location_admission/rollback.pgsql",
     "0006_source_erasure_projection_recovery/rollback.pgsql",
     "0005_bounded_auto_admission/rollback.pgsql",
     "0004_pilot_marker/rollback.pgsql",
@@ -108,6 +114,16 @@ EXPECTED_PACKAGE_CONTRACTS = {
         "rollback_empty_only": False,
         "activation": {
             "production_authorized": True,
+            "production_database_applied": False,
+            "production_services_changed": False,
+            "live_acceptance_pending": True,
+        },
+    },
+    "0007_personal_object_location_admission/package.json": {
+        "status": "inactive_candidate_pending_live_authorization",
+        "rollback_empty_only": False,
+        "activation": {
+            "production_authorized": False,
             "production_database_applied": False,
             "production_services_changed": False,
             "live_acceptance_pending": True,
@@ -215,6 +231,7 @@ def verify(root: Path) -> dict[str, object]:
         "legacy_import_authorized": False,
         "disposable_validation_authorized": False,
         "bounded_automatic_admission_authorized": True,
+        "personal_object_location_admission_candidate_authorized": True,
     }
     if manifest.get("authority") != expected_authority:
         raise ValueError("unexpected migration authority contract")
@@ -236,6 +253,9 @@ def verify(root: Path) -> dict[str, object]:
         "production_data_read": False,
         "provider_external_calls": 0,
         "bounded_automatic_admission_live_acceptance_pending": True,
+        "personal_object_location_admission_synthetic_tests_performed": True,
+        "personal_object_location_admission_disposable_database_execution_performed": False,
+        "personal_object_location_admission_live_acceptance_pending": True,
     }
     if manifest.get("safety") != expected_safety:
         raise ValueError("unexpected migration safety contract")
@@ -358,10 +378,10 @@ def verify(root: Path) -> dict[str, object]:
             candidate_id.encode("utf-8")
         ).hexdigest(),
         "result": "artifact_integrity_verified",
-        "schema_version": "governed-memory-migration-verification-v6",
-        "validation_state": "phase8g_current_candidate_disposable_validated",
-        "current_disposable_validation_complete": True,
-        "disposable_revalidation_required": False,
+        "schema_version": "governed-memory-migration-verification-v7",
+        "validation_state": "personal_object_location_admission_candidate_synthetic_validated",
+        "current_disposable_validation_complete": False,
+        "disposable_revalidation_required": True,
         "historical_phase7c_proof_reusable_for_current_candidate": False,
         "production_state_changed": False,
     }
