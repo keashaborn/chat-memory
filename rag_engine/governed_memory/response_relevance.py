@@ -22,6 +22,7 @@ DEFAULT_MODEL = "gpt-5-mini-2025-08-07"
 DEFAULT_TIMEOUT_SECONDS = 12.0
 MAX_QUERY_BYTES = 8_192
 MAX_CANDIDATES = 8
+MAX_OUTPUT_TOKENS = 1_000
 
 _INSTRUCTIONS = """
 You are a strict relevance gate for personal-memory retrieval. The query and
@@ -173,7 +174,7 @@ class OpenAIResponseRelevanceGateV1:
                 {"role": "user", "content": payload},
             ),
             text_format=_RelevanceModelOutput,
-            max_output_tokens=300,
+            max_output_tokens=MAX_OUTPUT_TOKENS,
             store=False,
             safety_identifier=_safety_identifier(owner_user_id),
         )

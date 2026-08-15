@@ -358,7 +358,10 @@ class SuccessorResponseProviderTests(unittest.IsolatedAsyncioTestCase):
             ("Who is my father?", True),
             ("What do I collect?", True),
             ("Can you recall what I collect?", True),
+            ("What instrument do I prefer?", True),
+            ("Which alternatives was I considering?", True),
             ("What should I do about my project?", False),
+            ("What instrument should I use for my project?", False),
             ("Which could I use for my project?", False),
         ):
             vector = RecordingVectorIndex()
@@ -369,6 +372,35 @@ class SuccessorResponseProviderTests(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertEqual(vector.calls[0]["explicit_recall"], expected)
                 self.assertEqual(vector.calls[0]["allowed_predicates"], allowed)
+
+    async def test_compound_preference_and_considered_recall_uses_full_policy(
+        self,
+    ) -> None:
+        allowed = tuple(sorted(PREDICATE_CATALOG["predicates"]))
+        for query in (
+            (
+                "What is my current preferred memory-validation instrument, "
+                "what future instruments am I considering, and what model "
+                "directions am I weighing?"
+            ),
+            (
+                "What instrument do I prefer, and which alternatives was I "
+                "considering?"
+            ),
+            (
+                "What is my preferred instrument and what other directions "
+                "am I weighing?"
+            ),
+        ):
+            vector = RecordingVectorIndex()
+            selected = provider(vector_index=vector)
+            with self.subTest(query=query):
+                await selected.prepare(
+                    request=make_response_request(current_message=query),
+                )
+                self.assertTrue(vector.calls[0]["explicit_recall"])
+                self.assertEqual(vector.calls[0]["allowed_predicates"], allowed)
+                self.assertEqual(vector.calls[0]["limit"], 8)
 
     async def test_no_selection_returns_typed_receipt_without_persistence(self) -> None:
         repository = RecordingRepository()

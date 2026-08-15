@@ -46,6 +46,7 @@ class ResponseRelevanceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, (CLAIM_A,))
         call = client.responses.calls[0]
         self.assertEqual(call["model"], "gpt-5-mini-2025-08-07")
+        self.assertEqual(call["max_output_tokens"], 1_000)
         self.assertFalse(call["store"])
         self.assertRegex(str(call["safety_identifier"]), r"^mr1_[0-9a-f]{60}$")
         payload = json.loads(call["input"][1]["content"])

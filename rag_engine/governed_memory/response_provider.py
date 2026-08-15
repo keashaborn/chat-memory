@@ -198,6 +198,35 @@ def _sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def _has_mixed_personal_recall_scope(normalized: str) -> bool:
+    return any(
+        marker in normalized
+        for marker in (
+            ", what ",
+            ", what's ",
+            ", which ",
+            ", who ",
+            ", who's ",
+            ", where ",
+            ", when ",
+            " and what ",
+            " and what's ",
+            " and which ",
+            " and who ",
+            " and who's ",
+            " and where ",
+            " and when ",
+            " considering",
+            " considered",
+            " weighing",
+            " undecided",
+            " future alternative",
+            " future option",
+            " possible direction",
+        )
+    )
+
+
 def _is_explicit_preference_recall(query: str) -> bool:
     if not isinstance(query, str):
         return False
@@ -223,7 +252,7 @@ def _is_explicit_preference_recall(query: str) -> bool:
             "normally choose",
         )
     )
-    if not preference_language:
+    if not preference_language or _has_mixed_personal_recall_scope(normalized):
         return False
     if normalized.startswith(("what is my ", "what's my ")):
         return True
@@ -244,6 +273,17 @@ def _is_explicit_personal_recall(query: str) -> bool:
         not normalized.endswith("?")
         or len(normalized) > 256
         or " or " in normalized
+    ):
+        return False
+    if any(
+        marker in normalized
+        for marker in (
+            " should i ",
+            " could i ",
+            " can i ",
+            " would i ",
+            " will i ",
+        )
     ):
         return False
     if normalized.startswith(
@@ -281,16 +321,19 @@ def _is_explicit_personal_recall(query: str) -> bool:
         )
     ):
         return True
-    return normalized.startswith(
-        (
-            "what do i ",
-            "what did i ",
-            "what have i ",
-            "which do i ",
-            "which did i ",
-            "who do i ",
-            "where do i ",
-            "when do i ",
+    if not normalized.startswith(("what ", "which ", "who ", "where ", "when ")):
+        return False
+    return any(
+        marker in normalized
+        for marker in (
+            " do i ",
+            " did i ",
+            " have i ",
+            " was i ",
+            " do we ",
+            " did we ",
+            " have we ",
+            " were we ",
         )
     )
 

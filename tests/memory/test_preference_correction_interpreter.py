@@ -78,6 +78,7 @@ class PreferenceCorrectionInterpreterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(command.replacement_literal, "vibraphone")
         call = client.responses.calls[0]
         self.assertEqual(call["model"], "gpt-5-mini-2025-08-07")
+        self.assertEqual(call["max_output_tokens"], 1_000)
         self.assertFalse(call["store"])
         self.assertRegex(str(call["safety_identifier"]), r"^mc1_[0-9a-f]{60}$")
         payload = json.loads(call["input"][1]["content"])
