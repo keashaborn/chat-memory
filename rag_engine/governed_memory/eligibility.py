@@ -32,6 +32,7 @@ from .contracts import (
 
 class EligibilityReason(str, Enum):
     PERSONAL_FACT_SELECTED = "personal_fact_selected"
+    OWNER_DECLARATION_SELECTED = "owner_declaration_selected"
     EXPLICIT_CORRECTION_COMMAND = "explicit_correction_command"
     EXPLICIT_REMEMBER_SELECTED = "explicit_remember_selected"
     BEFORE_CUTOVER = "before_cutover"
@@ -88,7 +89,7 @@ class EligibilityPolicy:
     ingest_after: datetime | None = None
     max_input_characters: int = 16_000
     max_selected_evidence: int = 1
-    policy_revision: int = 1
+    policy_revision: int = 2
 
     def __post_init__(self) -> None:
         if self.ingest_after is not None:
@@ -206,7 +207,9 @@ _SOCIAL_RE = re.compile(
 )
 _WORKFLOW_RE = re.compile(
     r"^\s*(?:continue|proceed|go ahead|run the tests?|commit|deploy|restart|"
-    r"authorized as written|try again|that sounds good)[.!\s]*$",
+    r"authorized as written|try again|(?:that\s+)?sounds good|got it|"
+    r"i\s+(?:agree(?:\s+with\s+(?:that|this|you))?|understand|(?:do\s+not|don't)\s+know))"
+    r"[.!\s]*$",
     re.I,
 )
 _STRUCTURED_RE = re.compile(
@@ -231,7 +234,11 @@ _UNADOPTED_QUOTE_RE = re.compile(
     r"^\s*(?:[\"“‘']|(?:he|she|they|the assistant|the article)\s+(?:said|wrote))",
     re.I,
 )
-_HYPOTHETICAL_RE = re.compile(r"\bif\s+i\s+(?:said|were|was|had|claimed)\b", re.I)
+_HYPOTHETICAL_RE = re.compile(
+    r"(?:\bif\s+i\b.{0,180}\b(?:would|could|might|should)\b|"
+    r"^\s*(?:suppose|imagine)\b)",
+    re.I | re.S,
+)
 _QUESTION_RE = re.compile(
     r"^\s*(?:who|what|when|where|why|how|which|is|are|am|was|were|do|does|"
     r"did|can|could|would|should|will|have|has|had)\b.*\?\s*$",
@@ -242,11 +249,31 @@ _TASK_RE = re.compile(
     r"summarize|translate|generate|make|create|open|close|send)\b",
     re.I,
 )
+_FIRST_PERSON_TASK_RE = re.compile(
+    r"^\s*(?:i|we)\s+(?:need|want|would\s+like)\s+(?:you\s+to|help\b)",
+    re.I,
+)
 _CONTEXT_FRAGMENT_RE = re.compile(
     r"^\s*(?:yes|no|maybe|actually|correction)\b.{0,180}\b(?:that|it|this|still|instead)\b",
     re.I | re.S,
 )
 _REMEMBER_RE = re.compile(r"^\s*(?:please\s+)?remember(?:\s+that|\s*:)?\s+", re.I)
+_MEMORY_DENIAL_RE = re.compile(
+    r"(?:\b(?:do\s+not|don't|never)\s+(?:remember|save|store|retain|record)\b|"
+    r"^\s*(?:please\s+)?forget\s+(?:this|that)\b|"
+    r"\b(?:do\s+not|don't)\s+(?:change|update)\b.{0,100}\b(?:memory|saved)\b)",
+    re.I | re.S,
+)
+_OWNER_DECLARATION_RE = re.compile(
+    r"\b(?:i|i'm|i've|i’d|i'd|i’ll|i'll|we|we're|we've|we’d|we'd|"
+    r"we’ll|we'll|my|mine|our|ours)\b",
+    re.I,
+)
+_UNCERTAINTY_RE = re.compile(
+    r"\b(?:maybe|may|might|possibly|possible|could|considering|not\s+sure|"
+    r"someday|future\s+(?:choice|option|possibility))\b",
+    re.I,
+)
 _ATTACHMENT_REQUEST_RE = re.compile(
     r"^\s*(?:please\s+)?remember\b.{0,80}\bfrom\b.{0,40}\battachment\b",
     re.I,
@@ -451,7 +478,7 @@ def _message_evidence(
         category=_category(selected).value,
         assertion_mode=(
             AssertionMode.UNCERTAIN.value
-            if re.search(r"\b(?:maybe|might|possibly|not sure)\b", selected, re.I)
+            if _UNCERTAINTY_RE.search(selected)
             else AssertionMode.ENDORSED.value
             if _PREFERENCE_RE.search(selected) or _BELIEF_RE.search(selected)
             else AssertionMode.ASSERTED.value
@@ -644,6 +671,21 @@ def classify_eligibility(
             EligibilityDecision.SKIP_ZERO_CALL,
             EligibilityReason.TASK_REQUEST,
         )
+    if _FIRST_PERSON_TASK_RE.search(text):
+        return source, _result(
+            source,
+            selected_policy,
+            EligibilityDecision.SKIP_ZERO_CALL,
+            EligibilityReason.TASK_REQUEST,
+        )
+
+    if _MEMORY_DENIAL_RE.search(text):
+        return source, _result(
+            source,
+            selected_policy,
+            EligibilityDecision.SKIP_ZERO_CALL,
+            EligibilityReason.NO_DURABLE_FACT,
+        )
 
     if explicit_preference_correction_command_v1(text) is not None:
         return source, _result(
@@ -660,7 +702,10 @@ def classify_eligibility(
             start += 1
         end = len(text.rstrip())
         selected_body = text[start:end]
-        if start < end and _ALLOWLISTED_FACT_RE.fullmatch(selected_body):
+        if start < end and (
+            _ALLOWLISTED_FACT_RE.fullmatch(selected_body)
+            or _OWNER_DECLARATION_RE.search(selected_body)
+        ):
             selected = _message_evidence(
                 source, start_character=start, end_character=end
             )
@@ -680,6 +725,17 @@ def classify_eligibility(
             selected_policy,
             EligibilityDecision.SEND_EXTERNAL,
             EligibilityReason.PERSONAL_FACT_SELECTED,
+            selected,
+        )
+    if _OWNER_DECLARATION_RE.search(text):
+        start = len(text) - len(text.lstrip())
+        end = len(text.rstrip())
+        selected = _message_evidence(source, start_character=start, end_character=end)
+        return source, _result(
+            source,
+            selected_policy,
+            EligibilityDecision.SEND_EXTERNAL,
+            EligibilityReason.OWNER_DECLARATION_SELECTED,
             selected,
         )
     return source, _result(

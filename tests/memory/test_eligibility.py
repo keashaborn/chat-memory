@@ -102,6 +102,97 @@ class EligibilityTests(unittest.TestCase):
         self.assertFalse(result["provider_allowed"])
         self.assertIsNone(result["selected_evidence"])
 
+    def test_clear_owner_declaration_is_candidate_without_remember_command(self) -> None:
+        result = self.evaluate("I have a dog named Pepper.")
+        evidence = result["selected_evidence"]
+
+        self.assertEqual(result["decision"], EligibilityDecision.SEND_EXTERNAL.value)
+        self.assertEqual(result["reason_codes"], ["owner_declaration_selected"])
+        self.assertEqual(evidence["selected_text"], "I have a dog named Pepper.")
+        self.assertEqual(evidence["category"], "pet")
+        self.assertEqual(evidence["assertion_mode"], "asserted")
+
+    def test_qualified_owner_declaration_is_sent_as_uncertain_evidence(self) -> None:
+        text = (
+            "Marimba is a possible future option for memory validation, while "
+            "vibraphone remains my current preferred instrument."
+        )
+        result = self.evaluate(text)
+        evidence = result["selected_evidence"]
+
+        self.assertEqual(result["decision"], EligibilityDecision.SEND_EXTERNAL.value)
+        self.assertEqual(result["reason_codes"], ["owner_declaration_selected"])
+        self.assertEqual(evidence["selected_text"], text)
+        self.assertEqual(evidence["category"], "life_preference")
+        self.assertEqual(evidence["assertion_mode"], "uncertain")
+
+    def test_remember_is_optional_emphasis_not_required_syntax(self) -> None:
+        text = (
+            "Remember that marimba is a possible future option for memory "
+            "validation, while vibraphone remains my current preferred instrument."
+        )
+        result = self.evaluate(text)
+        evidence = result["selected_evidence"]
+
+        self.assertEqual(result["decision"], EligibilityDecision.SEND_EXTERNAL.value)
+        self.assertEqual(result["reason_codes"], ["explicit_remember_selected"])
+        self.assertEqual(
+            evidence["selected_text"],
+            "marimba is a possible future option for memory validation, while "
+            "vibraphone remains my current preferred instrument.",
+        )
+        self.assertEqual(evidence["assertion_mode"], "uncertain")
+
+    def test_memory_denial_stays_zero_call_even_with_personal_fact(self) -> None:
+        variants = (
+            "Do not remember that my preferred tea is Earl Grey.",
+            "A marimba could be another option someday, but do not change my "
+            "saved memory validation instrument.",
+        )
+        for text in variants:
+            with self.subTest(text=text):
+                result = self.evaluate(text)
+                self.assertEqual(
+                    result["decision"], EligibilityDecision.SKIP_ZERO_CALL.value
+                )
+                self.assertEqual(result["reason_codes"], ["no_durable_fact"])
+                self.assertFalse(result["provider_allowed"])
+                self.assertIsNone(result["selected_evidence"])
+
+    def test_general_remember_request_does_not_become_personal_memory(self) -> None:
+        result = self.evaluate("Remember that Saturn has rings.")
+
+        self.assertEqual(result["decision"], EligibilityDecision.SKIP_ZERO_CALL.value)
+        self.assertFalse(result["provider_allowed"])
+        self.assertIsNone(result["selected_evidence"])
+
+    def test_first_person_task_does_not_become_personal_memory(self) -> None:
+        result = self.evaluate("I want you to explain how a binary tree works.")
+
+        self.assertEqual(result["decision"], EligibilityDecision.SKIP_ZERO_CALL.value)
+        self.assertEqual(result["reason_codes"], ["task_request"])
+        self.assertFalse(result["provider_allowed"])
+        self.assertIsNone(result["selected_evidence"])
+
+    def test_first_person_workflow_noise_does_not_call_provider(self) -> None:
+        for text in ("I agree with that.", "I understand.", "I don't know."):
+            with self.subTest(text=text):
+                result = self.evaluate(text)
+                self.assertEqual(
+                    result["decision"], EligibilityDecision.SKIP_ZERO_CALL.value
+                )
+                self.assertEqual(result["reason_codes"], ["workflow_control"])
+                self.assertFalse(result["provider_allowed"])
+
+    def test_broader_hypothetical_does_not_call_provider(self) -> None:
+        result = self.evaluate(
+            "If I started preferring tea someday, would that become memory?"
+        )
+
+        self.assertEqual(result["decision"], EligibilityDecision.SKIP_ZERO_CALL.value)
+        self.assertEqual(result["reason_codes"], ["no_durable_fact"])
+        self.assertFalse(result["provider_allowed"])
+
     def test_non_user_role_fails_closed(self) -> None:
         result = self.evaluate(SOURCE_TEXT, role="assistant")
         self.assertEqual(result["decision"], EligibilityDecision.BLOCK_LOCAL.value)
