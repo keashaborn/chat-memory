@@ -328,6 +328,7 @@ class SuccessorResponseProviderTests(unittest.IsolatedAsyncioTestCase):
                         else tuple(sorted(PREDICATE_CATALOG["predicates"]))
                     ),
                 )
+                self.assertEqual(vector.calls[0]["limit"], 1 if expected else 8)
 
     async def test_bounded_personal_recall_detection(self) -> None:
         allowed = tuple(sorted(PREDICATE_CATALOG["predicates"]))

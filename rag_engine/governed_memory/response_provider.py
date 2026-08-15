@@ -293,7 +293,7 @@ def _explicit_preference_policy(policy: RetrievalPolicy) -> RetrievalPolicy:
         allowed_predicates=("preference.personal",),
         domains=policy.domains,
         intents=policy.intents,
-        max_records=policy.max_records,
+        max_records=1,
         policy_revision=policy.policy_revision,
     )
 
