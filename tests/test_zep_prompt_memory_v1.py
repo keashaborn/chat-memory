@@ -24,15 +24,16 @@ ANSWER = UUID("dddddddd-dddd-4ddd-8ddd-dddddddddddd")
 class FakeRuntime:
     def __init__(self, value: str | Exception) -> None:
         self.value = value
-        self.calls: list[tuple[UUID, UUID]] = []
+        self.calls: list[tuple[UUID, UUID, str]] = []
 
     async def retrieve_prompt_context(
         self,
         *,
         owner_user_id: UUID,
         thread_id: UUID,
+        current_message: str,
     ) -> str:
-        self.calls.append((owner_user_id, thread_id))
+        self.calls.append((owner_user_id, thread_id, current_message))
         if isinstance(self.value, Exception):
             raise self.value
         return self.value
@@ -78,7 +79,10 @@ class ZepMemoryProviderTests(unittest.IsolatedAsyncioTestCase):
             conversation_snapshot=snapshot(),
             trusted_policy_signals=ResponsePolicySignalsV0_2(),
         )
-        self.assertEqual(runtime.calls, [(OWNER, THREAD)])
+        self.assertEqual(
+            runtime.calls,
+            [(OWNER, THREAD, "What do you remember?")],
+        )
         self.assertEqual(assembly.source_status, MemorySourceStatusV1.SELECTED)
         block = assembly.successor_memory_context_block
         self.assertIsNotNone(block)

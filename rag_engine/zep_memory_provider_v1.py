@@ -90,6 +90,7 @@ class ZepPromptRuntimeV1(Protocol):
         *,
         owner_user_id: UUID,
         thread_id: UUID,
+        current_message: str,
     ) -> str: ...
 
 
@@ -209,6 +210,7 @@ class ZepMemoryChatProviderV1:
             context = await self._runtime.retrieve_prompt_context(
                 owner_user_id=authenticated_actor_user_id,
                 thread_id=conversation_snapshot.thread_id,
+                current_message=conversation_snapshot.messages[-1].content,
             )
         except Exception:
             self._outcome = "unavailable"

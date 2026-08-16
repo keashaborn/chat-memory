@@ -27,6 +27,8 @@ _VALID_MODES = frozenset(
 _DEFAULT_TIMEOUT_SECONDS = 12.0
 _MAX_TIMEOUT_SECONDS = 30.0
 _MAX_CONTEXT_BYTES = 1_048_576
+_MAX_GRAPH_SEARCH_QUERY_CHARACTERS = 400
+_GRAPH_SEARCH_CONTEXT_CHARACTERS = 8_000
 
 
 class ZepShadowConfigurationError(ValueError):
@@ -60,6 +62,13 @@ class ZepShadowTransportV1(Protocol):
         *,
         user_id: str,
         thread_id: str,
+    ) -> str: ...
+
+    async def search_owner_context(
+        self,
+        *,
+        user_id: str,
+        query: str,
     ) -> str: ...
 
     async def delete_owner(self, *, user_id: str) -> None: ...
@@ -262,6 +271,26 @@ class ZepCloudShadowTransportV1:
             raise ZepShadowConfigurationError("zep_context_too_large")
         return context
 
+    async def search_owner_context(
+        self,
+        *,
+        user_id: str,
+        query: str,
+    ) -> str:
+        bounded_query = _bounded_graph_search_query(query)
+        response = await self._client.graph.search(
+            user_id=user_id,
+            query=bounded_query,
+            scope="auto",
+            max_characters=_GRAPH_SEARCH_CONTEXT_CHARACTERS,
+        )
+        context = getattr(response, "context", None)
+        if not isinstance(context, str):
+            raise ZepShadowConfigurationError("invalid_zep_search_context")
+        if len(context.encode("utf-8")) > _MAX_CONTEXT_BYTES:
+            raise ZepShadowConfigurationError("zep_search_context_too_large")
+        return context
+
     async def delete_owner(self, *, user_id: str) -> None:
         try:
             await self._client.user.delete(user_id=user_id)
@@ -287,6 +316,19 @@ class ZepCloudShadowTransportV1:
 
 def _default_transport_factory(api_key: str) -> ZepShadowTransportV1:
     return ZepCloudShadowTransportV1(api_key)
+
+
+def _bounded_graph_search_query(query: str) -> str:
+    if not isinstance(query, str) or not query.strip():
+        raise ZepShadowConfigurationError("invalid_zep_search_query")
+    value = query.strip()
+    if len(value) <= _MAX_GRAPH_SEARCH_QUERY_CHARACTERS:
+        return value
+    separator = "\n...\n"
+    remaining = _MAX_GRAPH_SEARCH_QUERY_CHARACTERS - len(separator)
+    leading = remaining // 2
+    trailing = remaining - leading
+    return value[:leading] + separator + value[-trailing:]
 
 
 class ZepShadowRuntimeV1:
@@ -487,10 +529,13 @@ class ZepShadowRuntimeV1:
         *,
         owner_user_id: UUID,
         thread_id: UUID,
+        current_message: str,
     ) -> str:
         if not isinstance(owner_user_id, UUID) or not isinstance(
             thread_id, UUID
         ):
+            raise ZepShadowConfigurationError("invalid_zep_prompt_request")
+        if not isinstance(current_message, str) or not current_message.strip():
             raise ZepShadowConfigurationError("invalid_zep_prompt_request")
         if not self._api_key:
             raise ZepShadowConfigurationError("zep_api_key_required")
@@ -506,10 +551,9 @@ class ZepShadowRuntimeV1:
         started_ns = time.monotonic_ns()
         try:
             context = await asyncio.wait_for(
-                self._retrieve_context_bounded(
+                self._search_prompt_context_bounded(
                     owner_user_id=owner_user_id,
-                    thread_id=thread_id,
-                    provision=True,
+                    current_message=current_message,
                 ),
                 timeout=self._settings.timeout_seconds,
             )
@@ -555,7 +599,6 @@ class ZepShadowRuntimeV1:
                 self._retrieve_context_bounded(
                     owner_user_id=owner_user_id,
                     thread_id=thread_id,
-                    provision=False,
                 ),
                 timeout=self._settings.timeout_seconds,
             )
@@ -589,20 +632,23 @@ class ZepShadowRuntimeV1:
         *,
         owner_user_id: UUID,
         thread_id: UUID,
-        provision: bool,
     ) -> str:
         transport = await self._transport_client()
-        user_id = zep_user_id_v1(owner_user_id)
-        zep_thread_id = zep_thread_id_v1(thread_id)
-        if provision:
-            await self._ensure_owner_thread(
-                transport=transport,
-                user_id=user_id,
-                thread_id=zep_thread_id,
-            )
         return await transport.get_owner_context(
-            user_id=user_id,
-            thread_id=zep_thread_id,
+            user_id=zep_user_id_v1(owner_user_id),
+            thread_id=zep_thread_id_v1(thread_id),
+        )
+
+    async def _search_prompt_context_bounded(
+        self,
+        *,
+        owner_user_id: UUID,
+        current_message: str,
+    ) -> str:
+        transport = await self._transport_client()
+        return await transport.search_owner_context(
+            user_id=zep_user_id_v1(owner_user_id),
+            query=current_message,
         )
 
     async def _ensure_owner_thread(

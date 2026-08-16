@@ -42,6 +42,7 @@ class FakeTransport:
         self.provisioned: list[tuple[str, str]] = []
         self.turns: list[tuple[str, UUID, UUID, str, str]] = []
         self.context_requests: list[tuple[str, str]] = []
+        self.search_requests: list[tuple[str, str]] = []
         self.deleted_users: list[str] = []
         self.closed = False
 
@@ -85,6 +86,17 @@ class FakeTransport:
         if self.fail:
             raise RuntimeError("synthetic transport failure")
         self.context_requests.append((user_id, thread_id))
+        return self.context
+
+    async def search_owner_context(
+        self,
+        *,
+        user_id: str,
+        query: str,
+    ) -> str:
+        if self.fail:
+            raise RuntimeError("synthetic transport failure")
+        self.search_requests.append((user_id, query))
         return self.context
 
     async def delete_owner(self, *, user_id: str) -> None:
@@ -182,7 +194,8 @@ class ZepShadowSettingsTests(unittest.TestCase):
         route = (ROOT / "rag_engine/resse_response_router.py").read_text()
         self.assertIn("get_user_context", adapter)
         self.assertIn("user.get_threads", adapter)
-        self.assertNotIn(".graph.search(", adapter)
+        self.assertIn(".graph.search(", adapter)
+        self.assertIn("search_owner_context", adapter)
         self.assertIn("prompt_bound=false", adapter)
         self.assertIn("prompt_bound=true", adapter)
         retrieval = route.index("ZEP_SHADOW_RUNTIME.dispatch_retrieval(")
@@ -283,6 +296,68 @@ class ZepCloudShadowTransportTests(unittest.IsolatedAsyncioTestCase):
                         thread_id=thread_id,
                     )
 
+    async def test_prompt_search_is_owner_scoped_auto_context(self) -> None:
+        search = AsyncMock(
+            return_value=SimpleNamespace(context="cross-thread context")
+        )
+        transport = object.__new__(ZepCloudShadowTransportV1)
+        transport._client = SimpleNamespace(
+            graph=SimpleNamespace(search=search)
+        )
+        user_id = zep_user_id_v1(OWNER)
+        self.assertEqual(
+            await transport.search_owner_context(
+                user_id=user_id,
+                query="What do you remember?",
+            ),
+            "cross-thread context",
+        )
+        search.assert_awaited_once_with(
+            user_id=user_id,
+            query="What do you remember?",
+            scope="auto",
+            max_characters=8_000,
+        )
+
+    async def test_prompt_search_query_is_bounded_at_both_ends(self) -> None:
+        search = AsyncMock(return_value=SimpleNamespace(context="context"))
+        transport = object.__new__(ZepCloudShadowTransportV1)
+        transport._client = SimpleNamespace(
+            graph=SimpleNamespace(search=search)
+        )
+        await transport.search_owner_context(
+            user_id=zep_user_id_v1(OWNER),
+            query="first" + ("x" * 500) + "last",
+        )
+        bounded = search.await_args.kwargs["query"]
+        self.assertEqual(len(bounded), 400)
+        self.assertTrue(bounded.startswith("first"))
+        self.assertTrue(bounded.endswith("last"))
+
+    async def test_prompt_search_rejects_invalid_or_oversized_context(
+        self,
+    ) -> None:
+        for context, expected in (
+            (None, "invalid_zep_search_context"),
+            ("x" * 1_048_577, "zep_search_context_too_large"),
+        ):
+            with self.subTest(expected=expected):
+                search = AsyncMock(
+                    return_value=SimpleNamespace(context=context)
+                )
+                transport = object.__new__(ZepCloudShadowTransportV1)
+                transport._client = SimpleNamespace(
+                    graph=SimpleNamespace(search=search)
+                )
+                with self.assertRaisesRegex(
+                    ZepShadowConfigurationError,
+                    expected,
+                ):
+                    await transport.search_owner_context(
+                        user_id=zep_user_id_v1(OWNER),
+                        query="query",
+                    )
+
     async def test_owner_delete_is_verified_and_idempotent(self) -> None:
         class NotFoundError(RuntimeError):
             status_code = 404
@@ -313,7 +388,7 @@ class ZepCloudShadowTransportTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ZepShadowRuntimeTests(unittest.IsolatedAsyncioTestCase):
-    async def test_prompt_retrieval_provisions_and_returns_owner_context(
+    async def test_prompt_retrieval_searches_owner_graph_with_current_message(
         self,
     ) -> None:
         transport = FakeTransport(context="prompt context")
@@ -329,15 +404,14 @@ class ZepShadowRuntimeTests(unittest.IsolatedAsyncioTestCase):
         context = await runtime.retrieve_prompt_context(
             owner_user_id=OWNER,
             thread_id=THREAD,
+            current_message="What do you remember?",
         )
         self.assertEqual(context, "prompt context")
+        self.assertEqual(transport.provisioned, [])
+        self.assertEqual(transport.context_requests, [])
         self.assertEqual(
-            transport.provisioned,
-            [(zep_user_id_v1(OWNER), zep_thread_id_v1(THREAD))],
-        )
-        self.assertEqual(
-            transport.context_requests,
-            [(zep_user_id_v1(OWNER), zep_thread_id_v1(THREAD))],
+            transport.search_requests,
+            [(zep_user_id_v1(OWNER), "What do you remember?")],
         )
         await runtime.close()
 
@@ -360,6 +434,7 @@ class ZepShadowRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 await runtime.retrieve_prompt_context(
                     owner_user_id=OWNER,
                     thread_id=THREAD,
+                    current_message="What do you remember?",
                 )
         rendered = "\n".join(captured.output)
         self.assertIn("retrieval_failed", rendered)
