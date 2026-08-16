@@ -20,6 +20,8 @@ from rag_engine.zep_shadow_memory_v1 import (
 OWNER = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 OTHER_OWNER = UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
 THREAD = UUID("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
+USER_MESSAGE = UUID("dddddddd-dddd-4ddd-8ddd-dddddddddddd")
+ASSISTANT_MESSAGE = UUID("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -27,7 +29,7 @@ class FakeTransport:
     def __init__(self, *, fail: bool = False) -> None:
         self.fail = fail
         self.provisioned: list[tuple[str, str]] = []
-        self.turns: list[tuple[str, str, str]] = []
+        self.turns: list[tuple[str, UUID, UUID, str, str]] = []
         self.closed = False
 
     async def ensure_user_and_thread(
@@ -44,12 +46,22 @@ class FakeTransport:
         self,
         *,
         thread_id: str,
+        user_message_id: UUID,
+        assistant_message_id: UUID,
         user_message: str,
         assistant_message: str,
     ) -> None:
         if self.fail:
             raise RuntimeError("synthetic transport failure")
-        self.turns.append((thread_id, user_message, assistant_message))
+        self.turns.append(
+            (
+                thread_id,
+                user_message_id,
+                assistant_message_id,
+                user_message,
+                assistant_message,
+            )
+        )
 
     async def close(self) -> None:
         self.closed = True
@@ -123,6 +135,8 @@ class ZepShadowSettingsTests(unittest.TestCase):
         dispatch_block = route[dispatch : dispatch + 400]
         self.assertIn("owner_user_id=owner", dispatch_block)
         self.assertNotIn("owner_user_id=payload.user_id", dispatch_block)
+        self.assertIn("user_message_id=payload.message_id", dispatch_block)
+        self.assertIn("assistant_message_id=finalized.answer_id", dispatch_block)
 
     def test_adapter_has_no_zep_retrieval_path(self) -> None:
         adapter = (ROOT / "rag_engine/zep_shadow_memory_v1.py").read_text()
@@ -150,6 +164,8 @@ class ZepShadowRuntimeTests(unittest.IsolatedAsyncioTestCase):
         outcome = runtime.dispatch_turn(
             owner_user_id=OWNER,
             thread_id=THREAD,
+            user_message_id=USER_MESSAGE,
+            assistant_message_id=ASSISTANT_MESSAGE,
             user_message="user text",
             assistant_message="assistant text",
         )
@@ -167,6 +183,8 @@ class ZepShadowRuntimeTests(unittest.IsolatedAsyncioTestCase):
         outcome = runtime.dispatch_turn(
             owner_user_id=OWNER,
             thread_id=THREAD,
+            user_message_id=USER_MESSAGE,
+            assistant_message_id=ASSISTANT_MESSAGE,
             user_message="user text",
             assistant_message="assistant text",
         )
@@ -181,6 +199,8 @@ class ZepShadowRuntimeTests(unittest.IsolatedAsyncioTestCase):
             [
                 (
                     zep_thread_id_v1(THREAD),
+                    USER_MESSAGE,
+                    ASSISTANT_MESSAGE,
                     "user text",
                     "assistant text",
                 )
@@ -199,6 +219,8 @@ class ZepShadowRuntimeTests(unittest.IsolatedAsyncioTestCase):
             runtime.dispatch_turn(
                 owner_user_id=OWNER,
                 thread_id=THREAD,
+                user_message_id=USER_MESSAGE,
+                assistant_message_id=ASSISTANT_MESSAGE,
                 user_message="user text",
                 assistant_message="assistant text",
             ),
@@ -208,6 +230,8 @@ class ZepShadowRuntimeTests(unittest.IsolatedAsyncioTestCase):
             runtime.dispatch_turn(
                 owner_user_id=OTHER_OWNER,
                 thread_id=THREAD,
+                user_message_id=USER_MESSAGE,
+                assistant_message_id=ASSISTANT_MESSAGE,
                 user_message="user text",
                 assistant_message="assistant text",
             ),
@@ -227,6 +251,8 @@ class ZepShadowRuntimeTests(unittest.IsolatedAsyncioTestCase):
             runtime.dispatch_turn(
                 owner_user_id=OWNER,
                 thread_id=THREAD,
+                user_message_id=USER_MESSAGE,
+                assistant_message_id=ASSISTANT_MESSAGE,
                 user_message="user text",
                 assistant_message="assistant text",
             ),

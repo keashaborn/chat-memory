@@ -45,6 +45,10 @@ from .worker_bridge import (
     PostgresConversationBridge,
     PostgresSuccessorIngest,
 )
+from .zep_deletion import (
+    BoundedZepHttpsTransport,
+    ZepConversationDeletionV1,
+)
 
 
 POSTGRES_DSN_ENV = "GOVERNED_MEMORY_POSTGRES_DSN"
@@ -61,6 +65,8 @@ EXPECTED_AUTHORIZATION_RECEIPT_SHA256_ENV = (
     "GOVERNED_MEMORY_EXPECTED_AUTHORIZATION_RECEIPT_SHA256"
 )
 QDRANT_URL_ENV = "GOVERNED_MEMORY_QDRANT_URL"
+ZEP_API_KEY_ENV = "ZEP_API_KEY"
+ZEP_DELETION_MODE_ENV = "GOVERNED_MEMORY_ZEP_DELETION_MODE"
 WORKER_ID = "governed-memory-pilot-worker-1"
 POSTGRES_HOST = "127.0.0.1"
 POSTGRES_PORT = 55_432
@@ -150,6 +156,8 @@ class WorkerRuntimeConfig:
     expected_authorization_receipt_sha256: str = field(repr=False)
     qdrant_url: str
     qdrant_api_key: str = field(repr=False)
+    zep_deletion_mode: str
+    zep_api_key: str = field(repr=False)
 
     @classmethod
     def from_environment(
@@ -179,6 +187,18 @@ class WorkerRuntimeConfig:
             raise WorkerRuntimeRefusal(
                 "governed_memory_worker_configuration_invalid"
             )
+        zep_deletion_mode = str(
+            environment.get(ZEP_DELETION_MODE_ENV, "off")
+        ).strip().casefold()
+        if zep_deletion_mode not in {"off", "on"}:
+            raise WorkerRuntimeRefusal(
+                "governed_memory_worker_configuration_invalid"
+            )
+        zep_api_key = (
+            _secret(environment, ZEP_API_KEY_ENV)
+            if zep_deletion_mode == "on"
+            else ""
+        )
         try:
             expected_pilot_id = require_key(
                 _secret(environment, EXPECTED_PILOT_ID_ENV),
@@ -216,6 +236,8 @@ class WorkerRuntimeConfig:
             ),
             qdrant_url=qdrant_url,
             qdrant_api_key=_secret(environment, QDRANT_API_KEY_ENV),
+            zep_deletion_mode=zep_deletion_mode,
+            zep_api_key=zep_api_key,
         )
         try:
             OpenAIEndpointConfig(
@@ -226,6 +248,8 @@ class WorkerRuntimeConfig:
                 base_url=config.qdrant_url,
                 api_key=config.qdrant_api_key,
             )
+            if config.zep_deletion_mode == "on":
+                BoundedZepHttpsTransport(api_key=config.zep_api_key)
         except ContractViolation as error:
             raise WorkerRuntimeRefusal(
                 "governed_memory_worker_configuration_invalid"
@@ -515,6 +539,15 @@ async def run_runtime_once(
                 api_key=config.qdrant_api_key,
             )
         )
+        zep_deletion = (
+            ZepConversationDeletionV1(
+                transport=BoundedZepHttpsTransport(
+                    api_key=config.zep_api_key,
+                )
+            )
+            if config.zep_deletion_mode == "on"
+            else None
+        )
         extraction_worker = OnceWorker(
             repository=PostgresWorkerLaneRepository(
                 repository,
@@ -571,6 +604,7 @@ async def run_runtime_once(
                         successor=PostgresSuccessorDeletionRepository(
                             connection
                         ),
+                        zep=zep_deletion,
                     ),
                 ).run_once()
             finally:
@@ -612,6 +646,8 @@ __all__ = [
     "PostgresAdvisoryGuard",
     "QDRANT_API_KEY_ENV",
     "QDRANT_URL_ENV",
+    "ZEP_API_KEY_ENV",
+    "ZEP_DELETION_MODE_ENV",
     "RuntimeEmbeddingProvider",
     "RuntimeExtractionProvider",
     "WORKER_ADVISORY_LOCK_KEY",

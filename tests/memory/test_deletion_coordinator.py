@@ -36,6 +36,9 @@ from rag_engine.governed_memory.runtime.once_worker import (
     WorkKind,
 )
 from rag_engine.governed_memory.runtime.worker_bridge import FairOnceRunner
+from rag_engine.governed_memory.runtime.zep_deletion import (
+    ZepDeletionUnavailable,
+)
 
 
 OWNER = UUID("11111111-1111-4111-8111-111111111111")
@@ -320,6 +323,28 @@ class FakeSuccessor:
         )
 
 
+class FakeZep:
+    def __init__(
+        self,
+        log: list[str],
+        *,
+        unavailable: bool = False,
+        contract_failure: bool = False,
+    ) -> None:
+        self.log = log
+        self.unavailable = unavailable
+        self.contract_failure = contract_failure
+
+    async def erase(self, *, lease, targets) -> None:
+        self.log.append("zep.erase")
+        if lease.owner_user_id != OWNER or targets != TARGETS:
+            raise AssertionError((lease, targets))
+        if self.unavailable:
+            raise ZepDeletionUnavailable("synthetic_zep_outage")
+        if self.contract_failure:
+            raise ContractViolation("synthetic_zep_contract_failure")
+
+
 class InactiveDeletionCoordinatorTests(unittest.IsolatedAsyncioTestCase):
     async def test_first_pass_stops_after_memory_receipt_handoff(self) -> None:
         log: list[str] = []
@@ -396,8 +421,11 @@ class InactiveDeletionCoordinatorTests(unittest.IsolatedAsyncioTestCase):
             ),
         )
         successor = FakeSuccessor(log, [])
+        zep = FakeZep(log)
         receipt = await InactiveDeletionCoordinator(
-            conversation=conversation, successor=successor
+            conversation=conversation,
+            successor=successor,
+            zep=zep,
         ).advance_one()
         self.assertEqual(receipt.outcome, DeletionCoordinatorOutcome.COMPLETED)
         self.assertEqual(
@@ -405,12 +433,84 @@ class InactiveDeletionCoordinatorTests(unittest.IsolatedAsyncioTestCase):
             [
                 "conversation.lease",
                 "conversation.targets",
+                "zep.erase",
                 "conversation.finalize",
                 "successor.ack_conversation",
                 "successor.final_receipt",
                 "conversation.ack_completion",
             ],
         )
+
+    async def test_zep_outage_retries_before_physical_chat_delete(self) -> None:
+        log: list[str] = []
+        conversation = FakeConversation(
+            log,
+            lease(
+                ConversationErasureState.GOVERNED_DELETED,
+                GOVERNED_RECEIPT,
+            ),
+        )
+        receipt = await InactiveDeletionCoordinator(
+            conversation=conversation,
+            successor=FakeSuccessor(log, []),
+            zep=FakeZep(log, unavailable=True),
+        ).advance_one()
+        self.assertEqual(receipt.outcome, DeletionCoordinatorOutcome.RETRYABLE)
+        self.assertEqual(
+            receipt.conversation_state,
+            ConversationErasureState.RETRYABLE,
+        )
+        self.assertEqual(
+            conversation.failures,
+            [DeletionRepositoryFailure.SUCCESSOR_UNAVAILABLE],
+        )
+        self.assertEqual(
+            log,
+            [
+                "conversation.lease",
+                "conversation.targets",
+                "zep.erase",
+                "conversation.fail",
+            ],
+        )
+        self.assertFalse(conversation.physically_deleted)
+
+    async def test_zep_contract_failure_stops_for_manual_review(self) -> None:
+        log: list[str] = []
+        conversation = FakeConversation(
+            log,
+            lease(
+                ConversationErasureState.GOVERNED_DELETED,
+                GOVERNED_RECEIPT,
+            ),
+        )
+        receipt = await InactiveDeletionCoordinator(
+            conversation=conversation,
+            successor=FakeSuccessor(log, []),
+            zep=FakeZep(log, contract_failure=True),
+        ).advance_one()
+        self.assertEqual(
+            receipt.outcome,
+            DeletionCoordinatorOutcome.MANUAL_REVIEW,
+        )
+        self.assertEqual(
+            receipt.conversation_state,
+            ConversationErasureState.MANUAL_REVIEW,
+        )
+        self.assertEqual(
+            conversation.failure_attempts,
+            [(DeletionRepositoryFailure.RECEIPT_INVALID, 0)],
+        )
+        self.assertEqual(
+            log,
+            [
+                "conversation.lease",
+                "conversation.targets",
+                "zep.erase",
+                "conversation.fail",
+            ],
+        )
+        self.assertFalse(conversation.physically_deleted)
 
     async def test_pending_ack_recovery_does_not_read_deleted_targets(self) -> None:
         log: list[str] = []
@@ -658,6 +758,8 @@ class InactiveDeletionCoordinatorTests(unittest.IsolatedAsyncioTestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("InactiveDeletionCoordinator", worker_source)
         self.assertIn("deletion_worker=", worker_source)
+        self.assertIn("zep=zep_deletion", worker_source)
+        self.assertIn("GOVERNED_MEMORY_ZEP_DELETION_MODE", worker_source)
         for relative in (
             "rag_engine/governed_memory/runtime/__init__.py",
             "rag_engine/governed_memory/runtime/application.py",

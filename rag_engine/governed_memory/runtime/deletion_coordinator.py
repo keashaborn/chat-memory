@@ -30,6 +30,7 @@ from ..deletion_contracts import (
     SuccessorErasureState,
     deletion_coordinator_receipt_sha256,
 )
+from .zep_deletion import ZepConversationDeletionV1, ZepDeletionUnavailable
 
 
 DELETION_COORDINATOR_WORKER_ID = "governed-memory-deletion-coordinator-1"
@@ -44,6 +45,7 @@ class InactiveDeletionCoordinator:
         *,
         conversation: ConversationDeletionRepository,
         successor: SuccessorDeletionRepository,
+        zep: ZepConversationDeletionV1 | None = None,
         worker_id: str = DELETION_COORDINATOR_WORKER_ID,
         lease_seconds: int = DEFAULT_DELETION_LEASE_SECONDS,
     ) -> None:
@@ -57,6 +59,7 @@ class InactiveDeletionCoordinator:
             raise ContractViolation("invalid_deletion_coordinator_lease")
         self._conversation = conversation
         self._successor = successor
+        self._zep = zep
         self._worker_id = worker_id
         self._lease_seconds = lease_seconds
 
@@ -217,6 +220,8 @@ class InactiveDeletionCoordinator:
                 # Once finalization begins, a malformed returned receipt may
                 # follow a committed physical chat deletion.  Preserve the
                 # pending-ack state conservatively on every failure thereafter.
+                if self._zep is not None:
+                    await self._zep.erase(lease=lease, targets=targets)
                 preserve_pending_ack = True
                 return await self._finish_conversation_and_ack(
                     lease,
@@ -318,6 +323,20 @@ class InactiveDeletionCoordinator:
                 successor_state=SuccessorErasureState.MEMORY_DELETED,
                 affected_claim_count=progress.affected_claim_count,
                 pending_claim_deletions=0,
+            )
+        except ZepDeletionUnavailable:
+            failed_state = await self._conversation.fail_erasure(
+                lease,
+                failure=DeletionRepositoryFailure.SUCCESSOR_UNAVAILABLE,
+                retry_after_seconds=30,
+            )
+            return self._receipt(
+                lease,
+                outcome=DeletionCoordinatorOutcome.RETRYABLE,
+                conversation_state=failed_state,
+                successor_state=successor_state,
+                affected_claim_count=affected_claim_count,
+                pending_claim_deletions=pending_claim_deletions,
             )
         except DeletionRepositoryError as exc:
             failed_state = await self._conversation.fail_erasure(

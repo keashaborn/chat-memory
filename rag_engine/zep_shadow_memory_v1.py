@@ -39,6 +39,8 @@ class ZepShadowTransportV1(Protocol):
         self,
         *,
         thread_id: str,
+        user_message_id: UUID,
+        assistant_message_id: UUID,
         user_message: str,
         assistant_message: str,
     ) -> None: ...
@@ -183,6 +185,8 @@ class ZepCloudShadowTransportV1:
         self,
         *,
         thread_id: str,
+        user_message_id: UUID,
+        assistant_message_id: UUID,
         user_message: str,
         assistant_message: str,
     ) -> None:
@@ -191,11 +195,17 @@ class ZepCloudShadowTransportV1:
                 role="user",
                 name="LifeSwitch User",
                 content=user_message,
+                metadata={
+                    "lifeswitch_message_id": str(user_message_id),
+                },
             ),
             self._message_type(
                 role="assistant",
                 name="LifeSwitch Assistant",
                 content=assistant_message,
+                metadata={
+                    "lifeswitch_message_id": str(assistant_message_id),
+                },
             ),
         ]
         await self._client.thread.add_messages(
@@ -262,6 +272,8 @@ class ZepShadowRuntimeV1:
         *,
         owner_user_id: UUID,
         thread_id: UUID,
+        user_message_id: UUID,
+        assistant_message_id: UUID,
         user_message: str,
         assistant_message: str,
     ) -> str:
@@ -274,11 +286,17 @@ class ZepShadowRuntimeV1:
             return "excluded"
         if not isinstance(assistant_message, str) or not assistant_message.strip():
             return "excluded"
+        if not isinstance(user_message_id, UUID) or not isinstance(
+            assistant_message_id, UUID
+        ):
+            return "excluded"
 
         task = asyncio.create_task(
             self._write_turn(
                 owner_user_id=owner_user_id,
                 thread_id=thread_id,
+                user_message_id=user_message_id,
+                assistant_message_id=assistant_message_id,
                 user_message=user_message,
                 assistant_message=assistant_message,
             )
@@ -292,6 +310,8 @@ class ZepShadowRuntimeV1:
         *,
         owner_user_id: UUID,
         thread_id: UUID,
+        user_message_id: UUID,
+        assistant_message_id: UUID,
         user_message: str,
         assistant_message: str,
     ) -> None:
@@ -302,6 +322,8 @@ class ZepShadowRuntimeV1:
                 self._write_turn_bounded(
                     owner_user_id=owner_user_id,
                     thread_id=thread_id,
+                    user_message_id=user_message_id,
+                    assistant_message_id=assistant_message_id,
                     user_message=user_message,
                     assistant_message=assistant_message,
                 ),
@@ -326,6 +348,8 @@ class ZepShadowRuntimeV1:
         *,
         owner_user_id: UUID,
         thread_id: UUID,
+        user_message_id: UUID,
+        assistant_message_id: UUID,
         user_message: str,
         assistant_message: str,
     ) -> None:
@@ -344,6 +368,8 @@ class ZepShadowRuntimeV1:
                     self._provisioned_threads.add(provision_key)
         await self._transport.add_turn(
             thread_id=zep_thread_id,
+            user_message_id=user_message_id,
+            assistant_message_id=assistant_message_id,
             user_message=user_message,
             assistant_message=assistant_message,
         )

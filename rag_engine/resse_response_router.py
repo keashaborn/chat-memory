@@ -677,10 +677,12 @@ async def resse_response_query(
                     request_id=request_id,
                     finalized=finalized,
                 )
-        if successor_eligible:
+        if successor_eligible and payload.message_id is not None:
             ZEP_SHADOW_RUNTIME.dispatch_turn(
                 owner_user_id=owner,
                 thread_id=thread_id,
+                user_message_id=payload.message_id,
+                assistant_message_id=finalized.answer_id,
                 user_message=payload.message,
                 assistant_message=finalized.assistant_text,
             )
