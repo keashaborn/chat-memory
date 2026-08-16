@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-"""Write-only Zep canary that is disconnected from response context."""
+"""Zep write/retrieval shadow disconnected from response context."""
 
 import asyncio
 import hashlib
 import inspect
 import logging
+import time
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Mapping, Protocol
 from uuid import UUID
@@ -24,9 +25,14 @@ _VALID_MODES = frozenset(
 )
 _DEFAULT_TIMEOUT_SECONDS = 12.0
 _MAX_TIMEOUT_SECONDS = 30.0
+_MAX_CONTEXT_BYTES = 1_048_576
 
 
 class ZepShadowConfigurationError(ValueError):
+    pass
+
+
+class ZepShadowOwnershipError(RuntimeError):
     pass
 
 
@@ -47,6 +53,13 @@ class ZepShadowTransportV1(Protocol):
         user_message: str,
         assistant_message: str,
     ) -> None: ...
+
+    async def get_owner_context(
+        self,
+        *,
+        user_id: str,
+        thread_id: str,
+    ) -> str: ...
 
     async def close(self) -> None: ...
 
@@ -221,6 +234,31 @@ class ZepCloudShadowTransportV1:
             return_context=False,
         )
 
+    async def get_owner_context(
+        self,
+        *,
+        user_id: str,
+        thread_id: str,
+    ) -> str:
+        owner_threads = await self._client.user.get_threads(user_id=user_id)
+        matches = [
+            item
+            for item in owner_threads
+            if getattr(item, "thread_id", None) == thread_id
+            and getattr(item, "user_id", None) == user_id
+        ]
+        if len(matches) != 1:
+            raise ZepShadowOwnershipError("zep_thread_owner_mismatch")
+        response = await self._client.thread.get_user_context(
+            thread_id=thread_id,
+        )
+        context = getattr(response, "context", None)
+        if not isinstance(context, str):
+            raise ZepShadowConfigurationError("invalid_zep_context")
+        if len(context.encode("utf-8")) > _MAX_CONTEXT_BYTES:
+            raise ZepShadowConfigurationError("zep_context_too_large")
+        return context
+
     async def close(self) -> None:
         close = getattr(self._client, "close", None)
         if close is None:
@@ -235,7 +273,7 @@ def _default_transport_factory(api_key: str) -> ZepShadowTransportV1:
 
 
 class ZepShadowRuntimeV1:
-    """Schedules canary writes without exposing Zep output to responses."""
+    """Schedules Zep I/O without exposing retrieved text to responses."""
 
     def __init__(
         self,
@@ -252,6 +290,7 @@ class ZepShadowRuntimeV1:
         self._transport_factory = transport_factory
         self._logger = logger or logging.getLogger("uvicorn.error")
         self._transport: ZepShadowTransportV1 | None = None
+        self._transport_lock = asyncio.Lock()
         self._provision_lock = asyncio.Lock()
         self._provisioned_threads: set[tuple[str, str]] = set()
         self._tasks: set[asyncio.Task[None]] = set()
@@ -315,6 +354,93 @@ class ZepShadowRuntimeV1:
         task.add_done_callback(self._tasks.discard)
         return "scheduled"
 
+    def dispatch_retrieval(
+        self,
+        *,
+        owner_user_id: UUID,
+        thread_id: UUID,
+    ) -> str:
+        if not isinstance(owner_user_id, UUID) or not isinstance(
+            thread_id, UUID
+        ):
+            return "excluded"
+        if not self._settings.enabled_for(owner_user_id):
+            return "disabled"
+        if not self._api_key:
+            self._logger.error("[zep_shadow] disabled code=api_key_missing")
+            return "misconfigured"
+
+        task = asyncio.create_task(
+            self._retrieve_context(
+                owner_user_id=owner_user_id,
+                thread_id=thread_id,
+            )
+        )
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return "scheduled"
+
+    async def _transport_client(self) -> ZepShadowTransportV1:
+        if self._transport is None:
+            async with self._transport_lock:
+                if self._transport is None:
+                    self._transport = self._transport_factory(self._api_key)
+        return self._transport
+
+    async def _retrieve_context(
+        self,
+        *,
+        owner_user_id: UUID,
+        thread_id: UUID,
+    ) -> None:
+        owner_hash = _sha256_identifier(owner_user_id)
+        thread_hash = _sha256_identifier(thread_id)
+        started_ns = time.monotonic_ns()
+        try:
+            context = await asyncio.wait_for(
+                self._retrieve_context_bounded(
+                    owner_user_id=owner_user_id,
+                    thread_id=thread_id,
+                ),
+                timeout=self._settings.timeout_seconds,
+            )
+            context_bytes = context.encode("utf-8")
+            context_sha256 = hashlib.sha256(context_bytes).hexdigest()
+            latency_ms = max(
+                0,
+                round((time.monotonic_ns() - started_ns) / 1_000_000),
+            )
+            self._logger.info(
+                "[zep_shadow] retrieval_succeeded owner_sha256=%s "
+                "thread_sha256=%s context_sha256=%s context_bytes=%s "
+                "latency_ms=%s prompt_bound=false",
+                owner_hash,
+                thread_hash,
+                context_sha256,
+                len(context_bytes),
+                latency_ms,
+            )
+        except Exception as error:
+            self._logger.error(
+                "[zep_shadow] retrieval_failed owner_sha256=%s "
+                "thread_sha256=%s error_type=%s prompt_bound=false",
+                owner_hash,
+                thread_hash,
+                type(error).__name__,
+            )
+
+    async def _retrieve_context_bounded(
+        self,
+        *,
+        owner_user_id: UUID,
+        thread_id: UUID,
+    ) -> str:
+        transport = await self._transport_client()
+        return await transport.get_owner_context(
+            user_id=zep_user_id_v1(owner_user_id),
+            thread_id=zep_thread_id_v1(thread_id),
+        )
+
     async def _write_turn(
         self,
         *,
@@ -363,20 +489,19 @@ class ZepShadowRuntimeV1:
         user_message: str,
         assistant_message: str,
     ) -> None:
-        if self._transport is None:
-            self._transport = self._transport_factory(self._api_key)
+        transport = await self._transport_client()
         user_id = zep_user_id_v1(owner_user_id)
         zep_thread_id = zep_thread_id_v1(thread_id)
         provision_key = (user_id, zep_thread_id)
         if provision_key not in self._provisioned_threads:
             async with self._provision_lock:
                 if provision_key not in self._provisioned_threads:
-                    await self._transport.ensure_user_and_thread(
+                    await transport.ensure_user_and_thread(
                         user_id=user_id,
                         thread_id=zep_thread_id,
                     )
                     self._provisioned_threads.add(provision_key)
-        await self._transport.add_turn(
+        await transport.add_turn(
             thread_id=zep_thread_id,
             user_message_id=user_message_id,
             assistant_message_id=assistant_message_id,
@@ -408,6 +533,7 @@ __all__ = [
     "ZEP_SHADOW_OWNER_IDS_ENV",
     "ZEP_SHADOW_TIMEOUT_SECONDS_ENV",
     "ZepShadowConfigurationError",
+    "ZepShadowOwnershipError",
     "ZepShadowRuntimeV1",
     "ZepShadowSettingsV1",
     "zep_thread_id_v1",

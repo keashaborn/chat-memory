@@ -403,6 +403,12 @@ async def resse_response_query(
     ):
         raise HTTPException(status_code=400, detail="invalid_message_context")
 
+    if tentative_successor_eligible:
+        ZEP_SHADOW_RUNTIME.dispatch_retrieval(
+            owner_user_id=owner,
+            thread_id=thread_id,
+        )
+
     requires_ingest_coordination = (
         tentative_successor_eligible
         and CHAT_MEMORY_LIFECYCLE_RUNTIME.requires_ingest_coordination(
