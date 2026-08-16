@@ -13,6 +13,7 @@ dependencies = [
   "fastapi==0.120.4",
   "PyJWT==2.13.0",
   "uvicorn==0.38.0",
+  "zep-cloud==3.25.0",
 ]
 
 [project.scripts]

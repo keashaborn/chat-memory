@@ -1,0 +1,239 @@
+from __future__ import annotations
+
+import asyncio
+import logging
+import unittest
+from pathlib import Path
+from uuid import UUID
+
+from rag_engine.zep_shadow_memory_v1 import (
+    ZEP_SHADOW_MODE_CANARY,
+    ZEP_SHADOW_MODE_OFF,
+    ZepShadowConfigurationError,
+    ZepShadowRuntimeV1,
+    ZepShadowSettingsV1,
+    zep_session_id_v1,
+    zep_user_id_v1,
+)
+
+
+OWNER = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+OTHER_OWNER = UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+THREAD = UUID("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class FakeTransport:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.provisioned: list[tuple[str, str]] = []
+        self.turns: list[tuple[str, str, str]] = []
+        self.closed = False
+
+    async def ensure_user_and_session(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+    ) -> None:
+        if self.fail:
+            raise RuntimeError("synthetic transport failure")
+        self.provisioned.append((user_id, session_id))
+
+    async def add_turn(
+        self,
+        *,
+        session_id: str,
+        user_message: str,
+        assistant_message: str,
+    ) -> None:
+        if self.fail:
+            raise RuntimeError("synthetic transport failure")
+        self.turns.append((session_id, user_message, assistant_message))
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+def canary_settings() -> ZepShadowSettingsV1:
+    return ZepShadowSettingsV1(
+        mode=ZEP_SHADOW_MODE_CANARY,
+        owner_user_ids=frozenset((OWNER,)),
+        timeout_seconds=1.0,
+    )
+
+
+class ZepShadowSettingsTests(unittest.TestCase):
+    def test_defaults_off(self) -> None:
+        settings = ZepShadowSettingsV1.from_environment({})
+        self.assertEqual(settings.mode, ZEP_SHADOW_MODE_OFF)
+        self.assertFalse(settings.enabled_for(OWNER))
+
+    def test_canary_requires_valid_owner_allowlist(self) -> None:
+        with self.assertRaisesRegex(
+            ZepShadowConfigurationError,
+            "zep_shadow_canary_owner_ids_required",
+        ):
+            ZepShadowSettingsV1.from_environment(
+                {"ZEP_SHADOW_MODE": "canary"}
+            )
+        with self.assertRaisesRegex(
+            ZepShadowConfigurationError,
+            "invalid_zep_shadow_owner_ids",
+        ):
+            ZepShadowSettingsV1.from_environment(
+                {
+                    "ZEP_SHADOW_MODE": "canary",
+                    "ZEP_SHADOW_OWNER_IDS": "not-a-uuid",
+                }
+            )
+
+    def test_canary_is_exact_owner_scoped(self) -> None:
+        settings = ZepShadowSettingsV1.from_environment(
+            {
+                "ZEP_SHADOW_MODE": "canary",
+                "ZEP_SHADOW_OWNER_IDS": str(OWNER),
+                "ZEP_SHADOW_TIMEOUT_SECONDS": "2.5",
+            }
+        )
+        self.assertTrue(settings.enabled_for(OWNER))
+        self.assertFalse(settings.enabled_for(OTHER_OWNER))
+        self.assertEqual(settings.timeout_seconds, 2.5)
+
+    def test_identifiers_are_stable_and_domain_separated(self) -> None:
+        self.assertEqual(zep_user_id_v1(OWNER), f"lifeswitch-user-{OWNER}")
+        self.assertEqual(
+            zep_session_id_v1(THREAD),
+            f"lifeswitch-thread-{THREAD}",
+        )
+
+    def test_route_uses_authenticated_owner_after_transcript_persistence(
+        self,
+    ) -> None:
+        route = (ROOT / "rag_engine/resse_response_router.py").read_text()
+        dispatch = route.index("ZEP_SHADOW_RUNTIME.dispatch_turn(")
+        self.assertLess(
+            route.index("await persist_finalized_response_v3("),
+            dispatch,
+        )
+        self.assertLess(
+            route.index("await persist_finalized_response_v1("),
+            dispatch,
+        )
+        dispatch_block = route[dispatch : dispatch + 400]
+        self.assertIn("owner_user_id=owner", dispatch_block)
+        self.assertNotIn("owner_user_id=payload.user_id", dispatch_block)
+
+    def test_adapter_has_no_zep_retrieval_path(self) -> None:
+        adapter = (ROOT / "rag_engine/zep_shadow_memory_v1.py").read_text()
+        self.assertNotIn(".memory.get(", adapter)
+
+
+class ZepShadowRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_off_mode_never_constructs_transport(self) -> None:
+        calls = []
+
+        def factory(api_key: str) -> FakeTransport:
+            calls.append(api_key)
+            return FakeTransport()
+
+        runtime = ZepShadowRuntimeV1(
+            settings=ZepShadowSettingsV1(
+                mode=ZEP_SHADOW_MODE_OFF,
+                owner_user_ids=frozenset(),
+                timeout_seconds=1.0,
+            ),
+            api_key="present",
+            transport_factory=factory,
+        )
+        outcome = runtime.dispatch_turn(
+            owner_user_id=OWNER,
+            thread_id=THREAD,
+            user_message="user text",
+            assistant_message="assistant text",
+        )
+        await runtime.close()
+        self.assertEqual(outcome, "disabled")
+        self.assertEqual(calls, [])
+
+    async def test_canary_writes_pair_after_dispatch(self) -> None:
+        transport = FakeTransport()
+        runtime = ZepShadowRuntimeV1(
+            settings=canary_settings(),
+            api_key="test-key",
+            transport_factory=lambda _: transport,
+        )
+        outcome = runtime.dispatch_turn(
+            owner_user_id=OWNER,
+            thread_id=THREAD,
+            user_message="user text",
+            assistant_message="assistant text",
+        )
+        await runtime.close()
+        self.assertEqual(outcome, "scheduled")
+        self.assertEqual(
+            transport.provisioned,
+            [(zep_user_id_v1(OWNER), zep_session_id_v1(THREAD))],
+        )
+        self.assertEqual(
+            transport.turns,
+            [
+                (
+                    zep_session_id_v1(THREAD),
+                    "user text",
+                    "assistant text",
+                )
+            ],
+        )
+        self.assertTrue(transport.closed)
+
+    async def test_missing_key_and_foreign_owner_fail_closed(self) -> None:
+        runtime = ZepShadowRuntimeV1(
+            settings=canary_settings(),
+            api_key="",
+            transport_factory=lambda _: FakeTransport(),
+            logger=logging.getLogger("test.zep-shadow"),
+        )
+        self.assertEqual(
+            runtime.dispatch_turn(
+                owner_user_id=OWNER,
+                thread_id=THREAD,
+                user_message="user text",
+                assistant_message="assistant text",
+            ),
+            "misconfigured",
+        )
+        self.assertEqual(
+            runtime.dispatch_turn(
+                owner_user_id=OTHER_OWNER,
+                thread_id=THREAD,
+                user_message="user text",
+                assistant_message="assistant text",
+            ),
+            "disabled",
+        )
+        await runtime.close()
+
+    async def test_transport_failure_never_escapes_background_task(self) -> None:
+        transport = FakeTransport(fail=True)
+        runtime = ZepShadowRuntimeV1(
+            settings=canary_settings(),
+            api_key="test-key",
+            transport_factory=lambda _: transport,
+            logger=logging.getLogger("test.zep-shadow"),
+        )
+        self.assertEqual(
+            runtime.dispatch_turn(
+                owner_user_id=OWNER,
+                thread_id=THREAD,
+                user_message="user text",
+                assistant_message="assistant text",
+            ),
+            "scheduled",
+        )
+        await runtime.close()
+        self.assertTrue(transport.closed)
+
+
+if __name__ == "__main__":
+    unittest.main()

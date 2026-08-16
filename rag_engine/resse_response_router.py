@@ -98,6 +98,7 @@ from rag_engine.voice_language_v1 import (
     AUTO_VOICE_LANGUAGE,
     voice_language_from_request,
 )
+from rag_engine.zep_shadow_memory_v1 import ZepShadowRuntimeV1
 
 
 router = APIRouter()
@@ -111,6 +112,10 @@ NO_STORE_HEADERS = {
     "pragma": "no-cache",
     "expires": "0",
 }
+ZEP_SHADOW_RUNTIME = ZepShadowRuntimeV1.from_environment(
+    os.environ,
+    logger=logger,
+)
 
 
 SuccessorResponseProviderFactory = Callable[
@@ -207,7 +212,10 @@ async def close_lifeswitch_chat_pool_v1() -> None:
     try:
         await LIFESWITCH_CHAT_POOL.close()
     finally:
-        await SUCCESSOR_RESPONSE_RUNTIME.close()
+        try:
+            await SUCCESSOR_RESPONSE_RUNTIME.close()
+        finally:
+            await ZEP_SHADOW_RUNTIME.close()
 
 
 def apply_no_store_headers(response: Response) -> None:
@@ -669,6 +677,13 @@ async def resse_response_query(
                     request_id=request_id,
                     finalized=finalized,
                 )
+        if successor_eligible:
+            ZEP_SHADOW_RUNTIME.dispatch_turn(
+                owner_user_id=owner,
+                thread_id=thread_id,
+                user_message=payload.message,
+                assistant_message=finalized.assistant_text,
+            )
         persistence_ms = max(
             0,
             round((time.monotonic_ns() - persistence_started_ns) / 1_000_000),
