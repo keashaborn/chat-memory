@@ -78,8 +78,9 @@ CanonicalJsonUUID = Annotated[uuid.UUID, BeforeValidator(_canonical_json_uuid)]
 class ChatHistoryClearReq(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    scope: Literal["all", "recent", "thread"]
+    scope: Literal["all", "recent", "thread", "message_tail"]
     thread_id: Optional[CanonicalJsonUUID] = None
+    anchor_message_id: Optional[CanonicalJsonUUID] = None
     recent_window_seconds: Optional[int] = None
     confirmation: str = Field(min_length=1, max_length=64)
 
@@ -89,21 +90,37 @@ class ChatHistoryClearReq(BaseModel):
             "all": "CLEAR CHAT HISTORY",
             "recent": "CLEAR RECENT CHAT HISTORY",
             "thread": "CLEAR CHAT",
+            "message_tail": "CLEAR MESSAGE TAIL",
         }[self.scope]
         if self.confirmation != expected_confirmation:
             raise ValueError("invalid confirmation")
         if self.scope == "thread":
-            if self.thread_id is None or self.recent_window_seconds is not None:
+            if (
+                self.thread_id is None
+                or self.anchor_message_id is not None
+                or self.recent_window_seconds is not None
+            ):
                 raise ValueError("invalid thread clear shape")
+        elif self.scope == "message_tail":
+            if (
+                self.thread_id is None
+                or self.anchor_message_id is None
+                or self.recent_window_seconds is not None
+            ):
+                raise ValueError("invalid message tail clear shape")
         elif self.scope == "recent":
-            if self.thread_id is not None or self.recent_window_seconds not in {
-                3_600,
-                86_400,
-                604_800,
-                2_592_000,
-            }:
+            if (
+                self.thread_id is not None
+                or self.anchor_message_id is not None
+                or self.recent_window_seconds
+                not in {3_600, 86_400, 604_800, 2_592_000}
+            ):
                 raise ValueError("invalid recent clear shape")
-        elif self.thread_id is not None or self.recent_window_seconds is not None:
+        elif (
+            self.thread_id is not None
+            or self.anchor_message_id is not None
+            or self.recent_window_seconds is not None
+        ):
             raise ValueError("invalid all clear shape")
         return self
 
@@ -1640,7 +1657,11 @@ async def chat_history_clear(body: ChatHistoryClearReq, req: Request):
     if owner_user_id is None:
         return _actor_missing_response()
     authorization = (req.headers.get("authorization") or "").strip()
-    operation_id = uuid.uuid4()
+    operation_id = (
+        body.anchor_message_id
+        if body.scope == "message_tail"
+        else uuid.uuid4()
+    )
 
     conn = await asyncpg.connect(DSN)
     try:

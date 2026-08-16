@@ -36,7 +36,7 @@ class ChatHistoryClearError(RuntimeError):
 @dataclass(frozen=True, slots=True)
 class ChatHistoryClearResultV1:
     operation_id: UUID
-    scope: Literal["all", "recent", "thread"]
+    scope: Literal["all", "recent", "thread", "message_tail"]
     deleted_message_count: int
     deleted_thread_count: int
     deleted_outbox_count: int
@@ -89,7 +89,7 @@ async def clear_chat_history_v1(
     owner_user_id: UUID,
     authorization: str,
     operation_id: UUID,
-    scope: Literal["all", "recent", "thread"],
+    scope: Literal["all", "recent", "thread", "message_tail"],
     thread_id: UUID | None = None,
     recent_window_seconds: int | None = None,
 ) -> ChatHistoryClearResultV1:
@@ -97,9 +97,9 @@ async def clear_chat_history_v1(
         raise ChatHistoryClearError("chat_history_unavailable", status_code=503)
     if not isinstance(owner_user_id, UUID) or not isinstance(operation_id, UUID):
         raise ChatHistoryClearError("invalid_chat_history_request", status_code=400)
-    if scope not in {"all", "recent", "thread"}:
+    if scope not in {"all", "recent", "thread", "message_tail"}:
         raise ChatHistoryClearError("invalid_chat_history_request", status_code=400)
-    if scope == "thread":
+    if scope in {"thread", "message_tail"}:
         if not isinstance(thread_id, UUID) or recent_window_seconds is not None:
             raise ChatHistoryClearError("invalid_chat_history_request", status_code=400)
     elif scope == "recent":
@@ -125,14 +125,22 @@ async def clear_chat_history_v1(
                 "'app.auth_context_sha256',$1::text,true)",
                 auth_sha256,
             )
-            value = await connection.fetchrow(
-                "SELECT * FROM chat_history_private.clear_history("
-                "$1::uuid,$2::text,$3::uuid,$4::integer)",
-                operation_id,
-                scope,
-                thread_id,
-                recent_window_seconds,
-            )
+            if scope == "message_tail":
+                value = await connection.fetchrow(
+                    "SELECT * FROM chat_history_private.clear_message_tail("
+                    "$1::uuid,$2::uuid)",
+                    operation_id,
+                    thread_id,
+                )
+            else:
+                value = await connection.fetchrow(
+                    "SELECT * FROM chat_history_private.clear_history("
+                    "$1::uuid,$2::text,$3::uuid,$4::integer)",
+                    operation_id,
+                    scope,
+                    thread_id,
+                    recent_window_seconds,
+                )
     except ChatHistoryClearError:
         raise
     except Exception as error:
@@ -144,6 +152,10 @@ async def clear_chat_history_v1(
             ) from None
         if message == "chat history thread is absent":
             raise ChatHistoryClearError("thread_not_found", status_code=404) from None
+        if message == "chat history message is absent":
+            raise ChatHistoryClearError(
+                "message_not_found", status_code=404
+            ) from None
         if message == "invalid chat history clear request":
             raise ChatHistoryClearError(
                 "invalid_chat_history_request",

@@ -84,6 +84,36 @@ class ChatHistoryClearTests(unittest.IsolatedAsyncioTestCase):
                 recent_window_seconds=3_600,
             )
 
+    async def test_message_tail_uses_anchor_as_operation_id(self) -> None:
+        connection = FakeConnection(
+            {
+                **FakeConnection().row,
+                "operation_id": OPERATION,
+                "scope": "message_tail",
+                "deleted_message_count": 2,
+                "deleted_thread_count": 0,
+            }
+        )
+        result = await clear_chat_history_v1(
+            connection,
+            owner_user_id=OWNER,
+            authorization=AUTHORIZATION,
+            operation_id=OPERATION,
+            scope="message_tail",
+            thread_id=THREAD,
+        )
+        self.assertEqual(
+            connection.fetchrow_calls[0][1],
+            (OPERATION, THREAD),
+        )
+        self.assertIn(
+            "chat_history_private.clear_message_tail",
+            connection.fetchrow_calls[0][0],
+        )
+        self.assertEqual(result.scope, "message_tail")
+        self.assertTrue(result.as_dict()["memory_retained"])
+        self.assertFalse(result.as_dict()["zep_called"])
+
     async def test_authorization_must_be_exact_bearer_jwt(self) -> None:
         with self.assertRaisesRegex(ChatHistoryClearError, "unauthorized"):
             authorization_manifest_sha256("Bearer not-a-jwt")
@@ -107,6 +137,23 @@ class ChatHistoryClearTests(unittest.IsolatedAsyncioTestCase):
             "zep_",
         ):
             self.assertNotIn(forbidden, migration.casefold())
+
+        message_tail = (
+            ROOT / "chat-history-migrations/0002_message_tail/forward.pgsql"
+        ).read_text()
+        self.assertIn("clear_message_tail", message_tail)
+        self.assertIn("'message_tail'::text", message_tail)
+        for forbidden in (
+            "memory.claim",
+            "memory.evidence",
+            "memory.entity",
+            "lifeswitch_nutrition",
+            "lifeswitch_training",
+            "lifeswitch_measurement",
+            "api.getzep.com",
+            "zep_",
+        ):
+            self.assertNotIn(forbidden, message_tail.casefold())
 
 
 if __name__ == "__main__":
