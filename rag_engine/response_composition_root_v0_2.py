@@ -157,7 +157,7 @@ class GovernedMemoryAssemblyV1(_StrictFrozenModel):
             raise ValueError("Memory source status differs from selected context")
         if self.successor_memory_context_block is not None and (
             self.successor_memory_context_block.block_id
-            != "governed_memory_successor_v1"
+            not in {"governed_memory_successor_v1", "zep_memory_v1"}
         ):
             raise ValueError("invalid successor Memory context")
         return self

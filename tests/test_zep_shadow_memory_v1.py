@@ -177,13 +177,14 @@ class ZepShadowSettingsTests(unittest.TestCase):
         self.assertIn("user_message_id=payload.message_id", dispatch_block)
         self.assertIn("assistant_message_id=finalized.answer_id", dispatch_block)
 
-    def test_retrieval_is_owner_bound_and_has_no_prompt_binding(self) -> None:
+    def test_shadow_and_prompt_retrieval_are_separate_owner_bound_paths(self) -> None:
         adapter = (ROOT / "rag_engine/zep_shadow_memory_v1.py").read_text()
         route = (ROOT / "rag_engine/resse_response_router.py").read_text()
         self.assertIn("get_user_context", adapter)
         self.assertIn("user.get_threads", adapter)
         self.assertNotIn(".graph.search(", adapter)
         self.assertIn("prompt_bound=false", adapter)
+        self.assertIn("prompt_bound=true", adapter)
         retrieval = route.index("ZEP_SHADOW_RUNTIME.dispatch_retrieval(")
         self.assertLess(route.index("owner = actor_context.owner_user_id"), retrieval)
         self.assertLess(retrieval, route.index("openai_client = get_openai_client()"))
@@ -193,6 +194,8 @@ class ZepShadowSettingsTests(unittest.TestCase):
         command_start = route.index("command = AuthenticatedResponseCommandV0_2(")
         command_block = route[command_start : command_start + 1_200]
         self.assertNotIn("zep", command_block.casefold())
+        self.assertIn("ZepMemoryChatProviderV1", route)
+        self.assertIn("ZEP_PROMPT_SETTINGS.enabled_for(owner)", route)
 
 
 class ZepCloudShadowTransportTests(unittest.IsolatedAsyncioTestCase):
@@ -310,6 +313,60 @@ class ZepCloudShadowTransportTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ZepShadowRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_prompt_retrieval_provisions_and_returns_owner_context(
+        self,
+    ) -> None:
+        transport = FakeTransport(context="prompt context")
+        runtime = ZepShadowRuntimeV1(
+            settings=ZepShadowSettingsV1(
+                mode=ZEP_SHADOW_MODE_OFF,
+                owner_user_ids=frozenset(),
+                timeout_seconds=1.0,
+            ),
+            api_key="test-key",
+            transport_factory=lambda _: transport,
+        )
+        context = await runtime.retrieve_prompt_context(
+            owner_user_id=OWNER,
+            thread_id=THREAD,
+        )
+        self.assertEqual(context, "prompt context")
+        self.assertEqual(
+            transport.provisioned,
+            [(zep_user_id_v1(OWNER), zep_thread_id_v1(THREAD))],
+        )
+        self.assertEqual(
+            transport.context_requests,
+            [(zep_user_id_v1(OWNER), zep_thread_id_v1(THREAD))],
+        )
+        await runtime.close()
+
+    async def test_prompt_retrieval_failure_is_explicit_and_content_free(
+        self,
+    ) -> None:
+        transport = FakeTransport(fail=True)
+        logger = logging.getLogger("test.zep-prompt-retrieval-failure")
+        runtime = ZepShadowRuntimeV1(
+            settings=canary_settings(),
+            api_key="test-key",
+            transport_factory=lambda _: transport,
+            logger=logger,
+        )
+        with self.assertLogs(logger, level="ERROR") as captured:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "synthetic transport failure",
+            ):
+                await runtime.retrieve_prompt_context(
+                    owner_user_id=OWNER,
+                    thread_id=THREAD,
+                )
+        rendered = "\n".join(captured.output)
+        self.assertIn("retrieval_failed", rendered)
+        self.assertIn("prompt_bound=true", rendered)
+        self.assertNotIn("synthetic transport failure", rendered)
+        await runtime.close()
+
     async def test_on_mode_rejects_non_uuid_authority_before_transport(self) -> None:
         calls = []
 

@@ -99,6 +99,10 @@ from rag_engine.voice_language_v1 import (
     voice_language_from_request,
 )
 from rag_engine.zep_shadow_memory_v1 import ZepShadowRuntimeV1
+from rag_engine.zep_memory_provider_v1 import (
+    ZepMemoryChatProviderV1,
+    ZepPromptSettingsV1,
+)
 
 
 router = APIRouter()
@@ -116,6 +120,7 @@ ZEP_SHADOW_RUNTIME = ZepShadowRuntimeV1.from_environment(
     os.environ,
     logger=logger,
 )
+ZEP_PROMPT_SETTINGS = ZepPromptSettingsV1.from_environment(os.environ)
 
 
 SuccessorResponseProviderFactory = Callable[
@@ -403,7 +408,11 @@ async def resse_response_query(
     ):
         raise HTTPException(status_code=400, detail="invalid_message_context")
 
-    if tentative_successor_eligible:
+    zep_prompt_enabled = (
+        tentative_successor_eligible
+        and ZEP_PROMPT_SETTINGS.enabled_for(owner)
+    )
+    if tentative_successor_eligible and not zep_prompt_enabled:
         ZEP_SHADOW_RUNTIME.dispatch_retrieval(
             owner_user_id=owner,
             thread_id=thread_id,
@@ -555,36 +564,45 @@ async def resse_response_query(
         successor_eligible = (
             payload.thread_id is not None and exclusion_reason is None
         )
+        zep_memory_provider = None
         try:
-            memory_provider, successor_memory_lifecycle = (
-                choose_response_memory_provider(
-                    mode=response_memory_mode,
-                    successor_factory=(
-                        (
-                            lambda: SuccessorMemoryChatAdapterV1(
-                                SUCCESSOR_RESPONSE_PROVIDER_FACTORY(
-                                    SuccessorResponseActorBinding(
-                                        owner_user_id=owner,
-                                        session_id=actor_context.session_id,
-                                        authentication_manifest_sha256=(
-                                            actor_context.authentication_manifest_sha256
-                                        ),
-                                        request_id=request_id,
-                                        thread_id=thread_id,
-                                        eligible=True,
+            if successor_eligible and zep_prompt_enabled:
+                zep_memory_provider = ZepMemoryChatProviderV1(
+                    ZEP_SHADOW_RUNTIME,
+                    logger=logger,
+                )
+                memory_provider = zep_memory_provider
+                successor_memory_lifecycle = None
+            else:
+                memory_provider, successor_memory_lifecycle = (
+                    choose_response_memory_provider(
+                        mode=response_memory_mode,
+                        successor_factory=(
+                            (
+                                lambda: SuccessorMemoryChatAdapterV1(
+                                    SUCCESSOR_RESPONSE_PROVIDER_FACTORY(
+                                        SuccessorResponseActorBinding(
+                                            owner_user_id=owner,
+                                            session_id=actor_context.session_id,
+                                            authentication_manifest_sha256=(
+                                                actor_context.authentication_manifest_sha256
+                                            ),
+                                            request_id=request_id,
+                                            thread_id=thread_id,
+                                            eligible=True,
+                                        )
                                     )
                                 )
                             )
-                        )
-                        if successor_eligible
-                        else lambda: SuccessorMemoryChatAdapterV1(
-                            _inactive_successor_response_provider(
-                                exclusion_reason
+                            if successor_eligible
+                            else lambda: SuccessorMemoryChatAdapterV1(
+                                _inactive_successor_response_provider(
+                                    exclusion_reason
+                                )
                             )
-                        )
-                    ),
+                        ),
+                    )
                 )
-            )
         except SuccessorResponseConfigurationError:
             raise _no_store_http_exception(
                 503,
@@ -646,10 +664,21 @@ async def resse_response_query(
                 timeout=RESPONSE_QUERY_DEADLINE_SECONDS,
             )
         finalized = execution.finalized
-        memory_provenance = response_memory_provenance_for_mode(
-            mode=response_memory_mode,
-            successor_provenance=execution.successor_memory_provenance,
-        )
+        if zep_memory_provider is not None:
+            memory_provenance = zep_memory_provider.build_answer_provenance(
+                answer_id=finalized.answer_id,
+                prompt_sha256=(
+                    execution.trusted_plan.assembled_prompt.manifest.assembly_sha256
+                ),
+                provider_request_sha256=(
+                    execution.provider_response.provider_request_sha256
+                ),
+            ).model_dump(mode="json")
+        else:
+            memory_provenance = response_memory_provenance_for_mode(
+                mode=response_memory_mode,
+                successor_provenance=execution.successor_memory_provenance,
+            )
         persistence_started_ns = time.monotonic_ns()
         if lifeswitch_enabled:
             await persist_openai_chat_usage_v2(

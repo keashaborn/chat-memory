@@ -229,6 +229,7 @@ class PromptReferenceContextBlockV1(_StrictFrozenModel):
     contract_version: Literal[CONTEXT_BLOCK_VERSION] = CONTEXT_BLOCK_VERSION
     block_id: Literal[
         "governed_memory_successor_v1",
+        "zep_memory_v1",
         "chat_attachments_v1",
         "relational_monism_v0_4",
         "prior_web_provenance_v1",
@@ -266,12 +267,18 @@ class PromptReferenceContextBlockV1(_StrictFrozenModel):
         if self.estimated_tokens != _tokens(self.content):
             raise ValueError("context token count mismatch")
         expected_blocks = {
-            ContextKind.MEMORY: "governed_memory_successor_v1",
             ContextKind.ATTACHMENT: "chat_attachments_v1",
             ContextKind.RELATIONAL_MONISM: "relational_monism_v0_4",
             ContextKind.WEB_PROVENANCE: "prior_web_provenance_v1",
-        }[self.kind]
-        if self.block_id != expected_blocks:
+        }
+        if self.kind is ContextKind.MEMORY:
+            valid_block = self.block_id in {
+                "governed_memory_successor_v1",
+                "zep_memory_v1",
+            }
+        else:
+            valid_block = self.block_id == expected_blocks[self.kind]
+        if not valid_block:
             raise ValueError("context block id differs from kind")
         if self.kind is ContextKind.RELATIONAL_MONISM and self.fragments:
             raise ValueError("RM context does not accept generic fragments")
@@ -306,6 +313,7 @@ PromptAssemblyRequestV1.model_rebuild()
 class PromptContextManifestEntryV1(_StrictFrozenModel):
     block_id: Literal[
         "governed_memory_successor_v1",
+        "zep_memory_v1",
         "chat_attachments_v1",
         "relational_monism_v0_4",
         "prior_web_provenance_v1",
@@ -860,7 +868,7 @@ def _validate_source_authority_chain(
         if (
             successor_memory_context_block.kind is not ContextKind.MEMORY
             or successor_memory_context_block.block_id
-            != "governed_memory_successor_v1"
+            not in {"governed_memory_successor_v1", "zep_memory_v1"}
             or successor_memory_context_block.request_id_sha256
             != _text_sha256(policy_input.request_id)
             or successor_memory_context_block.query_sha256
@@ -935,7 +943,8 @@ def _validate_context_shape(
         raise ValueError("context blocks must be unique and canonically ordered")
     has_memory = ContextKind.MEMORY in kinds
     successor_memory_block = any(
-        item.block_id == "governed_memory_successor_v1" for item in blocks
+        item.block_id in {"governed_memory_successor_v1", "zep_memory_v1"}
+        for item in blocks
     )
     has_attachment = ContextKind.ATTACHMENT in kinds
     has_fm = ContextKind.RELATIONAL_MONISM in kinds
