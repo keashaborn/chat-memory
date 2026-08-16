@@ -7,8 +7,9 @@ import hashlib
 import inspect
 import logging
 import time
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Mapping, Protocol
+from typing import AsyncIterator, Awaitable, Callable, Mapping, Protocol
 from uuid import UUID
 
 
@@ -60,6 +61,8 @@ class ZepShadowTransportV1(Protocol):
         user_id: str,
         thread_id: str,
     ) -> str: ...
+
+    async def delete_owner(self, *, user_id: str) -> None: ...
 
     async def close(self) -> None: ...
 
@@ -259,6 +262,20 @@ class ZepCloudShadowTransportV1:
             raise ZepShadowConfigurationError("zep_context_too_large")
         return context
 
+    async def delete_owner(self, *, user_id: str) -> None:
+        try:
+            await self._client.user.delete(user_id=user_id)
+        except Exception as error:
+            if _status_code(error) != 404:
+                raise
+        try:
+            await self._client.user.get(user_id=user_id)
+        except Exception as error:
+            if _status_code(error) == 404:
+                return
+            raise
+        raise ZepShadowConfigurationError("zep_owner_delete_unverified")
+
     async def close(self) -> None:
         close = getattr(self._client, "close", None)
         if close is None:
@@ -292,8 +309,11 @@ class ZepShadowRuntimeV1:
         self._transport: ZepShadowTransportV1 | None = None
         self._transport_lock = asyncio.Lock()
         self._provision_lock = asyncio.Lock()
+        self._deletion_lock = asyncio.Lock()
         self._provisioned_threads: set[tuple[str, str]] = set()
         self._tasks: set[asyncio.Task[None]] = set()
+        self._owner_tasks: dict[UUID, set[asyncio.Task[None]]] = {}
+        self._blocked_owners: set[UUID] = set()
 
     @classmethod
     def from_environment(
@@ -326,6 +346,8 @@ class ZepShadowRuntimeV1:
             thread_id, UUID
         ):
             return "excluded"
+        if owner_user_id in self._blocked_owners:
+            return "blocked"
         if not self._settings.enabled_for(owner_user_id):
             return "disabled"
         if not self._api_key:
@@ -340,7 +362,8 @@ class ZepShadowRuntimeV1:
         ):
             return "excluded"
 
-        task = asyncio.create_task(
+        self._schedule_owner_task(
+            owner_user_id,
             self._write_turn(
                 owner_user_id=owner_user_id,
                 thread_id=thread_id,
@@ -348,10 +371,8 @@ class ZepShadowRuntimeV1:
                 assistant_message_id=assistant_message_id,
                 user_message=user_message,
                 assistant_message=assistant_message,
-            )
+            ),
         )
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
         return "scheduled"
 
     def dispatch_retrieval(
@@ -364,21 +385,95 @@ class ZepShadowRuntimeV1:
             thread_id, UUID
         ):
             return "excluded"
+        if owner_user_id in self._blocked_owners:
+            return "blocked"
         if not self._settings.enabled_for(owner_user_id):
             return "disabled"
         if not self._api_key:
             self._logger.error("[zep_shadow] disabled code=api_key_missing")
             return "misconfigured"
 
-        task = asyncio.create_task(
+        self._schedule_owner_task(
+            owner_user_id,
             self._retrieve_context(
                 owner_user_id=owner_user_id,
                 thread_id=thread_id,
-            )
+            ),
         )
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
         return "scheduled"
+
+    def _schedule_owner_task(
+        self,
+        owner_user_id: UUID,
+        awaitable: Awaitable[None],
+    ) -> None:
+        task = asyncio.create_task(awaitable)
+        self._tasks.add(task)
+        owner_tasks = self._owner_tasks.setdefault(owner_user_id, set())
+        owner_tasks.add(task)
+
+        def discard(completed: asyncio.Task[None]) -> None:
+            self._tasks.discard(completed)
+            pending = self._owner_tasks.get(owner_user_id)
+            if pending is None:
+                return
+            pending.discard(completed)
+            if not pending:
+                self._owner_tasks.pop(owner_user_id, None)
+
+        task.add_done_callback(discard)
+
+    async def _drain_owner_tasks(self, owner_user_id: UUID) -> None:
+        pending = tuple(self._owner_tasks.get(owner_user_id, ()))
+        if not pending:
+            return
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*pending, return_exceptions=True),
+                timeout=self._settings.timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+
+    @asynccontextmanager
+    async def owner_erasure_barrier(
+        self,
+        owner_user_id: UUID,
+    ) -> AsyncIterator[None]:
+        if not isinstance(owner_user_id, UUID):
+            raise ZepShadowConfigurationError("invalid_zep_deletion_owner")
+        if not self._api_key:
+            raise ZepShadowConfigurationError("zep_api_key_required")
+        async with self._deletion_lock:
+            self._blocked_owners.add(owner_user_id)
+            try:
+                await self._drain_owner_tasks(owner_user_id)
+                yield
+            finally:
+                self._blocked_owners.discard(owner_user_id)
+
+    async def delete_owner_memory(self, owner_user_id: UUID) -> None:
+        if not isinstance(owner_user_id, UUID):
+            raise ZepShadowConfigurationError("invalid_zep_deletion_owner")
+        if owner_user_id not in self._blocked_owners:
+            raise ZepShadowConfigurationError("zep_erasure_barrier_required")
+        transport = await self._transport_client()
+        await asyncio.wait_for(
+            transport.delete_owner(user_id=zep_user_id_v1(owner_user_id)),
+            timeout=self._settings.timeout_seconds,
+        )
+        zep_user_id = zep_user_id_v1(owner_user_id)
+        self._provisioned_threads = {
+            value
+            for value in self._provisioned_threads
+            if value[0] != zep_user_id
+        }
+        self._logger.info(
+            "[zep_shadow] owner_delete_succeeded owner_sha256=%s",
+            _sha256_identifier(owner_user_id),
+        )
 
     async def _transport_client(self) -> ZepShadowTransportV1:
         if self._transport is None:

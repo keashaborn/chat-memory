@@ -42,6 +42,7 @@ class FakeTransport:
         self.provisioned: list[tuple[str, str]] = []
         self.turns: list[tuple[str, UUID, UUID, str, str]] = []
         self.context_requests: list[tuple[str, str]] = []
+        self.deleted_users: list[str] = []
         self.closed = False
 
     async def ensure_user_and_thread(
@@ -85,6 +86,11 @@ class FakeTransport:
             raise RuntimeError("synthetic transport failure")
         self.context_requests.append((user_id, thread_id))
         return self.context
+
+    async def delete_owner(self, *, user_id: str) -> None:
+        if self.fail:
+            raise RuntimeError("synthetic transport failure")
+        self.deleted_users.append(user_id)
 
     async def close(self) -> None:
         self.closed = True
@@ -273,6 +279,34 @@ class ZepCloudShadowTransportTests(unittest.IsolatedAsyncioTestCase):
                         user_id=user_id,
                         thread_id=thread_id,
                     )
+
+    async def test_owner_delete_is_verified_and_idempotent(self) -> None:
+        class NotFoundError(RuntimeError):
+            status_code = 404
+
+        user = SimpleNamespace(
+            delete=AsyncMock(return_value=SimpleNamespace(message="ok")),
+            get=AsyncMock(side_effect=NotFoundError()),
+        )
+        transport = object.__new__(ZepCloudShadowTransportV1)
+        transport._client = SimpleNamespace(user=user)
+        user_id = zep_user_id_v1(OWNER)
+        await transport.delete_owner(user_id=user_id)
+        user.delete.assert_awaited_once_with(user_id=user_id)
+        user.get.assert_awaited_once_with(user_id=user_id)
+
+    async def test_owner_delete_refuses_unverified_provider_result(self) -> None:
+        user = SimpleNamespace(
+            delete=AsyncMock(return_value=SimpleNamespace(message="ok")),
+            get=AsyncMock(return_value=SimpleNamespace(user_id="still-present")),
+        )
+        transport = object.__new__(ZepCloudShadowTransportV1)
+        transport._client = SimpleNamespace(user=user)
+        with self.assertRaisesRegex(
+            ZepShadowConfigurationError,
+            "zep_owner_delete_unverified",
+        ):
+            await transport.delete_owner(user_id=zep_user_id_v1(OWNER))
 
 
 class ZepShadowRuntimeTests(unittest.IsolatedAsyncioTestCase):
@@ -491,6 +525,110 @@ class ZepShadowRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("retrieval_failed", rendered)
         self.assertIn("prompt_bound=false", rendered)
         self.assertNotIn("synthetic transport failure", rendered)
+
+    async def test_owner_erasure_barrier_drains_and_blocks_owner_io(self) -> None:
+        transport = FakeTransport()
+        runtime = ZepShadowRuntimeV1(
+            settings=canary_settings(),
+            api_key="test-key",
+            transport_factory=lambda _: transport,
+        )
+        self.assertEqual(
+            runtime.dispatch_turn(
+                owner_user_id=OWNER,
+                thread_id=THREAD,
+                user_message_id=USER_MESSAGE,
+                assistant_message_id=ASSISTANT_MESSAGE,
+                user_message="user text",
+                assistant_message="assistant text",
+            ),
+            "scheduled",
+        )
+        async with runtime.owner_erasure_barrier(OWNER):
+            self.assertEqual(len(transport.turns), 1)
+            self.assertEqual(
+                runtime.dispatch_retrieval(
+                    owner_user_id=OWNER,
+                    thread_id=THREAD,
+                ),
+                "blocked",
+            )
+            self.assertEqual(
+                runtime.dispatch_turn(
+                    owner_user_id=OWNER,
+                    thread_id=THREAD,
+                    user_message_id=USER_MESSAGE,
+                    assistant_message_id=ASSISTANT_MESSAGE,
+                    user_message="user text",
+                    assistant_message="assistant text",
+                ),
+                "blocked",
+            )
+            await runtime.delete_owner_memory(OWNER)
+        self.assertEqual(transport.deleted_users, [zep_user_id_v1(OWNER)])
+        await runtime.close()
+
+    async def test_owner_deletion_is_not_disabled_with_shadow_io(self) -> None:
+        transport = FakeTransport()
+        runtime = ZepShadowRuntimeV1(
+            settings=ZepShadowSettingsV1(
+                mode=ZEP_SHADOW_MODE_OFF,
+                owner_user_ids=frozenset(),
+                timeout_seconds=1.0,
+            ),
+            api_key="test-key",
+            transport_factory=lambda _: transport,
+        )
+        async with runtime.owner_erasure_barrier(OWNER):
+            await runtime.delete_owner_memory(OWNER)
+        self.assertEqual(transport.deleted_users, [zep_user_id_v1(OWNER)])
+        await runtime.close()
+
+    async def test_owner_deletion_requires_barrier_and_key(self) -> None:
+        runtime = ZepShadowRuntimeV1(
+            settings=canary_settings(),
+            api_key="test-key",
+            transport_factory=lambda _: FakeTransport(),
+        )
+        with self.assertRaisesRegex(
+            ZepShadowConfigurationError,
+            "zep_erasure_barrier_required",
+        ):
+            await runtime.delete_owner_memory(OWNER)
+        await runtime.close()
+
+        missing_key = ZepShadowRuntimeV1(
+            settings=canary_settings(),
+            api_key="",
+            transport_factory=lambda _: FakeTransport(),
+        )
+        with self.assertRaisesRegex(
+            ZepShadowConfigurationError,
+            "zep_api_key_required",
+        ):
+            async with missing_key.owner_erasure_barrier(OWNER):
+                pass
+        await missing_key.close()
+
+    async def test_failed_owner_delete_unblocks_future_io(self) -> None:
+        transport = FakeTransport(fail=True)
+        runtime = ZepShadowRuntimeV1(
+            settings=canary_settings(),
+            api_key="test-key",
+            transport_factory=lambda _: transport,
+        )
+        with self.assertRaisesRegex(RuntimeError, "synthetic transport failure"):
+            async with runtime.owner_erasure_barrier(OWNER):
+                await runtime.delete_owner_memory(OWNER)
+        transport.fail = False
+        self.assertEqual(
+            runtime.dispatch_retrieval(
+                owner_user_id=OWNER,
+                thread_id=THREAD,
+            ),
+            "scheduled",
+        )
+        await runtime.close()
 
 
 if __name__ == "__main__":

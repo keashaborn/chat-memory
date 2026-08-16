@@ -19,7 +19,11 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from rag_engine.resse_response_router import router as resse_response_router
+from rag_engine.resse_response_router import (
+    ZEP_SHADOW_RUNTIME,
+    router as resse_response_router,
+)
+from rag_engine.zep_shadow_memory_v1 import ZepShadowConfigurationError
 from rag_engine.trusted_web_router import router as trusted_web_router
 from rag_engine.current_news_router import router as current_news_router
 from rag_engine.search_execution_router_v1 import (
@@ -1658,6 +1662,63 @@ async def chat_history_clear(body: ChatHistoryClearReq, req: Request):
     finally:
         await conn.close()
     return result.as_dict()
+
+
+@app.delete("/memory/chat-and-zep/clear")
+async def chat_and_zep_full_clear(req: Request):
+    actor = _actor_user_id(req)
+    owner_user_id = parse_uuid(actor or "")
+    if owner_user_id is None:
+        return _actor_missing_response()
+    authorization = (req.headers.get("authorization") or "").strip()
+    operation_id = uuid.uuid4()
+
+    try:
+        async with ZEP_SHADOW_RUNTIME.owner_erasure_barrier(owner_user_id):
+            conn = await asyncpg.connect(DSN)
+            try:
+                result = await clear_chat_history_v1(
+                    conn,
+                    owner_user_id=owner_user_id,
+                    authorization=authorization,
+                    operation_id=operation_id,
+                    scope="all",
+                )
+            finally:
+                await conn.close()
+            await ZEP_SHADOW_RUNTIME.delete_owner_memory(owner_user_id)
+    except ChatHistoryClearError as exc:
+        return JSONResponse(
+            {"status": "error", "detail": exc.code},
+            status_code=exc.status_code,
+            headers=SUCCESSOR_MEMORY_REFUSAL_HEADERS,
+        )
+    except (ZepShadowConfigurationError, asyncio.TimeoutError):
+        return JSONResponse(
+            {"status": "error", "detail": "zep_memory_deletion_unavailable"},
+            status_code=503,
+            headers=SUCCESSOR_MEMORY_REFUSAL_HEADERS,
+        )
+    except Exception:
+        return JSONResponse(
+            {"status": "error", "detail": "full_ai_data_deletion_unavailable"},
+            status_code=503,
+            headers=SUCCESSOR_MEMORY_REFUSAL_HEADERS,
+        )
+
+    return {
+        "contract_version": "chat_and_zep_full_clear_v1",
+        "status": "completed",
+        "operation_id": str(result.operation_id),
+        "deleted_message_count": result.deleted_message_count,
+        "deleted_thread_count": result.deleted_thread_count,
+        "deleted_outbox_count": result.deleted_outbox_count,
+        "chat_receipt_sha256": result.receipt_sha256,
+        "completed_at": result.completed_at,
+        "memory_retained": False,
+        "zep_called": True,
+        "zep_deleted": True,
+    }
 
 
 @app.get("/threads/{thread_id}/messages")
