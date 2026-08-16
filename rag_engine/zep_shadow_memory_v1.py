@@ -28,17 +28,17 @@ class ZepShadowConfigurationError(ValueError):
 
 
 class ZepShadowTransportV1(Protocol):
-    async def ensure_user_and_session(
+    async def ensure_user_and_thread(
         self,
         *,
         user_id: str,
-        session_id: str,
+        thread_id: str,
     ) -> None: ...
 
     async def add_turn(
         self,
         *,
-        session_id: str,
+        thread_id: str,
         user_message: str,
         assistant_message: str,
     ) -> None: ...
@@ -55,7 +55,7 @@ def zep_user_id_v1(owner_user_id: UUID) -> str:
     return f"lifeswitch-user-{owner_user_id}"
 
 
-def zep_session_id_v1(thread_id: UUID) -> str:
+def zep_thread_id_v1(thread_id: UUID) -> str:
     if not isinstance(thread_id, UUID):
         raise TypeError("thread_id must be UUID")
     return f"lifeswitch-thread-{thread_id}"
@@ -148,11 +148,11 @@ class ZepCloudShadowTransportV1:
         self._client = AsyncZep(api_key=api_key.strip())
         self._message_type = Message
 
-    async def ensure_user_and_session(
+    async def ensure_user_and_thread(
         self,
         *,
         user_id: str,
-        session_id: str,
+        thread_id: str,
     ) -> None:
         try:
             await self._client.user.get(user_id)
@@ -166,13 +166,13 @@ class ZepCloudShadowTransportV1:
                     raise
 
         try:
-            await self._client.memory.get_session(session_id)
+            await self._client.thread.get(thread_id)
         except Exception as error:
             if _status_code(error) != 404:
                 raise
             try:
-                await self._client.memory.add_session(
-                    session_id=session_id,
+                await self._client.thread.create(
+                    thread_id=thread_id,
                     user_id=user_id,
                 )
             except Exception as create_error:
@@ -182,24 +182,24 @@ class ZepCloudShadowTransportV1:
     async def add_turn(
         self,
         *,
-        session_id: str,
+        thread_id: str,
         user_message: str,
         assistant_message: str,
     ) -> None:
         messages = [
             self._message_type(
-                role="LifeSwitch User",
-                role_type="user",
+                role="user",
+                name="LifeSwitch User",
                 content=user_message,
             ),
             self._message_type(
-                role="LifeSwitch Assistant",
-                role_type="assistant",
+                role="assistant",
+                name="LifeSwitch Assistant",
                 content=assistant_message,
             ),
         ]
-        await self._client.memory.add(
-            session_id=session_id,
+        await self._client.thread.add_messages(
+            thread_id,
             messages=messages,
             ignore_roles=["assistant"],
             return_context=False,
@@ -237,7 +237,7 @@ class ZepShadowRuntimeV1:
         self._logger = logger or logging.getLogger("uvicorn.error")
         self._transport: ZepShadowTransportV1 | None = None
         self._provision_lock = asyncio.Lock()
-        self._provisioned_sessions: set[tuple[str, str]] = set()
+        self._provisioned_threads: set[tuple[str, str]] = set()
         self._tasks: set[asyncio.Task[None]] = set()
 
     @classmethod
@@ -332,18 +332,18 @@ class ZepShadowRuntimeV1:
         if self._transport is None:
             self._transport = self._transport_factory(self._api_key)
         user_id = zep_user_id_v1(owner_user_id)
-        session_id = zep_session_id_v1(thread_id)
-        provision_key = (user_id, session_id)
-        if provision_key not in self._provisioned_sessions:
+        zep_thread_id = zep_thread_id_v1(thread_id)
+        provision_key = (user_id, zep_thread_id)
+        if provision_key not in self._provisioned_threads:
             async with self._provision_lock:
-                if provision_key not in self._provisioned_sessions:
-                    await self._transport.ensure_user_and_session(
+                if provision_key not in self._provisioned_threads:
+                    await self._transport.ensure_user_and_thread(
                         user_id=user_id,
-                        session_id=session_id,
+                        thread_id=zep_thread_id,
                     )
-                    self._provisioned_sessions.add(provision_key)
+                    self._provisioned_threads.add(provision_key)
         await self._transport.add_turn(
-            session_id=session_id,
+            thread_id=zep_thread_id,
             user_message=user_message,
             assistant_message=assistant_message,
         )
@@ -373,6 +373,6 @@ __all__ = [
     "ZepShadowConfigurationError",
     "ZepShadowRuntimeV1",
     "ZepShadowSettingsV1",
-    "zep_session_id_v1",
+    "zep_thread_id_v1",
     "zep_user_id_v1",
 ]

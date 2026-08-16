@@ -12,7 +12,7 @@ from rag_engine.zep_shadow_memory_v1 import (
     ZepShadowConfigurationError,
     ZepShadowRuntimeV1,
     ZepShadowSettingsV1,
-    zep_session_id_v1,
+    zep_thread_id_v1,
     zep_user_id_v1,
 )
 
@@ -30,26 +30,26 @@ class FakeTransport:
         self.turns: list[tuple[str, str, str]] = []
         self.closed = False
 
-    async def ensure_user_and_session(
+    async def ensure_user_and_thread(
         self,
         *,
         user_id: str,
-        session_id: str,
+        thread_id: str,
     ) -> None:
         if self.fail:
             raise RuntimeError("synthetic transport failure")
-        self.provisioned.append((user_id, session_id))
+        self.provisioned.append((user_id, thread_id))
 
     async def add_turn(
         self,
         *,
-        session_id: str,
+        thread_id: str,
         user_message: str,
         assistant_message: str,
     ) -> None:
         if self.fail:
             raise RuntimeError("synthetic transport failure")
-        self.turns.append((session_id, user_message, assistant_message))
+        self.turns.append((thread_id, user_message, assistant_message))
 
     async def close(self) -> None:
         self.closed = True
@@ -103,7 +103,7 @@ class ZepShadowSettingsTests(unittest.TestCase):
     def test_identifiers_are_stable_and_domain_separated(self) -> None:
         self.assertEqual(zep_user_id_v1(OWNER), f"lifeswitch-user-{OWNER}")
         self.assertEqual(
-            zep_session_id_v1(THREAD),
+            zep_thread_id_v1(THREAD),
             f"lifeswitch-thread-{THREAD}",
         )
 
@@ -126,7 +126,8 @@ class ZepShadowSettingsTests(unittest.TestCase):
 
     def test_adapter_has_no_zep_retrieval_path(self) -> None:
         adapter = (ROOT / "rag_engine/zep_shadow_memory_v1.py").read_text()
-        self.assertNotIn(".memory.get(", adapter)
+        self.assertNotIn("get_user_context", adapter)
+        self.assertNotIn(".graph.search(", adapter)
 
 
 class ZepShadowRuntimeTests(unittest.IsolatedAsyncioTestCase):
@@ -173,13 +174,13 @@ class ZepShadowRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(outcome, "scheduled")
         self.assertEqual(
             transport.provisioned,
-            [(zep_user_id_v1(OWNER), zep_session_id_v1(THREAD))],
+            [(zep_user_id_v1(OWNER), zep_thread_id_v1(THREAD))],
         )
         self.assertEqual(
             transport.turns,
             [
                 (
-                    zep_session_id_v1(THREAD),
+                    zep_thread_id_v1(THREAD),
                     "user text",
                     "assistant text",
                 )
