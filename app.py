@@ -32,6 +32,7 @@ from rag_engine.lifeswitch_nutrition_router import router as lifeswitch_nutritio
 from rag_engine.lifeswitch_nutrition_log_batch_router import router as lifeswitch_nutrition_log_batch_router
 from rag_engine.lifeswitch_training_router import router as lifeswitch_training_router
 from rag_engine.lifeswitch_measurements_router import router as lifeswitch_measurements_router
+from rag_engine.lifeswitch_plan_router import router as lifeswitch_plan_router
 from rag_engine.lifeswitch_account_timezone_router_v1 import (
     router as lifeswitch_account_timezone_router_v1,
 )
@@ -345,6 +346,7 @@ app.include_router(lifeswitch_nutrition_log_router, prefix="/lifeswitch/nutritio
 app.include_router(lifeswitch_nutrition_log_batch_router, prefix="/lifeswitch/nutrition")
 app.include_router(catalog_router, prefix="/catalog")
 app.include_router(lifeswitch_training_router, prefix="/lifeswitch/training")
+app.include_router(lifeswitch_plan_router, prefix="/lifeswitch/plan")
 app.include_router(lifeswitch_measurements_router, prefix="/lifeswitch/measurements")
 app.include_router(
     lifeswitch_account_timezone_router_v1,
