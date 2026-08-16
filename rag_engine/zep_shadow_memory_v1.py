@@ -18,7 +18,10 @@ ZEP_SHADOW_TIMEOUT_SECONDS_ENV = "ZEP_SHADOW_TIMEOUT_SECONDS"
 
 ZEP_SHADOW_MODE_OFF = "off"
 ZEP_SHADOW_MODE_CANARY = "canary"
-_VALID_MODES = frozenset((ZEP_SHADOW_MODE_OFF, ZEP_SHADOW_MODE_CANARY))
+ZEP_SHADOW_MODE_ON = "on"
+_VALID_MODES = frozenset(
+    (ZEP_SHADOW_MODE_OFF, ZEP_SHADOW_MODE_CANARY, ZEP_SHADOW_MODE_ON)
+)
 _DEFAULT_TIMEOUT_SECONDS = 12.0
 _MAX_TIMEOUT_SECONDS = 30.0
 
@@ -133,8 +136,11 @@ class ZepShadowSettingsV1:
 
     def enabled_for(self, owner_user_id: UUID) -> bool:
         return (
-            self.mode == ZEP_SHADOW_MODE_CANARY
-            and owner_user_id in self.owner_user_ids
+            self.mode == ZEP_SHADOW_MODE_ON
+            or (
+                self.mode == ZEP_SHADOW_MODE_CANARY
+                and owner_user_id in self.owner_user_ids
+            )
         )
 
 
@@ -277,6 +283,10 @@ class ZepShadowRuntimeV1:
         user_message: str,
         assistant_message: str,
     ) -> str:
+        if not isinstance(owner_user_id, UUID) or not isinstance(
+            thread_id, UUID
+        ):
+            return "excluded"
         if not self._settings.enabled_for(owner_user_id):
             return "disabled"
         if not self._api_key:
@@ -394,6 +404,7 @@ __all__ = [
     "ZEP_SHADOW_MODE_CANARY",
     "ZEP_SHADOW_MODE_ENV",
     "ZEP_SHADOW_MODE_OFF",
+    "ZEP_SHADOW_MODE_ON",
     "ZEP_SHADOW_OWNER_IDS_ENV",
     "ZEP_SHADOW_TIMEOUT_SECONDS_ENV",
     "ZepShadowConfigurationError",

@@ -9,6 +9,7 @@ from uuid import UUID
 from rag_engine.zep_shadow_memory_v1 import (
     ZEP_SHADOW_MODE_CANARY,
     ZEP_SHADOW_MODE_OFF,
+    ZEP_SHADOW_MODE_ON,
     ZepShadowConfigurationError,
     ZepShadowRuntimeV1,
     ZepShadowSettingsV1,
@@ -112,6 +113,16 @@ class ZepShadowSettingsTests(unittest.TestCase):
         self.assertFalse(settings.enabled_for(OTHER_OWNER))
         self.assertEqual(settings.timeout_seconds, 2.5)
 
+    def test_on_mode_accepts_every_verified_owner_without_an_allowlist(
+        self,
+    ) -> None:
+        settings = ZepShadowSettingsV1.from_environment(
+            {"ZEP_SHADOW_MODE": "on"}
+        )
+        self.assertEqual(settings.mode, ZEP_SHADOW_MODE_ON)
+        self.assertTrue(settings.enabled_for(OWNER))
+        self.assertTrue(settings.enabled_for(OTHER_OWNER))
+
     def test_identifiers_are_stable_and_domain_separated(self) -> None:
         self.assertEqual(zep_user_id_v1(OWNER), f"lifeswitch-user-{OWNER}")
         self.assertEqual(
@@ -145,6 +156,36 @@ class ZepShadowSettingsTests(unittest.TestCase):
 
 
 class ZepShadowRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_on_mode_rejects_non_uuid_authority_before_transport(self) -> None:
+        calls = []
+
+        def factory(api_key: str) -> FakeTransport:
+            calls.append(api_key)
+            return FakeTransport()
+
+        runtime = ZepShadowRuntimeV1(
+            settings=ZepShadowSettingsV1(
+                mode=ZEP_SHADOW_MODE_ON,
+                owner_user_ids=frozenset(),
+                timeout_seconds=1.0,
+            ),
+            api_key="present",
+            transport_factory=factory,
+        )
+        self.assertEqual(
+            runtime.dispatch_turn(
+                owner_user_id="not-a-uuid",  # type: ignore[arg-type]
+                thread_id=THREAD,
+                user_message_id=USER_MESSAGE,
+                assistant_message_id=ASSISTANT_MESSAGE,
+                user_message="user text",
+                assistant_message="assistant text",
+            ),
+            "excluded",
+        )
+        await runtime.close()
+        self.assertEqual(calls, [])
+
     async def test_off_mode_never_constructs_transport(self) -> None:
         calls = []
 
