@@ -58,7 +58,7 @@ class ContextKindV2(str, Enum):
     MEMORY = "memory"
     ATTACHMENT = "attachment"
     LIFESWITCH = "lifeswitch"
-    FRACTAL_MONISM = "fractal_monism"
+    RELATIONAL_MONISM = "relational_monism"
     WEB_PROVENANCE = "web_provenance"
 
 
@@ -122,7 +122,7 @@ class PromptReferenceContextBlockV2(_StrictFrozenModel):
         "governed_memory_successor_v1",
         "chat_attachments_v1",
         "lifeswitch_domain_context_v1",
-        "fractal_monism_v0_2",
+        "relational_monism_v0_4",
         "prior_web_provenance_v1",
     ]
     kind: ContextKindV2
@@ -158,7 +158,7 @@ class PromptReferenceContextBlockV2(_StrictFrozenModel):
             },
             ContextKindV2.ATTACHMENT: "chat_attachments_v1",
             ContextKindV2.LIFESWITCH: "lifeswitch_domain_context_v1",
-            ContextKindV2.FRACTAL_MONISM: "fractal_monism_v0_2",
+            ContextKindV2.RELATIONAL_MONISM: "relational_monism_v0_4",
             ContextKindV2.WEB_PROVENANCE: "prior_web_provenance_v1",
         }[self.kind]
         if (
@@ -422,7 +422,7 @@ def assemble_prompt_with_lifeswitch_v1(
         "governed_memory_v1",
         "chat_attachments_v1",
         "lifeswitch_domain_context_v1",
-        "fractal_monism_v0_2",
+        "relational_monism_v0_4",
         "prior_web_provenance_v1",
     )
     blocks = tuple(by_id[item] for item in ordered_ids if item in by_id)

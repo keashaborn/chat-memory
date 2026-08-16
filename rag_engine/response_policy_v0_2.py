@@ -733,9 +733,9 @@ _LOCAL_TECHNICAL_RULES: tuple[re.Pattern[str], ...] = (
 )
 
 _LOCAL_FM_EXPLICIT_RULES: tuple[re.Pattern[str], ...] = (
-    re.compile(r"\bfractal monism\b"),
-    re.compile(r"\bfm (?:lens|view|philosophy|framework|idea)\b"),
-    re.compile(r"\bapply (?:the )?fm lens\b"),
+    re.compile(r"\brelational monism\b"),
+    re.compile(r"\brm (?:lens|view|philosophy|framework|idea)\b"),
+    re.compile(r"\bapply (?:the )?rm lens\b"),
 )
 
 _LOCAL_COACHING_RULES: tuple[re.Pattern[str], ...] = (

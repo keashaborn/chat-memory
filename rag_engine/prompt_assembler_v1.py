@@ -3,7 +3,7 @@ from __future__ import annotations
 """Typed, provider-neutral prompt assembly for RESSE.
 
 Assembly accepts only the outputs of the response-policy, governed-Memory
-successor, and canonical FM v0.2 boundaries. It has no provider, database,
+successor, and canonical RM v0.4 boundaries. It has no provider, database,
 retrieval, environment, or network dependencies.
 """
 
@@ -16,10 +16,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from rag_engine.fm_selection_envelope_v0_2 import (
-    FMSelectionEnvelopeV02,
-    FMSelectionRequestV02,
-    select_fm_v0_2,
+from rag_engine.rm_selection_envelope_v0_4 import (
+    RMSelectionEnvelopeV04,
+    RMSelectionRequestV04,
+    select_rm_v0_4,
 )
 from rag_engine.prior_web_provenance_v1 import PriorWebProvenanceEnvelopeV1
 from rag_engine.response_policy_prompt_v0_2 import (
@@ -77,7 +77,7 @@ class PromptAssemblyError(RuntimeError):
 class ContextKind(str, Enum):
     MEMORY = "memory"
     ATTACHMENT = "attachment"
-    FRACTAL_MONISM = "fractal_monism"
+    RELATIONAL_MONISM = "relational_monism"
     WEB_PROVENANCE = "web_provenance"
 
 
@@ -170,7 +170,7 @@ class PromptAssemblyRequestV1(_StrictFrozenModel):
     memory_source_status: MemorySourceStatusV1 = (
         MemorySourceStatusV1.NOT_APPLICABLE
     )
-    fm_selection: FMSelectionEnvelopeV02 | None = Field(default=None, repr=False)
+    fm_selection: RMSelectionEnvelopeV04 | None = Field(default=None, repr=False)
     prior_web_provenance: PriorWebProvenanceEnvelopeV1 | None = Field(
         default=None,
         repr=False,
@@ -230,7 +230,7 @@ class PromptReferenceContextBlockV1(_StrictFrozenModel):
     block_id: Literal[
         "governed_memory_successor_v1",
         "chat_attachments_v1",
-        "fractal_monism_v0_2",
+        "relational_monism_v0_4",
         "prior_web_provenance_v1",
     ]
     kind: ContextKind
@@ -268,13 +268,13 @@ class PromptReferenceContextBlockV1(_StrictFrozenModel):
         expected_blocks = {
             ContextKind.MEMORY: "governed_memory_successor_v1",
             ContextKind.ATTACHMENT: "chat_attachments_v1",
-            ContextKind.FRACTAL_MONISM: "fractal_monism_v0_2",
+            ContextKind.RELATIONAL_MONISM: "relational_monism_v0_4",
             ContextKind.WEB_PROVENANCE: "prior_web_provenance_v1",
         }[self.kind]
         if self.block_id != expected_blocks:
             raise ValueError("context block id differs from kind")
-        if self.kind is ContextKind.FRACTAL_MONISM and self.fragments:
-            raise ValueError("FM context does not accept generic fragments")
+        if self.kind is ContextKind.RELATIONAL_MONISM and self.fragments:
+            raise ValueError("RM context does not accept generic fragments")
         if self.kind is ContextKind.WEB_PROVENANCE and self.fragments:
             raise ValueError("Web provenance context does not accept generic fragments")
         if self.kind is ContextKind.ATTACHMENT and self.fragments:
@@ -307,7 +307,7 @@ class PromptContextManifestEntryV1(_StrictFrozenModel):
     block_id: Literal[
         "governed_memory_successor_v1",
         "chat_attachments_v1",
-        "fractal_monism_v0_2",
+        "relational_monism_v0_4",
         "prior_web_provenance_v1",
     ]
     kind: ContextKind
@@ -668,13 +668,13 @@ def _context_manifest_entry(
     )
 
 
-def _fm_context_block(selection: FMSelectionEnvelopeV02) -> PromptReferenceContextBlockV1 | None:
+def _rm_context_block(selection: RMSelectionEnvelopeV04) -> PromptReferenceContextBlockV1 | None:
     if selection.status != "SELECTED":
         return None
     content = selection.compact_content()
     return PromptReferenceContextBlockV1(
-        block_id="fractal_monism_v0_2",
-        kind=ContextKind.FRACTAL_MONISM,
+        block_id="relational_monism_v0_4",
+        kind=ContextKind.RELATIONAL_MONISM,
         source_contract_version=selection.contract_version,
         source_manifest_sha256=selection.selection_sha256,
         request_id_sha256=_text_sha256(selection.request_id),
@@ -740,15 +740,15 @@ def _validate_policy_chain(
         raise PromptAssemblyError("response-policy prompt is not canonical")
 
 
-def _validate_fm_chain(
+def _validate_rm_chain(
     policy_input: ResponsePolicyInputV0_2,
     decision: ResponsePolicyDecisionV0_2,
-    selection: FMSelectionEnvelopeV02 | None,
+    selection: RMSelectionEnvelopeV04 | None,
 ) -> None:
     if selection is None:
         if decision.fm_effective_level is not FMLevel.OFF:
             raise PromptAssemblyError(
-                "an active FM level requires an auditable FM selection envelope"
+                "an active philosophy level requires an auditable RM selection envelope"
             )
         return
     copied = (
@@ -764,27 +764,27 @@ def _validate_fm_chain(
         (selection.fm_level, decision.fm_effective_level.value),
     )
     if any(actual != expected for actual, expected in copied):
-        raise PromptAssemblyError("FM selection bindings differ from response policy")
+        raise PromptAssemblyError("RM selection bindings differ from response policy")
     if decision.fm_effective_level is FMLevel.OFF and selection.status != "OFF":
-        raise PromptAssemblyError("FM OFF requires an OFF selection envelope")
+        raise PromptAssemblyError("policy OFF requires an OFF RM selection envelope")
     if (
         decision.response_mode is ResponseMode.FM_EXPLICIT
         and decision.fm_effective_level is not FMLevel.OFF
         and selection.status != "SELECTED"
     ):
-        raise PromptAssemblyError("FM_EXPLICIT requires selected canonical FM content")
+        raise PromptAssemblyError("explicit philosophy mode requires selected canonical RM content")
     try:
-        expected_selection = select_fm_v0_2(
-            FMSelectionRequestV02(
+        expected_selection = select_rm_v0_4(
+            RMSelectionRequestV04(
                 policy_decision=decision,
                 query_text=policy_input.current_message.content,
                 token_budget=selection.token_budget,
             )
         )
     except Exception:
-        raise PromptAssemblyError("FM selection cannot be recomputed") from None
+        raise PromptAssemblyError("RM selection cannot be recomputed") from None
     if selection != expected_selection:
-        raise PromptAssemblyError("FM selection is not canonical")
+        raise PromptAssemblyError("RM selection is not canonical")
 
 
 def _strict_source_chain(request: PromptAssemblyRequestV1):
@@ -805,7 +805,7 @@ def _strict_source_chain(request: PromptAssemblyRequestV1):
         else None
     )
     fm_selection = (
-        FMSelectionEnvelopeV02.from_wire_json(source.fm_selection.canonical_json_bytes())
+        RMSelectionEnvelopeV04.from_wire_json(source.fm_selection.canonical_json_bytes())
         if source.fm_selection is not None
         else None
     )
@@ -851,7 +851,7 @@ def _validate_source_authority_chain(
     decision: ResponsePolicyDecisionV0_2,
     policy_prompt: ResponsePolicyPromptV0_2,
     successor_memory_context_block: PromptReferenceContextBlockV1 | None,
-    fm_selection: FMSelectionEnvelopeV02 | None,
+    fm_selection: RMSelectionEnvelopeV04 | None,
     prior_web_provenance: PriorWebProvenanceEnvelopeV1 | None,
     attachment_context_block: PromptReferenceContextBlockV1 | None,
 ) -> None:
@@ -869,7 +869,7 @@ def _validate_source_authority_chain(
             raise PromptAssemblyError(
                 "successor Memory context differs from the current request"
             )
-    _validate_fm_chain(policy_input, decision, fm_selection)
+    _validate_rm_chain(policy_input, decision, fm_selection)
     if prior_web_provenance is not None:
         if (
             prior_web_provenance.current_request_id_sha256
@@ -904,7 +904,7 @@ def _conversation_from_policy_input(
 
 def _context_blocks_from_sources(
     successor_memory_context_block: PromptReferenceContextBlockV1 | None,
-    fm_selection: FMSelectionEnvelopeV02 | None,
+    fm_selection: RMSelectionEnvelopeV04 | None,
     prior_web_provenance: PriorWebProvenanceEnvelopeV1 | None,
     attachment_context_block: PromptReferenceContextBlockV1 | None,
 ) -> tuple[PromptReferenceContextBlockV1, ...]:
@@ -914,7 +914,7 @@ def _context_blocks_from_sources(
     if attachment_context_block is not None:
         blocks.append(attachment_context_block)
     if fm_selection is not None:
-        fm_block = _fm_context_block(fm_selection)
+        fm_block = _rm_context_block(fm_selection)
         if fm_block is not None:
             blocks.append(fm_block)
     if prior_web_provenance is not None:
@@ -938,7 +938,7 @@ def _validate_context_shape(
         item.block_id == "governed_memory_successor_v1" for item in blocks
     )
     has_attachment = ContextKind.ATTACHMENT in kinds
-    has_fm = ContextKind.FRACTAL_MONISM in kinds
+    has_fm = ContextKind.RELATIONAL_MONISM in kinds
     has_web_provenance = ContextKind.WEB_PROVENANCE in kinds
     successor_memory_manifest = (
         manifest.successor_memory_context_manifest_sha256 is not None
@@ -952,9 +952,9 @@ def _validate_context_shape(
     if has_fm != (manifest.fm_selection_sha256 is not None):
         # OFF/EMPTY FM envelopes are audited without a context block.
         if has_fm or manifest.fm_selection_sha256 is None:
-            raise ValueError("FM context and manifest state differ")
+            raise ValueError("RM context and manifest state differ")
     if has_fm and decision.fm_effective_level is FMLevel.OFF:
-        raise ValueError("FM context is forbidden when FM is OFF")
+        raise ValueError("RM context is forbidden when philosophy is OFF")
     if has_web_provenance != (
         manifest.prior_web_provenance_manifest_sha256 is not None
     ):

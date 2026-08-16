@@ -278,7 +278,7 @@ class OpenAIChatProviderV1Tests(unittest.TestCase):
         self.assertEqual(first.request_sha256, second.request_sha256)
 
     def test_reference_context_is_lower_authority_json_before_current_turn(self) -> None:
-        current = "Give me an overview of Fractal Monism."
+        current = "Give me an overview of Relational Monism."
         plan = trusted_plan(
             current=current,
             prior=(
@@ -300,13 +300,13 @@ class OpenAIChatProviderV1Tests(unittest.TestCase):
                 ("system", None),
                 ("user", None),
                 ("user", None),
-                ("user", "fractal_monism_v0_2"),
+                ("user", "relational_monism_v0_4"),
                 ("user", None),
             ),
         )
         reference = json.loads(request.messages[-2].content)
         self.assertEqual(reference["authority"], "reference_data")
-        self.assertEqual(reference["kind"], "fractal_monism")
+        self.assertEqual(reference["kind"], "relational_monism")
         self.assertEqual(
             reference["content"],
             assembly.context_blocks[0].content,

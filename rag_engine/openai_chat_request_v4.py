@@ -98,7 +98,7 @@ class OpenAIChatMessageV2(_StrictFrozenModel):
                 "governed_memory_successor_v1",
                 "lifeswitch_domain_context_v1",
                 "prior_lifeswitch_provenance_v1",
-                "fractal_monism_v0_2",
+                "relational_monism_v0_4",
                 "prior_web_provenance_v1",
             }
         ):

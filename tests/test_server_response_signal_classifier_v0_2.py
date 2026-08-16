@@ -113,7 +113,7 @@ class ServerResponseSignalClassifierV0_2Tests(unittest.TestCase):
     def test_local_immediate_risk_bypasses_provider_and_suppresses_fm(self) -> None:
         client = FakeClient(output())
         policy_input = request(
-            "Explain Fractal Monism, but I have crushing chest pain and cannot breathe."
+            "Explain Relational Monism, but I have crushing chest pain and cannot breathe."
         )
 
         result = classifier(client).classify(policy_input)
@@ -177,7 +177,7 @@ class ServerResponseSignalClassifierV0_2Tests(unittest.TestCase):
             _CLASSIFIER_INSTRUCTIONS,
         )
         self.assertIn(
-            "A direct informational request about Fractal Monism is not domain risk",
+            "A direct informational request about Relational Monism is not domain risk",
             _CLASSIFIER_INSTRUCTIONS,
         )
         self.assertIn(
@@ -480,7 +480,7 @@ class ServerResponseSignalClassifierV0_2Tests(unittest.TestCase):
     def test_inconsistent_pass_category_still_fails_closed(self) -> None:
         client = FakeClient(output(categories=["other_material_risk"]))
         result = classifier(client).classify(
-            request("Could you tell me about Fractal Monism?")
+            request("Could you tell me about Relational Monism?")
         )
 
         self.assertEqual(result.assessment.gate, GateState.UNCERTAIN)
@@ -500,7 +500,7 @@ class ServerResponseSignalClassifierV0_2Tests(unittest.TestCase):
             )
         )
         policy_input = request(
-            "Under Fractal Monism, how should I answer this custody filing?"
+            "Under Relational Monism, how should I answer this custody filing?"
         )
         result = classifier(client).classify(policy_input)
         decision = decide_response_policy_v0_2(
@@ -872,7 +872,7 @@ class ServerResponseSignalClassifierV0_2Tests(unittest.TestCase):
 
     def test_model_false_does_not_disable_deterministic_mode_detection(self) -> None:
         client = FakeClient(output())
-        policy_input = request("Explain Fractal Monism.")
+        policy_input = request("Explain Relational Monism.")
         result = classifier(client).classify(policy_input)
         decision = decide_response_policy_v0_2(
             policy_input,

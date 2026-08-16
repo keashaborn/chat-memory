@@ -451,7 +451,7 @@ class ResponseCompositionRootV0_2Tests(unittest.IsolatedAsyncioTestCase):
         await root.execute(
             SnapshotConn(),
             command(
-                "Explain Fractal Monism, but I have crushing chest pain and cannot breathe."
+                "Explain Relational Monism, but I have crushing chest pain and cannot breathe."
             ),
         )
 
@@ -459,7 +459,7 @@ class ResponseCompositionRootV0_2Tests(unittest.IsolatedAsyncioTestCase):
         chat_kwargs = client.calls[-1][1]
         system_text = chat_kwargs["messages"][0]["content"]
         self.assertIn("Use conventional, concrete, domain-appropriate safeguards", system_text)
-        self.assertIn("Effective Fractal Monism level: OFF", system_text)
+        self.assertIn("Effective Relational Monism level: OFF", system_text)
         self.assertFalse(
             any(
                 message.get("name") == "fractal_monism_v0_2"

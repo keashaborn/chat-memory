@@ -145,7 +145,7 @@ class LifeSwitchPromptIntegrationV1Tests(unittest.TestCase):
 
         self.assertEqual(
             tuple(block.block_id for block in result.context_blocks),
-            ("lifeswitch_domain_context_v1", "fractal_monism_v0_2"),
+            ("lifeswitch_domain_context_v1", "relational_monism_v0_4"),
         )
 
     def test_lifeswitch_precedes_web_provenance(self) -> None:

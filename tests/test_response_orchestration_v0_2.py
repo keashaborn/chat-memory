@@ -217,12 +217,12 @@ class TrustedResponseOrchestrationV0_2Tests(unittest.IsolatedAsyncioTestCase):
             plan.assembled_prompt.system_prompt,
         )
 
-    async def test_explicit_fm_is_a_separate_reference_data_block(self) -> None:
+    async def test_explicit_rm_is_a_separate_reference_data_block(self) -> None:
         request = trusted_request(
             authenticated_actor_user_id=ACTOR,
-            request_id="fm-request",
+            request_id="rm-request",
             conversation=messages(
-                "Explain Fractal Monism and relational distinction."
+                "Explain Relational Monism and relational distinction."
             ),
         )
         plan = await orchestrator(FixedSafetyProvider()).build_plan(request)
@@ -233,7 +233,12 @@ class TrustedResponseOrchestrationV0_2Tests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(len(plan.fm_selection.selected_record_ids), 0)
         self.assertEqual(len(plan.assembled_prompt.context_blocks), 1)
         block = plan.assembled_prompt.context_blocks[0]
-        self.assertEqual(block.kind, ContextKind.FRACTAL_MONISM)
+        self.assertEqual(block.kind, ContextKind.RELATIONAL_MONISM)
+        self.assertEqual(block.block_id, "relational_monism_v0_4")
+        self.assertEqual(
+            plan.fm_selection.active_philosophy_id,
+            "relational_monism_v0_4",
+        )
         self.assertEqual(block.authority, "reference_data")
         self.assertNotIn(block.content, plan.assembled_prompt.system_prompt)
 
@@ -242,7 +247,7 @@ class TrustedResponseOrchestrationV0_2Tests(unittest.IsolatedAsyncioTestCase):
             authenticated_actor_user_id=ACTOR,
             request_id="technical-request",
             conversation=messages(
-                "Implement the Python API that stores Fractal Monism records."
+                "Implement the Python API that stores Relational Monism records."
             ),
         )
         plan = await orchestrator(FixedSafetyProvider()).build_plan(request)
@@ -255,7 +260,7 @@ class TrustedResponseOrchestrationV0_2Tests(unittest.IsolatedAsyncioTestCase):
         request = trusted_request(
             authenticated_actor_user_id=ACTOR,
             request_id="safety-request",
-            conversation=messages("Explain Fractal Monism."),
+            conversation=messages("Explain Relational Monism."),
             trusted_policy_signals=ResponsePolicySignalsV0_2(
                 technical=True,
                 fm_explicit=True,
@@ -280,7 +285,7 @@ class TrustedResponseOrchestrationV0_2Tests(unittest.IsolatedAsyncioTestCase):
         request = trusted_request(
             authenticated_actor_user_id=ACTOR,
             request_id="uncertain-request",
-            conversation=messages("Explain Fractal Monism."),
+            conversation=messages("Explain Relational Monism."),
         )
         plan = await orchestrator(
             AsyncSafetyProvider(
@@ -308,7 +313,7 @@ class TrustedResponseOrchestrationV0_2Tests(unittest.IsolatedAsyncioTestCase):
         request = trusted_request(
             authenticated_actor_user_id=ACTOR,
             request_id="opt-out-request",
-            conversation=messages("Explain Fractal Monism."),
+            conversation=messages("Explain Relational Monism."),
             request_field_names=("fm_lens", "mix"),
             trusted_policy_signals=ResponsePolicySignalsV0_2(
                 user_fm_opt_out=True

@@ -18,10 +18,10 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from rag_engine.response_conversation_snapshot_v1 import ConversationSnapshotV1
-from rag_engine.fm_selection_envelope_v0_2 import (
-    FMSelectionEnvelopeV02,
-    FMSelectionRequestV02,
-    select_fm_v0_2,
+from rag_engine.rm_selection_envelope_v0_4 import (
+    RMSelectionEnvelopeV04,
+    RMSelectionRequestV04,
+    select_rm_v0_4,
 )
 from rag_engine.prior_web_provenance_v1 import PriorWebProvenanceEnvelopeV1
 from rag_engine.prompt_assembler_v1 import (
@@ -465,7 +465,7 @@ class TrustedResponsePlanV0_2(_StrictFrozenModel):
     )
     policy_decision: ResponsePolicyDecisionV0_2 = Field(repr=False)
     policy_prompt: ResponsePolicyPromptV0_2 = Field(repr=False)
-    fm_selection: FMSelectionEnvelopeV02 = Field(repr=False)
+    fm_selection: RMSelectionEnvelopeV04 = Field(repr=False)
     prior_web_provenance: PriorWebProvenanceEnvelopeV1 | None = Field(
         default=None,
         repr=False,
@@ -629,7 +629,7 @@ def _plan_sha256(
     signals_envelope: TrustedPolicySignalsEnvelopeV0_2,
     decision: ResponsePolicyDecisionV0_2,
     prompt: ResponsePolicyPromptV0_2,
-    fm: FMSelectionEnvelopeV02,
+    fm: RMSelectionEnvelopeV04,
     prior_web_provenance: PriorWebProvenanceEnvelopeV1 | None = None,
     assembled: AssembledPromptV1,
     trace: SanitizedResponseShadowTraceV0_2,
@@ -672,7 +672,7 @@ def _shadow_trace(
     request: TrustedResponseRequestV0_2,
     safety: SafetyAssessmentV0_2,
     decision: ResponsePolicyDecisionV0_2,
-    fm: FMSelectionEnvelopeV02,
+    fm: RMSelectionEnvelopeV04,
     assembled: AssembledPromptV1,
     occurred_at: datetime,
     correlation_id: UUID,
@@ -787,8 +787,8 @@ class TrustedResponseOrchestratorV0_2:
                 signals=request.trusted_policy_signals,
             )
             prompt = render_response_policy_prompt_v0_2(decision)
-            fm = select_fm_v0_2(
-                FMSelectionRequestV02(
+            fm = select_rm_v0_4(
+                RMSelectionRequestV04(
                     policy_decision=decision,
                     query_text=policy_input.current_message.content,
                     token_budget=request.fm_token_budget,

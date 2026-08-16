@@ -9,10 +9,10 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-import rag_engine.fm_selection_envelope_v0_2 as fm_selector
-from rag_engine.fm_selection_envelope_v0_2 import (
-    FMSelectionRequestV02,
-    select_fm_v0_2,
+from rag_engine.rm_selection_envelope_v0_4 import (
+    ACTIVE_PHILOSOPHY_ID,
+    RMSelectionRequestV04,
+    select_rm_v0_4,
 )
 from rag_engine.prompt_assembler_v1 import (
     AssembledPromptV1,
@@ -465,7 +465,7 @@ class TypedPromptAssemblerV1Tests(unittest.TestCase):
             PromptAssemblyRequestV1.model_validate(payload)
 
     def test_explicit_fm_requires_selected_canonical_context(self) -> None:
-        message = "Explain Fractal Monism."
+        message = "Explain Relational Monism."
         policy_input, safety, signals, decision, prompt = policy_chain(message)
         self.assertEqual(decision.response_mode, ResponseMode.FM_EXPLICIT)
         with self.assertRaises(PromptAssemblyError):
@@ -478,8 +478,8 @@ class TypedPromptAssemblerV1Tests(unittest.TestCase):
                     policy_prompt=prompt,
                 )
             )
-        selection = select_fm_v0_2(
-            FMSelectionRequestV02(
+        selection = select_rm_v0_4(
+            RMSelectionRequestV04(
                 policy_decision=decision,
                 query_text=message,
             )
@@ -496,7 +496,8 @@ class TypedPromptAssemblerV1Tests(unittest.TestCase):
         )
         self.assertEqual(len(assembled.context_blocks), 1)
         block = assembled.context_blocks[0]
-        self.assertEqual(block.kind, ContextKind.FRACTAL_MONISM)
+        self.assertEqual(block.kind, ContextKind.RELATIONAL_MONISM)
+        self.assertEqual(block.block_id, "relational_monism_v0_4")
         self.assertEqual(block.content, selection.compact_content())
         self.assertNotIn(block.content, assembled.system_prompt)
         self.assertEqual(
@@ -536,8 +537,8 @@ class TypedPromptAssemblerV1Tests(unittest.TestCase):
                             policy_prompt=prompt,
                         )
                     )
-                selection = select_fm_v0_2(
-                    FMSelectionRequestV02(
+                selection = select_rm_v0_4(
+                    RMSelectionRequestV04(
                         policy_decision=decision,
                         query_text=message,
                     )
@@ -558,12 +559,12 @@ class TypedPromptAssemblerV1Tests(unittest.TestCase):
                 )
 
     def test_cross_request_fm_selection_is_rejected(self) -> None:
-        message = "Explain Fractal Monism."
+        message = "Explain Relational Monism."
         _, _, _, first_decision, _ = policy_chain(
             message, request_id="request-111"
         )
-        selection = select_fm_v0_2(
-            FMSelectionRequestV02(
+        selection = select_rm_v0_4(
+            RMSelectionRequestV04(
                 policy_decision=first_decision,
                 query_text=message,
             )
@@ -583,43 +584,23 @@ class TypedPromptAssemblerV1Tests(unittest.TestCase):
                 )
             )
 
-    def test_fm_selection_cannot_substitute_an_alternate_canonical_record(self) -> None:
-        message = "Explain Fractal Monism."
-        policy_input, safety, signals, decision, prompt = policy_chain(message)
-        selection_request = FMSelectionRequestV02(
-            policy_decision=decision,
-            query_text=message,
+    def test_rm_selection_cannot_substitute_an_alternate_identity(self) -> None:
+        message = "Explain Relational Monism."
+        _, _, _, decision, _ = policy_chain(message)
+        selection = select_rm_v0_4(
+            RMSelectionRequestV04(policy_decision=decision, query_text=message)
         )
-        bundle = fm_selector.load_runtime_bundle_v0_2()
-        record = bundle.record_index()["FM-C-038"]
-        content = fm_selector.render_compact_content_v0_2("EXPLICIT", (record,))
-        forged = fm_selector._build_envelope(
-            request=selection_request,
-            bundle=bundle,
-            status="SELECTED",
-            reason="selected",
-            fm_level="EXPLICIT",
-            selected=(record,),
-            token_budget=1600,
-            used_tokens=fm_selector._estimate_text_tokens(content),
-        )
-        with self.assertRaises(PromptAssemblyError):
-            assemble_prompt(
-                PromptAssemblyRequestV1(
-                    policy_input=policy_input,
-                    safety_assessment=safety,
-                    policy_signals=signals,
-                    policy_decision=decision,
-                    policy_prompt=prompt,
-                    fm_selection=forged,
-                )
-            )
+        payload = selection.model_dump(mode="json")
+        payload["selected_record_ids"] = ["fractal_monism_v0_2"]
+        self.assertNotEqual(payload["selected_record_ids"], [ACTIVE_PHILOSOPHY_ID])
+        with self.assertRaises(ValidationError):
+            type(selection).model_validate(payload)
 
     def test_high_stakes_fm_envelope_remains_off_and_has_no_context(self) -> None:
-        message = "Explain Fractal Monism while I plan to kill myself."
+        message = "Explain Relational Monism while I plan to kill myself."
         policy_input, safety, signals, decision, prompt = policy_chain(message)
-        selection = select_fm_v0_2(
-            FMSelectionRequestV02(policy_decision=decision, query_text=message)
+        selection = select_rm_v0_4(
+            RMSelectionRequestV04(policy_decision=decision, query_text=message)
         )
         self.assertEqual(selection.status, "OFF")
         assembled = assemble_prompt(

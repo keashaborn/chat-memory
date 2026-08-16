@@ -37,7 +37,7 @@ class VoiceLanguageV1Tests(unittest.TestCase):
     def test_transcription_prompt_keeps_product_names(self) -> None:
         prompt = transcription_prompt("fr")
         self.assertIn("French", prompt)
-        self.assertIn("Fractal Monism v0.2", prompt)
+        self.assertIn("Relational Monism v0.4", prompt)
         self.assertIn("Supabase", prompt)
         self.assertNotIn("RESSE", prompt)
 

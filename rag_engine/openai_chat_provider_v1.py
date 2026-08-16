@@ -220,7 +220,7 @@ class OpenAIChatMessageV1(_StrictFrozenModel):
         if self.name is not None:
             if self.role != "user" or self.name not in {
                 "governed_memory_successor_v1",
-                "fractal_monism_v0_2",
+                "relational_monism_v0_4",
                 "chat_attachments_v1",
                 "prior_web_provenance_v1",
             }:

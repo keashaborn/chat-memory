@@ -41,7 +41,7 @@ class BeforeOpenAIInspectionV1(_StrictFrozenModel):
     fm_status: str
     fm_record_count: int = Field(ge=0, le=8)
     fm_selected_record_ids: tuple[str, ...]
-    fm_estimated_tokens: int = Field(ge=0, le=1600)
+    fm_estimated_tokens: int = Field(ge=0, le=5200)
     memory_included: bool
     memory_record_count: int = Field(ge=0)
     memory_estimated_tokens: int = Field(ge=0)

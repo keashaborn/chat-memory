@@ -33,6 +33,13 @@ class _StrictFrozenModel(BaseModel):
 
 
 class BeforeOpenAIInspectionV4(BeforeOpenAIInspectionV2):
+    active_philosophy_id: Literal["relational_monism_v0_4"]
+    active_philosophy_manifest_sha256: Literal[
+        "29412aeeed3b98ffdeac6436d7ca1d1b2b27aa573bf23a85c99546f6a5c5f28a"
+    ]
+    active_philosophy_prompt_sha256: Literal[
+        "d41d8a7428406f3a4570d293d1436cf31c99df1c4bc8f4e7a01c1c0f05885ecf"
+    ]
     context_block_count: int = Field(ge=0, le=5)
     lifeswitch_status: Literal[
         "OFF",
@@ -156,6 +163,13 @@ def build_response_inspection_v4(
             else None
         ),
         before_openai=BeforeOpenAIInspectionV4(
+            active_philosophy_id=base.fm_selection.active_philosophy_id,
+            active_philosophy_manifest_sha256=(
+                base.fm_selection.canonical_manifest_sha256
+            ),
+            active_philosophy_prompt_sha256=(
+                base.fm_selection.runtime_prompt_sha256
+            ),
             response_mode=trace.response_mode,
             closure=trace.closure,
             high_stakes_gate=trace.high_stakes_gate,

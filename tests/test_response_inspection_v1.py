@@ -58,7 +58,7 @@ class ResponseInspectionV1Tests(unittest.IsolatedAsyncioTestCase):
             answer_id_factory=lambda: ANSWER,
             correlation_id_factory=lambda: CORRELATION,
         )
-        user_text = "Explain Fractal Monism in plain language."
+        user_text = "Explain Relational Monism in plain language."
         execution = await root.execute_detailed(SnapshotConn(), command(user_text))
 
         inspection = build_response_inspection_v1(

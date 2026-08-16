@@ -103,6 +103,28 @@ class LifeSwitchPromptIntegrationV2Tests(unittest.IsolatedAsyncioTestCase):
             plan.assembled_prompt.manifest.lifeswitch_database_accessed
         )
 
+    async def test_explicit_rm_context_survives_lifeswitch_augmentation(self) -> None:
+        message = "Explain Relational Monism in plain language."
+        base = await self.base_plan(message)
+        context = LifeSwitchPreparedContextV1.create(
+            status="OFF",
+            timezone_source="not_requested",
+            database_accessed=False,
+            data_plan=create_lifeswitch_data_plan_v1(message, today=TODAY),
+        )
+
+        plan = TrustedLifeSwitchResponsePlanV2.create(
+            base_response_plan=base,
+            lifeswitch_context=context,
+            prior_lifeswitch_context=off_prior(),
+        )
+
+        block_ids = tuple(
+            block.block_id for block in plan.assembled_prompt.context_blocks
+        )
+        self.assertIn("relational_monism_v0_4", block_ids)
+        self.assertNotIn("fractal_monism_v0_2", block_ids)
+
     async def test_off_adds_no_prior_block(self) -> None:
         plan = await new_plan("What are my macros?")
         self.assertNotIn(

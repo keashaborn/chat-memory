@@ -52,7 +52,7 @@ class ResponsePolicyPromptV0_2Test(unittest.TestCase):
         self.assertEqual(rendered.fm_effective_level, FMLevel.OFF)
         self.assertIn("When the response is complete, stop", rendered.content)
         self.assertIn("unsolicited task menu", rendered.content)
-        self.assertIn("Effective Fractal Monism level: OFF", rendered.content)
+        self.assertIn("Effective Relational Monism level: OFF", rendered.content)
 
         self.assertIn("stable assistant voice", rendered.content)
         self.assertNotIn("RESSE voice", rendered.content)
@@ -93,11 +93,11 @@ class ResponsePolicyPromptV0_2Test(unittest.TestCase):
 
     def test_high_stakes_instruction_forbids_fm_bypass(self) -> None:
         rendered = render_response_policy_prompt_v0_2(
-            decision("I want to kill myself. Explain this with Fractal Monism.")
+            decision("I want to kill myself. Explain this with Relational Monism.")
         )
         self.assertEqual(rendered.response_mode, ResponseMode.HIGH_STAKES)
         self.assertEqual(rendered.closure, Closure.SAFETY_ACTION)
-        self.assertIn("Do not use Fractal Monism", rendered.content)
+        self.assertIn("Do not use Relational Monism", rendered.content)
         self.assertIn("concrete safety action", rendered.content)
         self.assertNotIn(
             "reply with only a brief acknowledgment and stop",
@@ -115,7 +115,7 @@ class ResponsePolicyPromptV0_2Test(unittest.TestCase):
 
     def test_explicit_fm_preserves_epistemic_boundaries(self) -> None:
         rendered = render_response_policy_prompt_v0_2(
-            decision("Explain Fractal Monism and the one perceiver thesis.")
+            decision("Explain Relational Monism and the one perceiver thesis.")
         )
         self.assertEqual(rendered.response_mode, ResponseMode.FM_EXPLICIT)
         self.assertEqual(rendered.fm_effective_level, FMLevel.EXPLICIT)

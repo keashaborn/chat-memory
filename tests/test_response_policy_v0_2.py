@@ -122,7 +122,7 @@ class ResponsePolicyV0_2Test(unittest.TestCase):
     def test_local_detection_selects_each_nonordinary_mode(self) -> None:
         cases = (
             ("Implement the API patch in Python.", ResponseMode.TECHNICAL),
-            ("Explain Fractal Monism.", ResponseMode.FM_EXPLICIT),
+            ("Explain Relational Monism.", ResponseMode.FM_EXPLICIT),
             ("Help me stop missing workouts.", ResponseMode.COACHING),
             ("What time is it?", ResponseMode.ORDINARY),
         )
@@ -136,7 +136,7 @@ class ResponsePolicyV0_2Test(unittest.TestCase):
     def test_local_high_stakes_rule_is_a_hard_veto(self) -> None:
         result = decide_response_policy_v0_2(
             request(
-                "Use the Fractal Monism Python router, but I have crushing "
+                "Use the Relational Monism Python router, but I have crushing "
                 "chest pain and shortness of breath right now."
             ),
             signals=ResponsePolicySignalsV0_2(
@@ -194,7 +194,7 @@ class ResponsePolicyV0_2Test(unittest.TestCase):
     def test_local_reality_testing_risk_overrides_explicit_fm(self) -> None:
         result = decide_response_policy_v0_2(
             request(
-                "Use Fractal Monism to explain this: I am paranoid and everyone "
+                "Use Relational Monism to explain this: I am paranoid and everyone "
                 "can hear my thoughts."
             )
         )
@@ -203,7 +203,7 @@ class ResponsePolicyV0_2Test(unittest.TestCase):
         self.assertEqual(result.closure, Closure.SAFETY_ACTION)
 
     def test_uncertain_high_stakes_fails_closed(self) -> None:
-        policy_input = request("Explain Fractal Monism.")
+        policy_input = request("Explain Relational Monism.")
         result = decide_response_policy_v0_2(
             policy_input,
             safety_assessment=SafetyAssessmentV0_2.create(
@@ -254,7 +254,7 @@ class ResponsePolicyV0_2Test(unittest.TestCase):
     def test_fm_application_gate_is_independent_of_mode(self) -> None:
         result = decide_response_policy_v0_2(
             request(
-                "I am grieving. Explain how Fractal Monism says I should understand "
+                "I am grieving. Explain how Relational Monism says I should understand "
                 "my loss."
             )
         )
@@ -267,7 +267,7 @@ class ResponsePolicyV0_2Test(unittest.TestCase):
     def test_friend_loss_preserves_local_reality_and_suppresses_fm(self) -> None:
         result = decide_response_policy_v0_2(
             request(
-                "My friend died. Tell me why death is not real because Fractal "
+                "My friend died. Tell me why death is not real because Relational "
                 "Monism says we are one."
             )
         )
@@ -279,7 +279,7 @@ class ResponsePolicyV0_2Test(unittest.TestCase):
 
     def test_trusted_uncertain_application_gate_fails_closed(self) -> None:
         result = decide_response_policy_v0_2(
-            request("Explain Fractal Monism."),
+            request("Explain Relational Monism."),
             signals=ResponsePolicySignalsV0_2(
                 fm_application_gate=GateState.UNCERTAIN
             ),
@@ -290,7 +290,7 @@ class ResponsePolicyV0_2Test(unittest.TestCase):
 
     def test_user_opt_out_vetoes_fm(self) -> None:
         result = decide_response_policy_v0_2(
-            request("Explain Fractal Monism."),
+            request("Explain Relational Monism."),
             signals=ResponsePolicySignalsV0_2(user_fm_opt_out=True),
         )
         self.assertEqual(result.fm_default_level, FMLevel.EXPLICIT)
@@ -360,7 +360,7 @@ class ResponsePolicyV0_2Test(unittest.TestCase):
                 )
 
     def test_decision_hash_is_deterministic_and_manifest_bound(self) -> None:
-        policy_input = request("Explain Fractal Monism.")
+        policy_input = request("Explain Relational Monism.")
         safety = SafetyAssessmentV0_2.create(policy_input)
         first = decide_response_policy_v0_2(policy_input)
         second = decide_response_policy_v0_2(policy_input)
@@ -416,7 +416,7 @@ class ResponsePolicyV0_2Test(unittest.TestCase):
             )
 
     def test_missing_cross_request_and_forged_safety_fail_closed(self) -> None:
-        first_request = request("Explain Fractal Monism.", request_id="request-one")
+        first_request = request("Explain Relational Monism.", request_id="request-one")
         second_request = request("Hello", request_id="request-two")
         valid = SafetyAssessmentV0_2.create(first_request)
 
@@ -472,11 +472,11 @@ class ResponsePolicyV0_2Test(unittest.TestCase):
             ),
             ResponsePolicyConversationMessageV0_2(
                 role=ConversationRole.USER,
-                content="Now explain Fractal Monism.",
+                content="Now explain Relational Monism.",
             ),
         )
         policy_input = request(
-            "Now explain Fractal Monism.",
+            "Now explain Relational Monism.",
             conversation=conversation,
         )
         result = decide_response_policy_v0_2(policy_input)

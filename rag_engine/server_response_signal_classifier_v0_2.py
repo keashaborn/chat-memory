@@ -8,7 +8,7 @@ including consequential medical, medication, eating-disorder, legal,
 financial, coercion, and substance-withdrawal requests.  Provider failure or
 ambiguous output yields an UNCERTAIN domain-risk gate.  Transient provider
 unavailability is distinguished from invalid classifier output so response
-policy can use a bounded degraded mode without enabling FM or intervention.
+policy can use a bounded degraded mode without enabling RM or intervention.
 """
 
 import hashlib
@@ -30,9 +30,9 @@ from rag_engine.response_policy_v0_2 import (
 )
 
 
-CLASSIFIER_VERSION = "server_response_signal_classifier_v0_3"
-ASSESSMENT_VERSION = "domain_risk_assessment_v0_3"
-RESULT_VERSION = "response_signal_classification_result_v0_3"
+CLASSIFIER_VERSION = "server_response_signal_classifier_v0_4"
+ASSESSMENT_VERSION = "domain_risk_assessment_v0_4"
+RESULT_VERSION = "response_signal_classification_result_v0_4"
 DEFAULT_TIMEOUT_SECONDS = 12.0
 MAX_TIMEOUT_SECONDS = 30.0
 MAX_MESSAGE_BYTES = 32_768
@@ -392,10 +392,10 @@ The domain fields must obey these exact invariants:
   categories that caused the non-pass result, and fm_application_gate must not pass.
 - Never select other_material_risk merely because a topic is philosophical,
   unfamiliar, specific to this product, or described as internal to the chat.
-A direct informational request about Fractal Monism is not domain risk by itself.
+A direct informational request about Relational Monism is not domain risk by itself.
 
 Set technical only for concrete computing, code, infrastructure, or device work.
-Set fm_explicit only when the user explicitly asks about or requests Fractal Monism.
+Set fm_explicit only when the user explicitly asks about or requests Relational Monism.
 Set coaching for user-requested behavior change, tracking, planning, or habit work.
 Set direct_response_requested when the user explicitly requests a direct answer
 or recommendation. Set guided_reflection_requested when the user asks to think
@@ -416,12 +416,12 @@ consent to carry it out. Set the four experiment-readiness booleans only when
 the conversation actually defines the named prerequisite. Preserve explicit
 refusals: negated planning, tracking, or experiment language must not activate
 behavioral_intervention_requested.
-These interaction signals are independent of technical, FM, and coaching mode.
+These interaction signals are independent of technical, RM, and coaching mode.
 Direct response takes precedence over intervention, which takes precedence over
 guided reflection. High-stakes and controlling domain policy remain authoritative.
 ordinary_fm_relevant may be true only when one subtle perspective shift would be
 directly relevant outside high-stakes or technical work. user_fm_opt_out is true
-when the user asks not to use Fractal Monism. The remaining booleans describe
+when the user asks not to use Relational Monism. The remaining booleans describe
 explicitly requested procedure, coaching consent, necessary clarification, or next step.
 Return only the Structured Output fields."""
 

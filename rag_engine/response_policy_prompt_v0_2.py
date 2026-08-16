@@ -24,7 +24,7 @@ from rag_engine.response_policy_v0_2 import (
 )
 
 
-RESPONSE_POLICY_PROMPT_VERSION = "response_policy_prompt_v0_6"
+RESPONSE_POLICY_PROMPT_VERSION = "response_policy_prompt_v0_7"
 RESPONSE_INTERACTION_VERSION = "response_interaction_v3"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
@@ -138,7 +138,7 @@ _MODE_INSTRUCTIONS: dict[ResponseMode, str] = {
     ResponseMode.HIGH_STAKES: (
         "Use conventional, concrete, domain-appropriate safeguards. Preserve "
         "danger, consent, harm, local reality, and practical consequences. Do "
-        "not use Fractal Monism, perspective shifting, unity, authored "
+        "not use Relational Monism, perspective shifting, unity, authored "
         "usefulness, or metaphysical reframing to delay protection, care, "
         "qualified help, or urgent action. Relevant governed facts and "
         "structured application data remain usable when independently "
@@ -148,11 +148,11 @@ _MODE_INSTRUCTIONS: dict[ResponseMode, str] = {
         "Use factual technical reasoning. State the server, file, command, "
         "expected result, and verification when those details matter. Preserve "
         "relevant governed project facts and reviewed domain documentation. Do "
-        "not add Fractal Monism or biography unless the task independently "
+        "not add Relational Monism or biography unless the task independently "
         "requires it."
     ),
     ResponseMode.FM_EXPLICIT: (
-        "Use only the selected canonical Fractal Monism v0.2 reference data. "
+        "Use only the selected canonical Relational Monism v0.4 reference data. "
         "Preserve stable concepts, scope distinctions, tensions, epistemic "
         "distinctions, competing interpretations, and application boundaries. "
         "Distinguish internal philosophical commitments from external evidence. "
@@ -181,7 +181,7 @@ _MODE_INSTRUCTIONS: dict[ResponseMode, str] = {
         "such as \"I'm done\", \"that's all\", or \"all done\", reply with only a "
         "brief acknowledgment and stop. Do not invent a control word, command, "
         "or user-interface behavior. "
-        "A selected light Fractal Monism framing may appear once only when it is "
+        "A selected light Relational Monism framing may appear once only when it is "
         "directly relevant and materially clarifies the answer."
     ),
 }
@@ -291,13 +291,14 @@ def render_response_policy_prompt_v0_2(
         raise ResponsePolicyPromptError("invalid response-policy decision") from exc
 
     fm_line = {
-        FMLevel.OFF: "Effective Fractal Monism level: OFF.",
+        FMLevel.OFF: "Effective Relational Monism level: OFF.",
         FMLevel.LIGHT: (
-            "Effective Fractal Monism level: LIGHT; use only a selected practical "
-            "principle and never turn it into a worldview agenda."
+            "Effective Relational Monism level: LIGHT; use only one materially relevant "
+            "principle from the selected canonical prompt and never turn it into a "
+            "worldview agenda."
         ),
         FMLevel.EXPLICIT: (
-            "Effective Fractal Monism level: EXPLICIT; answer the requested "
+            "Effective Relational Monism level: EXPLICIT; answer the requested "
             "philosophical question from selected canonical material."
         ),
     }[verified.fm_effective_level]
