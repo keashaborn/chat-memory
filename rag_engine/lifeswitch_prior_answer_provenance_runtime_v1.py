@@ -19,7 +19,7 @@ from rag_engine.response_conversation_snapshot_v1 import ConversationSnapshotV1
 
 
 PRIOR_LIFESWITCH_PREPARED_V1 = "prior_lifeswitch_prepared_context_v1"
-LIFESWITCH_READER_ROLE = "lifeswitch_chat_reader_v1"
+LIFESWITCH_READER_ROLE = "lifeswitch_chat_reader"
 
 
 class _StrictFrozenModel(BaseModel):
@@ -161,6 +161,7 @@ class PostgresPriorLifeSwitchRestrictedReadSessionV1:
         async with self._pool.acquire() as conn:
             context_id: UUID | None = None
             async with conn.transaction():
+                await conn.execute("set transaction read write")
                 await conn.execute(
                     "select set_config('app.user_id',$1,true)",
                     str(authenticated_actor_user_id),
@@ -203,6 +204,7 @@ class PostgresPriorLifeSwitchRestrictedReadSessionV1:
             finally:
                 if context_id is not None:
                     async with conn.transaction():
+                        await conn.execute("set transaction read write")
                         removed = await conn.fetchval(
                             "select lifeswitch_chat.end_owner_read_context_v1($1)",
                             context_id,

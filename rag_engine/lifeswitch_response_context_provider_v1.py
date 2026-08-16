@@ -34,7 +34,7 @@ from rag_engine.response_conversation_snapshot_v1 import ConversationSnapshotV1
 
 
 LIFESWITCH_PREPARED_CONTEXT_VERSION = "lifeswitch_prepared_context_v1"
-LIFESWITCH_READER_ROLE = "lifeswitch_chat_reader_v1"
+LIFESWITCH_READER_ROLE = "lifeswitch_chat_reader"
 logger = logging.getLogger(__name__)
 
 LifeSwitchPreparationStatus = Literal[
@@ -280,6 +280,7 @@ class PostgresRestrictedLifeSwitchReadSessionV1:
         async with self._pool.acquire() as conn:
             context_id: UUID | None = None
             async with conn.transaction():
+                await conn.execute("set transaction read write")
                 await conn.execute(
                     "select set_config('app.user_id', $1, true)",
                     str(authenticated_actor_user_id),
@@ -303,6 +304,14 @@ class PostgresRestrictedLifeSwitchReadSessionV1:
                     raise ValueError("LifeSwitch owner gateway did not return a UUID")
             try:
                 async with conn.transaction(isolation="repeatable_read", readonly=True):
+                    await conn.execute(
+                        "select set_config('app.user_id', $1, true)",
+                        str(authenticated_actor_user_id),
+                    )
+                    await conn.execute(
+                        "select set_config('app.lifeswitch_owner_id', $1, true)",
+                        str(authenticated_actor_user_id),
+                    )
                     await conn.execute(f"set local role {LIFESWITCH_READER_ROLE}")
                     owner_timezone, source = await self._owner_timezone(
                         conn,
@@ -359,6 +368,7 @@ class PostgresRestrictedLifeSwitchReadSessionV1:
             finally:
                 if context_id is not None:
                     async with conn.transaction():
+                        await conn.execute("set transaction read write")
                         removed = await conn.fetchval(
                             "select lifeswitch_chat.end_owner_read_context_v1($1)",
                             context_id,

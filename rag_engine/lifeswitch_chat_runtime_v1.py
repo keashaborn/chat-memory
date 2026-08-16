@@ -30,6 +30,7 @@ LifeSwitchRuntimeMode = Literal["off", "canary", "on"]
 LifeSwitchSelfShadowRuntimeMode = Literal["off", "canary", "on"]
 PoolFactory = Callable[..., Awaitable[asyncpg.Pool]]
 logger = logging.getLogger("uvicorn.error")
+LIFESWITCH_CHAT_LOGIN_ROLE = "lifeswitch_chat_login"
 
 
 class LifeSwitchChatRuntimeSettingsV1(BaseModel):
@@ -156,8 +157,13 @@ async def _initialize_connection_v1(conn: asyncpg.Connection) -> None:
     )
     if row is None:
         raise RuntimeError("LifeSwitch pool identity is unavailable")
-    if row["session_user"] != "brains_app" or row["current_user"] != "brains_app":
-        raise RuntimeError("LifeSwitch pool must connect as brains_app")
+    if (
+        row["session_user"] != LIFESWITCH_CHAT_LOGIN_ROLE
+        or row["current_user"] != LIFESWITCH_CHAT_LOGIN_ROLE
+    ):
+        raise RuntimeError(
+            "LifeSwitch pool must connect as the isolated chat login"
+        )
     if row["is_superuser"] or row["bypasses_rls"]:
         raise RuntimeError("LifeSwitch pool role has excessive privileges")
 
