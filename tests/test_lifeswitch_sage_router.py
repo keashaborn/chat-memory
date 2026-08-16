@@ -76,9 +76,9 @@ class LifeSwitchSageRouterTests(unittest.TestCase):
         self.assertNotIn("SearchCapabilityManifestV1.create", source)
         self.assertNotIn("persist_finalized_response_v1", source)
 
-    def test_app_mounts_dedicated_internal_route(self) -> None:
+    def test_app_does_not_mount_retired_internal_route(self) -> None:
         source = (ROOT / "app.py").read_text()
-        self.assertIn(
+        self.assertNotIn(
             'app.include_router(lifeswitch_sage_router, '
             'prefix="/lifeswitch/sage")',
             source,

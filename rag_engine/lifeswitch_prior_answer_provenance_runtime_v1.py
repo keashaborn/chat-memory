@@ -109,6 +109,26 @@ class PriorLifeSwitchRestrictedReadSessionV1(Protocol):
     ) -> PriorLifeSwitchPreparedContextV1: ...
 
 
+class InactivePriorLifeSwitchProvenanceProviderV1:
+    """Return OFF without opening the retired provenance database path."""
+
+    async def prepare(
+        self,
+        *,
+        authenticated_actor_user_id: UUID,
+        conversation_snapshot: ConversationSnapshotV1,
+    ) -> PriorLifeSwitchPreparedContextV1:
+        snapshot = ConversationSnapshotV1.model_validate_json(
+            conversation_snapshot.model_dump_json()
+        )
+        if snapshot.authenticated_actor_user_id != authenticated_actor_user_id:
+            raise ValueError("prior provenance actor differs from snapshot")
+        return PriorLifeSwitchPreparedContextV1.create(
+            status="OFF",
+            database_accessed=False,
+        )
+
+
 class PriorLifeSwitchProvenanceProviderV1:
     """Run the narrow source-question trigger before opening a DB session."""
 
@@ -233,6 +253,7 @@ class LazyPostgresPriorLifeSwitchRestrictedReadSessionV1:
 
 
 __all__ = [
+    "InactivePriorLifeSwitchProvenanceProviderV1",
     "PostgresPriorLifeSwitchRestrictedReadSessionV1",
     "LazyPostgresPriorLifeSwitchRestrictedReadSessionV1",
     "PriorLifeSwitchPreparedContextV1",

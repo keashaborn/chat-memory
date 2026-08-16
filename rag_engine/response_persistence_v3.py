@@ -11,12 +11,6 @@ from rag_engine.chat_integrity import (
     ATTESTED_ASSISTANT_SOURCE,
     insert_assistant_transcript_attestation_v1,
 )
-from rag_engine.lifeswitch_answer_binding_store_v1 import (
-    persist_lifeswitch_binding_on_connection_v1,
-)
-from rag_engine.lifeswitch_answer_provenance_store_v1 import (
-    persist_lifeswitch_provenance_receipt_on_connection_v1,
-)
 from rag_engine.response_finalization_v3 import FinalizedTrustedResponseV3
 
 
@@ -38,12 +32,11 @@ async def persist_finalized_response_v3(
     request_id: str,
     finalized: FinalizedTrustedResponseV3,
 ) -> None:
-    """Persist transcript, neutral attestation, and LifeSwitch atomically.
+    """Persist the transcript and neutral attestation atomically.
 
     Governed Memory is persisted in its separate successor store before this
-    conversation transaction and is never written here. LifeSwitch remains in
-    its own table and RLS domain. The transaction assumes the application role
-    may SET ROLE to the narrowly granted binding writer.
+    conversation transaction and is never written here. Retired LifeSwitch
+    answer-binding and prior-provenance records are not persisted.
     """
 
     stage = "validation"
@@ -108,17 +101,6 @@ async def persist_finalized_response_v3(
             )
             stage = "attestation_insert"
             await insert_assistant_transcript_attestation_v1(conn, attestation)
-            if value.lifeswitch_binding is not None:
-                stage = "lifeswitch_binding_insert"
-                await persist_lifeswitch_binding_on_connection_v1(
-                    conn,
-                    value.lifeswitch_binding,
-                )
-                stage = "lifeswitch_provenance_receipt_insert"
-                await persist_lifeswitch_provenance_receipt_on_connection_v1(
-                    conn,
-                    value.lifeswitch_provenance_receipt,
-                )
 
             stage = "thread_touch"
             await conn.execute(

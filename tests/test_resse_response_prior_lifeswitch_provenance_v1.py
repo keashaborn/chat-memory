@@ -10,7 +10,8 @@ class ResseResponsePriorLifeSwitchProvenanceV1Tests(unittest.TestCase):
             pathlib.Path(__file__).parents[1] / "rag_engine" / "resse_response_router.py"
         ).read_text(encoding="utf-8")
         self.assertIn("IntegratedLifeSwitchResponseCompositionRootV0_4", source)
-        self.assertIn("PriorLifeSwitchProvenanceProviderV1", source)
+        self.assertIn("InactivePriorLifeSwitchProvenanceProviderV1", source)
+        self.assertNotIn("LazyPostgresPriorLifeSwitchRestrictedReadSessionV1", source)
         self.assertIn("persist_finalized_response_v3", source)
         self.assertIn("build_response_inspection_v4", source)
         self.assertNotIn("client_prior_lifeswitch", source)

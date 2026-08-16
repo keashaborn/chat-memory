@@ -57,7 +57,7 @@ class Conn:
 
 
 class ResponsePersistenceV3Tests(unittest.IsolatedAsyncioTestCase):
-    async def test_receipt_is_persisted_in_same_transaction_after_binding(self) -> None:
+    async def test_retired_lifeswitch_records_are_not_persisted(self) -> None:
         plan = await new_plan("What were my macros Monday?")
         response = OpenAIChatCompletionsAdapterV3(
             FakeClient(provider_response(content="Monday used your LifeSwitch log."))
@@ -77,10 +77,8 @@ class ResponsePersistenceV3Tests(unittest.IsolatedAsyncioTestCase):
             finalized=finalized,
         )
         sql = "\n".join(item[0].lower() for item in conn.calls)
-        self.assertLess(
-            sql.index("final_answer_lifeswitch_binding_v1"),
-            sql.index("final_answer_lifeswitch_provenance_receipt_v1"),
-        )
+        self.assertNotIn("final_answer_lifeswitch_binding_v1", sql)
+        self.assertNotIn("final_answer_lifeswitch_provenance_receipt_v1", sql)
         self.assertIn("chat_integrity.assistant_transcript_attestation_v1", sql)
         self.assertNotIn("memory.assistant_transcript_attestation_v1", sql)
 

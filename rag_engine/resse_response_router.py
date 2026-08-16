@@ -54,8 +54,7 @@ from rag_engine.lifeswitch_response_context_provider_v1 import (
     LifeSwitchResponseContextProviderV1,
 )
 from rag_engine.lifeswitch_prior_answer_provenance_runtime_v1 import (
-    LazyPostgresPriorLifeSwitchRestrictedReadSessionV1,
-    PriorLifeSwitchProvenanceProviderV1,
+    InactivePriorLifeSwitchProvenanceProviderV1,
 )
 from rag_engine.memory_actor_auth_v1 import (
     MemoryActorContextV1,
@@ -612,11 +611,7 @@ async def resse_response_query(
                     LIFESWITCH_CHAT_POOL
                 )
             )
-            prior_provenance_provider = PriorLifeSwitchProvenanceProviderV1(
-                LazyPostgresPriorLifeSwitchRestrictedReadSessionV1(
-                    LIFESWITCH_CHAT_POOL
-                )
-            )
+            prior_provenance_provider = InactivePriorLifeSwitchProvenanceProviderV1()
             root_v4 = IntegratedLifeSwitchResponseCompositionRootV0_4(
                 base_root=base_root,
                 openai_client=openai_client,

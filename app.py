@@ -16,12 +16,10 @@ from pydantic import (
     BeforeValidator,
     ConfigDict,
     Field,
-    ValidationError,
     field_validator,
     model_validator,
 )
 from rag_engine.resse_response_router import router as resse_response_router
-from rag_engine.lifeswitch_sage_router import router as lifeswitch_sage_router
 from rag_engine.trusted_web_router import router as trusted_web_router
 from rag_engine.current_news_router import router as current_news_router
 from rag_engine.search_execution_router_v1 import (
@@ -33,10 +31,7 @@ from rag_engine.lifeswitch_nutrition_log_router import router as lifeswitch_nutr
 from rag_engine.lifeswitch_nutrition_router import router as lifeswitch_nutrition_router
 from rag_engine.lifeswitch_nutrition_log_batch_router import router as lifeswitch_nutrition_log_batch_router
 from rag_engine.lifeswitch_training_router import router as lifeswitch_training_router
-from rag_engine.lifeswitch_plan_router import router as lifeswitch_plan_router
-from lifeswitch_agentic.app_adapter import create_lifeswitch_plan_app_router
 from rag_engine.lifeswitch_measurements_router import router as lifeswitch_measurements_router
-from rag_engine.lifeswitch_people_router import router as lifeswitch_people_router
 from rag_engine.lifeswitch_account_timezone_router_v1 import (
     router as lifeswitch_account_timezone_router_v1,
 )
@@ -174,15 +169,6 @@ from rag_engine.admin_ai_operations_v1 import (
     list_admin_ai_operations_incidents_v1,
     resolve_admin_ai_operations_incident_v1,
 )
-from rag_engine.usage_ledger_v1 import (
-    AdminUsageSummaryRequestV1,
-    AdminUsageUsersRequestV1,
-    UsageLedgerError,
-    build_admin_usage_overview_v1,
-    build_admin_usage_summary_v1,
-    build_admin_usage_user_detail_v1,
-    build_admin_usage_users_v1,
-)
 from rag_engine.governed_memory.response_runtime import (
     EXPECTED_POSTGRES_DATABASE,
     EXPECTED_POSTGRES_HOST,
@@ -312,7 +298,6 @@ app.include_router(
         service_token=GOVERNED_MEMORY_PROXY_SERVICE_TOKEN,
     )
 )
-app.include_router(lifeswitch_sage_router, prefix="/lifeswitch/sage")
 app.include_router(trusted_web_router, prefix="/trusted-web")
 app.include_router(current_news_router, prefix="/current-news")
 app.include_router(search_execution_router_v1, prefix="/search")
@@ -323,25 +308,7 @@ app.include_router(lifeswitch_nutrition_log_router, prefix="/lifeswitch/nutritio
 app.include_router(lifeswitch_nutrition_log_batch_router, prefix="/lifeswitch/nutrition")
 app.include_router(catalog_router, prefix="/catalog")
 app.include_router(lifeswitch_training_router, prefix="/lifeswitch/training")
-app.include_router(lifeswitch_plan_router, prefix="/lifeswitch/plan")
-app.include_router(
-    create_lifeswitch_plan_app_router(
-        dsn=os.environ["POSTGRES_DSN"],
-        people_schema=os.getenv("LIFESWITCH_PEOPLE_SCHEMA", "lifeswitch_people"),
-        legacy_plan_schema=os.getenv("LIFESWITCH_PLAN_SCHEMA", "lifeswitch_plan"),
-        openai_api_key=os.getenv("OPENAI_API_KEY"),
-        plan_recommendation_model=(
-            os.getenv("LIFESWITCH_PLAN_MODEL")
-            or os.getenv("OPENAI_CHAT_MODEL")
-            or os.getenv("VANTAGE_MODEL")
-            or "gpt-5.2"
-        ),
-    ),
-    prefix="/lifeswitch/plan",
-)
 app.include_router(lifeswitch_measurements_router, prefix="/lifeswitch/measurements")
-if os.getenv("LIFESWITCH_PEOPLE_ENABLED", "0") == "1":
-    app.include_router(lifeswitch_people_router, prefix="/lifeswitch/people")
 app.include_router(
     lifeswitch_account_timezone_router_v1,
     prefix="/lifeswitch/account",
@@ -894,177 +861,6 @@ async def admin_ai_operations_resolve(
 
 
 # ---------- admin usage ----------
-USAGE_ANALYTICS_CAPABILITY = "usage_analytics.view"
-
-
-def _require_usage_analytics_actor(req: Request):
-    actor = _actor_user_id(req)
-    if not actor:
-        return _actor_missing_response(), None
-    actor_uuid = parse_uuid(actor)
-    if actor_uuid is None:
-        return JSONResponse(
-            {"ok": False, "error": "invalid_actor_user_id"},
-            status_code=400,
-        ), None
-    capability = (
-        req.headers.get("x-vs-authorized-capability") or ""
-    ).strip()
-    if not hmac.compare_digest(capability, USAGE_ANALYTICS_CAPABILITY):
-        return JSONResponse(
-            {"ok": False, "error": "capability_required"},
-            status_code=403,
-        ), None
-    return None, str(actor_uuid)
-
-
-def _usage_window(raw: str | None, default: int) -> int:
-    value = str(raw if raw is not None else default).strip()
-    if not value or len(value) > 3:
-        raise ValueError("invalid_usage_window")
-    parsed = int(value)
-    if parsed not in {0, 7, 30, 90}:
-        raise ValueError("invalid_usage_window")
-    return parsed
-
-
-@app.post("/admin/usage/summary")
-async def admin_usage_summary(
-    payload: AdminUsageSummaryRequestV1,
-    req: Request,
-):
-    """
-    Content-free per-user usage aggregates for an authorized admin BFF.
-
-    The service boundary supplies the authenticated actor. The BFF supplies
-    the bounded target UUID list after a fresh Supabase capability check.
-    """
-    denied, _actor = _require_usage_analytics_actor(req)
-    if denied is not None:
-        return denied
-
-    try:
-        return await build_admin_usage_summary_v1(
-            dsn=DSN,
-            request=payload,
-        )
-    except Exception:
-        rid = getattr(req.state, "request_id", None) or _get_request_id(req)
-        return JSONResponse(
-            {
-                "ok": False,
-                "error": "usage_summary_unavailable",
-                "request_id": rid,
-            },
-            status_code=500,
-            headers={"x-request-id": rid},
-        )
-
-
-@app.get("/admin/usage/overview")
-async def admin_usage_overview(req: Request):
-    denied, _actor = _require_usage_analytics_actor(req)
-    if denied is not None:
-        return denied
-    try:
-        window_days = _usage_window(
-            req.query_params.get("window"),
-            30,
-        )
-    except (TypeError, ValueError):
-        return JSONResponse(
-            {"ok": False, "error": "invalid_usage_window"},
-            status_code=400,
-        )
-    try:
-        return await build_admin_usage_overview_v1(
-            dsn=DSN,
-            window_days=window_days,
-        )
-    except UsageLedgerError:
-        rid = getattr(req.state, "request_id", None) or _get_request_id(req)
-        return JSONResponse(
-            {"ok": False, "error": "usage_overview_unavailable"},
-            status_code=500,
-            headers={"x-request-id": rid},
-        )
-
-
-@app.get("/admin/usage/users")
-async def admin_usage_users(req: Request):
-    denied, _actor = _require_usage_analytics_actor(req)
-    if denied is not None:
-        return denied
-    params = req.query_params
-    try:
-        request = AdminUsageUsersRequestV1(
-            window_days=_usage_window(params.get("window"), 30),
-            limit=int(params.get("limit") or 25),
-            sort=params.get("sort") or "total_tokens_desc",
-            cursor=params.get("cursor"),
-            query=params.get("query"),
-        )
-    except (TypeError, ValueError, ValidationError):
-        return JSONResponse(
-            {"ok": False, "error": "invalid_usage_query"},
-            status_code=400,
-        )
-    try:
-        return await build_admin_usage_users_v1(
-            dsn=DSN,
-            request=request,
-            cursor_secret=os.getenv("VS_SERVICE_TOKEN") or "",
-        )
-    except UsageLedgerError as exc:
-        if "cursor" in str(exc):
-            return JSONResponse(
-                {"ok": False, "error": "invalid_usage_cursor"},
-                status_code=400,
-            )
-        rid = getattr(req.state, "request_id", None) or _get_request_id(req)
-        return JSONResponse(
-            {"ok": False, "error": "usage_users_unavailable"},
-            status_code=500,
-            headers={"x-request-id": rid},
-        )
-
-
-@app.get("/admin/usage/users/{target_user_id}")
-async def admin_usage_user_detail(target_user_id: str, req: Request):
-    denied, _actor = _require_usage_analytics_actor(req)
-    if denied is not None:
-        return denied
-    target_uuid = parse_uuid(target_user_id)
-    if target_uuid is None:
-        return JSONResponse(
-            {"ok": False, "error": "invalid_target_user_id"},
-            status_code=400,
-        )
-    try:
-        window_days = _usage_window(
-            req.query_params.get("window"),
-            90,
-        )
-    except (TypeError, ValueError):
-        return JSONResponse(
-            {"ok": False, "error": "invalid_usage_window"},
-            status_code=400,
-        )
-    try:
-        return await build_admin_usage_user_detail_v1(
-            dsn=DSN,
-            target_user_id=target_uuid,
-            window_days=window_days,
-        )
-    except UsageLedgerError:
-        rid = getattr(req.state, "request_id", None) or _get_request_id(req)
-        return JSONResponse(
-            {"ok": False, "error": "usage_user_detail_unavailable"},
-            status_code=500,
-            headers={"x-request-id": rid},
-        )
-
-
 # ---------- admin memory health ----------
 @app.get("/admin/memory/health")
 async def admin_memory_health(req: Request):
