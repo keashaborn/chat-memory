@@ -70,6 +70,39 @@ def _canonical_json_uuid(value: Any) -> uuid.UUID:
 CanonicalJsonUUID = Annotated[uuid.UUID, BeforeValidator(_canonical_json_uuid)]
 
 
+class ChatHistoryClearReq(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    scope: Literal["all", "recent", "thread"]
+    thread_id: Optional[CanonicalJsonUUID] = None
+    recent_window_seconds: Optional[int] = None
+    confirmation: str = Field(min_length=1, max_length=64)
+
+    @model_validator(mode="after")
+    def exact_scope(self) -> "ChatHistoryClearReq":
+        expected_confirmation = {
+            "all": "CLEAR CHAT HISTORY",
+            "recent": "CLEAR RECENT CHAT HISTORY",
+            "thread": "CLEAR CHAT",
+        }[self.scope]
+        if self.confirmation != expected_confirmation:
+            raise ValueError("invalid confirmation")
+        if self.scope == "thread":
+            if self.thread_id is None or self.recent_window_seconds is not None:
+                raise ValueError("invalid thread clear shape")
+        elif self.scope == "recent":
+            if self.thread_id is not None or self.recent_window_seconds not in {
+                3_600,
+                86_400,
+                604_800,
+                2_592_000,
+            }:
+                raise ValueError("invalid recent clear shape")
+        elif self.thread_id is not None or self.recent_window_seconds is not None:
+            raise ValueError("invalid all clear shape")
+        return self
+
+
 class ChatAttachmentCreateReq(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -156,6 +189,10 @@ from rag_engine.active_thread_selection_v1 import (
     clear_active_thread_v1,
     get_active_thread_v1,
     select_active_thread_v1,
+)
+from rag_engine.chat_history_clear_v1 import (
+    ChatHistoryClearError,
+    clear_chat_history_v1,
 )
 from rag_engine.thread_title_v1 import (
     generate_semantic_title,
@@ -444,6 +481,7 @@ SENSITIVE_NO_STORE_PREFIXES = (
     "/threads/active",
     "/attachments",
     "/memory/",
+    "/chat-history/",
 )
 SENSITIVE_NO_STORE_HEADERS = {
     "cache-control": "private, no-store, max-age=0, must-revalidate",
@@ -1587,6 +1625,37 @@ async def threads_active_clear(
         return {"status": "ok", "thread_id": None}
     finally:
         await conn.close()
+
+
+@app.post("/chat-history/clear")
+async def chat_history_clear(body: ChatHistoryClearReq, req: Request):
+    actor = _actor_user_id(req)
+    owner_user_id = parse_uuid(actor or "")
+    if owner_user_id is None:
+        return _actor_missing_response()
+    authorization = (req.headers.get("authorization") or "").strip()
+    operation_id = uuid.uuid4()
+
+    conn = await asyncpg.connect(DSN)
+    try:
+        result = await clear_chat_history_v1(
+            conn,
+            owner_user_id=owner_user_id,
+            authorization=authorization,
+            operation_id=operation_id,
+            scope=body.scope,
+            thread_id=body.thread_id,
+            recent_window_seconds=body.recent_window_seconds,
+        )
+    except ChatHistoryClearError as exc:
+        return JSONResponse(
+            {"status": "error", "detail": exc.code},
+            status_code=exc.status_code,
+            headers=SUCCESSOR_MEMORY_REFUSAL_HEADERS,
+        )
+    finally:
+        await conn.close()
+    return result.as_dict()
 
 
 @app.get("/threads/{thread_id}/messages")

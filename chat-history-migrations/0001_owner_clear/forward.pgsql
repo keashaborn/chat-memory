@@ -1,0 +1,283 @@
+SET ROLE sage;
+SET LOCAL lock_timeout = '5s';
+SET LOCAL statement_timeout = '30s';
+
+CREATE SCHEMA chat_history_private AUTHORIZATION sage;
+REVOKE ALL ON SCHEMA chat_history_private FROM PUBLIC;
+
+CREATE TABLE chat_history_private.clear_receipt (
+  owner_user_id uuid NOT NULL,
+  operation_id uuid PRIMARY KEY,
+  scope text NOT NULL CHECK (scope IN ('all', 'recent', 'thread')),
+  thread_id uuid,
+  recent_window_seconds integer,
+  deleted_message_count integer NOT NULL CHECK (deleted_message_count >= 0),
+  deleted_thread_count integer NOT NULL CHECK (deleted_thread_count >= 0),
+  deleted_outbox_count integer NOT NULL CHECK (deleted_outbox_count >= 0),
+  receipt_sha256 text NOT NULL CHECK (receipt_sha256 ~ '^[0-9a-f]{64}$'),
+  completed_at timestamptz NOT NULL,
+  UNIQUE (owner_user_id, operation_id),
+  CHECK (
+    (scope = 'all' AND thread_id IS NULL AND recent_window_seconds IS NULL)
+    OR (scope = 'thread' AND thread_id IS NOT NULL AND recent_window_seconds IS NULL)
+    OR (scope = 'recent' AND thread_id IS NULL
+        AND recent_window_seconds IN (3600, 86400, 604800, 2592000))
+  )
+);
+ALTER TABLE chat_history_private.clear_receipt OWNER TO sage;
+ALTER TABLE chat_history_private.clear_receipt ENABLE ROW LEVEL SECURITY;
+ALTER TABLE chat_history_private.clear_receipt FORCE ROW LEVEL SECURITY;
+REVOKE ALL ON chat_history_private.clear_receipt FROM PUBLIC, brains_app;
+CREATE POLICY clear_receipt_owner_context
+  ON chat_history_private.clear_receipt
+  FOR ALL
+  TO sage
+  USING (
+    owner_user_id = NULLIF(
+      pg_catalog.current_setting('app.user_id', true), ''
+    )::uuid
+  )
+  WITH CHECK (
+    owner_user_id = NULLIF(
+      pg_catalog.current_setting('app.user_id', true), ''
+    )::uuid
+  );
+
+CREATE FUNCTION chat_history_private.guard_receipt_immutable()
+RETURNS trigger
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO pg_catalog
+AS $function$
+BEGIN
+  RAISE EXCEPTION 'chat history clear receipts are immutable'
+    USING ERRCODE = '55000';
+END;
+$function$;
+ALTER FUNCTION chat_history_private.guard_receipt_immutable() OWNER TO sage;
+REVOKE ALL ON FUNCTION chat_history_private.guard_receipt_immutable()
+  FROM PUBLIC, brains_app;
+
+CREATE TRIGGER clear_receipt_immutable
+  BEFORE UPDATE OR DELETE ON chat_history_private.clear_receipt
+  FOR EACH ROW EXECUTE FUNCTION chat_history_private.guard_receipt_immutable();
+
+CREATE FUNCTION chat_history_private.clear_history(
+  p_operation_id uuid,
+  p_scope text,
+  p_thread_id uuid,
+  p_recent_window_seconds integer
+)
+RETURNS TABLE(
+  outcome text,
+  operation_id uuid,
+  scope text,
+  deleted_message_count integer,
+  deleted_thread_count integer,
+  deleted_outbox_count integer,
+  receipt_sha256 text,
+  completed_at timestamptz
+)
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO pg_catalog
+AS $function$
+DECLARE
+  actor uuid;
+  cutoff timestamptz;
+  finished_at timestamptz;
+  message_count integer := 0;
+  thread_count integer := 0;
+  outbox_count integer := 0;
+  receipt_hash text;
+  existing chat_history_private.clear_receipt%ROWTYPE;
+BEGIN
+  IF session_user <> 'brains_app' THEN
+    RAISE EXCEPTION 'brains application role required' USING ERRCODE = '42501';
+  END IF;
+  actor := NULLIF(pg_catalog.current_setting('app.user_id', true), '')::uuid;
+  IF actor IS NULL
+     OR p_operation_id IS NULL
+     OR COALESCE(
+       pg_catalog.current_setting('app.auth_context_sha256', true), ''
+     ) !~ '^[0-9a-f]{64}$'
+     OR COALESCE(p_scope, '') NOT IN ('all', 'recent', 'thread')
+     OR (p_scope = 'all' AND (
+       p_thread_id IS NOT NULL OR p_recent_window_seconds IS NOT NULL
+     ))
+     OR (p_scope = 'thread' AND (
+       p_thread_id IS NULL OR p_recent_window_seconds IS NOT NULL
+     ))
+     OR (p_scope = 'recent' AND (
+       p_thread_id IS NOT NULL
+       OR p_recent_window_seconds NOT IN (3600, 86400, 604800, 2592000)
+     )) THEN
+    RAISE EXCEPTION 'invalid chat history clear request'
+      USING ERRCODE = '22023';
+  END IF;
+
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(actor::text || '|chat_history_clear', 0)
+  );
+  SELECT receipt.* INTO existing
+  FROM chat_history_private.clear_receipt AS receipt
+  WHERE receipt.operation_id = p_operation_id;
+  IF FOUND THEN
+    IF existing.owner_user_id IS DISTINCT FROM actor
+       OR existing.scope IS DISTINCT FROM p_scope
+       OR existing.thread_id IS DISTINCT FROM p_thread_id
+       OR existing.recent_window_seconds IS DISTINCT FROM p_recent_window_seconds
+    THEN
+      RAISE EXCEPTION 'chat history clear replay drifted' USING ERRCODE = '23514';
+    END IF;
+    RETURN QUERY SELECT 'replayed'::text, existing.operation_id,
+      existing.scope, existing.deleted_message_count,
+      existing.deleted_thread_count, existing.deleted_outbox_count,
+      existing.receipt_sha256, existing.completed_at;
+    RETURN;
+  END IF;
+
+  LOCK TABLE public.threads IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE public.chat_log IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE public.chat_attachments IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE public.active_thread_selection IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE trusted_web.response_transcript_v1 IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE chat_integrity.assistant_transcript_attestation_v1
+    IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE memory_ingest_private.memory_ingest_outbox
+    IN SHARE ROW EXCLUSIVE MODE;
+
+  IF p_scope = 'thread' AND NOT EXISTS (
+    SELECT 1 FROM public.threads AS thread
+    WHERE thread.owner_user_id = actor AND thread.id = p_thread_id
+  ) THEN
+    RAISE EXCEPTION 'chat history thread is absent' USING ERRCODE = 'P0002';
+  END IF;
+  cutoff := CASE WHEN p_scope = 'recent' THEN
+    pg_catalog.transaction_timestamp()
+      - pg_catalog.make_interval(secs => p_recent_window_seconds)
+  ELSE NULL END;
+
+  CREATE TEMP TABLE pg_temp.chat_history_target_message (
+    message_id uuid PRIMARY KEY,
+    thread_id uuid NOT NULL
+  ) ON COMMIT DROP;
+  INSERT INTO pg_temp.chat_history_target_message(message_id, thread_id)
+  SELECT message.id, message.thread_id
+  FROM public.chat_log AS message
+  WHERE message.owner_user_id = actor
+    AND (
+      p_scope = 'all'
+      OR (p_scope = 'thread' AND message.thread_id = p_thread_id)
+      OR (p_scope = 'recent' AND message.created_at >= cutoff)
+    );
+
+  CREATE TEMP TABLE pg_temp.chat_history_target_thread (
+    thread_id uuid PRIMARY KEY
+  ) ON COMMIT DROP;
+  INSERT INTO pg_temp.chat_history_target_thread(thread_id)
+  SELECT thread.id
+  FROM public.threads AS thread
+  WHERE thread.owner_user_id = actor
+    AND (
+      p_scope = 'all'
+      OR (p_scope = 'thread' AND thread.id = p_thread_id)
+      OR EXISTS (
+        SELECT 1 FROM pg_temp.chat_history_target_message AS target
+        WHERE target.thread_id = thread.id
+      )
+    );
+
+  IF EXISTS (
+    SELECT 1
+    FROM memory_ingest_private.memory_ingest_outbox AS outbox
+    JOIN pg_temp.chat_history_target_message AS target
+      ON target.message_id = outbox.message_id
+    WHERE outbox.owner_user_id = actor
+      AND outbox.state NOT IN (
+        'completed', 'failed_terminal', 'skipped', 'expired'
+      )
+  ) THEN
+    RAISE EXCEPTION 'chat memory is still processing' USING ERRCODE = '55000';
+  END IF;
+
+  DELETE FROM memory_ingest_private.memory_ingest_outbox AS outbox
+  USING pg_temp.chat_history_target_message AS target
+  WHERE outbox.owner_user_id = actor
+    AND outbox.message_id = target.message_id;
+  GET DIAGNOSTICS outbox_count = ROW_COUNT;
+
+  DELETE FROM public.chat_log AS message
+  USING pg_temp.chat_history_target_message AS target
+  WHERE message.owner_user_id = actor
+    AND message.id = target.message_id;
+  GET DIAGNOSTICS message_count = ROW_COUNT;
+
+  DELETE FROM public.threads AS thread
+  USING pg_temp.chat_history_target_thread AS target
+  WHERE thread.owner_user_id = actor
+    AND thread.id = target.thread_id
+    AND NOT EXISTS (
+      SELECT 1 FROM public.chat_log AS remaining
+      WHERE remaining.owner_user_id = actor
+        AND remaining.thread_id = thread.id
+    );
+  GET DIAGNOSTICS thread_count = ROW_COUNT;
+
+  finished_at := pg_catalog.clock_timestamp();
+  receipt_hash := pg_catalog.encode(
+    pg_catalog.sha256(pg_catalog.convert_to(
+      actor::text || '|' || p_operation_id::text || '|' || p_scope || '|'
+      || COALESCE(p_thread_id::text, '-') || '|'
+      || COALESCE(p_recent_window_seconds::text, '-') || '|'
+      || message_count::text || '|' || thread_count::text || '|'
+      || outbox_count::text || '|' || finished_at::text,
+      'UTF8'
+    )),
+    'hex'
+  );
+  INSERT INTO chat_history_private.clear_receipt(
+    owner_user_id, operation_id, scope, thread_id,
+    recent_window_seconds, deleted_message_count,
+    deleted_thread_count, deleted_outbox_count,
+    receipt_sha256, completed_at
+  ) VALUES (
+    actor, p_operation_id, p_scope, p_thread_id,
+    p_recent_window_seconds, message_count, thread_count, outbox_count,
+    receipt_hash, finished_at
+  );
+
+  RETURN QUERY SELECT 'cleared'::text, p_operation_id, p_scope,
+    message_count, thread_count, outbox_count, receipt_hash, finished_at;
+END;
+$function$;
+ALTER FUNCTION chat_history_private.clear_history(
+  uuid, text, uuid, integer
+) OWNER TO sage;
+REVOKE ALL ON FUNCTION chat_history_private.clear_history(
+  uuid, text, uuid, integer
+) FROM PUBLIC;
+GRANT USAGE ON SCHEMA chat_history_private TO brains_app;
+GRANT EXECUTE ON FUNCTION chat_history_private.clear_history(
+  uuid, text, uuid, integer
+) TO brains_app;
+
+DO $postflight$
+BEGIN
+  IF pg_catalog.has_table_privilege(
+       'brains_app', 'chat_history_private.clear_receipt',
+       'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'
+     )
+     OR NOT pg_catalog.has_function_privilege(
+       'brains_app',
+       'chat_history_private.clear_history(uuid,text,uuid,integer)',
+       'EXECUTE'
+     ) THEN
+    RAISE EXCEPTION 'chat history clear privilege postflight failed';
+  END IF;
+END;
+$postflight$;
+
+RESET ROLE;

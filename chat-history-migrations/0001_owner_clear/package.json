@@ -1,0 +1,29 @@
+{
+  "schema_version": "chat-history-migration-package-v1",
+  "migration_id": "chat_history_owner_clear_0001",
+  "status": "candidate_not_applied",
+  "target": {
+    "server": "seebx",
+    "database": "memory",
+    "execution_role": "sage"
+  },
+  "transaction": {
+    "required": true,
+    "runner_supplies_begin_commit": true
+  },
+  "forward": {
+    "path": "forward.pgsql",
+    "sha256": "6499cc7bfe52e901908089292241c11454204a0f6edf996c0da05db9939f73ed"
+  },
+  "rollback": {
+    "path": "rollback.pgsql",
+    "sha256": "144caec8535dbb6e6243b3dcbb65954eda4357a2a3cc7bfa02dacf2a6738dcac",
+    "empty_only": true
+  },
+  "scope": {
+    "visible_chat_history_only": true,
+    "governed_memory_mutated": false,
+    "zep_called": false,
+    "structured_lifeswitch_data_mutated": false
+  }
+}
