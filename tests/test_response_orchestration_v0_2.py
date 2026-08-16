@@ -458,6 +458,21 @@ class TrustedResponseOrchestrationV0_2Tests(unittest.IsolatedAsyncioTestCase):
                         successor_memory_context_block=memory_block,
                     )
 
+    def test_zep_memory_is_accepted_when_bound_to_request_and_query(self) -> None:
+        current = "What is my temporary recall phrase?"
+        memory_block = successor_memory_block(
+            current,
+            block_id="zep_memory_v1",
+            source_contract_version="zep-cloud-context-v1",
+        )
+        valid = trusted_request(
+            authenticated_actor_user_id=ACTOR,
+            request_id="request-123",
+            conversation=messages(current),
+            successor_memory_context_block=memory_block,
+        )
+        self.assertEqual(valid.successor_memory_context_block, memory_block)
+
     async def test_trace_manifest_rejects_semantic_tampering(self) -> None:
         request = trusted_request(
             authenticated_actor_user_id=ACTOR,
