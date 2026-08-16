@@ -42,10 +42,12 @@ class NeverQueryPeople:
 
 
 class IsolatedPostgresV1Tests(unittest.IsolatedAsyncioTestCase):
-    def test_people_routes_are_preserved_but_disabled_by_default(self):
-        app_source = (Path(__file__).resolve().parents[1] / "app.py").read_text()
-        self.assertIn('os.getenv("LIFESWITCH_PEOPLE_ENABLED", "0") == "1"', app_source)
-        self.assertIn('prefix="/lifeswitch/people"', app_source)
+    def test_people_routes_are_removed(self):
+        root = Path(__file__).resolve().parents[1]
+        app_source = (root / "app.py").read_text()
+        self.assertNotIn("lifeswitch_people_router", app_source)
+        self.assertNotIn('prefix="/lifeswitch/people"', app_source)
+        self.assertFalse((root / "rag_engine" / "lifeswitch_people_router.py").exists())
 
     async def test_connection_binds_authenticated_actor_for_rls(self):
         conn = FakeConnection()
