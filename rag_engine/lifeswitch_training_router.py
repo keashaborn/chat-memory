@@ -11,6 +11,7 @@ import math
 import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Body, Header, Request
 from rag_engine.lifeswitch_auth import require_actor_matches_owner
+from rag_engine.lifeswitch_db import connect_lifeswitch
 from rag_engine.lifeswitch_training_log_service import (
     correct_conditioning_session as write_conditioning_correction,
     correct_training_session as write_training_correction,
@@ -23,10 +24,6 @@ from rag_engine.lifeswitch_training_log_service import (
 from fastapi.responses import JSONResponse
 
 router = APIRouter()
-
-DSN = os.getenv("POSTGRES_DSN") or ""
-if not DSN:
-    raise RuntimeError("POSTGRES_DSN missing")
 
 SCHEMA = os.getenv("LIFESWITCH_TRAINING_SCHEMA", "lifeswitch_training")
 PEOPLE_SCHEMA = os.getenv("LIFESWITCH_PEOPLE_SCHEMA", "lifeswitch_people")
@@ -128,8 +125,8 @@ async def _unique_imported_workout_name(conn, owner_user_id: str, base_name: str
     return f"{base} (Imported {secrets.token_hex(3)})"
 
 
-async def _db():
-    return await asyncpg.connect(DSN)
+async def _db(req: Request):
+    return await connect_lifeswitch(req)
 
 
 async def _has_people_permission(conn, grantor_user_id: str, grantee_user_id: str, scope: str) -> bool:
@@ -159,6 +156,8 @@ async def _resolve_training_view_target(conn, viewer_user_id: str, target_user_i
     delegated = target != viewer
 
     if delegated:
+        if os.getenv("LIFESWITCH_DELEGATED_READS_ENABLED", "0") != "1":
+            raise HTTPException(status_code=403, detail="delegated_access_disabled")
         allowed = await _has_people_permission(conn, target, viewer, "training:view")
         if not allowed:
             raise HTTPException(status_code=403, detail="training:view permission required")
@@ -177,7 +176,7 @@ async def list_my_exercises(
     include_inactive: int = Query(0, ge=0, le=1),
 ):
     owner = require_actor_matches_owner(req, owner_user_id)
-    conn = await _db()
+    conn = await _db(req)
     try:
         where_active = "" if include_inactive else "and me.is_active=true"
         rows = await conn.fetch(
@@ -217,7 +216,7 @@ async def upsert_my_exercise(
     clean_role = _clean_text(exercise_role, 20).lower()
     if clean_role and clean_role not in {"strength", "rehab"}:
         raise HTTPException(status_code=400, detail="exercise_role must be strength or rehab")
-    conn = await _db()
+    conn = await _db(req)
     try:
         async with conn.transaction():
             existing = await conn.fetchrow(
@@ -296,7 +295,7 @@ async def deactivate_my_exercise(
 ):
     mid = _as_uuid(my_exercise_id, "my_exercise_id")
     owner = require_actor_matches_owner(req, owner_user_id)
-    conn = await _db()
+    conn = await _db(req)
     try:
         row = await conn.fetchrow(
             f"""
@@ -322,7 +321,7 @@ async def deactivate_my_exercise(
 async def list_conditioning_library(
     include_inactive: int = Query(0, ge=0, le=1),
 ):
-    conn = await _db()
+    conn = await _db(req)
     try:
         where_active = "" if include_inactive else "where is_active=true"
         rows = await conn.fetch(
@@ -350,7 +349,7 @@ async def list_my_conditioning_prescriptions(
     include_inactive: int = Query(0, ge=0, le=1),
 ):
     owner = require_actor_matches_owner(req, owner_user_id)
-    conn = await _db()
+    conn = await _db(req)
     try:
         where_active = "" if include_inactive else "and p.is_active=true"
         rows = await conn.fetch(
@@ -460,7 +459,7 @@ async def upsert_my_conditioning_prescription(
         separators=(",", ":"),
     )
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         if pid:
             existing_owner = await conn.fetchval(
@@ -677,7 +676,7 @@ async def deactivate_my_conditioning_prescription(
     pid = _as_uuid(my_conditioning_prescription_id, "my_conditioning_prescription_id")
     owner = require_actor_matches_owner(req, owner_user_id)
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         row = await conn.fetchrow(
             f"""
@@ -794,7 +793,7 @@ async def create_conditioning_session(
         "dose_config": parsed_dose_config,
     }
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         async with conn.transaction():
             await set_transaction_actor(conn, actor_user_id=owner)
@@ -845,7 +844,7 @@ async def list_conditioning_sessions(
         except Exception:
             raise HTTPException(status_code=400, detail="invalid day")
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         owner, delegated = await _resolve_training_view_target(conn, viewer, target_user_id)
         session_source = (
@@ -913,7 +912,7 @@ async def get_conditioning_session(
     sid = _as_uuid(conditioning_session_log_id, "conditioning_session_log_id")
     owner = require_actor_matches_owner(req, owner_user_id)
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         row = await conn.fetchrow(
             f"""
@@ -962,7 +961,7 @@ async def deactivate_conditioning_session(
     sid = _as_uuid(conditioning_session_log_id, "conditioning_session_log_id")
     owner = require_actor_matches_owner(req, owner_user_id)
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         async with conn.transaction():
             await set_transaction_actor(conn, actor_user_id=owner)
@@ -997,7 +996,7 @@ async def correct_conditioning_session(
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="JSON object required")
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         async with conn.transaction():
             await set_transaction_actor(conn, actor_user_id=owner)
@@ -1051,7 +1050,7 @@ async def create_workout_template_share(
     token = _new_share_token()
     thash = _token_hash(token)
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         tpl = await conn.fetchrow(
             f"""
@@ -1116,7 +1115,7 @@ async def list_workout_template_shares(
     owner = require_actor_matches_owner(req, owner_user_id)
     status_filter = "" if include_inactive else "and s.status='active'"
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         rows = await conn.fetch(
             f"""
@@ -1153,7 +1152,7 @@ async def preview_workout_template_share(
 ):
     thash = _token_hash(token)
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         share = await conn.fetchrow(
             f"""
@@ -1269,7 +1268,7 @@ async def import_workout_template_share(
     importer = require_actor_matches_owner(req, owner_user_id)
     thash = _token_hash(token)
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         async with conn.transaction():
             share = await conn.fetchrow(
@@ -1470,7 +1469,7 @@ async def revoke_workout_template_share(
     sid = _as_uuid(workout_template_share_id, "workout_template_share_id")
     owner = require_actor_matches_owner(req, owner_user_id)
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         row = await conn.fetchrow(
             f"""
@@ -1511,7 +1510,7 @@ async def list_workout_templates(
     include_inactive: int = Query(0, ge=0, le=1),
 ):
     owner = require_actor_matches_owner(req, owner_user_id)
-    conn = await _db()
+    conn = await _db(req)
     try:
         where_active = "" if include_inactive else "and is_active=true"
         rows = await conn.fetch(
@@ -1572,7 +1571,7 @@ async def upsert_workout_template(
         raise HTTPException(status_code=400, detail="workout_role must be strength or rehab")
     write_key = _require_idempotency_key(idempotency_key)
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         async with conn.transaction():
             await set_transaction_actor(conn, actor_user_id=owner)
@@ -1658,7 +1657,7 @@ async def classify_historical_workout_sessions(
         raise HTTPException(status_code=400, detail="workout_role must be strength or rehab")
     write_key = _require_idempotency_key(idempotency_key)
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         async with conn.transaction():
             await set_transaction_actor(conn, actor_user_id=owner)
@@ -1682,7 +1681,7 @@ async def deactivate_workout_template(
 ):
     wid = _as_uuid(workout_template_id, "workout_template_id")
     owner = require_actor_matches_owner(req, owner_user_id)
-    conn = await _db()
+    conn = await _db(req)
     try:
         row = await conn.fetchrow(
             f"""
@@ -1707,7 +1706,7 @@ async def deactivate_workout_template(
 @router.get("/workout_templates/{workout_template_id}/exercises")
 async def list_workout_template_exercises(workout_template_id: str, req: Request):
     wid = _as_uuid(workout_template_id, "workout_template_id")
-    conn = await _db()
+    conn = await _db(req)
     try:
         owner = await conn.fetchval(
             f"select owner_user_id from {SCHEMA}.workout_template where workout_template_id=$1::uuid",
@@ -1748,7 +1747,7 @@ async def upsert_workout_template_exercise(
     flags: str | None = Query(None, max_length=240),
 ):
     wid = _as_uuid(workout_template_id, "workout_template_id")
-    conn = await _db()
+    conn = await _db(req)
     try:
         owner = await conn.fetchval(
             f"select owner_user_id from {SCHEMA}.workout_template where workout_template_id=$1::uuid and is_active",
@@ -1800,7 +1799,7 @@ async def delete_workout_template_exercise(
 ):
     wid = _as_uuid(workout_template_id, "workout_template_id")
     weid = _as_uuid(workout_template_exercise_id, "workout_template_exercise_id")
-    conn = await _db()
+    conn = await _db(req)
     try:
         owner = await conn.fetchval(
             f"select owner_user_id from {SCHEMA}.workout_template where workout_template_id=$1::uuid",
@@ -1832,7 +1831,7 @@ async def delete_workout_template_exercise(
 @router.get("/workout_template_exercises/{workout_template_exercise_id}/segments")
 async def list_workout_template_exercise_segments(workout_template_exercise_id: str, req: Request):
     weid = _as_uuid(workout_template_exercise_id, "workout_template_exercise_id")
-    conn = await _db()
+    conn = await _db(req)
     try:
         owner = await conn.fetchval(
             f"""
@@ -1880,7 +1879,7 @@ async def upsert_workout_template_exercise_segment(
     default_reps: int = Query(0, ge=0, le=1000),
 ):
     weid = _as_uuid(workout_template_exercise_id, "workout_template_exercise_id")
-    conn = await _db()
+    conn = await _db(req)
     try:
         owner = await conn.fetchval(
             f"""
@@ -1937,7 +1936,7 @@ async def delete_workout_template_exercise_segment(
 ):
     weid = _as_uuid(workout_template_exercise_id, "workout_template_exercise_id")
     segid = _as_uuid(workout_template_exercise_segment_id, "workout_template_exercise_segment_id")
-    conn = await _db()
+    conn = await _db(req)
     try:
         owner = await conn.fetchval(
             f"""
@@ -2120,7 +2119,7 @@ async def complete_training_session(
             }
         )
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         async with conn.transaction():
             await set_transaction_actor(conn, actor_user_id=owner)
@@ -2189,7 +2188,7 @@ async def list_training_sessions(
         except Exception:
             raise HTTPException(status_code=400, detail="invalid day")
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         owner, delegated = await _resolve_training_view_target(conn, viewer, target_user_id)
         session_source = (
@@ -2332,7 +2331,7 @@ async def get_training_session(
     sid = _as_uuid(training_session_id, "training_session_id")
     viewer = require_actor_matches_owner(req, owner_user_id)
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         owner, delegated = await _resolve_training_view_target(conn, viewer, target_user_id)
 
@@ -2381,7 +2380,7 @@ async def list_strength_progression(
     if (end_date - start_date).days > 366:
         raise HTTPException(status_code=400, detail="progression range cannot exceed 367 days")
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         owner, delegated = await _resolve_training_view_target(conn, viewer, target_user_id)
         rows = await conn.fetch(
@@ -2457,7 +2456,7 @@ async def deactivate_training_session(
     sid = _as_uuid(training_session_id, "training_session_id")
     owner = require_actor_matches_owner(req, owner_user_id)
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         async with conn.transaction():
             await set_transaction_actor(conn, actor_user_id=owner)
@@ -2492,7 +2491,7 @@ async def correct_training_session(
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="JSON object required")
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         async with conn.transaction():
             await set_transaction_actor(conn, actor_user_id=owner)
@@ -2536,7 +2535,7 @@ async def list_training_session_sets(
     sid = _as_uuid(training_session_id, "training_session_id")
     viewer = require_actor_matches_owner(req, owner_user_id)
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         owner, delegated = await _resolve_training_view_target(conn, viewer, target_user_id)
 
@@ -2626,7 +2625,7 @@ async def list_training_set_log_segments(
     sid = _as_uuid(training_session_id, "training_session_id")
     setid = _as_uuid(training_set_log_id, "training_set_log_id")
     viewer = require_actor_matches_owner(req, owner_user_id)
-    conn = await _db()
+    conn = await _db(req)
     try:
         owner, delegated = await _resolve_training_view_target(conn, viewer, target_user_id)
 

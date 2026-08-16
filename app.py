@@ -340,7 +340,8 @@ app.include_router(
     prefix="/lifeswitch/plan",
 )
 app.include_router(lifeswitch_measurements_router, prefix="/lifeswitch/measurements")
-app.include_router(lifeswitch_people_router, prefix="/lifeswitch/people")
+if os.getenv("LIFESWITCH_PEOPLE_ENABLED", "0") == "1":
+    app.include_router(lifeswitch_people_router, prefix="/lifeswitch/people")
 app.include_router(
     lifeswitch_account_timezone_router_v1,
     prefix="/lifeswitch/account",

@@ -11,9 +11,10 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from rag_engine.lifeswitch_db import DSN
+
 
 router = APIRouter()
-DSN = os.getenv("POSTGRES_DSN") or ""
 ACCOUNT_WRITER_ROLE = "lifeswitch_chat_account_writer_v1"
 
 

@@ -7,14 +7,11 @@ import datetime as _dt
 import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Request
 from rag_engine.lifeswitch_auth import require_actor_matches_owner
+from rag_engine.lifeswitch_db import connect_lifeswitch
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 router = APIRouter()
-
-DSN = os.getenv("POSTGRES_DSN") or ""
-if not DSN:
-    raise RuntimeError("POSTGRES_DSN missing")
 
 SCHEMA = os.getenv("LIFESWITCH_NUTRITION_SCHEMA", "lifeswitch_nutrition")
 PEOPLE_SCHEMA = os.getenv("LIFESWITCH_PEOPLE_SCHEMA", "lifeswitch_people")
@@ -42,8 +39,8 @@ def _row_to_jsonable(r):
     return {k: _json_safe(v) for k, v in d.items()}
 
 
-async def _db():
-    return await asyncpg.connect(DSN)
+async def _db(req: Request):
+    return await connect_lifeswitch(req)
 
 
 async def _has_people_permission(conn, grantor_user_id: str, grantee_user_id: str, scope: str) -> bool:
@@ -73,6 +70,8 @@ async def _resolve_nutrition_view_target(conn, viewer_user_id: str, target_user_
     delegated = target != viewer
 
     if delegated:
+        if os.getenv("LIFESWITCH_DELEGATED_READS_ENABLED", "0") != "1":
+            raise HTTPException(status_code=403, detail="delegated_access_disabled")
         allowed = await _has_people_permission(conn, target, viewer, "nutrition:view")
         if not allowed:
             raise HTTPException(status_code=403, detail="nutrition:view permission required")
@@ -233,7 +232,7 @@ async def create_log_entry(
         else None
     )
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         if mid is not None:
             ok = await conn.fetchval(
@@ -355,7 +354,7 @@ async def create_log_entries_batch(
     """Create several food entries in one transaction or create none."""
     owner = require_actor_matches_owner(req, owner_user_id)
     day = _parse_day(body.day)
-    conn = await _db()
+    conn = await _db(req)
     try:
         async with conn.transaction():
             prepared = []
@@ -486,7 +485,7 @@ async def update_log_entry(
     if use_serving and (my_food_serving_id is None or qty_servings is None):
         raise HTTPException(status_code=400, detail="serving mode requires my_food_serving_id and qty_servings")
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         async with conn.transaction():
             entry = await conn.fetchrow(
@@ -565,7 +564,7 @@ async def delete_log_entry(
     owner = require_actor_matches_owner(req, owner_user_id)
     eid = _as_uuid(nutrition_entry_id, "nutrition_entry_id")
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         row = await conn.fetchrow(
             f"""
@@ -605,7 +604,7 @@ async def get_log_range(
     if (end - start).days > 365:
         raise HTTPException(status_code=400, detail="date range cannot exceed 366 days")
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         owner, delegated = await _resolve_nutrition_view_target(conn, viewer, target_user_id)
         day_rows = await conn.fetch(
@@ -731,7 +730,7 @@ async def get_log_day(
     viewer = require_actor_matches_owner(req, owner_user_id)
     d = _parse_day(day)
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         owner, delegated = await _resolve_nutrition_view_target(conn, viewer, target_user_id)
 
@@ -826,7 +825,7 @@ async def set_log_day_completion(
     owner = require_actor_matches_owner(req, owner_user_id)
     parsed_day = _parse_day(day)
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         async with conn.transaction():
             result = await _set_nutrition_day_completion(

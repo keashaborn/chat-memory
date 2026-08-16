@@ -9,13 +9,10 @@ import asyncpg
 
 from fastapi import APIRouter, HTTPException, Query, Body, Request
 from rag_engine.lifeswitch_auth import require_actor_matches_owner
+from rag_engine.lifeswitch_db import connect_lifeswitch
 from fastapi.responses import JSONResponse
 
 router = APIRouter()
-
-DSN = os.getenv("POSTGRES_DSN") or ""
-if not DSN:
-    raise RuntimeError("POSTGRES_DSN missing")
 
 PEOPLE_SCHEMA = os.getenv("LIFESWITCH_PEOPLE_SCHEMA", "lifeswitch_people")
 
@@ -64,8 +61,8 @@ def _json_param(v):
     return json.dumps(v)
 
 
-async def _db():
-    return await asyncpg.connect(DSN)
+async def _db(req: Request):
+    return await connect_lifeswitch(req)
 
 
 async def _has_people_permission(conn, grantor_user_id: str, grantee_user_id: str, scope: str) -> bool:
@@ -95,6 +92,8 @@ async def _resolve_measurements_view_target(conn, viewer_user_id: str, target_us
     delegated = target != viewer
 
     if delegated:
+        if os.getenv("LIFESWITCH_DELEGATED_READS_ENABLED", "0") != "1":
+            raise HTTPException(status_code=403, detail="delegated_access_disabled")
         allowed = await _has_people_permission(conn, target, viewer, "measurements:view")
         if not allowed:
             raise HTTPException(status_code=403, detail="measurements:view permission required")
@@ -113,7 +112,7 @@ async def list_measurement_entries(
     viewer = require_actor_matches_owner(req, owner_user_id)
     where_active = "" if include_inactive else "and is_active=true"
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         owner, delegated = await _resolve_measurements_view_target(conn, viewer, target_user_id)
 
@@ -223,7 +222,7 @@ async def create_measurement_entry(
     skinfolds = _json_param(skinfolds_json)
     scan = _json_param(scan_json)
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         row = await conn.fetchrow(
             """
@@ -404,7 +403,7 @@ async def deactivate_measurement_entry(
     entry_id = _as_uuid(measurement_entry_id, "measurement_entry_id")
     owner = require_actor_matches_owner(req, owner_user_id)
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         row = await conn.fetchrow(
             """

@@ -7,13 +7,10 @@ import datetime as _dt
 import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Request
 from rag_engine.lifeswitch_auth import require_actor_matches_owner
+from rag_engine.lifeswitch_db import connect_lifeswitch
 from fastapi.responses import JSONResponse
 
 router = APIRouter()
-
-DSN = os.getenv("POSTGRES_DSN") or ""
-if not DSN:
-    raise RuntimeError("POSTGRES_DSN missing")
 
 SCHEMA = os.getenv("LIFESWITCH_NUTRITION_SCHEMA", "lifeswitch_nutrition")
 
@@ -40,8 +37,8 @@ def _row_to_jsonable(r):
     return {k: _json_safe(v) for k, v in d.items()}
 
 
-async def _db():
-    return await asyncpg.connect(DSN)
+async def _db(req: Request):
+    return await connect_lifeswitch(req)
 
 
 # ----------------------------
@@ -55,7 +52,7 @@ async def list_meals(
     include_inactive: int = Query(0, ge=0, le=1),
 ):
     owner = require_actor_matches_owner(req, owner_user_id)
-    conn = await _db()
+    conn = await _db(req)
     try:
         where = "owner_user_id=$1::uuid"
         if include_inactive == 0:
@@ -85,7 +82,7 @@ async def create_meal(
     if meal_type not in ("breakfast", "lunch", "dinner", "snack", "other"):
         raise HTTPException(status_code=400, detail="meal_type must be breakfast|lunch|dinner|snack|other")
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         row = await conn.fetchrow(
             f"""
@@ -113,7 +110,7 @@ async def deactivate_meal(
     mid = _as_uuid(meal_id, "meal_id")
     owner = require_actor_matches_owner(req, owner_user_id)
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         row = await conn.fetchrow(
             f"""
@@ -167,7 +164,7 @@ async def add_meal_item(
 
     sid = _as_uuid(my_food_serving_id, "my_food_serving_id") if my_food_serving_id else None
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         owner = await conn.fetchval(
             f"select owner_user_id from {SCHEMA}.meal where meal_id=$1::uuid and is_active",
@@ -233,7 +230,7 @@ async def update_meal_item(
         raise HTTPException(status_code=400, detail="servings mode requires my_food_serving_id and qty_servings")
 
     sid = _as_uuid(my_food_serving_id, "my_food_serving_id") if my_food_serving_id else None
-    conn = await _db()
+    conn = await _db(req)
     try:
         async with conn.transaction():
             current = await conn.fetchrow(
@@ -294,7 +291,7 @@ async def update_meal_item(
 @router.get("/meals/{meal_id}/items")
 async def list_meal_items(meal_id: str, req: Request):
     mid = _as_uuid(meal_id, "meal_id")
-    conn = await _db()
+    conn = await _db(req)
     try:
         owner = await conn.fetchval(
             f"select owner_user_id from {SCHEMA}.meal where meal_id=$1::uuid",
@@ -340,7 +337,7 @@ async def delete_meal_item(
     mid = _as_uuid(meal_id, "meal_id")
     iid = _as_uuid(meal_item_id, "meal_item_id")
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         row = await conn.fetchrow(
             f"""

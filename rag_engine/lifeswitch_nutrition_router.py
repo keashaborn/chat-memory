@@ -6,6 +6,7 @@ import uuid
 import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Request
 from rag_engine.lifeswitch_auth import require_actor_matches_owner
+from rag_engine.lifeswitch_db import connect_lifeswitch
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 import decimal
@@ -25,10 +26,6 @@ def _json_safe(v):
 def _row_to_jsonable(r):
     d = dict(r)
     return {k: _json_safe(v) for k, v in d.items()}
-
-DSN = os.getenv("POSTGRES_DSN") or ""
-if not DSN:
-    raise RuntimeError("POSTGRES_DSN missing")
 
 SCHEMA = os.getenv("LIFESWITCH_NUTRITION_SCHEMA", "lifeswitch_nutrition")
 
@@ -140,13 +137,13 @@ def _as_uuid(s: str, name: str) -> str:
     except Exception:
         raise HTTPException(status_code=400, detail=f"invalid {name}")
 
-async def _db():
-    return await asyncpg.connect(DSN)
+async def _db(req: Request):
+    return await connect_lifeswitch(req)
 
 @router.get("/meal_plans")
 async def list_meal_plans(req: Request, owner_user_id: str = Query(...)):
     uid = require_actor_matches_owner(req, owner_user_id)
-    conn = await _db()
+    conn = await _db(req)
     try:
         rows = await conn.fetch(
             f"""
@@ -178,7 +175,7 @@ async def create_meal_plan(
     if goal not in ("cut", "bulk", "maintain"):
         raise HTTPException(status_code=400, detail="goal must be cut|bulk|maintain")
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         row = await conn.fetchrow(
             f"""
@@ -276,7 +273,7 @@ async def create_my_food_from_usda(
         },
     )
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         async with conn.transaction():
             source_id = str(int(fdc_id))
@@ -458,7 +455,7 @@ async def add_item(
     if food_id and use_serving:
         raise HTTPException(status_code=400, detail="legacy catalog foods support grams only")
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         owner = await conn.fetchval(
             f"select owner_user_id from {SCHEMA}.meal_plan where meal_plan_id=$1::uuid and is_active",
@@ -552,7 +549,7 @@ async def update_meal_plan_item(
     if use_serving and (my_food_serving_id is None or qty_servings is None):
         raise HTTPException(status_code=400, detail="serving mode requires my_food_serving_id and qty_servings")
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         async with conn.transaction():
             item = await conn.fetchrow(
@@ -619,7 +616,7 @@ async def update_meal_plan_item(
 async def delete_meal_plan_item(meal_plan_id: str, meal_plan_item_id: str, req: Request):
     mpid = _as_uuid(meal_plan_id, "meal_plan_id")
     item_id = _as_uuid(meal_plan_item_id, "meal_plan_item_id")
-    conn = await _db()
+    conn = await _db(req)
     try:
         owner = await conn.fetchval(
             f"select owner_user_id from {SCHEMA}.meal_plan where meal_plan_id=$1::uuid",
@@ -649,7 +646,7 @@ async def delete_meal_plan_item(meal_plan_id: str, meal_plan_item_id: str, req: 
 @router.get("/meal_plans/{meal_plan_id}/items")
 async def list_items(meal_plan_id: str, req: Request):
     mpid = _as_uuid(meal_plan_id, "meal_plan_id")
-    conn = await _db()
+    conn = await _db(req)
     try:
         owner = await conn.fetchval(
             f"select owner_user_id from {SCHEMA}.meal_plan where meal_plan_id=$1::uuid",
@@ -701,7 +698,7 @@ async def list_my_foods(
     include_inactive: int = Query(0, ge=0, le=1),
 ):
     owner = require_actor_matches_owner(req, owner_user_id)
-    conn = await asyncpg.connect(DSN)
+    conn = await _db(req)
     try:
         where = "f.owner_user_id = $1::uuid"
         args: list[object] = [owner]
@@ -742,7 +739,7 @@ async def create_my_food_from_catalog(
     owner = require_actor_matches_owner(req, owner_user_id)
     fid = _as_uuid(food_id, "food_id")
 
-    conn = await asyncpg.connect(DSN)
+    conn = await _db(req)
     try:
         src = await conn.fetchrow(
             f"""
@@ -845,7 +842,7 @@ async def update_my_food(
     if not fields:
         raise HTTPException(status_code=400, detail="no fields provided")
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         async with conn.transaction():
             current = await conn.fetchrow(
@@ -1002,7 +999,7 @@ async def update_my_food(
 @router.post("/my_foods/{my_food_id}/deactivate")
 async def deactivate_my_food(my_food_id: str, req: Request):
     fid = _as_uuid(my_food_id, "my_food_id")
-    conn = await _db()
+    conn = await _db(req)
     try:
         owner = await conn.fetchval(
             f"select owner_user_id from {SCHEMA}.my_food where my_food_id=$1::uuid",
@@ -1035,7 +1032,7 @@ async def deactivate_my_food(my_food_id: str, req: Request):
 @router.get("/my_foods/{my_food_id}/servings")
 async def list_my_food_servings(my_food_id: str, req: Request):
     fid = _as_uuid(my_food_id, "my_food_id")
-    conn = await _db()
+    conn = await _db(req)
     try:
         owner = await conn.fetchval(
             f"select owner_user_id from {SCHEMA}.my_food where my_food_id=$1::uuid",
@@ -1073,7 +1070,7 @@ async def create_my_food_serving(
     if not nm:
         raise HTTPException(status_code=400, detail="name required")
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         food = await conn.fetchrow(
             f"select owner_user_id, is_active from {SCHEMA}.my_food where my_food_id=$1::uuid",
@@ -1220,7 +1217,7 @@ async def update_my_food_serving(
     if not fields:
         raise HTTPException(status_code=400, detail="no fields provided")
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         async with conn.transaction():
             current = await conn.fetchrow(
@@ -1341,7 +1338,7 @@ async def list_my_food_overrides(
     owner_user_id: str = Query(..., min_length=1),
 ):
     owner = require_actor_matches_owner(req, owner_user_id)
-    conn = await _db()
+    conn = await _db(req)
     try:
         rows = await conn.fetch(
             f"""
@@ -1373,7 +1370,7 @@ async def upsert_my_food_override(
     if al == "":
         al = None
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         ok = await conn.fetchval(
             f"select is_active from {SCHEMA}.my_food where my_food_id=$1::uuid",
@@ -1411,7 +1408,7 @@ async def delete_my_food_override(
 ):
     owner = require_actor_matches_owner(req, owner_user_id)
     fid = _as_uuid(my_food_id, "my_food_id")
-    conn = await _db()
+    conn = await _db(req)
     try:
         row = await conn.fetchrow(
             f"""

@@ -7,15 +7,12 @@ import datetime as _dt
 import asyncpg
 from fastapi import APIRouter, HTTPException, Request
 from rag_engine.lifeswitch_auth import require_actor_matches_owner
+from rag_engine.lifeswitch_db import connect_lifeswitch
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional
 
 router = APIRouter()
-
-DSN = os.getenv("POSTGRES_DSN") or ""
-if not DSN:
-    raise RuntimeError("POSTGRES_DSN missing")
 
 SCHEMA = os.getenv("LIFESWITCH_NUTRITION_SCHEMA", "lifeswitch_nutrition")
 
@@ -49,8 +46,8 @@ def _row_to_jsonable(r):
     return {k: _json_safe(v) for k, v in d.items()}
 
 
-async def _db():
-    return await asyncpg.connect(DSN)
+async def _db(req: Request):
+    return await connect_lifeswitch(req)
 
 
 class NutritionEntryIn(BaseModel):
@@ -72,7 +69,7 @@ async def create_log_entries_batch(payload: LogBatchIn, req: Request):
     owner = require_actor_matches_owner(req, payload.owner_user_id)
     d = _parse_day(payload.day)
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         # ensure day exists (upsert)
         day_row = await conn.fetchrow(

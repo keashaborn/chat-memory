@@ -29,3 +29,11 @@ def require_actor_matches_owner(req: Request, owner_user_id: str) -> str:
         raise HTTPException(status_code=403, detail="actor_owner_mismatch")
 
     return owner_uid
+
+
+def require_authenticated_actor(req: Request) -> str:
+    """Return the backend-authenticated actor as canonical UUID text."""
+    actor = (req.headers.get("x-vs-actor-user-id") or "").strip()
+    if not actor:
+        raise HTTPException(status_code=401, detail="missing_actor_user_id")
+    return _uuid_text(actor, "actor_user_id")

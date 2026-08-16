@@ -7,13 +7,10 @@ import datetime as _dt
 import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Request
 from rag_engine.lifeswitch_auth import require_actor_matches_owner
+from rag_engine.lifeswitch_db import connect_lifeswitch
 from fastapi.responses import JSONResponse
 
 router = APIRouter()
-
-DSN = os.getenv("POSTGRES_DSN") or ""
-if not DSN:
-    raise RuntimeError("POSTGRES_DSN missing")
 
 SCHEMA = os.getenv("LIFESWITCH_NUTRITION_SCHEMA", "lifeswitch_nutrition")
 
@@ -40,8 +37,8 @@ def _row_to_jsonable(r):
     return {k: _json_safe(v) for k, v in d.items()}
 
 
-async def _db():
-    return await asyncpg.connect(DSN)
+async def _db(req: Request):
+    return await connect_lifeswitch(req)
 
 
 @router.get("/my_food_overrides")
@@ -50,7 +47,7 @@ async def list_my_food_overrides(
     owner_user_id: str = Query(..., min_length=1),
 ):
     owner = require_actor_matches_owner(req, owner_user_id)
-    conn = await _db()
+    conn = await _db(req)
     try:
         rows = await conn.fetch(
             f"""
@@ -82,7 +79,7 @@ async def upsert_my_food_override(
     if a == "":
         a = None
 
-    conn = await _db()
+    conn = await _db(req)
     try:
         ok = await conn.fetchval(
             f"select is_active from {SCHEMA}.my_food where my_food_id=$1::uuid",
