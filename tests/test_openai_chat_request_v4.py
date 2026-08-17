@@ -10,6 +10,7 @@ from rag_engine.openai_chat_request_v4 import (
     OpenAIChatRequestV4,
 )
 from tests.test_lifeswitch_answer_provenance_receipt_v1 import ACTOR, new_plan
+from tests.test_lifeswitch_prompt_integration_v2 import zep_plan
 
 
 class OpenAIChatRequestV4Tests(unittest.IsolatedAsyncioTestCase):
@@ -34,6 +35,11 @@ class OpenAIChatRequestV4Tests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(request.store)
         exported = json.dumps(request.provider_kwargs(), sort_keys=True)
         self.assertNotIn(str(ACTOR), exported)
+
+    async def test_zep_memory_is_named_lower_authority_reference_data(self) -> None:
+        request = OpenAIChatRequestV4.create(source_plan=await zep_plan())
+        named = tuple(item.name for item in request.messages if item.name is not None)
+        self.assertEqual(named, ("zep_memory_v1",))
 
 
 if __name__ == "__main__":

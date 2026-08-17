@@ -7,6 +7,7 @@ from rag_engine.openai_chat_request_v4 import OpenAIChatCompletionsAdapterV3
 from rag_engine.response_finalization_v3 import finalize_trusted_response_v3
 from rag_engine.response_inspection_v4 import build_response_inspection_v4
 from tests.test_lifeswitch_answer_provenance_receipt_v1 import ACTOR, ANSWER, NOW, new_plan
+from tests.test_lifeswitch_prompt_integration_v2 import zep_plan
 from tests.test_openai_chat_provider_v1 import FakeClient, provider_response
 
 
@@ -36,6 +37,26 @@ class ResponseInspectionV4Tests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(message, exported)
         self.assertNotIn(str(ACTOR), exported)
         self.assertNotIn("protein_g", exported)
+
+    async def test_trace_reports_zep_memory_without_content(self) -> None:
+        plan = await zep_plan()
+        response = OpenAIChatCompletionsAdapterV3(
+            FakeClient(provider_response(content="Your recall phrase is available."))
+        ).complete(plan)
+        finalized = finalize_trusted_response_v3(
+            trusted_plan=plan,
+            provider_response=response,
+            answer_id=ANSWER,
+            created_at=NOW,
+        )
+        trace = build_response_inspection_v4(
+            trusted_plan=plan,
+            provider_response=response,
+            finalized=finalized,
+            transcript_persistence="persisted",
+        )
+        self.assertTrue(trace.before_openai.memory_included)
+        self.assertGreater(trace.before_openai.memory_estimated_tokens, 0)
 
 
 if __name__ == "__main__":

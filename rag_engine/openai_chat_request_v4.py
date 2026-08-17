@@ -96,6 +96,7 @@ class OpenAIChatMessageV2(_StrictFrozenModel):
             not in {
                 "chat_attachments_v1",
                 "governed_memory_successor_v1",
+                "zep_memory_v1",
                 "lifeswitch_domain_context_v1",
                 "prior_lifeswitch_provenance_v1",
                 "relational_monism_v0_4",

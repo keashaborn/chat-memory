@@ -27,6 +27,33 @@ from tests.test_response_orchestration_v0_2 import (
     orchestrator,
     trusted_request,
 )
+from tests.test_prompt_assembler_v1 import successor_memory_block
+
+
+async def zep_plan(message: str = "What is my temporary recall phrase?"):
+    base = await orchestrator(FixedSafetyProvider()).build_plan(
+        trusted_request(
+            authenticated_actor_user_id=ACTOR,
+            request_id="request-123",
+            conversation=messages(message),
+            successor_memory_context_block=successor_memory_block(
+                message,
+                block_id="zep_memory_v1",
+                source_contract_version="zep-cloud-context-v1",
+            ),
+        )
+    )
+    context = LifeSwitchPreparedContextV1.create(
+        status="OFF",
+        timezone_source="not_requested",
+        database_accessed=False,
+        data_plan=create_lifeswitch_data_plan_v1(message, today=TODAY),
+    )
+    return TrustedLifeSwitchResponsePlanV2.create(
+        base_response_plan=base,
+        lifeswitch_context=context,
+        prior_lifeswitch_context=off_prior(),
+    )
 
 
 class LifeSwitchPromptIntegrationV2Tests(unittest.IsolatedAsyncioTestCase):
@@ -54,6 +81,16 @@ class LifeSwitchPromptIntegrationV2Tests(unittest.IsolatedAsyncioTestCase):
                 estimated_tokens=2,
                 block_manifest_sha256="e" * 64,
             )
+
+    async def test_zep_memory_survives_lifeswitch_augmentation(self) -> None:
+        plan = await zep_plan()
+        memory = tuple(
+            block
+            for block in plan.assembled_prompt.context_blocks
+            if block.kind is ContextKindV3.MEMORY
+        )
+        self.assertEqual(len(memory), 1)
+        self.assertEqual(memory[0].block_id, "zep_memory_v1")
 
     async def test_prior_provenance_follows_current_lifeswitch_context(self) -> None:
         plan = await new_plan(
