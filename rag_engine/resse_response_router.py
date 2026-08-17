@@ -6,7 +6,6 @@ import asyncio
 import os
 import logging
 import time
-from typing import Callable
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -26,10 +25,6 @@ from rag_engine.governed_memory.response_provenance import (
     SuccessorMemoryAnswerProvenanceV1,
     SuccessorMemoryNotApplicableReason,
 )
-from rag_engine.governed_memory.successor_live_authority import (
-    SuccessorLiveAuthorityConfigurationError,
-    successor_live_authority_from_environment,
-)
 from rag_engine.lifeswitch_chat_runtime_v1 import (
     LazyPostgresRestrictedLifeSwitchReadSessionV1,
     LifeSwitchChatPoolManagerV1,
@@ -43,7 +38,6 @@ from rag_engine.lifeswitch_prior_answer_provenance_runtime_v1 import (
 )
 from rag_engine.memory_actor_auth_v1 import (
     MemoryActorContextV1,
-    MemoryLiveAuthorityVerifierV1,
     require_memory_actor_context_v1,
 )
 from rag_engine.openai_chat_provider_v1 import OpenAIChatGenerationConfigV1
@@ -108,9 +102,6 @@ ZEP_SHADOW_RUNTIME = ZepShadowRuntimeV1.from_environment(
 ZEP_PROMPT_SETTINGS = ZepPromptSettingsV1.from_environment(os.environ)
 
 
-SuccessorLiveAuthorityFactory = Callable[[], MemoryLiveAuthorityVerifierV1]
-
-
 RESPONSE_MEMORY_MODE = EXCLUSIVE_MODE_SUCCESSOR
 
 
@@ -170,11 +161,6 @@ def _inactive_successor_response_provider(
             "successor_response_exclusion_reason_missing"
         )
     return InactiveSuccessorMemoryProviderV1(reason)
-
-
-SUCCESSOR_LIVE_AUTHORITY_FACTORY: SuccessorLiveAuthorityFactory = (
-    successor_live_authority_from_environment
-)
 
 
 @router.on_event("shutdown")
@@ -293,22 +279,9 @@ async def resse_response_query(
         and tentative_exclusion_reason is None
     )
     try:
-        live_authority_verifier = (
-            SUCCESSOR_LIVE_AUTHORITY_FACTORY()
-            if tentative_successor_eligible
-            else None
-        )
-    except SuccessorLiveAuthorityConfigurationError:
-        raise _no_store_http_exception(
-            503,
-            "successor_live_authority_unconfigured",
-        ) from None
-    try:
         actor_context = await require_memory_actor_context_v1(
             req,
             str(payload.user_id),
-            live_authority_verifier=live_authority_verifier,
-            require_live_authority=tentative_successor_eligible,
         )
     except HTTPException as exc:
         raise _no_store_http_exception(

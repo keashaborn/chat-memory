@@ -1044,6 +1044,17 @@ async def log_chat(req: Request):
     tags = body.get("tags") or []
     vantage_id = (body.get("vantage_id") or "").strip() or "default"
     request_id = _sanitize_request_id(getattr(req.state, "request_id", None)) or str(uuid.uuid4())
+    raw_submission_id = body.get("submission_id")
+    submission_id = (
+        parse_uuid(str(raw_submission_id))
+        if raw_submission_id is not None
+        else None
+    )
+    if raw_submission_id is not None and submission_id is None:
+        return JSONResponse(
+            {"status": "bad_request", "detail": "invalid_submission_id"},
+            status_code=400,
+        )
 
     # New writes are owned by the exact authenticated Supabase UUID. Vantage
     # aliases must not partition or remap factual memory.
@@ -1096,7 +1107,7 @@ async def log_chat(req: Request):
 
     # The transcript is canonical chat history. Zep ingestion is dispatched by
     # the response route after the completed user/assistant turn is persisted.
-    rec_id = str(uuid.uuid4())
+    rec_id = str(submission_id or uuid.uuid4())
     created_dt = datetime.utcnow()
 
     # Save to PostgreSQL (authoritative transcript).
@@ -1173,6 +1184,40 @@ async def log_chat(req: Request):
             if bound_message_ids != {None}:
                 raise ValueError("attachment_binding_failed")
 
+        if submission_id is not None:
+            existing_submission = await conn.fetchrow(
+                """
+                SELECT id FROM public.chat_log
+                WHERE id=$1 AND owner_user_id=$2
+                  AND thread_id IS NOT DISTINCT FROM $3
+                  AND source=$4 AND text=$5
+                """,
+                submission_id,
+                uuid.UUID(user_id),
+                thread_id,
+                source,
+                text,
+            )
+            if existing_submission is not None:
+                await transaction.commit()
+                transaction = None
+                return {
+                    "status": "ok",
+                    "id": str(existing_submission["id"]),
+                    "request_id": request_id,
+                    "replayed": True,
+                }
+            conflicting_submission = await conn.fetchrow(
+                """
+                SELECT id FROM public.chat_log
+                WHERE id=$1 AND owner_user_id=$2
+                """,
+                submission_id,
+                uuid.UUID(user_id),
+            )
+            if conflicting_submission is not None:
+                raise ValueError("submission_id_conflict")
+
         await conn.execute(
             "INSERT INTO chat_log("
             "id,owner_user_id,user_id,user_id_alias,source,text,tags,thread_id,vantage_id,request_id,created_at"
@@ -1210,6 +1255,18 @@ async def log_chat(req: Request):
 
     except Exception as e:
         print("pg error:", e)
+        conflict = str(e) in {
+            "attachment_binding_failed",
+            "submission_id_conflict",
+        } or (
+            submission_id is not None
+            and isinstance(e, asyncpg.UniqueViolationError)
+        )
+        conflict_detail = (
+            "attachment_binding_failed"
+            if str(e) == "attachment_binding_failed"
+            else "submission_conflict"
+        )
         if transaction is not None:
             try:
                 await transaction.rollback()
@@ -1217,10 +1274,10 @@ async def log_chat(req: Request):
                 pass
         return JSONResponse(
             {
-                "status": "conflict" if str(e) == "attachment_binding_failed" else "unavailable",
-                "detail": str(e) if str(e) == "attachment_binding_failed" else "transcript_write_failed",
+                "status": "conflict" if conflict else "unavailable",
+                "detail": conflict_detail if conflict else "transcript_write_failed",
             },
-            status_code=409 if str(e) == "attachment_binding_failed" else 503,
+            status_code=409 if conflict else 503,
         )
     finally:
         if conn:
