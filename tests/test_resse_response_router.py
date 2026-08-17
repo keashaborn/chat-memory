@@ -38,7 +38,6 @@ from rag_engine.resse_response_router import (
     apply_no_store_headers,
     response_memory_provenance_for_mode,
     resse_response_query,
-    should_coordinate_chat_memory_ingest,
     successor_not_applicable_reason,
 )
 
@@ -117,6 +116,7 @@ class ResseResponseRouterTests(unittest.TestCase):
                 "user_id": str(ACTOR),
                 "message": "Hello.",
                 "thread_id": None,
+                "message_id": None,
                 "no_store": True,
                 "include_inspection": False,
                 "attachment_ids": [],
@@ -326,35 +326,18 @@ class ResseResponseRouterTests(unittest.TestCase):
             )
         )
 
-    def test_voice_turn_bypasses_text_chat_memory_ingest_coordination(self) -> None:
-        self.assertTrue(
-            should_coordinate_chat_memory_ingest(
-                no_store=False,
-                thread_id=THREAD,
-                is_voice=False,
-            )
-        )
-        self.assertFalse(
-            should_coordinate_chat_memory_ingest(
-                no_store=False,
-                thread_id=THREAD,
-                is_voice=True,
-            )
-        )
-        self.assertFalse(
-            should_coordinate_chat_memory_ingest(
-                no_store=True,
-                thread_id=THREAD,
-                is_voice=False,
-            )
-        )
-        self.assertFalse(
-            should_coordinate_chat_memory_ingest(
-                no_store=False,
-                thread_id=None,
-                is_voice=False,
-            )
-        )
+    def test_zep_is_the_only_eligible_chat_memory_provider(self) -> None:
+        source = (ROOT / "rag_engine/resse_response_router.py").read_text()
+        self.assertIn("memory_provider = zep_memory_provider", source)
+        self.assertIn("zep_prompt_memory_unavailable", source)
+        for retired_symbol in (
+            "SuccessorResponseRuntime",
+            "SUCCESSOR_RESPONSE_PROVIDER_FACTORY",
+            "CHAT_MEMORY_LIFECYCLE_RUNTIME",
+            "coordinate_chat_memory_ingest_v1",
+            "choose_response_memory_provider",
+        ):
+            self.assertNotIn(retired_symbol, source)
 
 
 def successor_request() -> Request:
@@ -499,30 +482,8 @@ class SuccessorResponseRouterAuthorityTests(unittest.IsolatedAsyncioTestCase):
             expected_detail="successor_live_authority_unavailable",
         )
 
-    def test_invalid_startup_mode_fails_import_before_runtime_io(self) -> None:
-        environment = dict(os.environ)
-        environment[EXCLUSIVE_MODE_ENV] = " successor_pilot"
-        script = (
-            "import rag_engine.resse_response_router\n"
-            "raise AssertionError('invalid mode import unexpectedly succeeded')\n"
-        )
-        result = subprocess.run(
-            [sys.executable, "-c", script],
-            cwd=ROOT,
-            env=environment,
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn(
-            "invalid_governed_memory_exclusive_mode",
-            result.stderr,
-        )
-
     async def test_non_successor_runtime_mode_refuses_before_resources(self) -> None:
         successor_factory = Mock()
-        response_runtime_provider = Mock()
         with (
             patch.object(response_router, "RESPONSE_MEMORY_MODE", "legacy"),
             patch.object(response_router, "DSN", "synthetic-configured-dsn"),
@@ -530,11 +491,6 @@ class SuccessorResponseRouterAuthorityTests(unittest.IsolatedAsyncioTestCase):
                 response_router,
                 "SUCCESSOR_LIVE_AUTHORITY_FACTORY",
                 successor_factory,
-            ),
-            patch.object(
-                response_router.SUCCESSOR_RESPONSE_RUNTIME,
-                "provider",
-                response_runtime_provider,
             ),
         ):
             with self.assertRaises(HTTPException) as raised:
@@ -546,7 +502,6 @@ class SuccessorResponseRouterAuthorityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raised.exception.status_code, 503)
         self.assertEqual(raised.exception.detail, "response_memory_mode_invalid")
         successor_factory.assert_not_called()
-        response_runtime_provider.assert_not_called()
 
     def test_successor_import_graph_blocks_retired_response_modules(self) -> None:
         environment = dict(os.environ)

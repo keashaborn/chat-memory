@@ -3,8 +3,6 @@ import os, time, uuid, hashlib, hmac, asyncpg, json
 import asyncio
 import socket
 from datetime import datetime
-from types import MappingProxyType
-from urllib.parse import urlsplit
 from fastapi import FastAPI, Body, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from fastapi.openapi.utils import get_openapi
@@ -20,6 +18,7 @@ from pydantic import (
     model_validator,
 )
 from rag_engine.resse_response_router import (
+    ZEP_PROMPT_SETTINGS,
     ZEP_SHADOW_RUNTIME,
     router as resse_response_router,
 )
@@ -176,35 +175,7 @@ from rag_engine.voice_session_router import (
 from rag_engine.voice_observability_v1 import voice_turn_id_from_request
 from rag_engine.lifeswitch_auth import require_actor_matches_owner
 from rag_engine.memory_actor_auth_v1 import (
-    memory_actor_authority_v1,
-    require_memory_actor_context_v1,
     require_memory_actor_v1,
-)
-from rag_engine.governed_memory.conversation_capture import (
-    CAPTURE_MODE_ENV,
-    CAPTURE_MODE_OFF,
-    CAPTURE_OWNER_ALLOWLIST_ENV,
-    CAPTURE_PILOT_ROLLING_24H_LIMIT,
-    CaptureConfigurationError,
-    capture_auth_context_sha256,
-    capture_decision_for_owner,
-    capture_settings_from_environment,
-    enqueue_captured_chat_log_message,
-    normalize_capture_text,
-)
-from rag_engine.governed_memory.exclusive_cutover import (
-    EXCLUSIVE_MODE_ENV,
-    ExclusiveMemoryMode,
-    exclusive_memory_mode,
-)
-from rag_engine.governed_memory.successor_live_authority import (
-    SuccessorLiveAuthorityConfigurationError,
-    successor_live_authority_from_environment,
-)
-from rag_engine.governed_memory_erasure_proxy_v1 import (
-    ERASURE_COLLECTION_PATH,
-    create_governed_memory_erasure_proxy_router_v1,
-    governed_memory_proxy_service_token_is_valid,
 )
 from rag_engine.active_thread_selection_v1 import (
     ActiveThreadSelectionV1Error,
@@ -221,127 +192,11 @@ from rag_engine.thread_title_v1 import (
     select_first_meaningful_exchange,
 )
 from rag_engine.web_transcript_persistence_v1 import WEB_ASSISTANT_SOURCE
-from rag_engine.web_search_actor_auth_v1 import VOICE_SEARCH_AUTHORIZATION_HEADER
 from rag_engine.admin_ai_operations_v1 import (
     AiOperationsError,
     acknowledge_admin_ai_operations_incident_v1,
     list_admin_ai_operations_incidents_v1,
     resolve_admin_ai_operations_incident_v1,
-)
-from rag_engine.governed_memory.response_runtime import (
-    EXPECTED_POSTGRES_DATABASE,
-    EXPECTED_POSTGRES_HOST,
-    EXPECTED_POSTGRES_PORT,
-    EXPECTED_POSTGRES_ROLE,
-    EXPECTED_QDRANT_HOST,
-    EXPECTED_QDRANT_PORT,
-    SUCCESSOR_CALIBRATION_APPROVAL_SHA256_ENV,
-    SUCCESSOR_CALIBRATION_ARTIFACT_SHA256_ENV,
-)
-from rag_engine.governed_memory.runtime.qdrant_adapter import (
-    QDRANT_ALIAS,
-    QDRANT_PHYSICAL_COLLECTION,
-)
-
-
-EXCLUSIVE_MEMORY_MODE = exclusive_memory_mode()
-LEGACY_MEMORY_SURFACES_ENABLED = False
-GOVERNED_MEMORY_CAPTURE_ENVIRONMENT = MappingProxyType(
-    {
-        EXCLUSIVE_MODE_ENV: EXCLUSIVE_MEMORY_MODE.value,
-        CAPTURE_MODE_ENV: os.environ.get(CAPTURE_MODE_ENV, CAPTURE_MODE_OFF),
-        CAPTURE_OWNER_ALLOWLIST_ENV: os.environ.get(
-            CAPTURE_OWNER_ALLOWLIST_ENV,
-            "",
-        ),
-    }
-)
-GOVERNED_MEMORY_CAPTURE_SETTINGS = capture_settings_from_environment(
-    GOVERNED_MEMORY_CAPTURE_ENVIRONMENT
-)
-
-
-def _frozen_optional_hex_environment(name: str, length: int) -> str | None:
-    value = os.environ.get(name)
-    if (
-        isinstance(value, str)
-        and len(value) == length
-        and all(character in "0123456789abcdef" for character in value)
-    ):
-        return value
-    return None
-
-
-SUCCESSOR_DECLARED_CALIBRATION_ARTIFACT_SHA256 = (
-    _frozen_optional_hex_environment(
-        SUCCESSOR_CALIBRATION_ARTIFACT_SHA256_ENV,
-        64,
-    )
-)
-SUCCESSOR_DECLARED_CALIBRATION_APPROVAL_SHA256 = (
-    _frozen_optional_hex_environment(
-        SUCCESSOR_CALIBRATION_APPROVAL_SHA256_ENV,
-        64,
-    )
-)
-SUCCESSOR_DECLARED_CANDIDATE_COMMIT = _frozen_optional_hex_environment(
-    "GOVERNED_MEMORY_CANDIDATE_COMMIT",
-    40,
-)
-
-EXPECTED_CONVERSATION_POSTGRES_HOST = "127.0.0.1"
-EXPECTED_CONVERSATION_POSTGRES_PORT = 5_432
-EXPECTED_CONVERSATION_POSTGRES_DATABASE = "memory"
-EXPECTED_CONVERSATION_POSTGRES_ROLE = "brains_app"
-
-
-def _conversation_bridge_identity(dsn: str) -> dict[str, object]:
-    try:
-        parsed = urlsplit(dsn)
-        port = parsed.port
-    except (TypeError, ValueError) as exc:
-        raise CaptureConfigurationError(
-            "conversation_bridge_postgres_target_invalid"
-        ) from exc
-    database = parsed.path.removeprefix("/")
-    exact = (
-        parsed.scheme == "postgresql"
-        and parsed.hostname == EXPECTED_CONVERSATION_POSTGRES_HOST
-        and port == EXPECTED_CONVERSATION_POSTGRES_PORT
-        and parsed.username == EXPECTED_CONVERSATION_POSTGRES_ROLE
-        and isinstance(parsed.password, str)
-        and bool(parsed.password)
-        and database == EXPECTED_CONVERSATION_POSTGRES_DATABASE
-        and not parsed.query
-        and not parsed.fragment
-    )
-    if EXCLUSIVE_MEMORY_MODE is ExclusiveMemoryMode.SUCCESSOR_PILOT and not exact:
-        raise CaptureConfigurationError(
-            "conversation_bridge_postgres_target_invalid"
-        )
-    return {
-        "identity_status": (
-            "configured_not_verified" if exact else "configured_mismatch"
-        ),
-        "host": parsed.hostname,
-        "port": port,
-        "database": database,
-        "application_login_role": parsed.username,
-        "migration_execution_role": "sage",
-        "schemas": ["public", "memory_ingest_private"],
-        "capture_function": (
-            "memory_ingest_private.enqueue_chat_log_message(uuid,text)"
-        ),
-    }
-
-SUCCESSOR_LIVE_AUTHORITY_FACTORY = successor_live_authority_from_environment
-GOVERNED_MEMORY_PROXY_SERVICE_TOKEN = os.environ.get(
-    "GOVERNED_MEMORY_SERVICE_TOKEN"
-)
-GOVERNED_MEMORY_ERASURE_PROXY_CONFIGURED = (
-    governed_memory_proxy_service_token_is_valid(
-        GOVERNED_MEMORY_PROXY_SERVICE_TOKEN
-    )
 )
 SUCCESSOR_MEMORY_REFUSAL_HEADERS = {
     "cache-control": "private, no-store, max-age=0, must-revalidate",
@@ -352,11 +207,6 @@ SUCCESSOR_MEMORY_REFUSAL_HEADERS = {
 
 app = FastAPI(title="Brains API", version="1.0.0")
 app.include_router(resse_response_router, prefix="/response")
-app.include_router(
-    create_governed_memory_erasure_proxy_router_v1(
-        service_token=GOVERNED_MEMORY_PROXY_SERVICE_TOKEN,
-    )
-)
 app.include_router(trusted_web_router, prefix="/trusted-web")
 app.include_router(current_news_router, prefix="/current-news")
 app.include_router(search_execution_router_v1, prefix="/search")
@@ -397,12 +247,16 @@ def _conversation_erasure_required(
     return JSONResponse(
         {
             "status": "conflict",
-            "detail": "conversation_erasure_coordinator_required",
+            "detail": "legacy_conversation_deletion_route_retired",
             "operation": operation,
             "selector_kind": selector_kind,
-            "canonical_route": ERASURE_COLLECTION_PATH,
+            "canonical_route": (
+                "/memory/chat-and-zep/clear"
+                if selector_kind == "all_conversations"
+                else "/chat-history/clear"
+            ),
         },
-        status_code=409,
+        status_code=410,
         headers=SUCCESSOR_MEMORY_REFUSAL_HEADERS,
     )
 
@@ -633,7 +487,6 @@ async def _require_actor_for_thread(req: Request, thread_id: uuid.UUID):
 qdrant_client = None
 
 DSN = os.environ["POSTGRES_DSN"]
-CONVERSATION_BRIDGE_IDENTITY = _conversation_bridge_identity(DSN)
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
@@ -1241,92 +1094,10 @@ async def log_chat(req: Request):
                 tags.append(tt)
                 existing.add(tt)
 
-    try:
-        governed_memory_capture = capture_decision_for_owner(
-            user_id,
-            authority=memory_actor_authority_v1(req),
-            source=source,
-            has_attachments=bool(attachment_ids),
-            is_voice_turn=voice_turn_id is not None,
-            no_store=no_store,
-            has_search_authorization=bool(
-                (req.headers.get(VOICE_SEARCH_AUTHORIZATION_HEADER) or "").strip()
-            ),
-            settings=GOVERNED_MEMORY_CAPTURE_SETTINGS,
-        )
-    except CaptureConfigurationError:
-        return JSONResponse(
-            {
-                "status": "unavailable",
-                "detail": "governed_memory_capture_configuration_invalid",
-            },
-            status_code=503,
-        )
-    governed_memory_actor_context = None
-    if governed_memory_capture.enabled:
-        if thread_id is None:
-            return JSONResponse(
-                {
-                    "status": "conflict",
-                    "detail": "governed_memory_capture_thread_required",
-                },
-                status_code=409,
-            )
-        try:
-            live_authority_verifier = SUCCESSOR_LIVE_AUTHORITY_FACTORY()
-        except SuccessorLiveAuthorityConfigurationError:
-            return JSONResponse(
-                {
-                    "status": "unavailable",
-                    "detail": "successor_live_authority_unconfigured",
-                },
-                status_code=503,
-                headers=SUCCESSOR_MEMORY_REFUSAL_HEADERS,
-            )
-        try:
-            governed_memory_actor_context = await require_memory_actor_context_v1(
-                req,
-                user_id,
-                live_authority_verifier=live_authority_verifier,
-                require_live_authority=True,
-            )
-        except HTTPException as exc:
-            return JSONResponse(
-                {
-                    "status": (
-                        "unavailable" if exc.status_code == 503 else "unauthorized"
-                    ),
-                    "detail": str(exc.detail),
-                },
-                status_code=exc.status_code,
-                headers={
-                    **SUCCESSOR_MEMORY_REFUSAL_HEADERS,
-                    **dict(exc.headers or {}),
-                },
-            )
-        text = normalize_capture_text(text)
-
-    # Stable transcript row id. Ineligible/default-off writes remain transcript-only;
-    # an eligible pilot write atomically creates its content-free bridge row below.
+    # The transcript is canonical chat history. Zep ingestion is dispatched by
+    # the response route after the completed user/assistant turn is persisted.
     rec_id = str(uuid.uuid4())
-
-    # Preserve the existing timestamp input exactly while capture is off.
-    created_dt = None if governed_memory_capture.enabled else datetime.utcnow()
-    capture_auth_context = None
-    capture_source_created_at = None
-    memory_capture_outcome = None
-    if governed_memory_capture.enabled:
-        if governed_memory_actor_context is None:
-            raise RuntimeError("governed_memory_capture_actor_context_missing")
-        capture_auth_context = capture_auth_context_sha256(
-            owner_user_id=governed_memory_actor_context.owner_user_id,
-            session_id=governed_memory_actor_context.session_id,
-            authentication_manifest_sha256=(
-                governed_memory_actor_context.authentication_manifest_sha256
-            ),
-            authority=governed_memory_actor_context.authority,
-            request_id=request_id,
-        )
+    created_dt = datetime.utcnow()
 
     # Save to PostgreSQL (authoritative transcript).
     conn = None
@@ -1336,13 +1107,6 @@ async def log_chat(req: Request):
         await _set_connection_actor(conn, user_id)
         transaction = conn.transaction()
         await transaction.start()
-        if governed_memory_capture.enabled:
-            if capture_auth_context is None:
-                raise RuntimeError("governed_memory_capture_auth_context_missing")
-            await conn.execute(
-                "SELECT set_config('app.auth_context_sha256',$1,true)",
-                capture_auth_context,
-            )
         # If thread_id was provided but the thread row doesn't exist (or belongs to another user),
         # fix it so the sidebar can show the thread.
         if thread_id:
@@ -1409,36 +1173,12 @@ async def log_chat(req: Request):
             if bound_message_ids != {None}:
                 raise ValueError("attachment_binding_failed")
 
-        if governed_memory_capture.enabled:
-            inserted_capture_row = await conn.fetchrow(
-                "INSERT INTO chat_log("
-                "id,owner_user_id,user_id,user_id_alias,source,text,tags,thread_id,vantage_id,request_id,created_at"
-                ") VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,transaction_timestamp()) "
-                "RETURNING id,created_at",
-                rec_id,
-                user_id,
-                user_id,
-                user_id_alias,
-                source,
-                text,
-                tags,
-                thread_id,
-                vantage_id,
-                request_id,
-            )
-            if (
-                inserted_capture_row is None
-                or str(inserted_capture_row["id"]) != rec_id
-            ):
-                raise RuntimeError("governed_memory_capture_insert_failed")
-            capture_source_created_at = inserted_capture_row["created_at"]
-        else:
-            await conn.execute(
-                "INSERT INTO chat_log("
-                "id,owner_user_id,user_id,user_id_alias,source,text,tags,thread_id,vantage_id,request_id,created_at"
-                ") VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
-                rec_id, user_id, user_id, user_id_alias, source, text, tags, thread_id, vantage_id, request_id, created_dt
-            )
+        await conn.execute(
+            "INSERT INTO chat_log("
+            "id,owner_user_id,user_id,user_id_alias,source,text,tags,thread_id,vantage_id,request_id,created_at"
+            ") VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
+            rec_id, user_id, user_id, user_id_alias, source, text, tags, thread_id, vantage_id, request_id, created_dt
+        )
 
         if attachment_ids:
             bound_rows = await conn.fetch(
@@ -1457,17 +1197,6 @@ async def log_chat(req: Request):
             )
             if len(bound_rows) != len(attachment_ids):
                 raise ValueError("attachment_binding_failed")
-
-        if governed_memory_capture.enabled:
-            if capture_source_created_at is None:
-                raise RuntimeError("governed_memory_capture_timestamp_missing")
-            capture_receipt = await enqueue_captured_chat_log_message(
-                conn,
-                decision=governed_memory_capture,
-                message_id=uuid.UUID(rec_id),
-                source_created_at=capture_source_created_at,
-            )
-            memory_capture_outcome = capture_receipt.outcome
 
         # Touch thread timestamp so list ordering works
         if thread_id:
@@ -1497,14 +1226,11 @@ async def log_chat(req: Request):
         if conn:
             await conn.close()
 
-    response_payload = {
+    return {
         "status": "ok",
         "id": rec_id,
         "request_id": request_id,
     }
-    if memory_capture_outcome is not None:
-        response_payload["memory_capture_outcome"] = memory_capture_outcome
-    return response_payload
 
 @app.post("/threads/new")
 async def threads_new(body: NewThreadReq, req: Request):
@@ -2114,15 +1840,6 @@ async def threads_delete(thread_id: str, req: Request):
 
 @app.get("/healthz")
 async def health():
-    if not GOVERNED_MEMORY_ERASURE_PROXY_CONFIGURED:
-        return JSONResponse(
-            {
-                "status": "unavailable",
-                "error": "governed_memory_erasure_proxy_unconfigured",
-            },
-            status_code=503,
-            headers=SUCCESSOR_MEMORY_REFUSAL_HEADERS,
-        )
     return {
         "status": "ok",
         "time": time.time(),
@@ -2131,52 +1848,20 @@ async def health():
             "embed_model": EMBED_MODEL,
             "qdrant_url": QDRANT_URL,
         },
-        "governed_memory_successor": {
-            "identity_status": "declared_not_verified",
-            "exclusive_mode": EXCLUSIVE_MEMORY_MODE.value,
-            "legacy_memory_surfaces_enabled": (
-                LEGACY_MEMORY_SURFACES_ENABLED
-            ),
-            "postgres": {
-                "host": EXPECTED_POSTGRES_HOST,
-                "port": EXPECTED_POSTGRES_PORT,
-                "database": EXPECTED_POSTGRES_DATABASE,
-                "api_role": EXPECTED_POSTGRES_ROLE,
-                "schemas": ["memory", "memory_private"],
+        "memory": {
+            "provider": "zep",
+            "prompt_mode": ZEP_PROMPT_SETTINGS.mode,
+            "chat_history_store": "postgres",
+            "chat_deletion_retains_memory": True,
+            "full_erasure_route": "/memory/chat-and-zep/clear",
+            "retired_governed_memory": {
+                "capture": "disabled",
+                "response_fallback": "disabled",
+                "lifecycle_commands": "disabled",
+                "erasure_proxy": "disabled",
+                "postgres_access": "disabled",
+                "qdrant_access": "disabled",
             },
-            "conversation_bridge": CONVERSATION_BRIDGE_IDENTITY,
-            "capture": {
-                "startup_validated": True,
-                "mode": GOVERNED_MEMORY_CAPTURE_SETTINGS.mode,
-                "pilot_owner_count": len(
-                    GOVERNED_MEMORY_CAPTURE_SETTINGS.owner_user_ids
-                ),
-                "rolling_24h_message_limit": CAPTURE_PILOT_ROLLING_24H_LIMIT,
-                "limit_enforcement": (
-                    "owner_locked_conversation_bridge_all_states"
-                ),
-                "source": "frontend/chat:user",
-                "authority": "supabase_access_token_v1",
-                "excludes": [
-                    "attachments",
-                    "no_store",
-                    "voice",
-                    "web_search",
-                ],
-            },
-            "qdrant": {
-                "host": EXPECTED_QDRANT_HOST,
-                "port": EXPECTED_QDRANT_PORT,
-                "alias": QDRANT_ALIAS,
-                "physical_collection": QDRANT_PHYSICAL_COLLECTION,
-            },
-            "calibration_artifact_sha256": (
-                SUCCESSOR_DECLARED_CALIBRATION_ARTIFACT_SHA256
-            ),
-            "calibration_approval_receipt_sha256": (
-                SUCCESSOR_DECLARED_CALIBRATION_APPROVAL_SHA256
-            ),
-            "candidate_commit": SUCCESSOR_DECLARED_CANDIDATE_COMMIT,
         },
     }
 

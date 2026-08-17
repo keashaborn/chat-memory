@@ -17,30 +17,15 @@ from rag_engine.chat_attachment_context_v1 import (
     MAX_ATTACHMENT_COUNT,
     build_attachment_context_block_v1,
 )
-from rag_engine.chat_memory_ingest_coordination_v1 import (
-    ChatMemoryIngestCoordinationErrorV1,
-    coordinate_chat_memory_ingest_v1,
-)
-from rag_engine.governed_memory.exclusive_cutover import (
-    exclusive_memory_mode,
-)
-from rag_engine.governed_memory_chat_lifecycle_v1 import (
-    ChatMemoryLifecycleError,
-    ChatMemoryLifecycleRuntimeV1,
-)
 from rag_engine.governed_memory.response_provider import (
     EXCLUSIVE_MODE_SUCCESSOR,
     InactiveSuccessorMemoryProviderV1,
-    SuccessorGovernedMemoryAssemblyProviderV1,
-    SuccessorResponseActorBinding,
     SuccessorResponseConfigurationError,
-    choose_response_memory_provider,
 )
 from rag_engine.governed_memory.response_provenance import (
     SuccessorMemoryAnswerProvenanceV1,
     SuccessorMemoryNotApplicableReason,
 )
-from rag_engine.governed_memory.response_runtime import SuccessorResponseRuntime
 from rag_engine.governed_memory.successor_live_authority import (
     SuccessorLiveAuthorityConfigurationError,
     successor_live_authority_from_environment,
@@ -123,19 +108,10 @@ ZEP_SHADOW_RUNTIME = ZepShadowRuntimeV1.from_environment(
 ZEP_PROMPT_SETTINGS = ZepPromptSettingsV1.from_environment(os.environ)
 
 
-SuccessorResponseProviderFactory = Callable[
-    [SuccessorResponseActorBinding],
-    SuccessorGovernedMemoryAssemblyProviderV1,
-]
 SuccessorLiveAuthorityFactory = Callable[[], MemoryLiveAuthorityVerifierV1]
 
 
-SUCCESSOR_RESPONSE_RUNTIME = SuccessorResponseRuntime()
-CHAT_MEMORY_LIFECYCLE_RUNTIME = (
-    ChatMemoryLifecycleRuntimeV1.from_environment()
-)
-EXCLUSIVE_MEMORY_MODE = exclusive_memory_mode()
-RESPONSE_MEMORY_MODE = EXCLUSIVE_MEMORY_MODE.value
+RESPONSE_MEMORY_MODE = EXCLUSIVE_MODE_SUCCESSOR
 
 
 def response_memory_provenance_for_mode(
@@ -186,28 +162,6 @@ def successor_not_applicable_reason(
     return None
 
 
-def should_coordinate_chat_memory_ingest(
-    *,
-    no_store: bool,
-    thread_id: UUID | None,
-    is_voice: bool,
-) -> bool:
-    """Only text-chat transcript sources participate in ingest coordination."""
-
-    return not no_store and thread_id is not None and not is_voice
-
-
-def _production_successor_response_provider(
-    binding: SuccessorResponseActorBinding,
-) -> SuccessorGovernedMemoryAssemblyProviderV1:
-    return SUCCESSOR_RESPONSE_RUNTIME.provider(binding, os.environ)
-
-
-SUCCESSOR_RESPONSE_PROVIDER_FACTORY: SuccessorResponseProviderFactory = (
-    _production_successor_response_provider
-)
-
-
 def _inactive_successor_response_provider(
     reason: SuccessorMemoryNotApplicableReason | None,
 ) -> InactiveSuccessorMemoryProviderV1:
@@ -228,10 +182,7 @@ async def close_lifeswitch_chat_pool_v1() -> None:
     try:
         await LIFESWITCH_CHAT_POOL.close()
     finally:
-        try:
-            await SUCCESSOR_RESPONSE_RUNTIME.close()
-        finally:
-            await ZEP_SHADOW_RUNTIME.close()
+        await ZEP_SHADOW_RUNTIME.close()
 
 
 def apply_no_store_headers(response: Response) -> None:
@@ -429,112 +380,8 @@ async def resse_response_query(
             thread_id=thread_id,
         )
 
-    requires_ingest_coordination = (
-        tentative_successor_eligible
-        and CHAT_MEMORY_LIFECYCLE_RUNTIME.requires_ingest_coordination(
-            payload.message
-        )
-    )
-    coordination_message_id = (
-        payload.message_id or payload.attachment_message_id
-    )
-
-    # A correction must bind to the exact transcript row before any memory
-    # mutation.  The frontend already supplies one request id to both /log and
-    # /response/query, and /log persists it in chat_log.  A future frontend may
-    # additionally provide message_id; when both are present the database
-    # requires both references to identify the same row.
-    if requires_ingest_coordination:
-        coordination_connection = None
-        try:
-            coordination_connection = await asyncpg.connect(
-                DSN, command_timeout=15
-            )
-            await coordinate_chat_memory_ingest_v1(
-                coordination_connection,
-                owner_user_id=owner,
-                message_id=coordination_message_id,
-                request_id=request_id,
-                thread_id=thread_id,
-                message=payload.message,
-                resolution="validate",
-            )
-        except ChatMemoryIngestCoordinationErrorV1:
-            raise _no_store_http_exception(
-                503,
-                "memory_ingest_coordination_unavailable",
-            ) from None
-        finally:
-            if coordination_connection is not None:
-                await coordination_connection.close()
-
-    lifecycle_receipt = None
-    if tentative_successor_eligible:
-        try:
-            lifecycle_receipt = (
-                await CHAT_MEMORY_LIFECYCLE_RUNTIME.apply_if_requested(
-                    owner_user_id=owner,
-                    message=payload.message,
-                    authorization=(
-                        req.headers.get("authorization") or ""
-                    ).strip(),
-                )
-            )
-        except ChatMemoryLifecycleError as exc:
-            if requires_ingest_coordination:
-                coordination_connection = None
-                try:
-                    coordination_connection = await asyncpg.connect(
-                        DSN, command_timeout=15
-                    )
-                    await coordinate_chat_memory_ingest_v1(
-                        coordination_connection,
-                        owner_user_id=owner,
-                        message_id=coordination_message_id,
-                        request_id=request_id,
-                        thread_id=thread_id,
-                        message=payload.message,
-                        resolution="suppress",
-                    )
-                except ChatMemoryIngestCoordinationErrorV1:
-                    raise _no_store_http_exception(
-                        503,
-                        "memory_ingest_coordination_unavailable",
-                    ) from None
-                finally:
-                    if coordination_connection is not None:
-                        await coordination_connection.close()
-            raise _no_store_http_exception(
-                exc.status_code,
-                exc.code,
-            ) from None
-
     conn = await asyncpg.connect(DSN, command_timeout=90)
     try:
-        if should_coordinate_chat_memory_ingest(
-            no_store=payload.no_store,
-            thread_id=payload.thread_id,
-            is_voice=voice_turn_id is not None,
-        ):
-            try:
-                await coordinate_chat_memory_ingest_v1(
-                    conn,
-                    owner_user_id=owner,
-                    message_id=coordination_message_id,
-                    request_id=request_id,
-                    thread_id=thread_id,
-                    message=payload.message,
-                    resolution=(
-                        "suppress"
-                        if lifecycle_receipt is not None
-                        else "release"
-                    ),
-                )
-            except ChatMemoryIngestCoordinationErrorV1:
-                raise _no_store_http_exception(
-                    503,
-                    "memory_ingest_coordination_unavailable",
-                ) from None
         attachment_context_block = None
         if payload.attachment_ids:
             await conn.execute("SELECT set_config('app.user_id', $1, false)", str(owner))
@@ -580,49 +427,22 @@ async def resse_response_query(
             payload.thread_id is not None and exclusion_reason is None
         )
         zep_memory_provider = None
-        try:
-            if successor_eligible and zep_prompt_enabled:
-                zep_memory_provider = ZepMemoryChatProviderV1(
-                    ZEP_SHADOW_RUNTIME,
-                    logger=logger,
+        if successor_eligible:
+            if not zep_prompt_enabled:
+                raise _no_store_http_exception(
+                    503,
+                    "zep_prompt_memory_unavailable",
                 )
-                memory_provider = zep_memory_provider
-                successor_memory_lifecycle = None
-            else:
-                memory_provider, successor_memory_lifecycle = (
-                    choose_response_memory_provider(
-                        mode=response_memory_mode,
-                        successor_factory=(
-                            (
-                                lambda: SuccessorMemoryChatAdapterV1(
-                                    SUCCESSOR_RESPONSE_PROVIDER_FACTORY(
-                                        SuccessorResponseActorBinding(
-                                            owner_user_id=owner,
-                                            session_id=actor_context.session_id,
-                                            authentication_manifest_sha256=(
-                                                actor_context.authentication_manifest_sha256
-                                            ),
-                                            request_id=request_id,
-                                            thread_id=thread_id,
-                                            eligible=True,
-                                        )
-                                    )
-                                )
-                            )
-                            if successor_eligible
-                            else lambda: SuccessorMemoryChatAdapterV1(
-                                _inactive_successor_response_provider(
-                                    exclusion_reason
-                                )
-                            )
-                        ),
-                    )
-                )
-        except SuccessorResponseConfigurationError:
-            raise _no_store_http_exception(
-                503,
-                "successor_response_runtime_unconfigured",
-            ) from None
+            zep_memory_provider = ZepMemoryChatProviderV1(
+                ZEP_SHADOW_RUNTIME,
+                logger=logger,
+            )
+            memory_provider = zep_memory_provider
+        else:
+            memory_provider = SuccessorMemoryChatAdapterV1(
+                _inactive_successor_response_provider(exclusion_reason)
+            )
+        successor_memory_lifecycle = None
         base_root = InactiveResponseCompositionRootV0_2(
             openai_client=openai_client,
             classifier_model=os.getenv("RESSE_CLASSIFIER_MODEL", "gpt-5.1"),
