@@ -38,6 +38,7 @@ from rag_engine.resse_response_router import (
     apply_no_store_headers,
     response_memory_provenance_for_mode,
     resse_response_query,
+    should_coordinate_chat_memory_ingest,
     successor_not_applicable_reason,
 )
 
@@ -322,6 +323,36 @@ class ResseResponseRouterTests(unittest.TestCase):
                 has_attachments=False,
                 is_voice=False,
                 has_web_search=False,
+            )
+        )
+
+    def test_voice_turn_bypasses_text_chat_memory_ingest_coordination(self) -> None:
+        self.assertTrue(
+            should_coordinate_chat_memory_ingest(
+                no_store=False,
+                thread_id=THREAD,
+                is_voice=False,
+            )
+        )
+        self.assertFalse(
+            should_coordinate_chat_memory_ingest(
+                no_store=False,
+                thread_id=THREAD,
+                is_voice=True,
+            )
+        )
+        self.assertFalse(
+            should_coordinate_chat_memory_ingest(
+                no_store=True,
+                thread_id=THREAD,
+                is_voice=False,
+            )
+        )
+        self.assertFalse(
+            should_coordinate_chat_memory_ingest(
+                no_store=False,
+                thread_id=None,
+                is_voice=False,
             )
         )
 

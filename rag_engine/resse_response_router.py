@@ -186,6 +186,17 @@ def successor_not_applicable_reason(
     return None
 
 
+def should_coordinate_chat_memory_ingest(
+    *,
+    no_store: bool,
+    thread_id: UUID | None,
+    is_voice: bool,
+) -> bool:
+    """Only text-chat transcript sources participate in ingest coordination."""
+
+    return not no_store and thread_id is not None and not is_voice
+
+
 def _production_successor_response_provider(
     binding: SuccessorResponseActorBinding,
 ) -> SuccessorGovernedMemoryAssemblyProviderV1:
@@ -500,7 +511,11 @@ async def resse_response_query(
 
     conn = await asyncpg.connect(DSN, command_timeout=90)
     try:
-        if not payload.no_store and payload.thread_id is not None:
+        if should_coordinate_chat_memory_ingest(
+            no_store=payload.no_store,
+            thread_id=payload.thread_id,
+            is_voice=voice_turn_id is not None,
+        ):
             try:
                 await coordinate_chat_memory_ingest_v1(
                     conn,
@@ -795,5 +810,6 @@ async def resse_response_query(
 __all__ = [
     "response_memory_provenance_for_mode",
     "router",
+    "should_coordinate_chat_memory_ingest",
     "successor_not_applicable_reason",
 ]
