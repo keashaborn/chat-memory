@@ -727,7 +727,11 @@ async def resse_response_query(
                     request_id=request_id,
                     finalized=finalized,
                 )
-        if successor_eligible and payload.message_id is not None:
+        if (
+            payload.message_id is not None
+            and not payload.no_store
+            and (successor_eligible or voice_turn_id is not None)
+        ):
             ZEP_SHADOW_RUNTIME.dispatch_turn(
                 owner_user_id=owner,
                 thread_id=thread_id,

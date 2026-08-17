@@ -447,6 +447,17 @@ class RealtimePreviewSidebandController:
             raise RealtimePreviewSidebandError(
                 "governed transcript persistence was not confirmed"
             )
+        raw_message_id = log_payload.get("id")
+        try:
+            persisted_message_id = str(uuid.UUID(str(raw_message_id)))
+        except (TypeError, ValueError) as exc:
+            raise RealtimePreviewSidebandError(
+                "governed transcript message binding was invalid"
+            ) from exc
+        if raw_message_id != persisted_message_id:
+            raise RealtimePreviewSidebandError(
+                "governed transcript message binding was invalid"
+            )
 
         response = await client.post(
             f"{self._internal_base_url}/response/query",
@@ -465,6 +476,7 @@ class RealtimePreviewSidebandController:
             json={
                 "user_id": self.session.owner_user_id,
                 "message": transcript,
+                "message_id": persisted_message_id,
                 "thread_id": str(self.session.thread_id),
                 "no_store": False,
                 "include_inspection": False,

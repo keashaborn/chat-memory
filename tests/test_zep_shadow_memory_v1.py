@@ -188,6 +188,13 @@ class ZepShadowSettingsTests(unittest.TestCase):
         self.assertNotIn("owner_user_id=payload.user_id", dispatch_block)
         self.assertIn("user_message_id=payload.message_id", dispatch_block)
         self.assertIn("assistant_message_id=finalized.answer_id", dispatch_block)
+        dispatch_guard = route[route.rfind("if (", 0, dispatch) : dispatch]
+        self.assertIn("payload.message_id is not None", dispatch_guard)
+        self.assertIn("not payload.no_store", dispatch_guard)
+        self.assertIn(
+            "successor_eligible or voice_turn_id is not None",
+            dispatch_guard,
+        )
 
     def test_shadow_and_prompt_retrieval_are_separate_owner_bound_paths(self) -> None:
         adapter = (ROOT / "rag_engine/zep_shadow_memory_v1.py").read_text()
@@ -230,6 +237,47 @@ class ZepCloudShadowTransportTests(unittest.IsolatedAsyncioTestCase):
         transport = object.__new__(ZepCloudShadowTransportV1)
         transport._client = client
         return transport, get_user_context
+
+    async def test_add_turn_binds_stable_provider_message_uuids(self) -> None:
+        class FakeMessage:
+            def __init__(self, **kwargs: object) -> None:
+                self.values = kwargs
+
+        add_messages = AsyncMock(
+            return_value=SimpleNamespace(message_uuids=[])
+        )
+        transport = object.__new__(ZepCloudShadowTransportV1)
+        transport._client = SimpleNamespace(
+            thread=SimpleNamespace(add_messages=add_messages)
+        )
+        transport._message_type = FakeMessage
+
+        await transport.add_turn(
+            thread_id=zep_thread_id_v1(THREAD),
+            user_message_id=USER_MESSAGE,
+            assistant_message_id=ASSISTANT_MESSAGE,
+            user_message="user text",
+            assistant_message="assistant text",
+        )
+
+        sent = add_messages.await_args.kwargs["messages"]
+        self.assertEqual(
+            [message.values["uuid_"] for message in sent],
+            [str(USER_MESSAGE), str(ASSISTANT_MESSAGE)],
+        )
+        self.assertEqual(
+            [
+                message.values["metadata"]["lifeswitch_message_id"]
+                for message in sent
+            ],
+            [str(USER_MESSAGE), str(ASSISTANT_MESSAGE)],
+        )
+        add_messages.assert_awaited_once_with(
+            zep_thread_id_v1(THREAD),
+            messages=sent,
+            ignore_roles=["assistant"],
+            return_context=False,
+        )
 
     async def test_owner_thread_match_is_required_before_context_read(
         self,

@@ -223,6 +223,7 @@ class ZepCloudShadowTransportV1:
     ) -> None:
         messages = [
             self._message_type(
+                uuid_=str(user_message_id),
                 role="user",
                 name="LifeSwitch User",
                 content=user_message,
@@ -231,6 +232,7 @@ class ZepCloudShadowTransportV1:
                 },
             ),
             self._message_type(
+                uuid_=str(assistant_message_id),
                 role="assistant",
                 name="LifeSwitch Assistant",
                 content=assistant_message,

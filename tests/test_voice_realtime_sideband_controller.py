@@ -41,6 +41,7 @@ class FakeHTTPClient:
     def __init__(self, **kwargs: Any) -> None:
         self.kwargs = kwargs
         self.calls: list[dict[str, Any]] = []
+        self.logged_message_ids: list[str] = []
 
     async def __aenter__(self) -> "FakeHTTPClient":
         return self
@@ -62,11 +63,13 @@ class FakeHTTPClient:
                 },
             )
         if url.endswith("/log"):
+            message_id = str(uuid.UUID(int=1_000 + len(self.logged_message_ids)))
+            self.logged_message_ids.append(message_id)
             return FakeHTTPResponse(
                 status_code=200,
                 payload={
                     "status": "ok",
-                    "id": str(uuid.uuid4()),
+                    "id": message_id,
                     "request_id": headers["x-request-id"],
                 },
             )
@@ -192,6 +195,10 @@ class RealtimePreviewSidebandControllerTests(
                 call["json"]["thread_id"] == str(THREAD_ID)
                 for call in query_calls
             )
+        )
+        self.assertEqual(
+            [call["json"]["message_id"] for call in query_calls],
+            self.http.logged_message_ids,
         )
         self.assertTrue(
             all(
