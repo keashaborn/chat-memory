@@ -339,6 +339,18 @@ class ResseResponseRouterTests(unittest.TestCase):
         ):
             self.assertNotIn(retired_symbol, source)
 
+    def test_non_zep_routes_retain_not_applicable_provenance_lifecycle(self) -> None:
+        source = (ROOT / "rag_engine/resse_response_router.py").read_text()
+        self.assertIn(
+            """        else:
+            memory_provider = SuccessorMemoryChatAdapterV1(
+                _inactive_successor_response_provider(exclusion_reason)
+            )
+            successor_memory_lifecycle = memory_provider
+""",
+            source,
+        )
+
 
 def successor_request() -> Request:
     return Request(

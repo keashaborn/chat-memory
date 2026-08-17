@@ -438,11 +438,12 @@ async def resse_response_query(
                 logger=logger,
             )
             memory_provider = zep_memory_provider
+            successor_memory_lifecycle = None
         else:
             memory_provider = SuccessorMemoryChatAdapterV1(
                 _inactive_successor_response_provider(exclusion_reason)
             )
-        successor_memory_lifecycle = None
+            successor_memory_lifecycle = memory_provider
         base_root = InactiveResponseCompositionRootV0_2(
             openai_client=openai_client,
             classifier_model=os.getenv("RESSE_CLASSIFIER_MODEL", "gpt-5.1"),
