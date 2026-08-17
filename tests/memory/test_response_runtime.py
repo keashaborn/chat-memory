@@ -88,7 +88,7 @@ def environment(path: Path, artifact_hash: str) -> dict[str, str]:
             "postgresql://governed_memory_api:synthetic-secret@"
             "127.0.0.1:55432/governed_memory"
         ),
-        SUCCESSOR_OPENAI_API_KEY_ENV: "sk-synthetic-response-key",
+        SUCCESSOR_OPENAI_API_KEY_ENV: "synthetic-not-a-real-openai-key",
         QDRANT_API_KEY_ENV: "synthetic-not-a-real-qdrant-key",
         SUCCESSOR_CALIBRATION_PATH_ENV: str(path),
         SUCCESSOR_CALIBRATION_ARTIFACT_SHA256_ENV: artifact_hash,
