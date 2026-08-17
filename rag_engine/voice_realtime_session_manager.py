@@ -110,6 +110,9 @@ class RealtimePreviewSessionRegistry:
     The current Brains service has one worker. A restart deliberately drops all
     preview sessions so the experimental path fails closed. Move this state to
     a shared TTL store before enabling the mode on multiple workers.
+
+    The TTL is an inactivity timeout. Successful owner- and voice-lease-bound
+    access renews it; missing or mismatched access never extends a session.
     """
 
     def __init__(
@@ -194,6 +197,7 @@ class RealtimePreviewSessionRegistry:
                 or session.voice_session_id != voice_session_id
             ):
                 return None
+            session.expires_at_monotonic = now + self._ttl_seconds
             return session
 
     def pop_owned(

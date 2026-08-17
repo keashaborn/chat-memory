@@ -44,6 +44,82 @@ class RealtimePreviewSessionRegistryTests(unittest.TestCase):
         )
         self.assertEqual(registry.size(), 0)
 
+    def test_owned_activity_renews_inactivity_timeout(self) -> None:
+        now = [100.0]
+        registry = RealtimePreviewSessionRegistry(
+            ttl_seconds=10,
+            clock=lambda: now[0],
+        )
+        session = registry.register(
+            owner_user_id=OWNER,
+            voice_session_id=VOICE_SESSION,
+            thread_id=THREAD_ID,
+            openai_call_id="rtc_renewing",
+        )
+
+        now[0] = 109.0
+        self.assertIs(
+            registry.get_owned(
+                preview_session_id=session.preview_session_id,
+                owner_user_id=OWNER,
+                voice_session_id=VOICE_SESSION,
+            ),
+            session,
+        )
+        self.assertEqual(session.expires_at_monotonic, 119.0)
+
+        now[0] = 111.0
+        self.assertIs(
+            registry.get_owned(
+                preview_session_id=session.preview_session_id,
+                owner_user_id=OWNER,
+                voice_session_id=VOICE_SESSION,
+            ),
+            session,
+        )
+        self.assertEqual(session.expires_at_monotonic, 121.0)
+
+        now[0] = 121.0
+        self.assertIsNone(
+            registry.get_owned(
+                preview_session_id=session.preview_session_id,
+                owner_user_id=OWNER,
+                voice_session_id=VOICE_SESSION,
+            )
+        )
+
+    def test_mismatched_activity_does_not_renew_timeout(self) -> None:
+        now = [100.0]
+        registry = RealtimePreviewSessionRegistry(
+            ttl_seconds=10,
+            clock=lambda: now[0],
+        )
+        session = registry.register(
+            owner_user_id=OWNER,
+            voice_session_id=VOICE_SESSION,
+            thread_id=THREAD_ID,
+            openai_call_id="rtc_not_renewed",
+        )
+
+        now[0] = 109.0
+        self.assertIsNone(
+            registry.get_owned(
+                preview_session_id=session.preview_session_id,
+                owner_user_id="557ea042-cb82-48f8-9429-472e96c957ef",
+                voice_session_id=VOICE_SESSION,
+            )
+        )
+        self.assertEqual(session.expires_at_monotonic, 110.0)
+
+        now[0] = 110.0
+        self.assertIsNone(
+            registry.get_owned(
+                preview_session_id=session.preview_session_id,
+                owner_user_id=OWNER,
+                voice_session_id=VOICE_SESSION,
+            )
+        )
+
     def test_owner_and_voice_lease_are_part_of_the_key(self) -> None:
         registry = RealtimePreviewSessionRegistry()
         session = registry.register(
