@@ -19,7 +19,7 @@ from typing import Any
 import httpx
 
 
-CONTRACT_VERSION = "voice_synthetic_canary_v1_3"
+CONTRACT_VERSION = "voice_synthetic_canary_v1_4"
 TRACE_CONTRACT_VERSION = "voice_turn_trace_v1"
 VOICE_SESSION_HEADER = "x-vs-voice-session-id"
 SPEECH_TO_FIRST_AUDIO_BASIS = "synthetic_turn_start_v1"
@@ -178,10 +178,8 @@ async def _stream_tts(
         headers=headers,
         json={
             "text": text,
-            "model": "gpt-4o-mini-tts",
             "voice": "marin",
-            "speed": 1.0,
-            "instructions": "Speak clearly in neutral operational English.",
+            "conversation_style": "direct",
         },
     ) as response:
         _require_success(response, stage)

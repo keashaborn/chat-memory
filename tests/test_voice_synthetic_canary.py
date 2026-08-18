@@ -194,6 +194,18 @@ class VoiceSyntheticCanaryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(report["contract_version"], CONTRACT_VERSION)
         self.assertTrue(report["telemetry_recorded"])
         self.assertEqual(tts_calls, 2)
+        tts_bodies = [
+            body
+            for _, path, body in calls
+            if path == "/voice/tts"
+        ]
+        self.assertEqual(len(tts_bodies), 2)
+        for body in tts_bodies:
+            self.assertEqual(body["voice"], "marin")
+            self.assertEqual(body["conversation_style"], "direct")
+            self.assertNotIn("instructions", body)
+            self.assertNotIn("model", body)
+            self.assertNotIn("speed", body)
         paths = [path for _, path, _ in calls]
         self.assertEqual(paths.count("/voice/session/acquire"), 1)
         self.assertEqual(paths.count("/voice/session/heartbeat"), 3)
