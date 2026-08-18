@@ -1,0 +1,506 @@
+{
+  "entries": [
+    {
+      "path": "Dockerfile.ci",
+      "sha256": "b82e7f0de057c1bd7d8f76f8ba082775ac8858eb20b41e4dfc8b0b9a426a4e8c",
+      "size_bytes": 438
+    },
+    {
+      "path": "docker-compose.ci.yml",
+      "sha256": "c437744f84f82ce14446fa420bb4680312bbc08acdbdebb92e6a48cc1af23f8e",
+      "size_bytes": 1071
+    },
+    {
+      "path": "docs/AI_RESPONSE_PREFERENCES_V1_INTEGRATION_HANDOFF.md",
+      "sha256": "227a1e00c44310209617d26522c8830a381318e6da9d2d4d5743ac027d3b1d7a",
+      "size_bytes": 7946
+    },
+    {
+      "path": "docs/ASSISTANT_PREFERENCE_COMPILER_V3_CANDIDATE.md",
+      "sha256": "fc0705ee7dfaf0ab6ab17959b11cac5a949bb13b6487a3664ad01c851aa9984f",
+      "size_bytes": 2516
+    },
+    {
+      "path": "docs/MEMORY_ARCHITECTURE_AUDIT.md",
+      "sha256": "61792ec12609798b1a4070cb164bd8c06520acd214bc1d444be386b86e9d6083",
+      "size_bytes": 2374
+    },
+    {
+      "path": "docs/MEMORY_INTERFACE_V1_READINESS_HANDOFF.md",
+      "sha256": "5df4bf9cba7578592f30265a7ea177f9f454e55fb73451db1b806272f8fb7c17",
+      "size_bytes": 6506
+    },
+    {
+      "path": "docs/MEMORY_SELECTION_ENVELOPE_V1.md",
+      "sha256": "0a6a0b695415f06c28d61b2a0857e1de888b4fec8409afdb353c94453bf8162d",
+      "size_bytes": 11993
+    },
+    {
+      "path": "docs/architecture/openai_only_consolidation_checkpoint_2026-06-30.md",
+      "sha256": "2e61ec5a5fcb31c22745f6551b9ef23feba99cde1323031e533353276ddebc31",
+      "size_bytes": 1651
+    },
+    {
+      "path": "docs/contingencies_v0.md",
+      "sha256": "fd6ff7037f3d64cdf7883b377930a7ce05f3b870a1723c0f76231b20d3953c57",
+      "size_bytes": 19286
+    },
+    {
+      "path": "docs/initiation_engine/jobs.md",
+      "sha256": "acaf9696768d57d636374e8e64022c896b34a7d1eb2efee36e7ba7269ad09438",
+      "size_bytes": 1851
+    },
+    {
+      "path": "docs/memory/clean_successor/ACTIVATION.md",
+      "sha256": "681a07ce8967210f13f8515436b25b3dbc29145ee83e7e68878ef707c0126343",
+      "size_bytes": 2724
+    },
+    {
+      "path": "docs/memory/clean_successor/README.md",
+      "sha256": "b9ef33d87e1e595104bee6dab2f6d65f22088318d2772b0e205551f01de98004",
+      "size_bytes": 5358
+    },
+    {
+      "path": "docs/memory/clean_successor/VALIDATION.md",
+      "sha256": "64d93a7bd125f030d9e33ba1f9bf0729c5c91f435f7ebccf479a08b683a36669",
+      "size_bytes": 7067
+    },
+    {
+      "path": "docs/memory_routing_map.md",
+      "sha256": "b95804f5e83f296e3ac8dece40fb9ba23379ddd7cef22722967489467e60dded",
+      "size_bytes": 11581
+    },
+    {
+      "path": "docs/memory_system_audit_ledger_20260712.md",
+      "sha256": "80d29f3f10c4c2333f748ebb0c7dff1bfc939d1940c7647d6886d53de6932b59",
+      "size_bytes": 57135
+    },
+    {
+      "path": "docs/neo_cortex.md",
+      "sha256": "46b1152db99920fe22dbe2173f5b6b8ab6fcfda983f38c49afcd6813a4584236",
+      "size_bytes": 11826
+    },
+    {
+      "path": "docs/rff_orchestrator_plan_v0.md",
+      "sha256": "73c7381c164394b9feb84d0dc1d73902bfc4af8b4fac82c1c2b25320c1c33ea2",
+      "size_bytes": 9075
+    },
+    {
+      "path": "docs/router.md",
+      "sha256": "47078c5843dfb6733ab3dc134361d6b15df27b28ffe305fb08b8520c23a60392",
+      "size_bytes": 11552
+    },
+    {
+      "path": "docs/verbal_sage_product_architecture_roadmap.md",
+      "sha256": "262fa50004dd971360304f74e31c5f777eef629d3fbe9fb00bb49f08ea3d6578",
+      "size_bytes": 13735
+    },
+    {
+      "path": "governed-function-creations/memory_governed_claim_lifecycle_v1/FORWARD_RECOVERY.md",
+      "sha256": "fbecf4dff7129592a7ad4ada09807ec732984565ffb26391fbea2e676d135580",
+      "size_bytes": 1541
+    },
+    {
+      "path": "governed-function-creations/memory_governed_claim_lifecycle_v1/package.json",
+      "sha256": "fdea6f5eb19e4c3263b970af5b483cdd61ec5084fea259fff50d796287428c67",
+      "size_bytes": 3637
+    },
+    {
+      "path": "governed-function-creations/memory_governed_claim_lifecycle_v1/read_owner_governed_claim_lifecycle_v1-forward.pgsql",
+      "sha256": "37e38307f8c65de77bf2d3051e90860c715749c654b2c8223eee8780ea06ac22",
+      "size_bytes": 1539
+    },
+    {
+      "path": "governed-function-creations/memory_governed_claim_lifecycle_v1/read_owner_governed_claim_lifecycle_v1-rollback.pgsql",
+      "sha256": "be5d829621171dd932d51aeef717b6fd7a1bf14fee250964a308411f189f3778",
+      "size_bytes": 70
+    },
+    {
+      "path": "governed-function-creations/memory_governed_claim_lifecycle_v1/retract_owner_governed_claim_v1-forward.pgsql",
+      "sha256": "218d3dcd73ffd93902e70abb2203623e1d60b386a4b0f3d6717b07a21f3e8f75",
+      "size_bytes": 6317
+    },
+    {
+      "path": "governed-function-creations/memory_governed_claim_lifecycle_v1/retract_owner_governed_claim_v1-rollback.pgsql",
+      "sha256": "13abe5e86a303bc9160fd4e1a68c0aa1e8bd27b22df25fe16c525f41e919b4b2",
+      "size_bytes": 88
+    },
+    {
+      "path": "ops/manifests/20260727_owner_terminal_reconciliation_v1.json",
+      "sha256": "1b762eb330841eb35e0f89afbd554ec6c8ab72645e8abef8361777a10a57b9ee",
+      "size_bytes": 83614
+    },
+    {
+      "path": "ops/retired/memory-v1-inference-20260719/README.md",
+      "sha256": "1a089fb1f56593ed2d7e652c5fd868b018769a0d5a2726c9959e01888244c4d4",
+      "size_bytes": 523
+    },
+    {
+      "path": "ops/retired/memory-v1-inference-20260719/memory-v1-v5-local-inference-gpu-tunnel.service",
+      "sha256": "724a5422dd74db748083f48e2d489e8dd7c406313e569c7b1917197a1014a109",
+      "size_bytes": 1309
+    },
+    {
+      "path": "ops/retired/memory-v1-inference-20260719/memory-v1-v5-local-inference-train.pinned.sha256",
+      "sha256": "14765a735d1e4e656933a64623013517178bc6f352ffb5b5aacd75eaba321927",
+      "size_bytes": 266
+    },
+    {
+      "path": "ops/retired/memory-v1-inference-20260719/memory-v1-v5-local-inference-train.service",
+      "sha256": "dbefc4c4a6cfa93e8a2080ae6302edcb0e7b8a9db9d81335250005817abe27f8",
+      "size_bytes": 1799
+    },
+    {
+      "path": "ops/sql/20260722_voice_thread_deletion_v1.sql",
+      "sha256": "51332088e32144ce2ec913a4f00b2d7c82e97ca732b26e67e0c0a4a61aa37218",
+      "size_bytes": 1321
+    },
+    {
+      "path": "ops/sql/20260722_voice_thread_deletion_v1_rollback.sql",
+      "sha256": "0b791368d8fc0eebf99c11a80bca41a30fb5a2eaa8e9198e173de656730c9551",
+      "size_bytes": 205
+    },
+    {
+      "path": "ops/systemd/brains-memory-v1-universal-authenticated.conf",
+      "sha256": "ef4c7247376dcca6d49f345297fcd33ba001171128f226967b1e58229c85d105",
+      "size_bytes": 349
+    },
+    {
+      "path": "ops/systemd/memory-v1-active-runtime-manifest-v1.json",
+      "sha256": "371196863bdeafde4d9e6c8f7091ecd23fa021084d95e9bb27a003f5f0a3c20c",
+      "size_bytes": 49471
+    },
+    {
+      "path": "ops/systemd/memory-v1-consolidation-owner-allowlist.conf",
+      "sha256": "bd8bd9ce035d264d346a44a38913048b2ab1a27a61978fd6eaf98fabf99ff6cd",
+      "size_bytes": 93
+    },
+    {
+      "path": "ops/systemd/memory-v1-consolidation.service",
+      "sha256": "44c8aa65f832df3281845b5912258f4ccf32cf1d53c7c0a0b8266f58d427b70a",
+      "size_bytes": 706
+    },
+    {
+      "path": "ops/systemd/memory-v1-consolidation.timer",
+      "sha256": "f55446271ac9369254000f8fa5605ed89ca38c688d4eca2cf50cd677a420158c",
+      "size_bytes": 220
+    },
+    {
+      "path": "ops/systemd/memory-v1-deferred-reconciliation-scan.service",
+      "sha256": "25fb48b554d9ba19c234bd57fd45201b5d546e516327dc3e59f5796654e43447",
+      "size_bytes": 1075
+    },
+    {
+      "path": "ops/systemd/memory-v1-deferred-reconciliation-scan.timer",
+      "sha256": "e67bf1b5dff51edeea37f1da92caa5645a216a5e9e82fce4013c3bc614810860",
+      "size_bytes": 253
+    },
+    {
+      "path": "ops/systemd/memory-v1-evidence-intake-dispatcher.service",
+      "sha256": "4d8105c93b31c7ba4e5d50f6d15facc362098e964f0c0906c481f4a7dbb97abc",
+      "size_bytes": 1300
+    },
+    {
+      "path": "ops/systemd/memory-v1-evidence-intake-dispatcher.timer",
+      "sha256": "cb85aa1c981c255bc2fdc8d742267c3ae2a4069625eb54d0e0374ad887f79c3f",
+      "size_bytes": 249
+    },
+    {
+      "path": "ops/systemd/memory-v1-governance-owner-allowlist.conf",
+      "sha256": "6092b2af8b98dd75dea36b89fbb993a52b0a1e8baa2b426de5a446968554190f",
+      "size_bytes": 90
+    },
+    {
+      "path": "ops/systemd/memory-v1-governance.service",
+      "sha256": "d35fb27e40224394e590e6dddd3b1bd2bb81e944d5117ddc2e80a228c7a53560",
+      "size_bytes": 747
+    },
+    {
+      "path": "ops/systemd/memory-v1-governance.timer",
+      "sha256": "8fb009cd3c5e96a5ee077cc6fa5e5973c9107312216f6e83bc6a16a2897dce22",
+      "size_bytes": 215
+    },
+    {
+      "path": "ops/systemd/memory-v1-openai-extraction.env.example",
+      "sha256": "77da8b285fb000e969bb11292a8a54b4dec8da622016b09a2e2b013a75bf77dc",
+      "size_bytes": 1584
+    },
+    {
+      "path": "ops/systemd/memory-v1-openai-extraction.service",
+      "sha256": "c76a06a6908de74fb4b81ca683b4750b86a2a144e91c1fa49814d3a24fa63dee",
+      "size_bytes": 1852
+    },
+    {
+      "path": "ops/systemd/memory-v1-openai-extraction.timer",
+      "sha256": "5cc9db1f1e484a90bc26bb46a0d1e0183e8d0c4ab1a9b4a9da4e1fd4be07096e",
+      "size_bytes": 302
+    },
+    {
+      "path": "ops/systemd/memory-v1-openai-v5-2-packet-router.service",
+      "sha256": "9e63530b8479e2b88e4a1c91c95449f3c68cefeaed65b7a289cd2f79c26ff7da",
+      "size_bytes": 1435
+    },
+    {
+      "path": "ops/systemd/memory-v1-openai-v5-2-packet-router.timer",
+      "sha256": "6b9bab0c047d251577fbec434219b6bd1f013b3e809a4aad681d268f05e3e62e",
+      "size_bytes": 316
+    },
+    {
+      "path": "ops/systemd/memory-v1-projection-owner-allowlist.conf",
+      "sha256": "705a435f54b9df5c4ee01eb379e54b9f881659df4eb2b0d4b9b947aa576e00e5",
+      "size_bytes": 164
+    },
+    {
+      "path": "ops/systemd/memory-v1-projection.service",
+      "sha256": "9171c302bedb892d0934bfb681579aa5e8f71891b346f2abcddb6a7e0fe828c4",
+      "size_bytes": 976
+    },
+    {
+      "path": "ops/systemd/memory-v1-projection.timer",
+      "sha256": "056916e2ee9685bc2fc76ba81866e9b2046585e4bb5bc65dd6b22890299cd666",
+      "size_bytes": 220
+    },
+    {
+      "path": "ops/systemd/memory-v1-v5-2-local-packet-router.service",
+      "sha256": "dc176490a15ee93f032f564f7e8f077fcfc1a72b4b6f9368024591e285f24b38",
+      "size_bytes": 1371
+    },
+    {
+      "path": "ops/systemd/memory-v1-v5-2-local-packet-router.timer",
+      "sha256": "aed751a6f305eb624b14dff6b6688e27c2b596e8165d052f8dd5835a34db6b94",
+      "size_bytes": 239
+    },
+    {
+      "path": "ops/systemd/memory-v1-v5-2-reviewed-observation-stage.service",
+      "sha256": "2da2e41ef58c52ca0e8271395aae0e947d03a1b7eae649c91d0a9ff3d54f4069",
+      "size_bytes": 1431
+    },
+    {
+      "path": "ops/systemd/memory-v1-v5-2-reviewed-observation-stage.timer",
+      "sha256": "5514b7b71d8976ea0f8053721c701f3926638dc038ffdc4260e1b26a07ee9027",
+      "size_bytes": 250
+    },
+    {
+      "path": "ops/systemd/memory-v1-v5-bounded-extraction.service",
+      "sha256": "932bb5c0888043773018ad92e023f1159f3d723d87d0362d2703c7b986b4be59",
+      "size_bytes": 1569
+    },
+    {
+      "path": "ops/systemd/memory-v1-v5-bounded-extraction.timer",
+      "sha256": "4fd416d9eb18ff065b444be87beb5cfd92a2d3a624b8ae5822bcb2766d2c4289",
+      "size_bytes": 244
+    },
+    {
+      "path": "ops/systemd/memory-v1-v5-chat-capture.service",
+      "sha256": "65ca4a019e40e17f151a5b92138b2993c3f3ce7012b39e21f93eaa134b6e1831",
+      "size_bytes": 1164
+    },
+    {
+      "path": "ops/systemd/memory-v1-v5-chat-capture.timer",
+      "sha256": "78b4e34f8556a16f33fd9838801310e6b361398a220899e3abefc0e70f7052de",
+      "size_bytes": 250
+    },
+    {
+      "path": "ops/systemd/memory-v1-v5-local-auto-resolution.service",
+      "sha256": "b495647096e970ad08cbe2f0baaf4d3c8000a911d568f1a3121333803bd035d1",
+      "size_bytes": 1367
+    },
+    {
+      "path": "ops/systemd/memory-v1-v5-local-auto-resolution.timer",
+      "sha256": "1da0fb1dd262259557acc8565c6c78aacd14233cfafaf664a7ee1bf227b7e633",
+      "size_bytes": 249
+    },
+    {
+      "path": "ops/systemd/memory-v1-v5-local-auto-stage.service",
+      "sha256": "08a6d658f8de264447d6e63d573f2525a9ff9e295c320ec2de922f93ee741fda",
+      "size_bytes": 1347
+    },
+    {
+      "path": "ops/systemd/memory-v1-v5-local-auto-stage.timer",
+      "sha256": "66d8605f7f0c2f91eeec444339f7db216256dff876e603a00b87a164fb16df9e",
+      "size_bytes": 248
+    },
+    {
+      "path": "ops/systemd/memory-v1-v5-local-claim-projection.service",
+      "sha256": "5603ba6d197929cc4d7c0045f3d4b47dfb551b449c4bf0825c91605109f8e32b",
+      "size_bytes": 1331
+    },
+    {
+      "path": "ops/systemd/memory-v1-v5-local-claim-projection.timer",
+      "sha256": "0dc455c37929fc06918710a679c6856f87fcef73bd9d8679a31ab45be3d0ef4e",
+      "size_bytes": 238
+    },
+    {
+      "path": "ops/systemd/memory-v1-v5-local-entailment.service",
+      "sha256": "01cc9b84e22e2ed3f8b817895dc3e6bd34589453fda6a90711cdeaa5fa3ee725",
+      "size_bytes": 1637
+    },
+    {
+      "path": "ops/systemd/memory-v1-v5-local-entailment.timer",
+      "sha256": "af24812bb349f57625d7bb4982d78107bdd198e8112d2990d880b11bf1ffbc38",
+      "size_bytes": 248
+    },
+    {
+      "path": "ops/systemd/memory-v1-v5-local-entity-validation.service",
+      "sha256": "4d32967af4a6b569d2fc054ebd2f21e2d5b973d5bb45ae57d6639d7a77998fc9",
+      "size_bytes": 1588
+    },
+    {
+      "path": "ops/systemd/memory-v1-v5-local-entity-validation.timer",
+      "sha256": "35ac30f0dc05b39f03a75f863e14032e5dd59f0252882d78a97cfb6a43226a25",
+      "size_bytes": 240
+    },
+    {
+      "path": "ops/systemd/memory-v1-v5-local-inference-health.service",
+      "sha256": "6af5f37ce14e8e9bae1b60a3be9489f871cec018abf516d4562e084d7bcb70ce",
+      "size_bytes": 1177
+    },
+    {
+      "path": "ops/systemd/memory-v1-v5-local-inference-health.timer",
+      "sha256": "e4e6ff368d2c7d410fefa857863a78867795d78a506565c268e17669f094b25b",
+      "size_bytes": 242
+    },
+    {
+      "path": "ops/systemd/memory-v1-v5-local-inference-scheduler.service",
+      "sha256": "b75108f5b4e355b6e981348c4ab570d75cd2d3751ec015b618cb1e08288bce7c",
+      "size_bytes": 1727
+    },
+    {
+      "path": "ops/systemd/memory-v1-v5-local-inference-scheduler.timer",
+      "sha256": "49c00faacf1f890bf9abc04fac50e56eb9a7a64c05ff620ddcad837d433c6e0d",
+      "size_bytes": 256
+    },
+    {
+      "path": "ops/systemd/memory-v1-v5-local-inference-tunnel.service",
+      "sha256": "0250ca7c3dfc1a464de349b10f71aa239066a03681e0ee4e5bbc869d9c491f43",
+      "size_bytes": 1341
+    },
+    {
+      "path": "ops/systemd/memory-v1-v5-local-legacy-reintake-audit.service",
+      "sha256": "d23af67d6800ac299ad6c8a98ea05789fddef3232bb997706440775d41982532",
+      "size_bytes": 1609
+    },
+    {
+      "path": "ops/systemd/memory-v1-v5-local-legacy-reintake-audit.timer",
+      "sha256": "8e9f102d4af20e8a17185cfe27e5b70c2ff38edc9597e955b4505eaaf145258d",
+      "size_bytes": 250
+    },
+    {
+      "path": "ops/systemd/memory-v1-v5-local-legacy-reintake.service",
+      "sha256": "c680878728d163051fc10c82ada59c6fc5117b5d814f4ad9a24f431d77cc1f29",
+      "size_bytes": 1768
+    },
+    {
+      "path": "ops/systemd/memory-v1-v5-local-legacy-reintake.timer",
+      "sha256": "f35f3397e1938f1f083c36a05758b6b2924d8800659910daf94b6322d74e7e69",
+      "size_bytes": 374
+    },
+    {
+      "path": "ops/systemd/memory-v1-v5-local-packet-router.service",
+      "sha256": "df4d4097e9304808d0b47993294a3fd1f64de1839730bd09e023419b31ccc50e",
+      "size_bytes": 1410
+    },
+    {
+      "path": "ops/systemd/memory-v1-v5-local-packet-router.timer",
+      "sha256": "d63af9811bf5aa3d74b5d1894dd076da7f7873f25e1d486f3ef1b424c6ec9baf",
+      "size_bytes": 237
+    },
+    {
+      "path": "ops/systemd/vs-memory-gpu-inference.service",
+      "sha256": "2871fc2a7d676cecbb84822de1759601ea2f722f504a0d60e751adf02025d0a6",
+      "size_bytes": 2149
+    },
+    {
+      "path": "scripts/durable_card_catalog_audit.py",
+      "sha256": "21976cceff0c30155cf9cf4cedd1a0aef0bae04dec4245aab459181c424a1df7",
+      "size_bytes": 10530
+    },
+    {
+      "path": "scripts/durable_card_signal_audit.py",
+      "sha256": "5c76b8fdbea79cb4d4d1b9c324ea05f417d2ce5a3d51c08bc8c7beb988d59bb2",
+      "size_bytes": 7031
+    },
+    {
+      "path": "scripts/legacy_rag_route_retirement_test.py",
+      "sha256": "1e37e6c83265decfe5425cf96502f26ea4cb21ffbba04af027fa7ae10c256c64",
+      "size_bytes": 3640
+    },
+    {
+      "path": "scripts/legacy_route_retirement_test.py",
+      "sha256": "7584b391d59dbecc59545723a9c1986b708f1de1bb9989de18c3471f73895bfa",
+      "size_bytes": 2252
+    },
+    {
+      "path": "scripts/memory_route_audit.py",
+      "sha256": "3b11ff64715729b7ada5b4dee2ed1bef091ee7d9f50224239b828077cff400ef",
+      "size_bytes": 54345
+    },
+    {
+      "path": "scripts/review_promotion_plan.py",
+      "sha256": "2b696082f1d28c98083be136d7d66684fc73881bb49549cb0f9d8d05770b718b",
+      "size_bytes": 20856
+    },
+    {
+      "path": "specs/final_answer_memory_binding_v1.schema.json",
+      "sha256": "b3a769cf8fe6152ad506ab9f791aefe12f51a2e09546a2726e9a08171dd64a1e",
+      "size_bytes": 8355
+    },
+    {
+      "path": "specs/memory_prompt_assembly_input_v1.schema.json",
+      "sha256": "360d90120ae7cca98c6bc0df8d4a8ac4ac87296e2fd2e1355550682a7203c5a3",
+      "size_bytes": 49609
+    },
+    {
+      "path": "specs/memory_selection_envelope_v1.schema.json",
+      "sha256": "0a7ae57c2c288ea8f3eaff68a3a019aa97d3255f667def3152f48c176a06d649",
+      "size_bytes": 45659
+    },
+    {
+      "path": "specs/memory_selection_request_v1.schema.json",
+      "sha256": "54c1809a748776ed5255c1b6f031699e84740f5617ef314db295b6877d526f16",
+      "size_bytes": 8156
+    },
+    {
+      "path": "tests/test_thread_deletion_migration_v1.py",
+      "sha256": "fe6acf1e3f206cdb9067e255eb5500cf60ee9a646fc3f6e146931f04c0577e85",
+      "size_bytes": 1202
+    },
+    {
+      "path": "tools/audit_canary.sh",
+      "sha256": "f1b64184f7e6f886c2d1e6e4a73b23bd79f3edea52b77eeabb9aee09cf24cffe",
+      "size_bytes": 4904
+    },
+    {
+      "path": "tools/ci_bootstrap.sql",
+      "sha256": "b1e40a7f5bf98d76dd2417ee01942f49f40fdce29435c2be007595e1a99de43b",
+      "size_bytes": 1216
+    },
+    {
+      "path": "tools/cleanup_alias_cards.py",
+      "sha256": "7fd1f7d5e283b3f295db16c40963661328b162901a39282f9afe8ea9cd205965",
+      "size_bytes": 1768
+    },
+    {
+      "path": "tools/telemetry_governance_v1_production_clone.sh",
+      "sha256": "08094d7af60e7ac6c87ffdba94fb06a84191660ef8b3d29bbc12e1fc662e955d",
+      "size_bytes": 4682
+    },
+    {
+      "path": "tools/voice_thread_deletion_v1_production_clone.sh",
+      "sha256": "e780d5cc3cb3299cde7c75e1329fa1c71500dfde84cd968240adb477879f2456",
+      "size_bytes": 17091
+    }
+  ],
+  "entries_sha256": "f0b8b21fa105330961d50af0a04a9863c8abf52f7966c5c748d12f5d8184cd3f",
+  "recovery": {
+    "authority": "git_history",
+    "command_template": "git archive SOURCE_COMMIT -- PATHS_FROM_THIS_MANIFEST",
+    "production_unchanged": true
+  },
+  "retirement_family": "original_memory_v1_residual_assets",
+  "schema_version": "seebx_legacy_memory_retirement_manifest_v1",
+  "source_commit": "d5b788ac5b1f913316f2abfa11c5f759d49bfe96",
+  "source_tree": "2e737178446c592be22c4a2315b1bb5e833f6813",
+  "target_bytes": 618378,
+  "target_count": 98
+}
