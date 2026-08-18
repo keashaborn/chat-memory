@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from rag_engine.trusted_web_admission_v1 import (
+from seebx.capabilities.search.admission import (
     admit_trusted_web_sources_v1,
 )
 from rag_engine.trusted_web_provider_v1 import (

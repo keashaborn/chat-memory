@@ -10,7 +10,7 @@ from uuid import UUID
 import asyncpg
 from fastapi import Response
 
-from rag_engine.trusted_web_audit_v1 import (
+from seebx.capabilities.search.audit import (
     acquire_trusted_web_rate_limit_v1,
     finish_trusted_web_audit_v1,
     query_sha256,

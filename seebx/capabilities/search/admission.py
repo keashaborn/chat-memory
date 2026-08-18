@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from rag_engine.citation_evidence_v1 import (
+from seebx.capabilities.search.citation import (
     CITATION_EVIDENCE_CONTRACT,
     assess_citation_evidence_v1,
     citation_source_rank_v1,

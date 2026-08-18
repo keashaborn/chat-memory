@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import unittest
 import json
+from pathlib import Path
 from uuid import UUID, uuid4
 
-from rag_engine.trusted_web_audit_v1 import (
+from seebx.capabilities.search.audit import (
     acquire_trusted_web_rate_limit_v1,
     finish_trusted_web_audit_v1,
     query_sha256,
@@ -32,6 +33,16 @@ class FakeConnection:
 
 
 class TrustedWebAuditV1Tests(unittest.IsolatedAsyncioTestCase):
+    def test_legacy_evidence_and_audit_modules_are_retired(self) -> None:
+        repository = Path(__file__).resolve().parents[1]
+        for relative_path in (
+            "rag_engine/citation_evidence_v1.py",
+            "rag_engine/trusted_web_admission_v1.py",
+            "rag_engine/trusted_web_audit_v1.py",
+        ):
+            with self.subTest(relative_path=relative_path):
+                self.assertFalse((repository / relative_path).exists())
+
     async def test_rate_limit_is_atomic_and_user_scoped(self) -> None:
         conn = FakeConnection(count=6)
         admitted = await acquire_trusted_web_rate_limit_v1(

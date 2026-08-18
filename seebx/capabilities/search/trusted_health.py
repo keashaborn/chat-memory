@@ -22,8 +22,8 @@ except ImportError:
             allow_reuse=True,
         )
 
-from rag_engine.citation_evidence_v1 import CITATION_EVIDENCE_CONTRACT
-from rag_engine.trusted_web_admission_v1 import (
+from seebx.capabilities.search.citation import CITATION_EVIDENCE_CONTRACT
+from seebx.capabilities.search.admission import (
     TRUSTED_HEALTH_MAX_ADMITTED_SOURCES,
     WEB_EVIDENCE_ADMISSION_CONTRACT,
     admit_trusted_web_sources_v1,
