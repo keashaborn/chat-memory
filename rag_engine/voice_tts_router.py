@@ -19,7 +19,7 @@ from seebx.contracts.voice_language import (
     VOICE_LANGUAGE_CONTRACT_VERSION,
     VOICE_LANGUAGES,
 )
-from rag_engine.voice_session_router import require_active_voice_session
+from seebx.core.voice_identity import require_active_voice_session
 
 router = APIRouter()
 

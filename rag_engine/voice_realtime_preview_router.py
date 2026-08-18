@@ -19,7 +19,7 @@ from rag_engine.voice_realtime_sideband_controller import (
     RealtimePreviewSidebandController,
     RealtimePreviewSidebandNotReady,
 )
-from rag_engine.voice_session_router import require_active_voice_session
+from seebx.core.voice_identity import require_active_voice_session
 from seebx.contracts.voice_language import (
     AUTO_VOICE_LANGUAGE,
     voice_language_from_request,

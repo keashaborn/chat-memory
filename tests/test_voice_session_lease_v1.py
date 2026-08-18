@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi import Request
 from fastapi.testclient import TestClient
 
-from rag_engine import voice_session_router as lease
+from seebx.capabilities.voice import session as lease
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,8 +27,14 @@ class FakeTransaction:
 
 
 class FakeConnection:
-    def __init__(self, *, heartbeat_active: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        heartbeat_active: bool = True,
+        session_active: bool = True,
+    ) -> None:
         self.heartbeat_active = heartbeat_active
+        self.session_active = session_active
         self.closed = False
         self.calls: list[tuple[str, tuple[object, ...]]] = []
 
@@ -49,6 +55,10 @@ class FakeConnection:
             "session_id": UUID(SESSION),
             "expires_at": datetime(2026, 7, 24, 14, 0, tzinfo=timezone.utc),
         }
+
+    async def fetchval(self, sql: str, *args: object) -> bool:
+        self.calls.append((sql, args))
+        return self.session_active
 
     async def close(self) -> None:
         self.closed = True
@@ -90,8 +100,8 @@ class VoiceSessionLeaseTests(unittest.TestCase):
             return connection
 
         with (
-            patch.object(lease, "DSN", "postgresql://test"),
-            patch.object(lease.asyncpg, "connect", connect),
+            patch.object(lease.store, "POSTGRES_DSN", "postgresql://test"),
+            patch.object(lease.store.asyncpg, "connect", connect),
         ):
             response = self.client.post(
                 "/voice/session/acquire",
@@ -116,6 +126,31 @@ class VoiceSessionLeaseTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 403)
 
+    def test_active_session_is_owner_bound_and_store_backed(self) -> None:
+        connection = FakeConnection()
+
+        async def connect(*args: object, **kwargs: object) -> FakeConnection:
+            return connection
+
+        with (
+            patch.object(lease.store, "POSTGRES_DSN", "postgresql://test"),
+            patch.object(lease.store.asyncpg, "connect", connect),
+        ):
+            response = self.client.get(
+                "/validate",
+                headers={
+                    "x-vs-actor-user-id": ACTOR,
+                    "x-vs-voice-session-id": SESSION,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["session_id"], SESSION)
+        self.assertTrue(connection.closed)
+        sql = "\n".join(call[0] for call in connection.calls)
+        self.assertIn("FROM public.voice_session_lease", sql)
+        self.assertIn("set_config('app.user_id'", sql)
+
     def test_superseded_heartbeat_returns_conflict(self) -> None:
         connection = FakeConnection(heartbeat_active=False)
 
@@ -123,8 +158,8 @@ class VoiceSessionLeaseTests(unittest.TestCase):
             return connection
 
         with (
-            patch.object(lease, "DSN", "postgresql://test"),
-            patch.object(lease.asyncpg, "connect", connect),
+            patch.object(lease.store, "POSTGRES_DSN", "postgresql://test"),
+            patch.object(lease.store.asyncpg, "connect", connect),
         ):
             response = self.client.post(
                 "/voice/session/heartbeat",
@@ -148,6 +183,29 @@ class VoiceSessionLeaseTests(unittest.TestCase):
             response.json()["detail"]["error"],
             "voice_session_required",
         )
+
+    def test_release_is_owner_scoped_and_no_store(self) -> None:
+        connection = FakeConnection()
+
+        async def connect(*args: object, **kwargs: object) -> FakeConnection:
+            return connection
+
+        with (
+            patch.object(lease.store, "POSTGRES_DSN", "postgresql://test"),
+            patch.object(lease.store.asyncpg, "connect", connect),
+        ):
+            response = self.client.post(
+                "/voice/session/release",
+                headers=self.headers(),
+                json={"session_id": SESSION},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["released"])
+        self.assertEqual(response.headers["cache-control"].split(",")[0], "private")
+        self.assertTrue(connection.closed)
+        sql = "\n".join(call[0] for call in connection.calls)
+        self.assertIn("DELETE FROM public.voice_session_lease", sql)
 
     def test_migration_forces_owner_rls_and_has_rollback(self) -> None:
         migration = (

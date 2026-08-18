@@ -166,10 +166,8 @@ from rag_engine.voice_transcription_router import router as voice_transcription_
 from rag_engine.voice_realtime_preview_router import (
     router as voice_realtime_preview_router,
 )
-from rag_engine.voice_session_router import (
-    require_active_voice_session,
-    router as voice_session_router,
-)
+from seebx.capabilities.voice.session import router as voice_session_router
+from seebx.core.voice_identity import require_active_voice_session
 from rag_engine.voice_observability_v1 import voice_turn_id_from_request
 from seebx.core.ownership import require_actor_matches_owner
 from seebx.core.identity import require_actor

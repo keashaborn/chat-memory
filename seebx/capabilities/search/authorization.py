@@ -6,7 +6,7 @@ from fastapi import HTTPException, Request
 
 from seebx.core.ownership import require_actor_matches_owner
 from seebx.core.identity import require_verified_supabase_actor
-from rag_engine.voice_session_router import require_active_voice_session
+from seebx.core.voice_identity import require_active_voice_session
 
 
 VOICE_SEARCH_AUTHORIZATION_HEADER = "x-vs-web-search-authorization"
