@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-"""Inactive downstream composition root for LifeSwitch structured context.
+"""LifeSwitch context augmentation for canonical conversation responses.
 
-The existing response-policy root remains authoritative for authentication,
-safety, response mode, Memory, FM, and prior web provenance. This root starts
-with that exact trusted plan and adds only the separately governed LifeSwitch
-selection, provider projection, and versioned finalization path.
+The generic conversation composer remains authoritative for identity, safety,
+memory, search, attachments, and the trusted base plan. This module adds only
+owner-scoped LifeSwitch context and LifeSwitch-specific answer generation.
 """
 
 import time
@@ -31,9 +30,9 @@ from rag_engine.openai_chat_request_v4 import (
     OpenAIChatResponseV3,
 )
 from rag_engine.response_conversation_snapshot_v1 import ConversationSnapshotV1
-from rag_engine.response_composition_root_v0_2 import (
+from seebx.capabilities.conversation.composition import (
     AuthenticatedResponseCommandV0_2,
-    InactiveResponseCompositionRootV0_2,
+    ConversationResponseComposer,
 )
 from rag_engine.response_finalization_v3 import (
     FinalizedTrustedResponseV3,
@@ -48,7 +47,7 @@ from rag_engine.response_orchestration_v0_2 import TrustedResponsePlanV0_2
 class LifeSwitchCompositionError(RuntimeError):
     def __init__(self, stage: str) -> None:
         self.stage = stage
-        super().__init__("inactive LifeSwitch response composition failed")
+        super().__init__("LifeSwitch response composition failed")
 
 
 class _StrictFrozenModel(BaseModel):
@@ -173,8 +172,8 @@ def _elapsed_ms(start_ns: int) -> int:
     return max(0, round((time.monotonic_ns() - start_ns) / 1_000_000))
 
 
-class InactiveLifeSwitchResponseCompositionRootV0_4:
-    """Candidate-only seam after trusted response policy orchestration."""
+class LifeSwitchResponseStage:
+    """Add LifeSwitch context and generate the LifeSwitch response."""
 
     def __init__(
         self,
@@ -284,13 +283,13 @@ class InactiveLifeSwitchResponseCompositionRootV0_4:
             raise LifeSwitchCompositionError(stage) from None
 
 
-class IntegratedLifeSwitchResponseCompositionRootV0_4:
-    """Current-route candidate: one base plan, one LifeSwitch pass, one answer."""
+class LifeSwitchConversationComposer:
+    """Compose one conversation response with LifeSwitch domain context."""
 
     def __init__(
         self,
         *,
-        base_root: InactiveResponseCompositionRootV0_2,
+        base_composer: ConversationResponseComposer,
         openai_client: Any,
         context_provider: LifeSwitchContextPreparationProviderV1,
         prior_provenance_provider: PriorLifeSwitchProvenancePreparationProviderV1,
@@ -298,9 +297,9 @@ class IntegratedLifeSwitchResponseCompositionRootV0_4:
         clock: Callable[[], datetime] | None = None,
         answer_id_factory: Callable[[], UUID] | None = None,
     ) -> None:
-        self._base_root = base_root
+        self._base_composer = base_composer
         self._generation_config = generation_config or OpenAIChatGenerationConfigV1()
-        self._downstream = InactiveLifeSwitchResponseCompositionRootV0_4(
+        self._lifeswitch_stage = LifeSwitchResponseStage(
             openai_client=openai_client,
             context_provider=context_provider,
             prior_provenance_provider=prior_provenance_provider,
@@ -315,14 +314,14 @@ class IntegratedLifeSwitchResponseCompositionRootV0_4:
         command: AuthenticatedResponseCommandV0_2,
     ) -> IntegratedTrustedLifeSwitchResponseExecutionV2:
         pipeline_started_ns = time.monotonic_ns()
-        prepared = await self._base_root.prepare_detailed(conn, command)
+        prepared = await self._base_composer.prepare_detailed(conn, command)
         successor_memory_provenance = None
         try:
-            downstream = await self._downstream.execute(
+            downstream = await self._lifeswitch_stage.execute(
                 base_response_plan=prepared.trusted_plan,
                 conversation_snapshot=prepared.conversation_snapshot,
             )
-            if self._base_root.has_successor_memory_lifecycle:
+            if self._base_composer.has_successor_memory_lifecycle:
                 exact_request = OpenAIChatRequestV4.create(
                     source_plan=downstream.trusted_plan,
                     generation_config=self._generation_config,
@@ -335,7 +334,7 @@ class IntegratedLifeSwitchResponseCompositionRootV0_4:
                         "successor_memory_answer_binding"
                     )
                 successor_memory_provenance = (
-                    await self._base_root.persist_successor_memory_answer_binding(
+                    await self._base_composer.persist_successor_memory_answer_binding(
                         answer_id=downstream.finalized.answer_id,
                         prompt_sha256=(
                             downstream.trusted_plan.assembled_prompt.manifest.assembly_sha256
@@ -346,7 +345,7 @@ class IntegratedLifeSwitchResponseCompositionRootV0_4:
                     )
                 )
         except Exception:
-            self._base_root.discard_successor_memory_selection()
+            self._base_composer.discard_successor_memory_selection()
             raise
         base = prepared.stage_timings
         life = downstream.stage_timings
@@ -377,10 +376,10 @@ class IntegratedLifeSwitchResponseCompositionRootV0_4:
 
 
 __all__ = [
-    "IntegratedLifeSwitchResponseCompositionRootV0_4",
+    "LifeSwitchConversationComposer",
     "IntegratedLifeSwitchResponseStageTimingsV2",
     "IntegratedTrustedLifeSwitchResponseExecutionV2",
-    "InactiveLifeSwitchResponseCompositionRootV0_4",
+    "LifeSwitchResponseStage",
     "LifeSwitchCompositionError",
     "LifeSwitchContextPreparationProviderV1",
     "PriorLifeSwitchProvenancePreparationProviderV1",

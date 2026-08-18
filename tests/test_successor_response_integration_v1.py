@@ -22,12 +22,12 @@ from rag_engine.prompt_assembler_v1 import (
     PromptReferenceContextBlockV1,
     PromptReferenceFragmentV1,
 )
-from rag_engine.response_composition_root_v0_2 import (
+from seebx.capabilities.conversation.composition import (
     GovernedMemoryAssemblyV1,
-    InactiveResponseCompositionRootV0_2,
+    ConversationResponseComposer,
 )
-from rag_engine.response_composition_root_v0_4 import (
-    IntegratedLifeSwitchResponseCompositionRootV0_4,
+from seebx.capabilities.conversation.lifeswitch_composition import (
+    LifeSwitchConversationComposer,
 )
 from rag_engine.response_lifeswitch_integration_v2 import (
     TrustedLifeSwitchResponsePlanV2,
@@ -41,8 +41,8 @@ from seebx.capabilities.conversation.memory_contracts import (
     MemoryNotApplicableReason,
 )
 from tests.test_lifeswitch_answer_provenance_receipt_v1 import off_prior
-from tests.test_response_composition_root_v0_4 import CurrentProvider, PriorProvider
-from tests.test_response_composition_root_v0_2 import (
+from tests.test_lifeswitch_conversation_composition import CurrentProvider, PriorProvider
+from tests.test_conversation_composition import (
     ANSWER,
     CORRELATION,
     CombinedOpenAIClient,
@@ -225,12 +225,12 @@ class SuccessorProviderPayloadTests(unittest.IsolatedAsyncioTestCase):
             1,
         )
 
-    async def test_base_root_dispatches_one_answer_and_exact_binding_payload(
+    async def test_base_composer_dispatches_one_answer_and_exact_binding_payload(
         self,
     ) -> None:
         lifecycle = OneRequestSuccessorLifecycle()
         client = CombinedOpenAIClient()
-        root = InactiveResponseCompositionRootV0_2(
+        root = ConversationResponseComposer(
             openai_client=client,
             classifier_model="gpt-5.1",
             memory_provider=lifecycle,
@@ -303,7 +303,7 @@ class SuccessorProviderPayloadTests(unittest.IsolatedAsyncioTestCase):
                 SuccessorMemoryNotApplicableReason.NO_STORE
             )
         )
-        root = InactiveResponseCompositionRootV0_2(
+        root = ConversationResponseComposer(
             openai_client=CombinedOpenAIClient(),
             classifier_model="gpt-5.1",
             memory_provider=lifecycle,
@@ -345,15 +345,15 @@ class SuccessorProviderPayloadTests(unittest.IsolatedAsyncioTestCase):
         )
         lifecycle = OneRequestSuccessorLifecycle()
         client = CombinedOpenAIClient()
-        base_root = InactiveResponseCompositionRootV0_2(
+        base_composer = ConversationResponseComposer(
             openai_client=client,
             classifier_model="gpt-5.1",
             memory_provider=lifecycle,
             successor_memory_lifecycle=lifecycle,
             correlation_id_factory=lambda: CORRELATION,
         )
-        root = IntegratedLifeSwitchResponseCompositionRootV0_4(
-            base_root=base_root,
+        root = LifeSwitchConversationComposer(
+            base_composer=base_composer,
             openai_client=client,
             context_provider=CurrentProvider(selected_context(context_base, query)),
             prior_provenance_provider=PriorProvider(),

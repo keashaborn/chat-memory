@@ -659,8 +659,8 @@ class SelfShadowAdapterTests(unittest.TestCase):
         needle = "lifeswitch_coaching_self_shadow_adapter_v2"
         live_paths = (
             root / "seebx" / "capabilities/conversation/router.py",
-            root / "rag_engine" / "response_composition_root_v0_2.py",
-            root / "rag_engine" / "response_composition_root_v0_4.py",
+            root / "seebx" / "capabilities/conversation/composition.py",
+            root / "seebx" / "capabilities/conversation/lifeswitch_composition.py",
             root / "rag_engine" / "response_lifeswitch_integration_v2.py",
         )
         for path in live_paths:

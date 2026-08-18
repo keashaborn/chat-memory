@@ -282,7 +282,7 @@ class LifeSwitchSelfShadowRunnerV2Tests(unittest.TestCase):
         needle = "lifeswitch_coaching_self_shadow_runner_v2"
         live_paths = (
             root / "seebx" / "capabilities/conversation/router.py",
-            root / "rag_engine" / "response_composition_root_v0_4.py",
+            root / "seebx" / "capabilities/conversation/lifeswitch_composition.py",
             root / "rag_engine" / "lifeswitch_response_context_provider_v1.py",
             root / "rag_engine" / "response_inspection_v4.py",
         )

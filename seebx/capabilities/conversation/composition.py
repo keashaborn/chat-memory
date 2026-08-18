@@ -1,12 +1,6 @@
 from __future__ import annotations
 
-"""Inactive production composition root for RESSE response orchestration.
-
-Nothing imports this module from the live request path.  It demonstrates and
-tests the intended authority flow: authenticated route values, an owner-scoped
-database snapshot, backend safety and mode classifiers, governed-Memory
-successor context, typed prompt assembly, provider execution, and final binding.
-"""
+"""Canonical conversation response planning, execution, and finalization."""
 
 import hashlib
 import re
@@ -311,8 +305,8 @@ async def _await_memory(
         raise ResponseCompositionError("Memory provider result is invalid") from None
 
 
-class InactiveResponseCompositionRootV0_2:
-    """Integration-ready root; intentionally absent from live route imports."""
+class ConversationResponseComposer:
+    """Compose one authenticated conversation response."""
 
     def __init__(
         self,
@@ -431,7 +425,7 @@ class InactiveResponseCompositionRootV0_2:
         except Exception:
             self.discard_successor_memory_selection()
             raise ResponseCompositionError(
-                "inactive response composition failed",
+                "conversation response composition failed",
                 stage=stage,
             ) from None
 
@@ -609,7 +603,7 @@ class InactiveResponseCompositionRootV0_2:
             raise
         except Exception:
             raise ResponseCompositionError(
-                "inactive response composition failed",
+                "conversation response composition failed",
                 stage=stage,
             ) from None
 
@@ -618,7 +612,7 @@ __all__ = [
     "AuthenticatedResponseCommandV0_2",
     "GovernedMemoryAssemblyProviderV1",
     "GovernedMemoryAssemblyV1",
-    "InactiveResponseCompositionRootV0_2",
+    "ConversationResponseComposer",
     "NoGovernedMemoryAssemblyProviderV1",
     "ResponseCompositionError",
     "ResponsePreparationTimingsV1",

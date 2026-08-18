@@ -22,8 +22,8 @@ from rag_engine.openai_chat_request_v4 import (
     OpenAIChatMessageV2 as OpenAIChatMessageV4,
     OpenAIChatRequestV4,
 )
-from rag_engine.response_composition_root_v0_2 import (
-    InactiveResponseCompositionRootV0_2,
+from seebx.capabilities.conversation.composition import (
+    ConversationResponseComposer,
 )
 from rag_engine.response_lifeswitch_integration_v1 import (
     TrustedLifeSwitchResponsePlanV1,
@@ -32,7 +32,7 @@ from rag_engine.response_lifeswitch_integration_v2 import (
     TrustedLifeSwitchResponsePlanV2,
 )
 from tests.test_lifeswitch_answer_provenance_receipt_v1 import off_prior
-from tests.test_response_composition_root_v0_2 import (
+from tests.test_conversation_composition import (
     CombinedOpenAIClient,
     SnapshotConn,
     command,
@@ -66,7 +66,7 @@ def attachment_context():
 class ChatAttachmentProviderProjectionV1Tests(unittest.IsolatedAsyncioTestCase):
     async def test_all_response_adapters_preserve_attachment_authority(self) -> None:
         client = CombinedOpenAIClient()
-        root = InactiveResponseCompositionRootV0_2(
+        root = ConversationResponseComposer(
             openai_client=client,
             classifier_model="gpt-5.1",
         )

@@ -31,7 +31,7 @@ from rag_engine.governed_memory.runtime.openai_adapters import (
     OpenAIOutcomeUnknownFailure,
     OpenAITerminalFailure,
 )
-from rag_engine.response_composition_root_v0_2 import GovernedMemoryAssemblyV1
+from seebx.capabilities.conversation.composition import GovernedMemoryAssemblyV1
 from rag_engine.response_conversation_snapshot_v1 import (
     create_current_only_conversation_snapshot_v1,
 )

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import unittest
 
-from rag_engine.response_composition_root_v0_2 import (
-    InactiveResponseCompositionRootV0_2,
+from seebx.capabilities.conversation.composition import (
+    ConversationResponseComposer,
 )
 from rag_engine.response_inspection_v2 import build_response_inspection_v2
-from tests.test_response_composition_root_v0_2 import (
+from tests.test_conversation_composition import (
     ANSWER,
     CORRELATION,
     CombinedOpenAIClient,
@@ -30,7 +30,7 @@ class ResponseInspectionV2Tests(unittest.IsolatedAsyncioTestCase):
                 behavioral_intervention_requested=False,
             )
         )
-        root = InactiveResponseCompositionRootV0_2(
+        root = ConversationResponseComposer(
             openai_client=client,
             classifier_model="gpt-5.1",
             answer_id_factory=lambda: ANSWER,
@@ -72,7 +72,7 @@ class ResponseInspectionV2Tests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("request_sha256", wire)
 
     async def test_direct_request_is_distinguishable_in_safe_trace(self) -> None:
-        root = InactiveResponseCompositionRootV0_2(
+        root = ConversationResponseComposer(
             openai_client=CombinedOpenAIClient(
                 classifier_output(
                     coaching=True,

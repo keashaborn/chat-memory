@@ -48,12 +48,12 @@ from seebx.core.identity import (
 )
 from rag_engine.openai_chat_provider_v1 import OpenAIChatGenerationConfigV1
 from seebx.adapters.openai import get_openai_client
-from rag_engine.response_composition_root_v0_2 import (
+from seebx.capabilities.conversation.composition import (
     AuthenticatedResponseCommandV0_2,
-    InactiveResponseCompositionRootV0_2,
+    ConversationResponseComposer,
 )
-from rag_engine.response_composition_root_v0_4 import (
-    IntegratedLifeSwitchResponseCompositionRootV0_4,
+from seebx.capabilities.conversation.lifeswitch_composition import (
+    LifeSwitchConversationComposer,
 )
 from rag_engine.response_inspection_v4 import build_response_inspection_v4
 from rag_engine.response_inspection_v2 import build_response_inspection_v2
@@ -388,7 +388,7 @@ async def resse_response_query(
                 )
             memory_provider = InactiveMemoryContextProviderV1(exclusion_reason)
             memory_lifecycle = memory_provider
-        base_root = InactiveResponseCompositionRootV0_2(
+        base_composer = ConversationResponseComposer(
             openai_client=openai_client,
             classifier_model=os.getenv("RESSE_CLASSIFIER_MODEL", "gpt-5.1"),
             memory_provider=memory_provider,
@@ -424,20 +424,20 @@ async def resse_response_query(
                 )
             )
             prior_provenance_provider = InactivePriorLifeSwitchProvenanceProviderV1()
-            root_v4 = IntegratedLifeSwitchResponseCompositionRootV0_4(
-                base_root=base_root,
+            lifeswitch_composer = LifeSwitchConversationComposer(
+                base_composer=base_composer,
                 openai_client=openai_client,
                 context_provider=context_provider,
                 prior_provenance_provider=prior_provenance_provider,
                 generation_config=generation_config,
             )
             execution = await asyncio.wait_for(
-                root_v4.execute_detailed(conn, command),
+                lifeswitch_composer.execute_detailed(conn, command),
                 timeout=RESPONSE_QUERY_DEADLINE_SECONDS,
             )
         else:
             execution = await asyncio.wait_for(
-                base_root.execute_detailed(
+                base_composer.execute_detailed(
                     conn,
                     command,
                 ),

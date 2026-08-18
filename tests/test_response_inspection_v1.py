@@ -3,11 +3,11 @@ from __future__ import annotations
 import unittest
 from uuid import UUID
 
-from rag_engine.response_composition_root_v0_2 import (
-    InactiveResponseCompositionRootV0_2,
+from seebx.capabilities.conversation.composition import (
+    ConversationResponseComposer,
 )
 from rag_engine.response_inspection_v1 import build_response_inspection_v1
-from tests.test_response_composition_root_v0_2 import (
+from tests.test_conversation_composition import (
     ANSWER,
     CORRELATION,
     BoundProvenanceConn,
@@ -20,7 +20,7 @@ from tests.test_response_composition_root_v0_2 import (
 
 class ResponseInspectionV1Tests(unittest.IsolatedAsyncioTestCase):
     async def test_prior_web_provenance_is_reported_without_source_content(self) -> None:
-        root = InactiveResponseCompositionRootV0_2(
+        root = ConversationResponseComposer(
             openai_client=CombinedOpenAIClient(),
             classifier_model="gpt-5.1",
             answer_id_factory=lambda: ANSWER,
@@ -52,7 +52,7 @@ class ResponseInspectionV1Tests(unittest.IsolatedAsyncioTestCase):
 
     async def test_trace_describes_exact_execution_without_private_content(self) -> None:
         client = CombinedOpenAIClient(classifier_output(fm_explicit=True))
-        root = InactiveResponseCompositionRootV0_2(
+        root = ConversationResponseComposer(
             openai_client=client,
             classifier_model="gpt-5.1",
             answer_id_factory=lambda: ANSWER,
@@ -97,7 +97,7 @@ class ResponseInspectionV1Tests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn(forbidden, wire)
 
     async def test_stateless_trace_reports_skipped_persistence(self) -> None:
-        root = InactiveResponseCompositionRootV0_2(
+        root = ConversationResponseComposer(
             openai_client=CombinedOpenAIClient(),
             classifier_model="gpt-5.1",
             answer_id_factory=lambda: ANSWER,

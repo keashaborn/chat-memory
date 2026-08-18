@@ -11,7 +11,7 @@ class ResseResponsePriorLifeSwitchProvenanceV1Tests(unittest.TestCase):
             / "seebx"
             / "capabilities/conversation/router.py"
         ).read_text(encoding="utf-8")
-        self.assertIn("IntegratedLifeSwitchResponseCompositionRootV0_4", source)
+        self.assertIn("LifeSwitchConversationComposer", source)
         self.assertIn("InactivePriorLifeSwitchProvenanceProviderV1", source)
         self.assertNotIn("LazyPostgresPriorLifeSwitchRestrictedReadSessionV1", source)
         self.assertIn("persist_finalized_response_v3", source)

@@ -46,8 +46,8 @@ class ZepRuntimeRetirementContractTests(unittest.TestCase):
     def test_live_response_roots_do_not_import_retired_memory_packages(self) -> None:
         for relative in (
             "seebx/capabilities/conversation/router.py",
-            "rag_engine/response_composition_root_v0_2.py",
-            "rag_engine/response_composition_root_v0_4.py",
+            "seebx/capabilities/conversation/composition.py",
+            "seebx/capabilities/conversation/lifeswitch_composition.py",
         ):
             source = (ROOT / relative).read_text()
             self.assertNotIn("rag_engine.governed_memory", source)

@@ -5,8 +5,8 @@ import unittest
 from rag_engine.lifeswitch_prior_answer_provenance_runtime_v1 import (
     PriorLifeSwitchPreparedContextV1,
 )
-from rag_engine.response_composition_root_v0_4 import (
-    InactiveLifeSwitchResponseCompositionRootV0_4,
+from seebx.capabilities.conversation.lifeswitch_composition import (
+    LifeSwitchResponseStage,
 )
 from rag_engine.response_conversation_snapshot_v1 import (
     create_current_only_conversation_snapshot_v1,
@@ -30,7 +30,7 @@ class PriorProvider:
         )
 
 
-class ResponseCompositionRootV04Tests(unittest.IsolatedAsyncioTestCase):
+class LifeSwitchConversationCompositionTests(unittest.IsolatedAsyncioTestCase):
     async def test_text_and_voice_share_the_same_downstream_root(self) -> None:
         message = "What were my macros Monday?"
         prepared_plan = await new_plan(message)
@@ -41,7 +41,7 @@ class ResponseCompositionRootV04Tests(unittest.IsolatedAsyncioTestCase):
             current_request_id=base.policy_input.request_id,
             current_message=message,
         )
-        root = InactiveLifeSwitchResponseCompositionRootV0_4(
+        root = LifeSwitchResponseStage(
             openai_client=FakeClient(provider_response(content="Bound answer.")),
             context_provider=CurrentProvider(prepared_plan.lifeswitch_context),
             prior_provenance_provider=PriorProvider(),

@@ -10,10 +10,10 @@ from uuid import UUID
 
 from pydantic import ValidationError
 
-from rag_engine.response_composition_root_v0_2 import (
+from seebx.capabilities.conversation.composition import (
     AuthenticatedResponseCommandV0_2,
     GovernedMemoryAssemblyV1,
-    InactiveResponseCompositionRootV0_2,
+    ConversationResponseComposer,
     ResponseCompositionError,
 )
 from rag_engine.response_conversation_snapshot_v1 import USER_SOURCE
@@ -257,7 +257,7 @@ def command(message: str) -> AuthenticatedResponseCommandV0_2:
     )
 
 
-class ResponseCompositionRootV0_2Tests(unittest.IsolatedAsyncioTestCase):
+class ConversationCompositionTests(unittest.IsolatedAsyncioTestCase):
     def test_authenticated_command_rejects_retired_preferences_field(self) -> None:
         payload = command("Hello").model_dump(mode="json")
         payload["assistant_response_preferences"] = None
@@ -267,7 +267,7 @@ class ResponseCompositionRootV0_2Tests(unittest.IsolatedAsyncioTestCase):
     async def test_source_followup_uses_prior_provenance_without_new_search(self) -> None:
         client = CombinedOpenAIClient()
         conn = BoundProvenanceConn()
-        root = InactiveResponseCompositionRootV0_2(
+        root = ConversationResponseComposer(
             openai_client=client,
             classifier_model="gpt-5.1",
             answer_id_factory=lambda: ANSWER,
@@ -303,7 +303,7 @@ class ResponseCompositionRootV0_2Tests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_failure_reports_only_the_composition_stage(self) -> None:
-        root = InactiveResponseCompositionRootV0_2(
+        root = ConversationResponseComposer(
             openai_client=CombinedOpenAIClient(),
             classifier_model="gpt-5.1",
             memory_provider=FailingMemoryProvider(),
@@ -323,7 +323,7 @@ class ResponseCompositionRootV0_2Tests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(signal_values=signal_values):
                 client = CombinedOpenAIClient(classifier_output(**signal_values))
                 memory_provider = CapturingMemoryProvider()
-                root = InactiveResponseCompositionRootV0_2(
+                root = ConversationResponseComposer(
                     openai_client=client,
                     classifier_model="gpt-5.1",
                     memory_provider=memory_provider,
@@ -343,7 +343,7 @@ class ResponseCompositionRootV0_2Tests(unittest.IsolatedAsyncioTestCase):
     async def test_exact_authority_order_reaches_final_attestation(self) -> None:
         client = CombinedOpenAIClient()
         conn = SnapshotConn()
-        root = InactiveResponseCompositionRootV0_2(
+        root = ConversationResponseComposer(
             openai_client=client,
             classifier_model="gpt-5.1",
             answer_id_factory=lambda: ANSWER,
@@ -369,7 +369,7 @@ class ResponseCompositionRootV0_2Tests(unittest.IsolatedAsyncioTestCase):
 
     async def test_capability_manifest_reaches_provider_system_prompt(self) -> None:
         client = CombinedOpenAIClient()
-        root = InactiveResponseCompositionRootV0_2(
+        root = ConversationResponseComposer(
             openai_client=client,
             classifier_model="gpt-5.1",
             answer_id_factory=lambda: ANSWER,
@@ -394,7 +394,7 @@ class ResponseCompositionRootV0_2Tests(unittest.IsolatedAsyncioTestCase):
 
     async def test_detailed_execution_is_bound_to_public_finalization(self) -> None:
         client = CombinedOpenAIClient()
-        root = InactiveResponseCompositionRootV0_2(
+        root = ConversationResponseComposer(
             openai_client=client,
             classifier_model="gpt-5.1",
             answer_id_factory=lambda: ANSWER,
@@ -441,7 +441,7 @@ class ResponseCompositionRootV0_2Tests(unittest.IsolatedAsyncioTestCase):
 
     async def test_local_domain_danger_skips_classifier_call_and_suppresses_fm(self) -> None:
         client = CombinedOpenAIClient(classifier_output(fm_explicit=True))
-        root = InactiveResponseCompositionRootV0_2(
+        root = ConversationResponseComposer(
             openai_client=client,
             classifier_model="gpt-5.1",
             answer_id_factory=lambda: ANSWER,
@@ -477,6 +477,34 @@ class ResponseCompositionRootV0_2Tests(unittest.IsolatedAsyncioTestCase):
                     "lens_fm": 1.0,
                 }
             )
+
+    def test_canonical_composition_paths_have_no_legacy_wrappers(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        canonical = (
+            root / "seebx/capabilities/conversation/composition.py",
+            root / "seebx/capabilities/conversation/lifeswitch_composition.py",
+        )
+        legacy = (
+            root / "rag_engine/response_composition_root_v0_2.py",
+            root / "rag_engine/response_composition_root_v0_4.py",
+        )
+        for candidate in canonical:
+            self.assertTrue(candidate.is_file(), candidate)
+        for retired in legacy:
+            self.assertFalse(retired.exists(), retired)
+
+        router = (
+            root / "seebx/capabilities/conversation/router.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "from seebx.capabilities.conversation.composition import (",
+            router,
+        )
+        self.assertIn(
+            "from seebx.capabilities.conversation.lifeswitch_composition import (",
+            router,
+        )
+        self.assertNotIn("rag_engine.response_composition_root", router)
 
     def test_phase3_root_is_absent_from_live_shared_request_files(self) -> None:
         root = Path(__file__).resolve().parents[1]
