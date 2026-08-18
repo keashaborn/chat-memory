@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import re
 from urllib.parse import urlsplit
 
-from rag_engine.trusted_web_provider_v1 import (
+from seebx.capabilities.search.provider import (
     TrustedWebProviderSecurityError,
     TrustedWebSourceV1,
 )

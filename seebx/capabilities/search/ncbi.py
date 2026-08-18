@@ -12,7 +12,7 @@ from typing import Iterable
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from rag_engine.trusted_web_policy_v1 import PUBMED_DOMAIN
+from seebx.capabilities.search.policy import PUBMED_DOMAIN
 _EUTILS_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 _RESEARCH_TOPIC_VALUES = frozenset(
     {"supplements", "nutrition_evidence", "training_evidence", "behavior_change"}

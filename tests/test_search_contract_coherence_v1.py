@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from seebx.capabilities.search.plan import create_search_plan_v1
-from rag_engine.trusted_web_policy_v1 import (
+from seebx.capabilities.search.policy import (
     TrustedWebDispositionV1,
     TrustedWebTopicV1,
     route_trusted_web_query,

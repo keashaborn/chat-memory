@@ -18,7 +18,7 @@ from rag_engine.trusted_source_registry_v1 import (
     PUBMED_DOMAIN,
     REUTERS_DOMAIN,
 )
-from rag_engine.trusted_web_policy_v1 import (
+from seebx.capabilities.search.policy import (
     CURRENT_NEWS_ALLOWED_DOMAINS,
     EXERCISE_TRAINING_ALLOWED_DOMAINS,
     GENERAL_CURRENT_NEWS_ALLOWED_DOMAINS,

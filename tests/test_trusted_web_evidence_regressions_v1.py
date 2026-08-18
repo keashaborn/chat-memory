@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from seebx.capabilities.search.plan import create_search_plan_v1
-from rag_engine.trusted_web_ncbi_v1 import (
+from seebx.capabilities.search.ncbi import (
     NCBIClientError,
     NCBIPubMedClientV1,
     NCBIResearchRecordV1,

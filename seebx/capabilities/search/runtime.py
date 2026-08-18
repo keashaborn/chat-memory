@@ -16,7 +16,7 @@ from seebx.capabilities.search.audit import (
     query_sha256,
     start_trusted_web_audit_v1,
 )
-from rag_engine.trusted_web_provider_v1 import TrustedWebSourceV1
+from seebx.capabilities.search.provider import TrustedWebSourceV1
 
 
 NO_STORE_HEADERS = {

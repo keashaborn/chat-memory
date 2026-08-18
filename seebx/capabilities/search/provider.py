@@ -12,16 +12,16 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from rag_engine.trusted_web_policy_v1 import (
+from seebx.capabilities.search.policy import (
     TrustedWebPolicyDecisionV1,
     validate_allowed_source_url,
 )
-from rag_engine.trusted_web_ncbi_v1 import (
+from seebx.capabilities.search.ncbi import (
     NCBIResearchRecordV1,
     classify_publication_types,
     format_ncbi_records_for_model,
 )
-from rag_engine.trusted_web_ods_v1 import (
+from seebx.capabilities.search.ods import (
     ODSGuidanceRecordV1,
     format_ods_guidance_for_model,
 )

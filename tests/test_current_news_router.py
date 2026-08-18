@@ -19,12 +19,12 @@ from seebx.capabilities.search.current_news import (
     current_news_fetch_enabled_from_env,
     current_news_provider_settings_from_env,
 )
-from rag_engine.trusted_web_policy_v1 import (
+from seebx.capabilities.search.policy import (
     TrustedWebDispositionV1,
     TrustedWebTopicV1,
     route_trusted_web_query,
 )
-from rag_engine.trusted_web_provider_v1 import (
+from seebx.capabilities.search.provider import (
     TrustedWebProviderResultV1,
     TrustedWebProviderSecurityError,
     TrustedWebSourceV1,

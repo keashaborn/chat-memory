@@ -18,14 +18,14 @@ from datetime import datetime, timedelta, timezone
 import asyncpg
 import subprocess
 
-from rag_engine.trusted_web_ods_v1 import (
+from seebx.capabilities.search.ods import (
     NIHODSClientV1,
     ODS_EXERCISE_PERFORMANCE_CONSUMER_URL,
     ODSGuidanceRecordV1,
     _compact_creatine_guidance,
     _html_to_text,
 )
-from rag_engine.trusted_web_policy_v1 import ODS_DOMAIN, validate_allowed_source_url
+from seebx.capabilities.search.policy import ODS_DOMAIN, validate_allowed_source_url
 
 
 def _extract_section(text: str, start_heading: str, end_heading: str) -> str:

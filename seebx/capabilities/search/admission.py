@@ -11,7 +11,7 @@ from seebx.capabilities.search.citation import (
     qualify_source_freshness_v1,
     source_rejection_reason_v1,
 )
-from rag_engine.trusted_web_provider_v1 import (
+from seebx.capabilities.search.provider import (
     TrustedWebProviderSecurityError,
     TrustedWebSourceV1,
 )

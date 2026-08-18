@@ -7,7 +7,7 @@ import re
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from rag_engine.trusted_web_policy_v1 import ODS_DOMAIN, validate_allowed_source_url
+from seebx.capabilities.search.policy import ODS_DOMAIN, validate_allowed_source_url
 
 
 ODS_EXERCISE_PERFORMANCE_CONSUMER_URL = (

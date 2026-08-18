@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 import xml.etree.ElementTree as ET
 
-from rag_engine.trusted_web_ncbi_v1 import (
+from seebx.capabilities.search.ncbi import (
     NCBIClientError,
     NCBIPubMedClientV1,
     NCBIResearchRecordV1,
@@ -13,7 +13,7 @@ from rag_engine.trusted_web_ncbi_v1 import (
     format_ncbi_records_for_model,
     trusted_web_topic_uses_ncbi,
 )
-from rag_engine.trusted_web_policy_v1 import TrustedWebTopicV1
+from seebx.capabilities.search.policy import TrustedWebTopicV1
 
 
 class FakeNCBIClient(NCBIPubMedClientV1):

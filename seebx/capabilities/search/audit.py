@@ -6,7 +6,7 @@ import hashlib
 import json
 from uuid import UUID
 
-from rag_engine.trusted_web_provider_v1 import TrustedWebSourceV1
+from seebx.capabilities.search.provider import TrustedWebSourceV1
 
 
 def query_sha256(query: str) -> str:

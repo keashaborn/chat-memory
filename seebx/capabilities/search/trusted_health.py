@@ -28,25 +28,25 @@ from seebx.capabilities.search.admission import (
     WEB_EVIDENCE_ADMISSION_CONTRACT,
     admit_trusted_web_sources_v1,
 )
-from rag_engine.trusted_web_ncbi_v1 import (
+from seebx.capabilities.search.ncbi import (
     NCBIClientError,
     NCBIPubMedClientV1,
     trusted_web_topic_uses_ncbi,
 )
-from rag_engine.trusted_web_ods_v1 import (
+from seebx.capabilities.search.ods import (
     NIHODSClientV1,
     ODSClientError,
     load_cached_ods_creatine_guidance,
     trusted_web_query_uses_ods,
 )
-from rag_engine.trusted_web_policy_v1 import (
+from seebx.capabilities.search.policy import (
     TrustedWebDispositionV1,
     TrustedWebPolicyDecisionV1,
     TrustedWebTopicV1,
     route_trusted_web_query,
 )
 from seebx.capabilities.search.budget import resolve_search_budget_v1
-from rag_engine.trusted_web_provider_v1 import (
+from seebx.capabilities.search.provider import (
     OpenAITrustedWebProviderV1,
     TrustedWebProviderError,
     TrustedWebProviderSecurityError,

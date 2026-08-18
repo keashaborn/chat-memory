@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 import unittest
+from pathlib import Path
 
-from rag_engine.trusted_web_ncbi_v1 import NCBIResearchRecordV1
-from rag_engine.trusted_web_policy_v1 import route_trusted_web_query
-from rag_engine.trusted_web_provider_v1 import (
+from seebx.capabilities.search.ncbi import NCBIResearchRecordV1
+from seebx.capabilities.search.policy import route_trusted_web_query
+from seebx.capabilities.search.provider import (
     OpenAITrustedWebProviderV1,
     TrustedWebProviderError,
     TrustedWebProviderSecurityError,
@@ -106,6 +107,17 @@ class FakeClient:
 
 
 class TrustedWebProviderV1Tests(unittest.TestCase):
+    def test_legacy_provider_policy_and_source_modules_are_retired(self) -> None:
+        repository = Path(__file__).resolve().parents[1]
+        for relative_path in (
+            "rag_engine/trusted_web_policy_v1.py",
+            "rag_engine/trusted_web_provider_v1.py",
+            "rag_engine/trusted_web_ncbi_v1.py",
+            "rag_engine/trusted_web_ods_v1.py",
+        ):
+            with self.subTest(relative_path=relative_path):
+                self.assertFalse((repository / relative_path).exists())
+
     def settings(self) -> TrustedWebSettingsV1:
         return TrustedWebSettingsV1(
             enabled=True,
@@ -114,7 +126,7 @@ class TrustedWebProviderV1Tests(unittest.TestCase):
         )
 
     def test_instructions_forbid_source_access_disclaimers(self) -> None:
-        from rag_engine.trusted_web_provider_v1 import TRUSTED_WEB_INSTRUCTIONS_V1
+        from seebx.capabilities.search.provider import TRUSTED_WEB_INSTRUCTIONS_V1
 
         self.assertIn("Never claim that you lack access", TRUSTED_WEB_INSTRUCTIONS_V1)
         self.assertIn("PubMed", TRUSTED_WEB_INSTRUCTIONS_V1)
