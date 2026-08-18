@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import time
 from uuid import UUID, uuid4
 
@@ -69,18 +68,17 @@ from rag_engine.voice_language_v1 import (
     SUPPORTED_VOICE_LANGUAGE_IDS,
     response_language_instruction,
 )
+from seebx.capabilities.search.runtime import (
+    NO_STORE_HEADERS,
+    SearchRuntimeConfigurationError,
+    apply_search_no_store_headers,
+    safe_search_error_code,
+    search_runtime_settings_from_env,
+)
 
 
 router = APIRouter()
 logger = logging.getLogger("uvicorn.error")
-
-NO_STORE_HEADERS = {
-    "cache-control": "private, no-store, max-age=0, must-revalidate",
-    "pragma": "no-cache",
-    "expires": "0",
-    "x-content-type-options": "nosniff",
-}
-
 
 class TrustedWebRequestV1(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
@@ -170,8 +168,7 @@ class TrustedWebResponseV1(BaseModel):
 
 
 def apply_trusted_web_no_store_headers(response: Response) -> None:
-    for name, value in NO_STORE_HEADERS.items():
-        response.headers[name] = value
+    apply_search_no_store_headers(response)
 
 
 def _decline_answer(policy: TrustedWebPolicyDecisionV1) -> str:
@@ -192,15 +189,6 @@ def _decline_answer(policy: TrustedWebPolicyDecisionV1) -> str:
     )
 
 
-def _safe_error_code(exc: Exception) -> str:
-    text = str(exc or "").strip()
-    if text and len(text) <= 100 and all(
-        char.isalnum() or char in {"_", "-"} for char in text
-    ):
-        return text
-    return type(exc).__name__[:100]
-
-
 @router.post("/query", response_model=TrustedWebResponseV1)
 async def trusted_web_query(
     payload: TrustedWebRequestV1,
@@ -219,13 +207,15 @@ async def trusted_web_query(
     if not settings.enabled:
         raise HTTPException(status_code=503, detail="trusted_web_search_disabled")
 
-    dsn = (os.getenv("POSTGRES_DSN") or "").strip()
-    safety_secret = (os.getenv("VS_SERVICE_TOKEN") or "").strip()
-    if not dsn or len(safety_secret) < 20:
+    try:
+        runtime = search_runtime_settings_from_env()
+    except SearchRuntimeConfigurationError:
         raise HTTPException(
             status_code=503,
             detail="trusted_web_runtime_unconfigured",
-        )
+        ) from None
+    dsn = runtime.postgres_dsn
+    safety_secret = runtime.safety_secret
 
     owner = UUID(await require_web_search_actor_v1(req, str(payload.user_id)))
     request_id = str(getattr(req.state, "request_id", "") or uuid4())[:128]
@@ -448,7 +438,7 @@ async def trusted_web_query(
                 latency_ms=round(
                     (time.monotonic_ns() - started_ns) / 1_000_000
                 ),
-                error_code=_safe_error_code(exc),
+                error_code=safe_search_error_code(exc),
             )
         raise HTTPException(status_code=503, detail="trusted_web_ods_unavailable") from None
     except NCBIClientError as exc:
@@ -460,7 +450,7 @@ async def trusted_web_query(
                 latency_ms=round(
                     (time.monotonic_ns() - started_ns) / 1_000_000
                 ),
-                error_code=_safe_error_code(exc),
+                error_code=safe_search_error_code(exc),
             )
         raise HTTPException(
             status_code=503,
@@ -475,12 +465,12 @@ async def trusted_web_query(
                 latency_ms=round(
                     (time.monotonic_ns() - started_ns) / 1_000_000
                 ),
-                error_code=_safe_error_code(exc),
+                error_code=safe_search_error_code(exc),
             )
         logger.error(
             "[trusted_web] search_id=%s status=blocked reason=%s",
             search_id,
-            _safe_error_code(exc),
+            safe_search_error_code(exc),
         )
         raise HTTPException(
             status_code=502,
@@ -495,7 +485,7 @@ async def trusted_web_query(
                 latency_ms=round(
                     (time.monotonic_ns() - started_ns) / 1_000_000
                 ),
-                error_code=_safe_error_code(exc),
+                error_code=safe_search_error_code(exc),
             )
         raise HTTPException(
             status_code=503,

@@ -55,11 +55,16 @@ from rag_engine.trusted_web_provider_v1 import (
     TrustedWebSourceV1,
     WEB_SOURCE_PROVENANCE_CONTRACT,
 )
-from seebx.capabilities.search.trusted_health import NO_STORE_HEADERS
 from rag_engine.voice_language_v1 import (
     DEFAULT_VOICE_LANGUAGE,
     SUPPORTED_VOICE_LANGUAGE_IDS,
     response_language_instruction,
+)
+from seebx.capabilities.search.runtime import (
+    SearchRuntimeConfigurationError,
+    apply_search_no_store_headers,
+    safe_search_error_code,
+    search_runtime_settings_from_env,
 )
 
 
@@ -277,8 +282,7 @@ class CurrentNewsResponseV1(BaseModel):
 
 
 def apply_current_news_no_store_headers(response: Response) -> None:
-    for name, value in NO_STORE_HEADERS.items():
-        response.headers[name] = value
+    apply_search_no_store_headers(response)
 
 
 def _current_news_skeleton_answer(policy_topic: TrustedWebTopicV1) -> str:
@@ -398,15 +402,6 @@ def _current_news_sources_from_trusted_sources(
     return tuple(result)
 
 
-def _safe_error_code(exc: Exception) -> str:
-    text = str(exc or "").strip()
-    if text and len(text) <= 100 and all(
-        char.isalnum() or char in {"_", "-"} for char in text
-    ):
-        return text
-    return type(exc).__name__[:100]
-
-
 @router.post("/query", response_model=CurrentNewsResponseV1)
 async def current_news_query(
     payload: CurrentNewsRequestV1,
@@ -488,13 +483,15 @@ async def current_news_query(
             detail="current_news_configuration_invalid",
         ) from None
 
-    dsn = (os.getenv("POSTGRES_DSN") or "").strip()
-    safety_secret = (os.getenv("VS_SERVICE_TOKEN") or "").strip()
-    if not dsn or len(safety_secret) < 20:
+    try:
+        runtime = search_runtime_settings_from_env()
+    except SearchRuntimeConfigurationError:
         raise HTTPException(
             status_code=503,
             detail="current_news_runtime_unconfigured",
-        )
+        ) from None
+    dsn = runtime.postgres_dsn
+    safety_secret = runtime.safety_secret
 
     try:
         conn = await asyncpg.connect(dsn, command_timeout=15)
@@ -630,7 +627,7 @@ async def current_news_query(
                 search_id=search_id,
                 status="blocked",
                 latency_ms=round((time.monotonic_ns() - started_ns) / 1_000_000),
-                error_code=_safe_error_code(exc),
+                error_code=safe_search_error_code(exc),
             )
         raise HTTPException(
             status_code=502,
@@ -643,7 +640,7 @@ async def current_news_query(
                 search_id=search_id,
                 status="failed",
                 latency_ms=round((time.monotonic_ns() - started_ns) / 1_000_000),
-                error_code=_safe_error_code(exc),
+                error_code=safe_search_error_code(exc),
             )
         raise HTTPException(
             status_code=503,

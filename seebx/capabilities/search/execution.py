@@ -2,7 +2,6 @@ from __future__ import annotations
 
 """One server-owned search plan and executor for text and Realtime voice."""
 
-import os
 from typing import Any, Literal
 from uuid import UUID, uuid4
 
@@ -27,16 +26,13 @@ from rag_engine.voice_language_v1 import (
     AUTO_VOICE_LANGUAGE,
     SUPPORTED_VOICE_LANGUAGE_IDS,
 )
+from seebx.capabilities.search.runtime import (
+    NO_STORE_HEADERS,
+    search_postgres_dsn_from_env,
+)
 
 
 router = APIRouter()
-DSN = (os.getenv("POSTGRES_DSN") or "").strip()
-NO_STORE_HEADERS = {
-    "cache-control": "private, no-store, max-age=0, must-revalidate",
-    "pragma": "no-cache",
-    "expires": "0",
-    "x-content-type-options": "nosniff",
-}
 
 
 class SearchExecutionRequestV1(BaseModel):
@@ -253,14 +249,14 @@ async def execute_search_plan_v1(
     request_id = str(getattr(req.state, "request_id", "") or uuid4())[:128]
     if not payload.persist_transcript:
         answer_id = uuid4()
-    elif not DSN:
+    elif not (dsn := search_postgres_dsn_from_env()):
         raise HTTPException(
             status_code=503,
             detail="search_transcript_store_unconfigured",
         )
     else:
         try:
-            conn = await asyncpg.connect(DSN, command_timeout=15)
+            conn = await asyncpg.connect(dsn, command_timeout=15)
         except Exception:
             raise HTTPException(
                 status_code=503,
