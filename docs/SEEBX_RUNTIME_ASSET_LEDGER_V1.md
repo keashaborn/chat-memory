@@ -7,8 +7,10 @@ Evidence date: 2026-08-18 UTC
 
 Production source: `49f9e60cf4321c8e42c359845c1a62a8c987614d`
 
-Cleanup candidate: `e7005538` on
-`codex/seebx-cleanup-integration-20260818`; unpushed and undeployed
+Cleanup integration candidate: `ada67aeebaa3a530d939914fbc074210c5310d3c`
+on `codex/seebx-cleanup-integration-20260818`; 96 commits ahead of
+production, clean, unpushed, and undeployed. The bounded voice-canary repair is
+commit `e7005538` within this integration line.
 
 ## Purpose
 
@@ -24,10 +26,16 @@ consumer.
 |---|---|---|---|
 | Ubuntu host | EC2, 4 vCPU, 15.7 GiB RAM, 96 GiB root volume | KEEP | Continue patching and capacity monitoring; Ubuntu is not the cleanup problem |
 | Caddy | Public listeners on 80/443 | KEEP | Preserve authenticated routing; include configuration in deployment evidence |
-| SSH | Listener on 22 | KEEP, HARDEN SEPARATELY | Prefer SSM/private access; do not mix access redesign with code cleanup |
-| `brains.service` | Active; runs `/opt/chat-memory` with Uvicorn on `0.0.0.0:8088` | KEEP + RENAME/CONSOLIDATE | Move to the final SeeBx package/service name only after route parity and rollback proof |
+| SSH | Listener on 22; UFW permits public IPv4/IPv6 ingress, while AWS permits only two explicit public `/32` addresses | KEEP, HARDEN SEPARATELY | Reconcile the two named operator addresses, prefer SSM/private access, then remove public SSH when an independently tested recovery path exists |
+| `brains.service` | Active; runs `/opt/chat-memory` with Uvicorn on `0.0.0.0:8088`; UFW permits 8088 only from `172.31.0.0/16`; AWS permits it only from the LifeSwitch frontend at `172.31.43.160/32` | KEEP + RENAME/CONSOLIDATE | Narrow UFW to the same exact frontend source before final service rename; preserve SSM/control-plane recovery |
 | Local PostgreSQL listeners | 5432 and 55433 on loopback | TRANSITIONAL + KEEP | 5432 is the old platform database; 55433 is the isolated LifeSwitch database |
-| Local Redis listener | 6379 on loopback | RETIRE CANDIDATE | No live service setting or TCP consumer was found; complete key/timer/script trace first |
+| Local Redis listener | 6379 on loopback; no live service setting or TCP consumer; inspection saw only its own client | RETIRE CANDIDATE | Preserve a hashed data artifact, then stop reversibly before container/data removal |
+
+The instance has public IPv4 `13.58.169.54` and security group
+`launch-wizard-10` (`sg-09ca1e52ffde0fd22`). AWS does not expose 8088 to the
+internet. The group still carries stale-looking ingress for 6333, 6379, 5432,
+and 8080 even though those services are absent or loopback-only. Each rule
+requires one final source-owner check, then removal and a logical group rename.
 
 ## Services and timers
 
@@ -74,7 +82,7 @@ batch.
 |---|---|---|---|
 | `lifeswitch-postgres-current` | healthy; digest-pinned PostgreSQL; port 55433; named volume; internal network | canonical LifeSwitch domain data | KEEP |
 | `brains-postgres-1` | running PostgreSQL 16; port 5432; host bind for data | transitional platform/chat/search/telemetry data plus retired schemas | KEEP DURING MIGRATION |
-| `brains-redis-1` | running Redis 7; port 6379; host bind; 203 keys/~1.07 MB | no verified live capability owner | RETIRE CANDIDATE |
+| `brains-redis-1` | running Redis 7; port 6379; host bind; 203 persistent keys/~1.30 MB; key families are 200 `open-webui`, two `mem`, and one `tool_servers`; no TTLs; last durable save 2026-08-16T04:08:10Z | no verified live capability owner; retained data belongs to retired Open WebUI/memory/tool-server surfaces | RETIRE CANDIDATE |
 
 Docker is the current production container engine. Rootless Podman remains the
 selected Work Runner engine. Converting the production host from Docker to
@@ -104,9 +112,24 @@ schemas.
 | `user_settings` | REBUILD OR RETIRE | Current API is unmounted and tables are empty |
 | `memory_ingest_private` | DECOUPLE THEN RETIRE | Remove deletion-function dependency and preserve terminal receipt evidence |
 | `memory` schema and Vantage schemas | ARCHIVE THEN RETIRE | Zero Python, SQL-function, timer, cron, frontend, and recovery dependency |
-| `memory_extraction_v2_20260714_test` | RETIRE CANDIDATE | Snapshot/export requirement, connection check, exact drop manifest |
-| `memory_v1_pet_core_clone_20260724` | RETIRE CANDIDATE | Same gate; clone is not production authority |
-| `lifeswitch_training_family_stage_20260727` | RETIRE CANDIDATE | Confirm migration/evaluation evidence is preserved elsewhere |
+| `memory_extraction_v2_20260714_test` | RETIRE CANDIDATE; 1,380 MB, 12 application schemas, 117 tables, zero connections, zero repository/config references | Snapshot/export requirement and exact drop manifest |
+| `memory_v1_pet_core_clone_20260724` | RETIRE CANDIDATE; 1,405 MB, 14 application schemas, 229 tables, zero connections, zero repository/config references | Same gate; clone is not production authority |
+| `lifeswitch_training_family_stage_20260727` | RETIRE CANDIDATE; 15 MB, three application schemas, 29 tables, zero connections, zero repository/config references | Confirm migration/evaluation evidence is preserved elsewhere, then exact drop manifest |
+
+## Security configuration debt
+
+The root-restricted Docker Compose configuration and an old backup contain
+hard-coded database and retired API credentials. Secret values are deliberately
+excluded from this ledger. File permissions reduce casual exposure but do not
+make tracked/static credentials acceptable, especially because Docker access
+can reveal container environment values.
+
+Disposition: **ROTATE AND EXTERNALIZE** in a separate bounded security batch.
+The batch must inventory every consumer without printing values, install
+mode-restricted environment or managed-secret sources, rotate the active
+PostgreSQL role credential, remove the retired token, verify both databases and
+the application, and retain an encrypted recovery path. It must not combine
+credential rotation with database drops or the 96-commit application deployment.
 
 ## Runtime settings
 
@@ -124,16 +147,25 @@ timers, cron, and frontend callers all show zero dependency.
 
 ## Immediate bounded batches
 
-1. Review and deploy `e7005538`, then run one explicit synthetic voice canary
-   and verify the timer returns healthy.
-2. Retire only the legacy `eval_all_users.sh` crontab line with a crontab
+1. Finish full integration-candidate tests and production-equivalent nonpublic
+   process verification. Review the 96-commit line as one declared structural
+   release; do not deploy the canary repair by extracting an unreviewed subset.
+2. Deploy only after route/OpenAPI/data/identity/Zep/voice/search/domain parity,
+   rollback, and frontend bearer-forwarding evidence; then run one explicit
+   synthetic voice canary and verify the timer returns healthy.
+3. Retire only the legacy `eval_all_users.sh` crontab line with a crontab
    rollback file and post-window verification.
-3. Perform Redis key/type/TTL plus timer/script dependency evidence; if zero,
-   stop Redis in a reversible batch before removing its container or data.
-4. Produce an exact PostgreSQL object/caller/row/ACL ledger for the three clone
+4. Preserve a hashed Redis data/config manifest and stop Redis reversibly; wait
+   through an observation window before removing its container or data.
+5. Produce an exact PostgreSQL object/caller/row/ACL ledger for the three clone
    databases and retired schemas. Database drops remain later, separately
    authorized actions.
-5. Archive historical Memory/Vantage/RESSE documents and code outside the
+6. Rotate/externalize static Docker credentials without combining the change
+   with a database drop or application deployment.
+7. Preserve the exact frontend-only AWS 8088 rule, narrow UFW 8088 from the
+   full VPC to that frontend `/32`, and retire stale 6333/6379/5432/8080 rules
+   after final source-owner verification; logically rename the security group.
+8. Archive historical Memory/Vantage/RESSE documents and code outside the
    active package only after controlling and rollback evidence is indexed.
 
 ## Completion rule
