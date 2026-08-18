@@ -21,7 +21,7 @@ from seebx.adapters.voice_realtime_config import (
 from seebx.capabilities.voice.realtime_session import (
     RealtimePreviewSessionRegistry,
 )
-from rag_engine.voice_realtime_sideband_controller import (
+from seebx.capabilities.voice.realtime_sideband import (
     RealtimePreviewSidebandController,
     RealtimePreviewSidebandNotReady,
 )

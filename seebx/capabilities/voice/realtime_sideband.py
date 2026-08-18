@@ -9,16 +9,14 @@ from contextlib import suppress
 from typing import Any, Callable
 
 import httpx
-from websockets.asyncio.client import connect
 
-from seebx.adapters.openai_chat import safety_identifier_v1
+from seebx.adapters.openai_realtime_sideband import (
+    open_realtime_sideband_connection,
+)
 from seebx.contracts.voice_language import VOICE_LANGUAGE_HEADER
 from seebx.capabilities.voice.realtime_session import RealtimePreviewSession
 
 
-OPENAI_REALTIME_SIDEBAND_URL = (
-    "wss://api.openai.com/v1/realtime?call_id={call_id}"
-)
 BRAINS_INTERNAL_BASE_URL = "http://127.0.0.1:8088"
 MAX_SIDEBAND_MESSAGE_BYTES = 256 * 1024
 MAX_TRANSCRIPT_CHARS = 32_768
@@ -50,7 +48,9 @@ class RealtimePreviewSidebandController:
         api_key: str,
         service_token: str,
         internal_base_url: str = BRAINS_INTERNAL_BASE_URL,
-        connect_factory: Callable[..., Any] = connect,
+        sideband_connection_factory: Callable[..., Any] = (
+            open_realtime_sideband_connection
+        ),
         http_client_factory: Callable[..., Any] = httpx.AsyncClient,
     ) -> None:
         if not api_key.strip():
@@ -61,7 +61,9 @@ class RealtimePreviewSidebandController:
         self._api_key = api_key.strip()
         self._service_token = service_token.strip()
         self._internal_base_url = internal_base_url.rstrip("/")
-        self._connect_factory = connect_factory
+        self._sideband_connection_factory = (
+            sideband_connection_factory
+        )
         self._http_client_factory = http_client_factory
         self._connected = asyncio.Event()
         self._closing = False
@@ -132,25 +134,12 @@ class RealtimePreviewSidebandController:
 
     async def _run(self) -> None:
         worker: asyncio.Task[None] | None = None
-        sideband_url = OPENAI_REALTIME_SIDEBAND_URL.format(
-            call_id=self.session.openai_call_id
-        )
         try:
-            async with self._connect_factory(
-                sideband_url,
-                additional_headers={
-                    "Authorization": f"Bearer {self._api_key}",
-                    "OpenAI-Safety-Identifier": safety_identifier_v1(
-                        self.session.owner_user_id
-                    ),
-                },
-                compression=None,
-                open_timeout=10,
-                close_timeout=5,
-                ping_interval=20,
-                ping_timeout=20,
-                max_size=MAX_SIDEBAND_MESSAGE_BYTES,
-                max_queue=32,
+            async with self._sideband_connection_factory(
+                call_id=self.session.openai_call_id,
+                api_key=self._api_key,
+                owner_user_id=self.session.owner_user_id,
+                max_message_bytes=MAX_SIDEBAND_MESSAGE_BYTES,
             ) as websocket:
                 self._websocket = websocket
                 self._connected.set()

@@ -4,12 +4,16 @@ import asyncio
 import json
 import unittest
 import uuid
+from pathlib import Path
 from typing import Any
 
+from seebx.adapters.openai_realtime_sideband import (
+    open_realtime_sideband_connection,
+)
 from seebx.capabilities.voice.realtime_session import (
     RealtimePreviewSessionRegistry,
 )
-from rag_engine.voice_realtime_sideband_controller import (
+from seebx.capabilities.voice.realtime_sideband import (
     RealtimePreviewSidebandController,
     RealtimePreviewSidebandError,
 )
@@ -388,6 +392,64 @@ class RealtimePreviewSidebandControllerTests(
                     }
                 )
             )
+
+    def test_canonical_capability_has_no_legacy_wrapper(self) -> None:
+        repository = Path(__file__).resolve().parents[1]
+        self.assertTrue(
+            (
+                repository
+                / "seebx/capabilities/voice/realtime_sideband.py"
+            ).is_file()
+        )
+        self.assertFalse(
+            (
+                repository
+                / "rag_engine/voice_realtime_sideband_controller.py"
+            ).exists()
+        )
+
+    def test_openai_adapter_owns_exact_websocket_configuration(self) -> None:
+        calls: list[dict[str, Any]] = []
+        sentinel = object()
+
+        def fake_connect(url: str, **kwargs: Any) -> object:
+            calls.append({"url": url, **kwargs})
+            return sentinel
+
+        result = open_realtime_sideband_connection(
+            call_id="rtc_sideband_test",
+            api_key="server-api-key",
+            owner_user_id=OWNER,
+            max_message_bytes=256 * 1024,
+            connect_factory=fake_connect,
+        )
+
+        self.assertIs(result, sentinel)
+        self.assertEqual(len(calls), 1)
+        call = calls[0]
+        self.assertEqual(
+            call["url"],
+            (
+                "wss://api.openai.com/v1/realtime"
+                "?call_id=rtc_sideband_test"
+            ),
+        )
+        self.assertEqual(
+            call["additional_headers"]["Authorization"],
+            "Bearer server-api-key",
+        )
+        safety_identifier = call["additional_headers"][
+            "OpenAI-Safety-Identifier"
+        ]
+        self.assertTrue(safety_identifier.startswith("vs1_"))
+        self.assertNotIn(OWNER, safety_identifier)
+        self.assertIsNone(call["compression"])
+        self.assertEqual(call["open_timeout"], 10)
+        self.assertEqual(call["close_timeout"], 5)
+        self.assertEqual(call["ping_interval"], 20)
+        self.assertEqual(call["ping_timeout"], 20)
+        self.assertEqual(call["max_size"], 256 * 1024)
+        self.assertEqual(call["max_queue"], 32)
 
 
 if __name__ == "__main__":
