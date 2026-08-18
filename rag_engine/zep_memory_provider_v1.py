@@ -18,7 +18,7 @@ from rag_engine.prompt_assembler_v1 import (
     PromptReferenceFragmentV1,
 )
 from seebx.capabilities.conversation.composition import GovernedMemoryAssemblyV1
-from rag_engine.response_conversation_snapshot_v1 import ConversationSnapshotV1
+from seebx.capabilities.conversation.snapshot import ConversationSnapshotV1
 from rag_engine.response_policy_v0_2 import ResponsePolicySignalsV0_2
 from rag_engine.response_source_awareness_v1 import MemorySourceStatusV1
 

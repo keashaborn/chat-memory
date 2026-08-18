@@ -27,10 +27,12 @@ from rag_engine.prior_web_provenance_v1 import (
     load_prior_web_provenance_v1,
 )
 from rag_engine.prompt_assembler_v1 import PromptReferenceContextBlockV1
-from rag_engine.response_conversation_snapshot_v1 import (
+from seebx.adapters.conversation_snapshot import (
+    load_conversation_snapshot_v1,
+)
+from seebx.capabilities.conversation.snapshot import (
     ConversationSnapshotV1,
     create_current_only_conversation_snapshot_v1,
-    load_response_conversation_snapshot_v1,
 )
 from rag_engine.response_finalization_v1 import (
     FinalizedTrustedResponseV1,
@@ -503,7 +505,7 @@ class ConversationResponseComposer:
                     current_message=command.current_message,
                 )
             else:
-                snapshot = await load_response_conversation_snapshot_v1(
+                snapshot = await load_conversation_snapshot_v1(
                     conn,
                     authenticated_actor_user_id=command.authenticated_actor_user_id,
                     thread_id=command.thread_id,

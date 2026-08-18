@@ -15,9 +15,9 @@ from rag_engine.prior_web_provenance_v1 import (
     load_prior_web_provenance_v1,
     prior_web_provenance_requested_v1,
 )
-from rag_engine.response_conversation_snapshot_v1 import (
+from seebx.capabilities.conversation.snapshot import (
     ConversationSnapshotOutcome,
-    _snapshot,
+    create_conversation_snapshot_v1,
 )
 from rag_engine.response_policy_v0_2 import (
     ConversationRole,
@@ -38,7 +38,7 @@ def text_sha256(value: str) -> str:
 
 
 def snapshot(message: str = QUESTION):
-    return _snapshot(
+    return create_conversation_snapshot_v1(
         actor=ACTOR,
         thread=THREAD,
         request_id="provenance-request-001",

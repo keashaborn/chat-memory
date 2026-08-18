@@ -28,7 +28,7 @@ from rag_engine.memory_v1_intent import classify_memory_intent  # noqa: E402
 from rag_engine.memory_v1_projection import ClaimVectorIndex  # noqa: E402
 from rag_engine.memory_v1_shadow import governed_activation_allowlisted  # noqa: E402
 from rag_engine.qdrant_compat import make_qdrant_client  # noqa: E402
-from rag_engine.response_conversation_snapshot_v1 import (  # noqa: E402
+from seebx.capabilities.conversation.snapshot import (  # noqa: E402
     create_current_only_conversation_snapshot_v1,
 )
 from rag_engine.response_policy_v0_2 import ResponsePolicySignalsV0_2  # noqa: E402

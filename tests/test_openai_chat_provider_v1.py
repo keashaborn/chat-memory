@@ -27,9 +27,9 @@ from rag_engine.prior_web_provenance_v1 import (
     PriorWebResponseV1,
     PriorWebSourceV1,
 )
-from rag_engine.response_conversation_snapshot_v1 import (
+from seebx.capabilities.conversation.snapshot import (
     ConversationSnapshotOutcome,
-    _snapshot,
+    create_conversation_snapshot_v1,
     create_current_only_conversation_snapshot_v1,
 )
 from rag_engine.response_orchestration_v0_2 import (
@@ -81,7 +81,7 @@ def trusted_plan(
     )
     actor = uuid.UUID(ACTOR)
     snapshot = (
-        _snapshot(
+        create_conversation_snapshot_v1(
             actor=actor,
             thread=THREAD,
             request_id="provider-request-001",

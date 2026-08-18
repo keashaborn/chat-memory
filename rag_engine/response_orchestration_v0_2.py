@@ -17,7 +17,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from rag_engine.response_conversation_snapshot_v1 import ConversationSnapshotV1
+from seebx.capabilities.conversation.snapshot import ConversationSnapshotV1
 from rag_engine.rm_selection_envelope_v0_4 import (
     RMSelectionEnvelopeV04,
     RMSelectionRequestV04,

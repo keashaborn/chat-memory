@@ -8,7 +8,7 @@ from rag_engine.lifeswitch_prior_answer_provenance_runtime_v1 import (
 from seebx.capabilities.conversation.lifeswitch_composition import (
     LifeSwitchResponseStage,
 )
-from rag_engine.response_conversation_snapshot_v1 import (
+from seebx.capabilities.conversation.snapshot import (
     create_current_only_conversation_snapshot_v1,
 )
 from tests.test_lifeswitch_answer_provenance_receipt_v1 import ACTOR, ANSWER, NOW, new_plan

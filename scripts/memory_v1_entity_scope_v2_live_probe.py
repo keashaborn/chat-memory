@@ -18,7 +18,7 @@ from rag_engine.governed_memory_provider_v1 import (
     LiveGovernedMemoryAssemblyProviderV1,
 )
 from rag_engine.qdrant_compat import make_qdrant_client
-from rag_engine.response_conversation_snapshot_v1 import (
+from seebx.capabilities.conversation.snapshot import (
     create_current_only_conversation_snapshot_v1,
 )
 from rag_engine.response_policy_v0_2 import ResponsePolicySignalsV0_2

@@ -29,7 +29,7 @@ from rag_engine.openai_chat_request_v4 import (
     OpenAIChatRequestV4,
     OpenAIChatResponseV3,
 )
-from rag_engine.response_conversation_snapshot_v1 import ConversationSnapshotV1
+from seebx.capabilities.conversation.snapshot import ConversationSnapshotV1
 from seebx.capabilities.conversation.composition import (
     AuthenticatedResponseCommandV0_2,
     ConversationResponseComposer,

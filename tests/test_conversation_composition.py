@@ -16,7 +16,7 @@ from seebx.capabilities.conversation.composition import (
     ConversationResponseComposer,
     ResponseCompositionError,
 )
-from rag_engine.response_conversation_snapshot_v1 import USER_SOURCE
+from seebx.capabilities.conversation.snapshot import USER_SOURCE
 from rag_engine.response_policy_v0_2 import ResponsePolicySignalsV0_2
 from seebx.contracts.search import (
     VOICE_SEARCH_AUTHORIZATION_BASIS,

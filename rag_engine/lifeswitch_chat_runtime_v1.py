@@ -23,7 +23,7 @@ from rag_engine.lifeswitch_response_context_provider_v1 import (
     LifeSwitchPreparedContextV1,
     PostgresRestrictedLifeSwitchReadSessionV1,
 )
-from rag_engine.response_conversation_snapshot_v1 import ConversationSnapshotV1
+from seebx.capabilities.conversation.snapshot import ConversationSnapshotV1
 
 
 LifeSwitchRuntimeMode = Literal["off", "canary", "on"]

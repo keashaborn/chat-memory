@@ -15,7 +15,7 @@ from rag_engine.prior_lifeswitch_provenance_v1 import (
     prior_lifeswitch_provenance_requested_v1,
     select_prior_lifeswitch_provenance_v1,
 )
-from rag_engine.response_conversation_snapshot_v1 import ConversationSnapshotV1
+from seebx.capabilities.conversation.snapshot import ConversationSnapshotV1
 
 
 PRIOR_LIFESWITCH_PREPARED_V1 = "prior_lifeswitch_prepared_context_v1"

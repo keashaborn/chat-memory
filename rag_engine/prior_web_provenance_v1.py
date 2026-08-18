@@ -13,7 +13,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from rag_engine.response_conversation_snapshot_v1 import (
+from seebx.capabilities.conversation.snapshot import (
     ConversationSnapshotOutcome,
     ConversationSnapshotV1,
 )

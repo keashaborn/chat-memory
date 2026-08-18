@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import json
 import hashlib
+import json
+from pathlib import Path
 import unittest
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -13,7 +14,10 @@ from rag_engine.chat_integrity import (
     AssistantOutputKind,
     AssistantTranscriptAttestationV1,
 )
-from rag_engine.response_conversation_snapshot_v1 import (
+from seebx.adapters.conversation_snapshot import (
+    load_conversation_snapshot_v1,
+)
+from seebx.capabilities.conversation.snapshot import (
     ASSISTANT_SOURCE,
     ATTESTED_ASSISTANT_SOURCE,
     ConversationSnapshotError,
@@ -22,11 +26,9 @@ from rag_engine.response_conversation_snapshot_v1 import (
     MAX_PRIOR_CONTENT_BYTES,
     USER_SOURCE,
     VOICE_REALTIME_USER_SOURCE,
-    WEB_ASSISTANT_SOURCE,
-    WEB_USER_SOURCE,
-    _snapshot,
-    load_response_conversation_snapshot_v1,
+    create_conversation_snapshot_v1,
 )
+from seebx.contracts.conversation import WEB_ASSISTANT_SOURCE, WEB_USER_SOURCE
 from rag_engine.response_policy_v0_2 import (
     ConversationRole,
     ResponsePolicyConversationMessageV0_2,
@@ -218,7 +220,24 @@ def prior_row(
     return row
 
 
-class ResponseConversationSnapshotV1Tests(unittest.IsolatedAsyncioTestCase):
+class ConversationSnapshotTests(unittest.IsolatedAsyncioTestCase):
+
+
+    def test_contract_and_postgres_adapter_have_distinct_owners(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        capability = root / "seebx/capabilities/conversation/snapshot.py"
+        adapter = root / "seebx/adapters/conversation_snapshot.py"
+        legacy = root / "rag_engine/response_conversation_snapshot_v1.py"
+        self.assertTrue(capability.is_file())
+        self.assertTrue(adapter.is_file())
+        self.assertFalse(legacy.exists())
+        capability_text = capability.read_text()
+        adapter_text = adapter.read_text()
+        self.assertNotIn("SELECT ", capability_text)
+        self.assertNotIn("conn.", capability_text)
+        self.assertNotIn("async def load_response", capability_text)
+        self.assertIn("async def load_conversation_snapshot_v1", adapter_text)
+        self.assertIn('transaction(isolation="repeatable_read", readonly=True)', adapter_text)
     def test_snapshot_contract_accepts_typed_assistant_history(self) -> None:
         messages = (
             ResponsePolicyConversationMessageV0_2(
@@ -230,7 +249,7 @@ class ResponseConversationSnapshotV1Tests(unittest.IsolatedAsyncioTestCase):
                 content="Current message",
             ),
         )
-        snapshot = _snapshot(
+        snapshot = create_conversation_snapshot_v1(
             actor=ACTOR,
             thread=THREAD,
             request_id=REQUEST_ID,
@@ -256,7 +275,7 @@ class ResponseConversationSnapshotV1Tests(unittest.IsolatedAsyncioTestCase):
             ),
         )
         with self.assertRaises(ValidationError):
-            _snapshot(
+            create_conversation_snapshot_v1(
                 actor=ACTOR,
                 thread=THREAD,
                 request_id=REQUEST_ID,
@@ -273,7 +292,7 @@ class ResponseConversationSnapshotV1Tests(unittest.IsolatedAsyncioTestCase):
         conn = FakeConnection(prior_rows=[
             prior_row(number=1, source=USER_SOURCE, text="should not load")
         ])
-        snapshot = await load_response_conversation_snapshot_v1(
+        snapshot = await load_conversation_snapshot_v1(
             conn,
             authenticated_actor_user_id=ACTOR,
             thread_id=THREAD,
@@ -297,7 +316,7 @@ class ResponseConversationSnapshotV1Tests(unittest.IsolatedAsyncioTestCase):
                 prior_row(number=2, source=USER_SOURCE, text="older user"),
             ],
         )
-        snapshot = await load_response_conversation_snapshot_v1(
+        snapshot = await load_conversation_snapshot_v1(
             conn,
             authenticated_actor_user_id=ACTOR,
             thread_id=THREAD,
@@ -343,7 +362,7 @@ class ResponseConversationSnapshotV1Tests(unittest.IsolatedAsyncioTestCase):
                 )
             ],
         )
-        snapshot = await load_response_conversation_snapshot_v1(
+        snapshot = await load_conversation_snapshot_v1(
             conn,
             authenticated_actor_user_id=ACTOR,
             thread_id=THREAD,
@@ -363,7 +382,7 @@ class ResponseConversationSnapshotV1Tests(unittest.IsolatedAsyncioTestCase):
             ConversationSnapshotError,
             "assistant transcript differs from its attestation",
         ):
-            await load_response_conversation_snapshot_v1(
+            await load_conversation_snapshot_v1(
                 FakeConnection(
                     current_rows=[current_row()],
                     prior_rows=[assistant],
@@ -392,7 +411,7 @@ class ResponseConversationSnapshotV1Tests(unittest.IsolatedAsyncioTestCase):
                 ),
             ],
         )
-        snapshot = await load_response_conversation_snapshot_v1(
+        snapshot = await load_conversation_snapshot_v1(
             conn,
             authenticated_actor_user_id=ACTOR,
             thread_id=THREAD,
@@ -424,7 +443,7 @@ class ResponseConversationSnapshotV1Tests(unittest.IsolatedAsyncioTestCase):
                 prior_row(number=2, source=USER_SOURCE, text=older),
             ],
         )
-        snapshot = await load_response_conversation_snapshot_v1(
+        snapshot = await load_conversation_snapshot_v1(
             conn,
             authenticated_actor_user_id=ACTOR,
             thread_id=THREAD,
@@ -446,7 +465,7 @@ class ResponseConversationSnapshotV1Tests(unittest.IsolatedAsyncioTestCase):
                 prior_row(number=3, source=USER_SOURCE, text="older-small"),
             ],
         )
-        snapshot = await load_response_conversation_snapshot_v1(
+        snapshot = await load_conversation_snapshot_v1(
             conn,
             authenticated_actor_user_id=ACTOR,
             thread_id=THREAD,
@@ -466,7 +485,7 @@ class ResponseConversationSnapshotV1Tests(unittest.IsolatedAsyncioTestCase):
         for rows in cases:
             with self.subTest(rows=len(rows)):
                 with self.assertRaises(ConversationSnapshotError):
-                    await load_response_conversation_snapshot_v1(
+                    await load_conversation_snapshot_v1(
                         FakeConnection(current_rows=rows),
                         authenticated_actor_user_id=ACTOR,
                         thread_id=THREAD,
@@ -483,7 +502,7 @@ class ResponseConversationSnapshotV1Tests(unittest.IsolatedAsyncioTestCase):
         for conn in cases:
             with self.subTest(role=conn.role, read_only=conn.read_only):
                 with self.assertRaises(ConversationSnapshotError):
-                    await load_response_conversation_snapshot_v1(
+                    await load_conversation_snapshot_v1(
                         conn,
                         authenticated_actor_user_id=ACTOR,
                         thread_id=THREAD,
@@ -513,7 +532,7 @@ class ResponseConversationSnapshotV1Tests(unittest.IsolatedAsyncioTestCase):
         for rows in cases:
             with self.subTest(source=rows[0]["source"]):
                 with self.assertRaises(ConversationSnapshotError):
-                    await load_response_conversation_snapshot_v1(
+                    await load_conversation_snapshot_v1(
                         FakeConnection(
                             current_rows=[current_row()],
                             prior_rows=rows,
@@ -538,7 +557,7 @@ class ResponseConversationSnapshotV1Tests(unittest.IsolatedAsyncioTestCase):
         for rows in ([cross_owner], [duplicate, duplicate_copy], out_of_order):
             with self.subTest(rows=rows):
                 with self.assertRaises(ConversationSnapshotError):
-                    await load_response_conversation_snapshot_v1(
+                    await load_conversation_snapshot_v1(
                         FakeConnection(
                             current_rows=[current_row()],
                             prior_rows=rows,
@@ -554,7 +573,7 @@ class ResponseConversationSnapshotV1Tests(unittest.IsolatedAsyncioTestCase):
             prior_row(number=number, source=USER_SOURCE, text=f"prior {number}")
             for number in range(1, 25)
         ]
-        snapshot = await load_response_conversation_snapshot_v1(
+        snapshot = await load_conversation_snapshot_v1(
             FakeConnection(current_rows=[current_row()], prior_rows=rows),
             authenticated_actor_user_id=ACTOR,
             thread_id=THREAD,
@@ -574,7 +593,7 @@ class ResponseConversationSnapshotV1Tests(unittest.IsolatedAsyncioTestCase):
             conn = FakeConnection()
             with self.subTest(request_id=request_id):
                 with self.assertRaises(ConversationSnapshotError):
-                    await load_response_conversation_snapshot_v1(
+                    await load_conversation_snapshot_v1(
                         conn,
                         authenticated_actor_user_id=ACTOR,
                         thread_id=THREAD,
@@ -585,7 +604,7 @@ class ResponseConversationSnapshotV1Tests(unittest.IsolatedAsyncioTestCase):
 
     async def test_sanitized_report_contains_no_actor_thread_or_prose(self) -> None:
         sentinel = "PRIVATE-SNAPSHOT-SENTINEL"
-        snapshot = await load_response_conversation_snapshot_v1(
+        snapshot = await load_conversation_snapshot_v1(
             FakeConnection(current_rows=[current_row(sentinel)]),
             authenticated_actor_user_id=ACTOR,
             thread_id=THREAD,
@@ -600,7 +619,7 @@ class ResponseConversationSnapshotV1Tests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("sha256", report)
 
     async def test_snapshot_manifest_rejects_semantic_tampering(self) -> None:
-        snapshot = await load_response_conversation_snapshot_v1(
+        snapshot = await load_conversation_snapshot_v1(
             FakeConnection(current_rows=[current_row()]),
             authenticated_actor_user_id=ACTOR,
             thread_id=THREAD,

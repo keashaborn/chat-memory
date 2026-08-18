@@ -8,7 +8,7 @@ from rag_engine.governed_memory.response_provenance import (
     build_successor_exposed_provenance_v1,
     build_successor_not_applicable_provenance_v1,
 )
-from rag_engine.response_conversation_snapshot_v1 import (
+from seebx.capabilities.conversation.snapshot import (
     create_current_only_conversation_snapshot_v1,
 )
 from rag_engine.response_policy_v0_2 import ResponsePolicySignalsV0_2

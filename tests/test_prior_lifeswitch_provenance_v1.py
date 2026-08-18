@@ -15,11 +15,11 @@ from rag_engine.prior_lifeswitch_provenance_v1 import (
     prior_lifeswitch_provenance_requested_v1,
     select_prior_lifeswitch_provenance_v1,
 )
-from rag_engine.response_conversation_snapshot_v1 import (
+from seebx.capabilities.conversation.snapshot import (
     ATTESTED_ASSISTANT_SOURCE,
     ConversationSnapshotOutcome,
     create_current_only_conversation_snapshot_v1,
-    _snapshot,
+    create_conversation_snapshot_v1,
 )
 from rag_engine.response_finalization_v3 import finalize_trusted_response_v3
 from rag_engine.response_policy_v0_2 import (
@@ -56,7 +56,7 @@ class RowsConn:
 
 
 def bound_snapshot(message: str = QUESTION):
-    return _snapshot(
+    return create_conversation_snapshot_v1(
         actor=ACTOR,
         thread=THREAD,
         request_id="prior-provenance-request",

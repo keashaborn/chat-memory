@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from rag_engine.openai_moderation_adapter_v0_2 import (
     OpenAIModerationAdapterV0_2,
 )
-from rag_engine.response_conversation_snapshot_v1 import (
+from seebx.capabilities.conversation.snapshot import (
     ConversationSnapshotV1,
 )
 from rag_engine.response_orchestration_v0_2 import (

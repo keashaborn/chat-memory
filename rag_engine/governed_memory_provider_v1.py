@@ -53,7 +53,7 @@ from rag_engine.memory_v1_v5_shadow_candidate import discover_v5_shadow_candidat
 from seebx.adapters.openai import embed_text
 from rag_engine.qdrant_compat import make_qdrant_client
 from seebx.capabilities.conversation.composition import GovernedMemoryAssemblyV1
-from rag_engine.response_conversation_snapshot_v1 import ConversationSnapshotV1
+from seebx.capabilities.conversation.snapshot import ConversationSnapshotV1
 from rag_engine.response_policy_v0_2 import ResponsePolicySignalsV0_2
 
 

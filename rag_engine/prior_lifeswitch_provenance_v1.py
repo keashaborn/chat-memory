@@ -19,7 +19,7 @@ from rag_engine.lifeswitch_answer_provenance_receipt_v1 import (
     FinalAnswerLifeSwitchProvenanceReceiptV1,
     LifeSwitchProvenanceSourceRefV1,
 )
-from rag_engine.response_conversation_snapshot_v1 import (
+from seebx.capabilities.conversation.snapshot import (
     ATTESTED_ASSISTANT_SOURCE,
     ConversationSnapshotOutcome,
     ConversationSnapshotV1,

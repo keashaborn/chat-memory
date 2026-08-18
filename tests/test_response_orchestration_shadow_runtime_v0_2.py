@@ -7,7 +7,7 @@ from uuid import UUID
 
 from pydantic import ValidationError
 
-from rag_engine.response_conversation_snapshot_v1 import (
+from seebx.capabilities.conversation.snapshot import (
     create_current_only_conversation_snapshot_v1,
 )
 from rag_engine.response_orchestration_shadow_runtime_v0_2 import (

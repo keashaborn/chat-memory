@@ -25,10 +25,10 @@ from rag_engine.lifeswitch_prior_answer_provenance_runtime_v1 import (
     PostgresPriorLifeSwitchRestrictedReadSessionV1,
     PriorLifeSwitchProvenanceProviderV1,
 )
-from rag_engine.response_conversation_snapshot_v1 import (
+from seebx.capabilities.conversation.snapshot import (
     ATTESTED_ASSISTANT_SOURCE,
     ConversationSnapshotOutcome,
-    _snapshot,
+    create_conversation_snapshot_v1,
 )
 from rag_engine.response_policy_v0_2 import (
     ConversationRole,
@@ -121,7 +121,7 @@ async def end_context(conn: asyncpg.Connection, context_id: UUID) -> None:
 
 
 def snapshot(owner: UUID, thread: UUID):
-    return _snapshot(
+    return create_conversation_snapshot_v1(
         actor=owner,
         thread=thread,
         request_id="prior-provenance-clone-request",
@@ -708,7 +708,7 @@ async def main() -> None:
         forbidden = ForbiddenSession()
         off = await PriorLifeSwitchProvenanceProviderV1(forbidden).prepare(
             authenticated_actor_user_id=OWNER_A,
-            conversation_snapshot=_snapshot(
+            conversation_snapshot=create_conversation_snapshot_v1(
                 actor=OWNER_A,
                 thread=THREAD_A,
                 request_id="off-clone-request",

@@ -30,7 +30,7 @@ from rag_engine.lifeswitch_domain_provider_v1 import LifeSwitchDomainContextProv
 from rag_engine.lifeswitch_postgres_domain_reader_v1 import (
     PostgresLifeSwitchDomainReaderV1,
 )
-from rag_engine.response_conversation_snapshot_v1 import ConversationSnapshotV1
+from seebx.capabilities.conversation.snapshot import ConversationSnapshotV1
 
 
 LIFESWITCH_PREPARED_CONTEXT_VERSION = "lifeswitch_prepared_context_v1"
