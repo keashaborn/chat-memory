@@ -14,7 +14,7 @@ class ResseResponsePriorLifeSwitchProvenanceV1Tests(unittest.TestCase):
         self.assertIn("LifeSwitchConversationComposer", source)
         self.assertIn("InactivePriorLifeSwitchProvenanceProviderV1", source)
         self.assertNotIn("LazyPostgresPriorLifeSwitchRestrictedReadSessionV1", source)
-        self.assertIn("persist_finalized_response_v3", source)
+        self.assertIn("persist_conversation_response", source)
         self.assertIn("build_response_inspection_v4", source)
         self.assertNotIn("client_prior_lifeswitch", source)
 

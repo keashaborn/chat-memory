@@ -18,7 +18,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from rag_engine.chat_integrity import (
+from seebx.contracts.transcript_integrity import (
     ASSISTANT_ATTESTATION_VERSION,
     AssistantOutputKind,
     AssistantTranscriptAttestationV1,

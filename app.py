@@ -173,7 +173,7 @@ from seebx.core.voice_identity import require_active_voice_session
 from rag_engine.voice_observability_v1 import voice_turn_id_from_request
 from seebx.core.ownership import require_actor_matches_owner
 from seebx.core.identity import require_actor
-from rag_engine.active_thread_selection_v1 import (
+from seebx.adapters.thread_selection import (
     ActiveThreadSelectionV1Error,
     clear_active_thread_v1,
     get_active_thread_v1,

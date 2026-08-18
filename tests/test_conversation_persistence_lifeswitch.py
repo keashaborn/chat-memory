@@ -5,9 +5,9 @@ from typing import Any
 
 from seebx.adapters.lifeswitch_openai_chat import OpenAIChatCompletionsAdapterV3
 from seebx.capabilities.conversation.lifeswitch_finalization import finalize_trusted_response_v3
-from rag_engine.response_persistence_v3 import (
-    ResponsePersistenceV3Error,
-    persist_finalized_response_v3,
+from seebx.adapters.conversation_persistence import (
+    ConversationPersistenceError,
+    persist_conversation_response,
 )
 from tests.test_lifeswitch_answer_provenance_receipt_v1 import ACTOR, ANSWER, NOW, new_plan
 from tests.test_openai_chat_provider_v1 import FakeClient, provider_response
@@ -56,7 +56,7 @@ class Conn:
         raise AssertionError(sql)
 
 
-class ResponsePersistenceV3Tests(unittest.IsolatedAsyncioTestCase):
+class ConversationPersistenceLifeSwitchTests(unittest.IsolatedAsyncioTestCase):
     async def test_retired_lifeswitch_records_are_not_persisted(self) -> None:
         plan = await new_plan("What were my macros Monday?")
         response = OpenAIChatCompletionsAdapterV3(
@@ -69,7 +69,7 @@ class ResponsePersistenceV3Tests(unittest.IsolatedAsyncioTestCase):
             created_at=NOW,
         )
         conn = Conn()
-        await persist_finalized_response_v3(
+        await persist_conversation_response(
             conn,
             owner_user_id=ACTOR,
             thread_id=THREAD,
@@ -94,8 +94,8 @@ class ResponsePersistenceV3Tests(unittest.IsolatedAsyncioTestCase):
             created_at=NOW,
         )
         conn = Conn()
-        with self.assertRaises(ResponsePersistenceV3Error) as raised:
-            await persist_finalized_response_v3(
+        with self.assertRaises(ConversationPersistenceError) as raised:
+            await persist_conversation_response(
                 conn,
                 owner_user_id=ACTOR,
                 thread_id=THREAD,

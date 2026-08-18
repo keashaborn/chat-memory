@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
-from seebx.capabilities.conversation.persistence import (
+from seebx.adapters.conversation_persistence import (
     SearchTranscriptPersistenceError,
     persist_search_exchange,
 )

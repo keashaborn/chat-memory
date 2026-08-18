@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-"""Neutral transcript-integrity contract shared by chat and LifeSwitch.
+"""Pure transcript-integrity contract shared by conversation variants.
 
-This module is deliberately outside the governed-Memory namespace.  It owns
-only provenance for backend-authored assistant transcript rows; it is not a
-claim store, retrieval surface, compatibility layer, or Memory authority.
+This contract owns backend-authored assistant transcript provenance. It has no
+database, provider, retrieval, compatibility, or Memory authority.
 """
 
 import hashlib
@@ -168,42 +167,6 @@ class AssistantTranscriptAttestationV1(_StrictFrozenModel):
         return cls(**payload, attestation_sha256=_sha256(payload))
 
 
-async def insert_assistant_transcript_attestation_v1(
-    conn: object,
-    attestation: AssistantTranscriptAttestationV1,
-) -> None:
-    """Insert one owner-bound neutral attestation inside the caller transaction."""
-
-    value = AssistantTranscriptAttestationV1.model_validate_json(
-        attestation.model_dump_json()
-    )
-    await conn.execute(
-        """
-        INSERT INTO chat_integrity.assistant_transcript_attestation_v1(
-          answer_id,owner_user_id,thread_id,chat_log_id,
-          request_id_sha256,conversation_snapshot_sha256,
-          trusted_plan_sha256,provider_request_sha256,
-          provider_response_sha256,provider_response_id,output_kind,
-          assistant_text_sha256,attestation_sha256,created_at
-        )
-        VALUES($1,$2,$3,$1,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-        """,
-        value.answer_id,
-        value.authenticated_actor_user_id,
-        value.thread_id,
-        value.request_id_sha256,
-        value.conversation_snapshot_sha256,
-        value.trusted_plan_sha256,
-        value.provider_request_sha256,
-        value.provider_response_sha256,
-        value.provider_response_id,
-        value.output_kind.value,
-        value.assistant_text_sha256,
-        value.attestation_sha256,
-        value.created_at,
-    )
-
-
 def validate_assistant_transcript_attestation_row_v1(
     row: Mapping[str, object],
     *,
@@ -255,7 +218,6 @@ __all__ = [
     "ATTESTED_ASSISTANT_SOURCE",
     "AssistantOutputKind",
     "AssistantTranscriptAttestationV1",
-    "insert_assistant_transcript_attestation_v1",
     "text_sha256",
     "validate_assistant_transcript_attestation_row_v1",
 ]

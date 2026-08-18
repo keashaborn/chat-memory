@@ -10,7 +10,7 @@ from uuid import UUID
 
 from pydantic import ValidationError
 
-from rag_engine.chat_integrity import (
+from seebx.contracts.transcript_integrity import (
     AssistantOutputKind,
     AssistantTranscriptAttestationV1,
 )

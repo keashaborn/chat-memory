@@ -33,7 +33,7 @@ from seebx.capabilities.conversation.lifeswitch_plan import (
     TrustedLifeSwitchResponsePlanV2,
 )
 from rag_engine.response_source_awareness_v1 import MemorySourceStatusV1
-from rag_engine.response_persistence_v1 import persist_finalized_response_v1
+from seebx.adapters.conversation_persistence import persist_conversation_response
 from rag_engine.successor_memory_chat_adapter_v1 import (
     SuccessorMemoryChatAdapterV1,
 )
@@ -49,7 +49,7 @@ from tests.test_conversation_composition import (
     SnapshotConn,
     command,
 )
-from tests.test_response_persistence_v1 import FakeConnection
+from tests.test_conversation_persistence_generic import FakeConnection
 from tests.test_response_orchestration_v0_2 import (
     ACTOR,
     FixedSafetyProvider,
@@ -275,7 +275,7 @@ class SuccessorProviderPayloadTests(unittest.IsolatedAsyncioTestCase):
         )
 
         persistence = FakeConnection()
-        await persist_finalized_response_v1(
+        await persist_conversation_response(
             persistence,
             owner_user_id=ACTOR,
             thread_id=execution.finalized.attestation.thread_id,

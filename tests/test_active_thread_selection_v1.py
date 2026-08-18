@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from rag_engine.active_thread_selection_v1 import (
+from seebx.adapters.thread_selection import (
     ActiveThreadSelectionV1Error,
     clear_active_thread_v1,
     get_active_thread_v1,

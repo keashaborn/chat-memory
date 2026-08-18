@@ -5,7 +5,7 @@ from uuid import UUID
 
 from seebx.adapters.lifeswitch_openai_chat import OpenAIChatCompletionsAdapterV3
 from seebx.capabilities.conversation.lifeswitch_finalization import finalize_trusted_response_v3
-from seebx.capabilities.conversation.persistence import (
+from seebx.adapters.conversation_persistence import (
     ConversationPersistenceError,
     persist_conversation_response,
 )
@@ -17,11 +17,11 @@ from tests.test_lifeswitch_answer_provenance_receipt_v1 import (
 )
 from tests.test_openai_chat_provider_v1 import FakeClient, provider_response
 from tests.test_response_orchestration_v0_2 import THREAD
-from tests.test_response_persistence_v1 import (
+from tests.test_conversation_persistence_generic import (
     FakeConnection,
     finalized_response,
 )
-from tests.test_response_persistence_v3 import Conn
+from tests.test_conversation_persistence_lifeswitch import Conn
 
 
 OTHER_ACTOR = UUID("80000000-0000-4000-8000-000000000099")

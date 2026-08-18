@@ -28,7 +28,7 @@ from seebx.capabilities.conversation.memory_contracts import (
     MemoryNotApplicableReason,
     MemoryResponseConfigurationError,
 )
-from seebx.capabilities.conversation.persistence import (
+from seebx.adapters.conversation_persistence import (
     persist_conversation_response,
 )
 from seebx.adapters.lifeswitch_context_runtime import (

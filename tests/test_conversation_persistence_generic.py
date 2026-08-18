@@ -6,9 +6,9 @@ from uuid import UUID
 
 from seebx.adapters.openai_chat import OpenAIChatCompletionsAdapterV1
 from seebx.capabilities.conversation.finalization import finalize_trusted_response_v1
-from rag_engine.response_persistence_v1 import (
-    ResponsePersistenceError,
-    persist_finalized_response_v1,
+from seebx.adapters.conversation_persistence import (
+    ConversationPersistenceError,
+    persist_conversation_response,
 )
 from tests.test_openai_chat_provider_v1 import FakeClient, provider_response
 from tests.test_response_orchestration_v0_2 import (
@@ -87,12 +87,12 @@ async def finalized_response():
     )
 
 
-class ResponsePersistenceV1Tests(unittest.IsolatedAsyncioTestCase):
+class ConversationPersistenceGenericTests(unittest.IsolatedAsyncioTestCase):
     async def test_persists_answer_then_attestation_atomically(self) -> None:
         conn = FakeConnection()
         finalized = await finalized_response()
 
-        await persist_finalized_response_v1(
+        await persist_conversation_response(
             conn,
             owner_user_id=ACTOR,
             thread_id=THREAD,
@@ -126,10 +126,10 @@ class ResponsePersistenceV1Tests(unittest.IsolatedAsyncioTestCase):
         finalized = await finalized_response()
 
         with self.assertRaisesRegex(
-            ResponsePersistenceError,
-            "finalized response persistence failed",
+            ConversationPersistenceError,
+            "conversation response persistence failed",
         ) as raised:
-            await persist_finalized_response_v1(
+            await persist_conversation_response(
                 conn,
                 owner_user_id=ACTOR,
                 thread_id=THREAD,
@@ -145,8 +145,8 @@ class ResponsePersistenceV1Tests(unittest.IsolatedAsyncioTestCase):
     async def test_request_mismatch_fails_before_transaction(self) -> None:
         conn = FakeConnection()
         finalized = await finalized_response()
-        with self.assertRaises(ResponsePersistenceError) as raised:
-            await persist_finalized_response_v1(
+        with self.assertRaises(ConversationPersistenceError) as raised:
+            await persist_conversation_response(
                 conn,
                 owner_user_id=ACTOR,
                 thread_id=THREAD,
@@ -161,8 +161,8 @@ class ResponsePersistenceV1Tests(unittest.IsolatedAsyncioTestCase):
         conn = FakeConnection(visible_thread=False)
         finalized = await finalized_response()
 
-        with self.assertRaises(ResponsePersistenceError) as raised:
-            await persist_finalized_response_v1(
+        with self.assertRaises(ConversationPersistenceError) as raised:
+            await persist_conversation_response(
                 conn,
                 owner_user_id=ACTOR,
                 thread_id=THREAD,

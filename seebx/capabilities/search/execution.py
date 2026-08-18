@@ -23,7 +23,7 @@ from seebx.capabilities.search.trusted_health import (
 from seebx.capabilities.search.authorization import (
     require_web_search_actor_v1,
 )
-from seebx.capabilities.conversation.persistence import persist_search_exchange
+from seebx.adapters.conversation_persistence import persist_search_exchange
 from seebx.contracts.voice_language import (
     AUTO_VOICE_LANGUAGE,
     SUPPORTED_VOICE_LANGUAGE_IDS,

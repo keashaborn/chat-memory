@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Owner-scoped PostgreSQL adapter for active thread selection."""
+
 import uuid
 from typing import Any
 

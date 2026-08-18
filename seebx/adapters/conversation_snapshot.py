@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from rag_engine.chat_integrity import (
+from seebx.contracts.transcript_integrity import (
     ATTESTED_ASSISTANT_SOURCE,
     validate_assistant_transcript_attestation_row_v1,
 )
