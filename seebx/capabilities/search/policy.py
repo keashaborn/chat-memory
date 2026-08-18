@@ -9,7 +9,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict
 
-from rag_engine.trusted_source_registry_v1 import (
+from seebx.capabilities.search.registry import (
     ALL_REGISTERED_DOMAINS,
     APNEWS_DOMAIN,
     ARSTECHNICA_DOMAIN,

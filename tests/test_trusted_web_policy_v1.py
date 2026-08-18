@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from rag_engine.trusted_source_registry_v1 import (
+from seebx.capabilities.search.registry import (
     ACSM_DOMAIN,
     APNEWS_DOMAIN,
     ARSTECHNICA_DOMAIN,

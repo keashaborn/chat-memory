@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
-from rag_engine.trusted_source_registry_v1 import (
+from seebx.capabilities.search.registry import (
     ACSM_DOMAIN,
     APNEWS_DOMAIN,
     BACB_DOMAIN,
@@ -24,6 +25,12 @@ from rag_engine.trusted_source_registry_v1 import (
 
 
 class TrustedSourceRegistryV1Tests(unittest.TestCase):
+    def test_legacy_registry_module_is_retired(self) -> None:
+        repository = Path(__file__).resolve().parents[1]
+        self.assertFalse(
+            (repository / "rag_engine/trusted_source_registry_v1.py").exists()
+        )
+
     def test_registry_exposes_bounded_intent_specific_packs(self) -> None:
         news = trusted_source_pack_v1(
             TrustedSourcePackIdV1.GENERAL_CURRENT_NEWS
