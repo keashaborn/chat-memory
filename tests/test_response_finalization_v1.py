@@ -4,7 +4,7 @@ import unittest
 from uuid import UUID
 
 from seebx.adapters.openai_chat import OpenAIChatCompletionsAdapterV1
-from rag_engine.response_finalization_v1 import (
+from seebx.capabilities.conversation.finalization import (
     AssistantOutputKind,
     ResponseFinalizationError,
     finalize_trusted_response_v1,

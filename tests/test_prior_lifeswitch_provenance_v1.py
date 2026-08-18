@@ -21,7 +21,7 @@ from seebx.capabilities.conversation.snapshot import (
     create_current_only_conversation_snapshot_v1,
     create_conversation_snapshot_v1,
 )
-from rag_engine.response_finalization_v3 import finalize_trusted_response_v3
+from seebx.capabilities.conversation.lifeswitch_finalization import finalize_trusted_response_v3
 from seebx.capabilities.conversation.policy import (
     ConversationRole,
     ResponsePolicyConversationMessageV0_2,

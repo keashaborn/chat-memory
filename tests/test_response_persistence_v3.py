@@ -4,7 +4,7 @@ import unittest
 from typing import Any
 
 from seebx.adapters.lifeswitch_openai_chat import OpenAIChatCompletionsAdapterV3
-from rag_engine.response_finalization_v3 import finalize_trusted_response_v3
+from seebx.capabilities.conversation.lifeswitch_finalization import finalize_trusted_response_v3
 from rag_engine.response_persistence_v3 import (
     ResponsePersistenceV3Error,
     persist_finalized_response_v3,

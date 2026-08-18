@@ -34,7 +34,7 @@ from seebx.capabilities.conversation.composition import (
     AuthenticatedResponseCommandV0_2,
     ConversationResponseComposer,
 )
-from rag_engine.response_finalization_v3 import (
+from seebx.capabilities.conversation.lifeswitch_finalization import (
     FinalizedTrustedResponseV3,
     finalize_trusted_response_v3,
 )

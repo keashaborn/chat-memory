@@ -4,7 +4,7 @@ import json
 import unittest
 
 from seebx.adapters.lifeswitch_openai_chat import OpenAIChatCompletionsAdapterV3
-from rag_engine.response_finalization_v3 import finalize_trusted_response_v3
+from seebx.capabilities.conversation.lifeswitch_finalization import finalize_trusted_response_v3
 from rag_engine.response_inspection_v4 import build_response_inspection_v4
 from tests.test_lifeswitch_answer_provenance_receipt_v1 import ACTOR, ANSWER, NOW, new_plan
 from tests.test_lifeswitch_prompt_integration_v2 import zep_plan

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Pure final-answer binding for one trusted RESSE provider response.
+"""Pure final-answer binding for one trusted provider response.
 
 This module performs no database writes. It creates the neutral assistant
 transcript attestation accepted by the append-only conversation persistence

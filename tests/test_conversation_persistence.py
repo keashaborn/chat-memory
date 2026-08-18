@@ -4,7 +4,7 @@ import unittest
 from uuid import UUID
 
 from seebx.adapters.lifeswitch_openai_chat import OpenAIChatCompletionsAdapterV3
-from rag_engine.response_finalization_v3 import finalize_trusted_response_v3
+from seebx.capabilities.conversation.lifeswitch_finalization import finalize_trusted_response_v3
 from seebx.capabilities.conversation.persistence import (
     ConversationPersistenceError,
     persist_conversation_response,

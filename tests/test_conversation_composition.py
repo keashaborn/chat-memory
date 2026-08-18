@@ -478,15 +478,19 @@ class ConversationCompositionTests(unittest.IsolatedAsyncioTestCase):
                 }
             )
 
-    def test_canonical_composition_paths_have_no_legacy_wrappers(self) -> None:
+    def test_canonical_conversation_paths_have_no_legacy_wrappers(self) -> None:
         root = Path(__file__).resolve().parents[1]
         canonical = (
             root / "seebx/capabilities/conversation/composition.py",
             root / "seebx/capabilities/conversation/lifeswitch_composition.py",
+            root / "seebx/capabilities/conversation/finalization.py",
+            root / "seebx/capabilities/conversation/lifeswitch_finalization.py",
         )
         legacy = (
             root / "rag_engine/response_composition_root_v0_2.py",
             root / "rag_engine/response_composition_root_v0_4.py",
+            root / "rag_engine/response_finalization_v1.py",
+            root / "rag_engine/response_finalization_v3.py",
         )
         for candidate in canonical:
             self.assertTrue(candidate.is_file(), candidate)

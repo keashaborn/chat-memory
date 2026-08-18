@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from rag_engine.response_finalization_v1 import FinalizedTrustedResponseV1
+from seebx.capabilities.conversation.finalization import FinalizedTrustedResponseV1
 from seebx.capabilities.conversation.persistence import (
     ConversationPersistenceError,
     persist_conversation_response,

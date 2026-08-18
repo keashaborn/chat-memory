@@ -34,7 +34,7 @@ from seebx.capabilities.conversation.snapshot import (
     ConversationSnapshotV1,
     create_current_only_conversation_snapshot_v1,
 )
-from rag_engine.response_finalization_v1 import (
+from seebx.capabilities.conversation.finalization import (
     FinalizedTrustedResponseV1,
     finalize_trusted_response_v1,
 )

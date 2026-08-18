@@ -8,7 +8,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from seebx.adapters.lifeswitch_openai_chat import OpenAIChatResponseV3
-from rag_engine.response_finalization_v3 import FinalizedTrustedResponseV3
+from seebx.capabilities.conversation.lifeswitch_finalization import FinalizedTrustedResponseV3
 from rag_engine.response_inspection_v1 import (
     OpenAIInspectionV1,
     VoiceDeliveryInspectionV1,

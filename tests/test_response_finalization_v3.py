@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from seebx.adapters.lifeswitch_openai_chat import OpenAIChatCompletionsAdapterV3
-from rag_engine.response_finalization_v3 import finalize_trusted_response_v3
+from seebx.capabilities.conversation.lifeswitch_finalization import finalize_trusted_response_v3
 from tests.test_lifeswitch_answer_provenance_receipt_v1 import ANSWER, NOW, new_plan
 from tests.test_openai_chat_provider_v1 import FakeClient, provider_response
 

@@ -14,8 +14,8 @@ from rag_engine.chat_integrity import (
     insert_assistant_transcript_attestation_v1,
     text_sha256,
 )
-from rag_engine.response_finalization_v1 import FinalizedTrustedResponseV1
-from rag_engine.response_finalization_v3 import FinalizedTrustedResponseV3
+from seebx.capabilities.conversation.finalization import FinalizedTrustedResponseV1
+from seebx.capabilities.conversation.lifeswitch_finalization import FinalizedTrustedResponseV3
 from seebx.contracts.conversation import WEB_ASSISTANT_SOURCE, WEB_USER_SOURCE
 
 
