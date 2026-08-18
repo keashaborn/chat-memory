@@ -8,7 +8,7 @@ from seebx.capabilities.conversation.snapshot import (
 )
 from seebx.capabilities.conversation.policy import ResponsePolicySignalsV0_2
 from rag_engine.response_source_awareness_v1 import MemorySourceStatusV1
-from rag_engine.zep_memory_provider_v1 import (
+from seebx.capabilities.conversation.zep_memory import (
     ZepMemoryChatProviderV1,
     ZepPromptConfigurationError,
     ZepPromptSettingsV1,

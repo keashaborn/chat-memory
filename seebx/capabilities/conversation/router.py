@@ -77,7 +77,7 @@ from seebx.contracts.voice_language import (
     AUTO_VOICE_LANGUAGE,
     voice_language_from_request,
 )
-from rag_engine.zep_memory_provider_v1 import (
+from seebx.capabilities.conversation.zep_memory import (
     ZepMemoryChatProviderV1,
 )
 from seebx.capabilities.conversation.zep_runtime import (

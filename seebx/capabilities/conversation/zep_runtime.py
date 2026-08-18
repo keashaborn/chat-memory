@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 
-from rag_engine.zep_memory_provider_v1 import ZepPromptSettingsV1
+from seebx.capabilities.conversation.zep_memory import ZepPromptSettingsV1
 from seebx.adapters.postgres import PostgresConnectionProvider
 from seebx.adapters.zep_cloud import ZepRuntime
 from seebx.adapters.zep_sync_postgres import PostgresZepSyncRepository
