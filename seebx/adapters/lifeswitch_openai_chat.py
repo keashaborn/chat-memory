@@ -22,7 +22,7 @@ from seebx.adapters.openai_chat import (
     _usage_count,
     safety_identifier_v1,
 )
-from rag_engine.prompt_assembler_v1 import (
+from seebx.capabilities.conversation.prompt import (
     MODEL_CONTEXT_WINDOW_TOKENS,
     PER_MESSAGE_OVERHEAD_TOKENS,
 )

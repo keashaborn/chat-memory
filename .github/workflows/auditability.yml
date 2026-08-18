@@ -52,7 +52,7 @@ jobs:
           if git grep -nE \
             'governed_memory_v1|MemoryPrompt(AssemblyInput|ApplicationResult)V1|assistant_response_preferences' \
             -- \
-              rag_engine/prompt_assembler_v1.py \
+              seebx/capabilities/conversation/prompt.py \
               rag_engine/response_composition_root_v0_2.py \
               rag_engine/response_orchestration_v0_2.py \
               seebx/adapters/openai_chat.py \

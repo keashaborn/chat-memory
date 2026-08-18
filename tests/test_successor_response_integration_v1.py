@@ -17,7 +17,7 @@ from rag_engine.governed_memory.response_provenance import (
 )
 from seebx.adapters.openai_chat import OpenAIChatRequestV1
 from seebx.adapters.lifeswitch_openai_chat import OpenAIChatRequestV4
-from rag_engine.prompt_assembler_v1 import (
+from seebx.capabilities.conversation.prompt import (
     ContextKind,
     PromptReferenceContextBlockV1,
     PromptReferenceFragmentV1,

@@ -9,7 +9,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from rag_engine.prompt_assembler_v1 import (
+from seebx.capabilities.conversation.prompt import (
     ContextKind,
     PromptReferenceContextBlockV1,
 )

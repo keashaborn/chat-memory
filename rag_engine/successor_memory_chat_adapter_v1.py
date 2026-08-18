@@ -29,7 +29,7 @@ from rag_engine.governed_memory.response_provenance import (
 from rag_engine.governed_memory.runtime.openai_adapters import (
     OpenAIOutcomeUnknownFailure,
 )
-from rag_engine.prompt_assembler_v1 import PromptReferenceContextBlockV1
+from seebx.capabilities.conversation.prompt import PromptReferenceContextBlockV1
 from seebx.capabilities.conversation.composition import GovernedMemoryAssemblyV1
 from seebx.capabilities.conversation.snapshot import ConversationSnapshotV1
 from rag_engine.response_policy_v0_2 import ResponsePolicySignalsV0_2

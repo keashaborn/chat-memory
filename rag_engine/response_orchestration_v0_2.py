@@ -24,7 +24,7 @@ from rag_engine.rm_selection_envelope_v0_4 import (
     select_rm_v0_4,
 )
 from rag_engine.prior_web_provenance_v1 import PriorWebProvenanceEnvelopeV1
-from rag_engine.prompt_assembler_v1 import (
+from seebx.capabilities.conversation.prompt import (
     AssembledPromptV1,
     ContextKind,
     PromptAssemblyRequestV1,

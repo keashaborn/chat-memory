@@ -29,7 +29,7 @@ from rag_engine.prior_lifeswitch_provenance_v1 import (
     MAX_PROVENANCE_CONTENT_TOKENS,
     PriorLifeSwitchProvenanceEnvelopeV1,
 )
-from rag_engine.prompt_assembler_v1 import (
+from seebx.capabilities.conversation.prompt import (
     HARD_MAX_MESSAGE_BYTES,
     HARD_MAX_MESSAGE_TOKENS,
     HARD_MAX_TOTAL_INPUT_BYTES,

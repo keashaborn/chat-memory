@@ -7,7 +7,7 @@ from uuid import UUID
 
 from pydantic import ValidationError
 
-from rag_engine.prompt_assembler_v1 import ContextKind
+from seebx.capabilities.conversation.prompt import ContextKind
 from seebx.capabilities.conversation.snapshot import (
     create_current_only_conversation_snapshot_v1,
 )

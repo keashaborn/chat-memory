@@ -21,7 +21,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from rag_engine.prompt_assembler_v1 import (
+from seebx.capabilities.conversation.prompt import (
     MODEL_CONTEXT_WINDOW_TOKENS,
     PER_MESSAGE_OVERHEAD_TOKENS,
     RESERVED_OUTPUT_TOKENS,

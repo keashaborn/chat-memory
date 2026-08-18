@@ -14,7 +14,7 @@ from rag_engine.rm_selection_envelope_v0_4 import (
     RMSelectionRequestV04,
     select_rm_v0_4,
 )
-from rag_engine.prompt_assembler_v1 import (
+from seebx.capabilities.conversation.prompt import (
     AssembledPromptV1,
     ContextKind,
     PromptAssemblyError,
@@ -792,7 +792,7 @@ class TypedPromptAssemblerV1Tests(unittest.TestCase):
             )
 
     def test_module_has_no_provider_or_runtime_side_effect_imports(self) -> None:
-        source_path = Path(__file__).parents[1] / "rag_engine" / "prompt_assembler_v1.py"
+        source_path = Path(__file__).parents[1] / "seebx" / "capabilities" / "conversation" / "prompt.py"
         tree = ast.parse(source_path.read_text(encoding="utf-8"))
         imported_roots: set[str] = set()
         for node in ast.walk(tree):

@@ -10,7 +10,7 @@ from seebx.capabilities.conversation.attachments import (
     MAX_ATTACHMENT_TOTAL_BYTES,
     build_attachment_context_block_v1,
 )
-from rag_engine.prompt_assembler_v1 import ContextKind
+from seebx.capabilities.conversation.prompt import ContextKind
 
 
 class _Row(dict):

@@ -87,7 +87,7 @@ class SearchCapabilityManifestV1Tests(unittest.TestCase):
             (root / "rag_engine/search_capability_manifest_v1.py").exists()
         )
         for relative in (
-            "rag_engine/prompt_assembler_v1.py",
+            "seebx/capabilities/conversation/prompt.py",
             "rag_engine/response_orchestration_v0_2.py",
             "rag_engine/search_capability_output_validator_v1.py",
             "seebx/capabilities/conversation/composition.py",

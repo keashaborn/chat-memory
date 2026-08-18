@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from rag_engine.prompt_assembler_v1 import ASSEMBLY_MANIFEST_VERSION
+from seebx.capabilities.conversation.prompt import ASSEMBLY_MANIFEST_VERSION
 from rag_engine.response_orchestration_v0_2 import (
     ORCHESTRATOR_VERSION,
     SHADOW_TRACE_VERSION,

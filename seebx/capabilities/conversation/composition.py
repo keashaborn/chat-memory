@@ -26,7 +26,7 @@ from rag_engine.prior_web_provenance_v1 import (
     PriorWebProvenanceError,
     load_prior_web_provenance_v1,
 )
-from rag_engine.prompt_assembler_v1 import PromptReferenceContextBlockV1
+from seebx.capabilities.conversation.prompt import PromptReferenceContextBlockV1
 from seebx.adapters.conversation_snapshot import (
     load_conversation_snapshot_v1,
 )
