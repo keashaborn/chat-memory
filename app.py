@@ -20,7 +20,7 @@ from seebx.capabilities.conversation.zep_runtime import (
 from seebx.capabilities.conversation.router import (
     router as conversation_router,
 )
-from rag_engine.zep_shadow_memory_v1 import ZepShadowConfigurationError
+from seebx.adapters.zep_cloud import ZepConfigurationError
 from seebx.capabilities.search.trusted_health import router as trusted_web_router
 from seebx.capabilities.search.current_news import router as current_news_router
 from seebx.capabilities.search.execution import (
@@ -1082,7 +1082,7 @@ async def chat_and_zep_full_clear(req: Request):
             status_code=exc.status_code,
             headers=SUCCESSOR_MEMORY_REFUSAL_HEADERS,
         )
-    except (ZepShadowConfigurationError, asyncio.TimeoutError):
+    except (ZepConfigurationError, asyncio.TimeoutError):
         return JSONResponse(
             {"status": "error", "detail": "zep_memory_deletion_unavailable"},
             status_code=503,

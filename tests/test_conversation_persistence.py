@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
 from seebx.adapters.lifeswitch_openai_chat import OpenAIChatCompletionsAdapterV3
@@ -9,6 +10,7 @@ from seebx.adapters.conversation_persistence import (
     ConversationPersistenceError,
     persist_conversation_response,
 )
+from tests.test_zep_sync_postgres import USER_MESSAGE
 from tests.test_lifeswitch_answer_provenance_receipt_v1 import (
     ACTOR,
     ANSWER,
@@ -61,12 +63,24 @@ class ConversationPersistenceTests(unittest.IsolatedAsyncioTestCase):
         )
 
         lifeswitch_conn = Conn()
-        await persist_conversation_response(
+        with patch(
+            "seebx.adapters.conversation_persistence.enqueue_zep_turn",
+            new_callable=AsyncMock,
+        ) as enqueue:
+            await persist_conversation_response(
+                lifeswitch_conn,
+                owner_user_id=ACTOR,
+                thread_id=THREAD,
+                request_id="request-123",
+                finalized=await finalized_lifeswitch_response(),
+                zep_sync_user_message_id=USER_MESSAGE,
+            )
+        enqueue.assert_awaited_once_with(
             lifeswitch_conn,
             owner_user_id=ACTOR,
             thread_id=THREAD,
-            request_id="request-123",
-            finalized=await finalized_lifeswitch_response(),
+            user_message_id=USER_MESSAGE,
+            assistant_message_id=ANSWER,
         )
         lifeswitch_chat_call = next(
             call

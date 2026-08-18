@@ -18,6 +18,7 @@ from seebx.adapters.thread_selection import promote_resume_thread_v1
 from seebx.adapters.transcript_integrity import (
     insert_assistant_transcript_attestation_v1,
 )
+from seebx.adapters.zep_sync_postgres import enqueue_zep_turn
 from seebx.capabilities.conversation.persistence import (
     ConversationPersistenceError,
     FinalizedConversationResponse,
@@ -254,6 +255,7 @@ async def persist_conversation_response(
     thread_id: UUID,
     request_id: str,
     finalized: FinalizedConversationResponse,
+    zep_sync_user_message_id: UUID | None = None,
 ) -> None:
     """Persist one exact finalized response through the shared transaction."""
 
@@ -313,6 +315,16 @@ async def persist_conversation_response(
             )
             stage = "attestation_insert"
             await insert_assistant_transcript_attestation_v1(conn, attestation)
+
+            if zep_sync_user_message_id is not None:
+                stage = "zep_sync_enqueue"
+                await enqueue_zep_turn(
+                    conn,
+                    owner_user_id=owner_user_id,
+                    thread_id=thread_id,
+                    user_message_id=zep_sync_user_message_id,
+                    assistant_message_id=value.answer_id,
+                )
 
             stage = "thread_touch"
             await conn.execute(

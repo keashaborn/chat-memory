@@ -83,10 +83,13 @@ from rag_engine.zep_memory_provider_v1 import (
 from seebx.capabilities.conversation.zep_runtime import (
     ZEP_MEMORY_RUNTIME,
     ZEP_PROMPT_SETTINGS,
+    ZEP_SYNC_CONTROLLER,
 )
 
 
 router = APIRouter()
+router.add_event_handler("startup", ZEP_SYNC_CONTROLLER.start)
+router.add_event_handler("shutdown", ZEP_SYNC_CONTROLLER.stop)
 logger = logging.getLogger("uvicorn.error")
 DSN = (os.getenv("POSTGRES_DSN") or "").strip()
 LIFESWITCH_CHAT_SETTINGS = LifeSwitchChatRuntimeSettingsV1.from_environment()
@@ -332,11 +335,6 @@ async def resse_response_query(
         tentative_zep_eligible
         and ZEP_PROMPT_SETTINGS.enabled_for(owner)
     )
-    if tentative_zep_eligible and not zep_prompt_enabled:
-        ZEP_MEMORY_RUNTIME.dispatch_retrieval(
-            owner_user_id=owner,
-            thread_id=thread_id,
-        )
 
     conn = await asyncpg.connect(DSN, command_timeout=90)
     try:
@@ -467,26 +465,23 @@ async def resse_response_query(
             provider_response=execution.provider_response,
         )
         if not payload.no_store:
+            zep_sync_user_message_id = (
+                payload.message_id
+                if payload.message_id is not None
+                and (zep_eligible or voice_turn_id is not None)
+                and ZEP_MEMORY_RUNTIME.sync_enabled_for(owner)
+                else None
+            )
             await persist_conversation_response(
                 conn,
                 owner_user_id=owner,
                 thread_id=thread_id,
                 request_id=request_id,
                 finalized=finalized,
+                zep_sync_user_message_id=zep_sync_user_message_id,
             )
-        if (
-            payload.message_id is not None
-            and not payload.no_store
-            and (zep_eligible or voice_turn_id is not None)
-        ):
-            ZEP_MEMORY_RUNTIME.dispatch_turn(
-                owner_user_id=owner,
-                thread_id=thread_id,
-                user_message_id=payload.message_id,
-                assistant_message_id=finalized.answer_id,
-                user_message=payload.message,
-                assistant_message=finalized.assistant_text,
-            )
+            if zep_sync_user_message_id is not None:
+                ZEP_SYNC_CONTROLLER.notify()
         persistence_ms = max(
             0,
             round((time.monotonic_ns() - persistence_started_ns) / 1_000_000),
