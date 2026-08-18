@@ -1,18 +1,23 @@
 from __future__ import annotations
 
+from pathlib import Path
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import UUID
 
 from seebx.adapters.conversation_attachments import (
+    BIND_ATTACHMENTS_TO_MESSAGE_SQL,
     CREATE_ATTACHMENT_SQL,
     DELETE_ATTACHMENT_SQL,
+    FETCH_ATTACHMENT_BINDINGS_SQL,
     FETCH_ATTACHMENT_STATUS_SQL,
     FETCH_RETRY_CANDIDATE_SQL,
     OWNER_CONTEXT_SQL,
     UPDATE_RETRY_STATUS_SQL,
     ConversationAttachmentPostgresStore,
+    bind_attachments_to_message,
+    fetch_attachment_bindings,
     fetch_ready_message_attachments,
 )
 
@@ -58,6 +63,66 @@ class ConversationAttachmentAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("attachment.deleted_at IS NULL", query)
         self.assertIn("attachment.content IS NOT NULL", query)
         self.assertIn("array_position($4::uuid[], attachment.id)", query)
+
+    async def test_message_binding_queries_are_owner_thread_bound_and_ordered(self) -> None:
+        records = ({"id": ATTACHMENT},)
+        connection = SimpleNamespace(
+            fetch=AsyncMock(side_effect=(records, records)),
+        )
+
+        candidates = await fetch_attachment_bindings(
+            connection,
+            owner_user_id=OWNER,
+            thread_id=THREAD,
+            attachment_ids=(ATTACHMENT,),
+        )
+        bound = await bind_attachments_to_message(
+            connection,
+            message_id=MESSAGE,
+            owner_user_id=OWNER,
+            thread_id=THREAD,
+            attachment_ids=(ATTACHMENT,),
+        )
+
+        self.assertEqual(candidates, records)
+        self.assertEqual(bound, records)
+        candidate_call, bind_call = connection.fetch.await_args_list
+        self.assertEqual(
+            candidate_call.args,
+            (FETCH_ATTACHMENT_BINDINGS_SQL, OWNER, THREAD, [ATTACHMENT]),
+        )
+        self.assertEqual(
+            bind_call.args,
+            (
+                BIND_ATTACHMENTS_TO_MESSAGE_SQL,
+                MESSAGE,
+                OWNER,
+                THREAD,
+                [ATTACHMENT],
+            ),
+        )
+        self.assertIn("owner_user_id=$1", FETCH_ATTACHMENT_BINDINGS_SQL)
+        self.assertIn("thread_id=$2", FETCH_ATTACHMENT_BINDINGS_SQL)
+        self.assertIn(
+            "ORDER BY array_position($3::uuid[],id)",
+            FETCH_ATTACHMENT_BINDINGS_SQL,
+        )
+        self.assertIn("owner_user_id=$2", BIND_ATTACHMENTS_TO_MESSAGE_SQL)
+        self.assertIn("thread_id=$3", BIND_ATTACHMENTS_TO_MESSAGE_SQL)
+        self.assertIn("message_id IS NULL", BIND_ATTACHMENTS_TO_MESSAGE_SQL)
+        self.assertIn("status='ready'", BIND_ATTACHMENTS_TO_MESSAGE_SQL)
+        self.assertIn("deleted_at IS NULL", BIND_ATTACHMENTS_TO_MESSAGE_SQL)
+
+    def test_log_route_delegates_attachment_sql_to_adapter(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        source = (root / "app.py").read_text(encoding="utf-8")
+        log_route = source.split('@app.post("/log")', 1)[1].split(
+            '@app.post("/threads/new")', 1
+        )[0]
+
+        self.assertNotIn("public.chat_attachments", log_route)
+        self.assertIn("fetch_attachment_bindings(", log_route)
+        self.assertIn("bind_attachments_to_message(", log_route)
 
     async def test_crud_store_owns_sql_actor_context_and_lifetime(self) -> None:
         records = tuple({"index": index} for index in range(5))

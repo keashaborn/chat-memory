@@ -46,6 +46,12 @@ from seebx.capabilities.conversation.attachments import (
     MAX_ATTACHMENT_COUNT,
 )
 from seebx.contracts.identifiers import CanonicalJsonUUID
+from seebx.adapters.conversation_attachments import (
+    bind_attachments_to_message,
+    fetch_attachment_bindings,
+)
+
+
 class NewThreadReq(BaseModel):
     user_id: str
     title: Optional[str] = None
@@ -847,16 +853,11 @@ async def log_chat(req: Request):
                 thread_id = None
 
         if attachment_ids:
-            attachment_rows = await conn.fetch(
-                """
-                SELECT id,message_id,status,deleted_at
-                FROM public.chat_attachments
-                WHERE owner_user_id=$1 AND thread_id=$2 AND id=ANY($3::uuid[])
-                ORDER BY array_position($3::uuid[],id)
-                """,
-                uuid.UUID(user_id),
-                thread_id,
-                attachment_ids,
+            attachment_rows = await fetch_attachment_bindings(
+                conn,
+                owner_user_id=uuid.UUID(user_id),
+                thread_id=thread_id,
+                attachment_ids=attachment_ids,
             )
             if (
                 len(attachment_rows) != len(attachment_ids)
@@ -935,19 +936,12 @@ async def log_chat(req: Request):
         )
 
         if attachment_ids:
-            bound_rows = await conn.fetch(
-                """
-                UPDATE public.chat_attachments
-                SET message_id=$1,updated_at=now()
-                WHERE owner_user_id=$2 AND thread_id=$3
-                  AND id=ANY($4::uuid[]) AND message_id IS NULL
-                  AND status='ready' AND deleted_at IS NULL
-                RETURNING id
-                """,
-                uuid.UUID(rec_id),
-                uuid.UUID(user_id),
-                thread_id,
-                attachment_ids,
+            bound_rows = await bind_attachments_to_message(
+                conn,
+                message_id=uuid.UUID(rec_id),
+                owner_user_id=uuid.UUID(user_id),
+                thread_id=thread_id,
+                attachment_ids=attachment_ids,
             )
             if len(bound_rows) != len(attachment_ids):
                 raise ValueError("attachment_binding_failed")

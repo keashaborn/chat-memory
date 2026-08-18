@@ -54,7 +54,8 @@ class RawMemoryCompatibilityBoundaryV1Tests(unittest.TestCase):
         registry_write = source.index("memory.register_authenticated_owner_v1")
         self.assertLess(registry_guard, registry_write)
         self.assertIn("INSERT INTO chat_log(", source)
-        self.assertIn("UPDATE public.chat_attachments", source)
+        self.assertIn("fetch_attachment_bindings(", source)
+        self.assertIn("bind_attachments_to_message(", source)
         self.assertIn('"transcript_write_failed"', source)
         self.assertIn(
             'return {"status": "ok", "id": rec_id, "request_id": request_id}',

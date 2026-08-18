@@ -100,7 +100,7 @@ class ExclusiveCutoverContractTests(unittest.TestCase):
         self.assertNotIn("client.embeddings.create", source)
         self.assertNotIn("memory_raw", source)
         self.assertIn("INSERT INTO chat_log(", source[transcript:])
-        self.assertIn("UPDATE public.chat_attachments", source[transcript:])
+        self.assertIn("bind_attachments_to_message(", source[transcript:])
 
     def test_retired_legacy_operations_contain_no_store_access(self) -> None:
         expectations = {

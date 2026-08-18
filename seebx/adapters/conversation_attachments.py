@@ -66,6 +66,21 @@ WHERE id=$1 AND owner_user_id=$2
 RETURNING id,deleted_at
 """
 
+FETCH_ATTACHMENT_BINDINGS_SQL = """
+SELECT id,message_id,status,deleted_at
+FROM public.chat_attachments
+WHERE owner_user_id=$1 AND thread_id=$2 AND id=ANY($3::uuid[])
+ORDER BY array_position($3::uuid[],id)
+"""
+BIND_ATTACHMENTS_TO_MESSAGE_SQL = """
+UPDATE public.chat_attachments
+SET message_id=$1,updated_at=now()
+WHERE owner_user_id=$2 AND thread_id=$3
+  AND id=ANY($4::uuid[]) AND message_id IS NULL
+  AND status='ready' AND deleted_at IS NULL
+RETURNING id
+"""
+
 
 class AttachmentConnection(Protocol):
     async def execute(self, query: str, *args: object) -> str: ...
@@ -210,16 +225,58 @@ async def fetch_ready_message_attachments(
     return tuple(rows)
 
 
+async def fetch_attachment_bindings(
+    connection: AttachmentReadConnection,
+    *,
+    owner_user_id: UUID,
+    thread_id: UUID,
+    attachment_ids: Sequence[UUID],
+) -> tuple[Any, ...]:
+    """Read exact owner/thread attachment binding state in request order."""
+
+    rows = await connection.fetch(
+        FETCH_ATTACHMENT_BINDINGS_SQL,
+        owner_user_id,
+        thread_id,
+        list(attachment_ids),
+    )
+    return tuple(rows)
+
+
+async def bind_attachments_to_message(
+    connection: AttachmentReadConnection,
+    *,
+    message_id: UUID,
+    owner_user_id: UUID,
+    thread_id: UUID,
+    attachment_ids: Sequence[UUID],
+) -> tuple[Any, ...]:
+    """Atomically bind ready, unbound owner/thread attachments to a message."""
+
+    rows = await connection.fetch(
+        BIND_ATTACHMENTS_TO_MESSAGE_SQL,
+        message_id,
+        owner_user_id,
+        thread_id,
+        list(attachment_ids),
+    )
+    return tuple(rows)
+
+
 __all__ = [
     "AttachmentConnection",
     "AttachmentReadConnection",
+    "BIND_ATTACHMENTS_TO_MESSAGE_SQL",
     "CREATE_ATTACHMENT_SQL",
     "ConversationAttachmentPostgresStore",
     "DELETE_ATTACHMENT_SQL",
+    "FETCH_ATTACHMENT_BINDINGS_SQL",
     "FETCH_ATTACHMENT_STATUS_SQL",
     "FETCH_RETRY_CANDIDATE_SQL",
     "OWNER_CONTEXT_SQL",
     "READY_MESSAGE_ATTACHMENTS_SQL",
     "UPDATE_RETRY_STATUS_SQL",
+    "bind_attachments_to_message",
+    "fetch_attachment_bindings",
     "fetch_ready_message_attachments",
 ]

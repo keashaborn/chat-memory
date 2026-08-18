@@ -335,7 +335,7 @@ class CaptureGateTests(unittest.TestCase):
             route,
         )
         enqueue_at = route.index("await enqueue_captured_chat_log_message(")
-        attachment_binding_at = route.index("UPDATE public.chat_attachments")
+        attachment_binding_at = route.index("await bind_attachments_to_message(")
         commit_at = route.index("await transaction.commit()", enqueue_at)
         identity_return_at = route.index("legacy_identity_memory_retired")
         decision_at = route.index("capture_decision_for_owner(")
@@ -354,13 +354,10 @@ class CaptureGateTests(unittest.TestCase):
         )
         self.assertNotIn("capture_receipt.outbox_id", route)
         self.assertIn(
-            "SELECT id,message_id,status,deleted_at",
+            "await fetch_attachment_bindings(",
             route,
         )
-        self.assertNotIn(
-            "SELECT id,message_id,status,deleted_at,content",
-            route,
-        )
+        self.assertNotIn("public.chat_attachments", route)
         before_log, after_log = source.split('@app.post("/log")', 1)
         after_log = after_log.split('@app.post("/threads/new")', 1)[1]
         self.assertNotIn("enqueue_captured_chat_log_message(", before_log)
