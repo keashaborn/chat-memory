@@ -6,6 +6,9 @@ from typing import Any, Protocol, Sequence
 from uuid import UUID
 
 
+THREAD_BELONGS_TO_OWNER_SQL = (
+    "SELECT 1 FROM threads WHERE id=$1 AND owner_user_id=$2"
+)
 CREATE_THREAD_SQL = (
     "INSERT INTO threads(owner_user_id, user_id, title) "
     "VALUES ($1,$2,$3) RETURNING id, title, updated_at"
@@ -67,6 +70,22 @@ class ConversationThreadConnection(Protocol):
     async def fetch(self, query: str, *args: object) -> Sequence[Any]: ...
 
     async def fetchrow(self, query: str, *args: object) -> Any: ...
+
+    async def fetchval(self, query: str, *args: object) -> Any: ...
+
+
+async def thread_belongs_to_owner(
+    connection: ConversationThreadConnection,
+    *,
+    owner_user_id: str | UUID,
+    thread_id: UUID,
+) -> bool:
+    value = await connection.fetchval(
+        THREAD_BELONGS_TO_OWNER_SQL,
+        thread_id,
+        owner_user_id,
+    )
+    return bool(value)
 
 
 async def create_thread(
@@ -186,6 +205,7 @@ __all__ = [
     "LIST_VISIBLE_THREADS_SQL",
     "RENAME_THREAD_MANUAL_SQL",
     "SET_THREAD_PINNED_SQL",
+    "THREAD_BELONGS_TO_OWNER_SQL",
     "UPDATE_THREAD_AUTOMATIC_TITLE_SQL",
     "archive_thread",
     "create_thread",
@@ -194,5 +214,6 @@ __all__ = [
     "list_visible_threads",
     "rename_thread_manual",
     "set_thread_pinned",
+    "thread_belongs_to_owner",
     "update_thread_automatic_title",
 ]

@@ -59,6 +59,7 @@ from seebx.adapters.conversation_threads import (
     list_visible_threads,
     rename_thread_manual,
     set_thread_pinned,
+    thread_belongs_to_owner,
     update_thread_automatic_title,
 )
 
@@ -427,10 +428,10 @@ async def _require_actor_for_thread(req: Request, thread_id: uuid.UUID):
     conn = await asyncpg.connect(DSN)
     try:
         await _set_connection_actor(conn, actor_uuid)
-        found = await conn.fetchval(
-            "SELECT 1 FROM threads WHERE id=$1 AND owner_user_id=$2",
-            thread_id,
-            actor_uuid,
+        found = await thread_belongs_to_owner(
+            conn,
+            owner_user_id=actor_uuid,
+            thread_id=thread_id,
         )
     finally:
         await conn.close()

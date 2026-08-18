@@ -13,6 +13,7 @@ from seebx.adapters.conversation_threads import (
     LIST_VISIBLE_THREADS_SQL,
     RENAME_THREAD_MANUAL_SQL,
     SET_THREAD_PINNED_SQL,
+    THREAD_BELONGS_TO_OWNER_SQL,
     UPDATE_THREAD_AUTOMATIC_TITLE_SQL,
     archive_thread,
     create_thread,
@@ -21,6 +22,7 @@ from seebx.adapters.conversation_threads import (
     list_visible_threads,
     rename_thread_manual,
     set_thread_pinned,
+    thread_belongs_to_owner,
     update_thread_automatic_title,
 )
 
@@ -44,8 +46,16 @@ class ConversationThreadsAdapterTests(unittest.IsolatedAsyncioTestCase):
             fetchrow=AsyncMock(
                 side_effect=(created, renamed, pinned, state, automatic)
             ),
+            fetchval=AsyncMock(return_value=1),
         )
 
+        self.assertTrue(
+            await thread_belongs_to_owner(
+                connection,
+                owner_user_id=OWNER,
+                thread_id=THREAD,
+            )
+        )
         self.assertIs(
             await create_thread(connection, owner_user_id=OWNER, title="New chat"),
             created,
@@ -128,8 +138,14 @@ class ConversationThreadsAdapterTests(unittest.IsolatedAsyncioTestCase):
             OWNER,
             THREAD,
         )
+        connection.fetchval.assert_awaited_once_with(
+            THREAD_BELONGS_TO_OWNER_SQL,
+            THREAD,
+            OWNER,
+        )
 
         for query in (
+            THREAD_BELONGS_TO_OWNER_SQL,
             LIST_VISIBLE_THREADS_SQL,
             RENAME_THREAD_MANUAL_SQL,
             SET_THREAD_PINNED_SQL,
