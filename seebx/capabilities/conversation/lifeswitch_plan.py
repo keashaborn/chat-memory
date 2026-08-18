@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Additive integration plan joining response policy and LifeSwitch context."""
+"""Hash-bound LifeSwitch conversation response plan."""
 
 import hashlib
 import json

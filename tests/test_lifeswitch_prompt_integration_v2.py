@@ -12,7 +12,7 @@ from rag_engine.lifeswitch_prompt_integration_v2 import (
 from rag_engine.lifeswitch_response_context_provider_v1 import (
     LifeSwitchPreparedContextV1,
 )
-from rag_engine.response_lifeswitch_integration_v2 import (
+from seebx.capabilities.conversation.lifeswitch_plan import (
     TrustedLifeSwitchResponsePlanV2,
 )
 from tests.test_lifeswitch_answer_provenance_receipt_v1 import (

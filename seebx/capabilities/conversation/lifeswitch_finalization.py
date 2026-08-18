@@ -16,10 +16,10 @@ from rag_engine.chat_integrity import (
     AssistantOutputKind,
     AssistantTranscriptAttestationV1,
 )
-from rag_engine.lifeswitch_answer_binding_v1 import (
+from seebx.capabilities.conversation.lifeswitch_answer_binding import (
     FinalAnswerLifeSwitchBindingV1,
 )
-from rag_engine.lifeswitch_answer_provenance_receipt_v1 import (
+from seebx.capabilities.conversation.lifeswitch_provenance import (
     FinalAnswerLifeSwitchProvenanceReceiptV1,
 )
 from seebx.adapters.openai_chat import OpenAIChatGenerationConfigV1
@@ -27,7 +27,7 @@ from seebx.adapters.lifeswitch_openai_chat import (
     OpenAIChatRequestV4,
     OpenAIChatResponseV3,
 )
-from rag_engine.response_lifeswitch_integration_v2 import (
+from seebx.capabilities.conversation.lifeswitch_plan import (
     TrustedLifeSwitchResponsePlanV2,
 )
 from rag_engine.search_capability_output_validator_v1 import (

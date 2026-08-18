@@ -11,12 +11,12 @@ from uuid import UUID
 
 import asyncpg
 
-from rag_engine.lifeswitch_answer_binding_v1 import (
+from seebx.capabilities.conversation.lifeswitch_answer_binding import (
     FinalAnswerLifeSwitchBindingV1,
     LifeSwitchAnswerRecordRefV1,
     _sha256 as binding_sha256,
 )
-from rag_engine.lifeswitch_answer_provenance_receipt_v1 import (
+from seebx.capabilities.conversation.lifeswitch_provenance import (
     FinalAnswerLifeSwitchProvenanceReceiptV1,
     LifeSwitchProvenanceSourceRefV1,
     _sha256 as receipt_sha256,

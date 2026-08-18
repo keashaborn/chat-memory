@@ -21,7 +21,7 @@ from seebx.adapters.lifeswitch_openai_chat import (
 from seebx.capabilities.conversation.composition import (
     ConversationResponseComposer,
 )
-from rag_engine.response_lifeswitch_integration_v2 import (
+from seebx.capabilities.conversation.lifeswitch_plan import (
     TrustedLifeSwitchResponsePlanV2,
 )
 from tests.test_lifeswitch_answer_provenance_receipt_v1 import off_prior, selected_context

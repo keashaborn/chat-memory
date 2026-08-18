@@ -29,7 +29,7 @@ from seebx.capabilities.conversation.composition import (
 from seebx.capabilities.conversation.lifeswitch_composition import (
     LifeSwitchConversationComposer,
 )
-from rag_engine.response_lifeswitch_integration_v2 import (
+from seebx.capabilities.conversation.lifeswitch_plan import (
     TrustedLifeSwitchResponsePlanV2,
 )
 from rag_engine.response_source_awareness_v1 import MemorySourceStatusV1

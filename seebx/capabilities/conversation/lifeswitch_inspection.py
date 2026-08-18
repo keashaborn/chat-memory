@@ -16,7 +16,7 @@ from seebx.capabilities.conversation.inspection import (
 from seebx.capabilities.conversation.lifeswitch_finalization import (
     FinalizedTrustedResponseV3,
 )
-from rag_engine.response_lifeswitch_integration_v2 import (
+from seebx.capabilities.conversation.lifeswitch_plan import (
     TrustedLifeSwitchResponsePlanV2,
 )
 

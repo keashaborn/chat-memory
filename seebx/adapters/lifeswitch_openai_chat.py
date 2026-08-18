@@ -26,7 +26,7 @@ from seebx.capabilities.conversation.prompt import (
     MODEL_CONTEXT_WINDOW_TOKENS,
     PER_MESSAGE_OVERHEAD_TOKENS,
 )
-from rag_engine.response_lifeswitch_integration_v2 import (
+from seebx.capabilities.conversation.lifeswitch_plan import (
     TrustedLifeSwitchResponsePlanV2,
 )
 

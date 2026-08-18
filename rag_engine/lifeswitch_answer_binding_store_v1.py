@@ -7,7 +7,7 @@ from typing import Any
 
 import asyncpg
 
-from rag_engine.lifeswitch_answer_binding_v1 import (
+from seebx.capabilities.conversation.lifeswitch_answer_binding import (
     FinalAnswerLifeSwitchBindingV1,
 )
 

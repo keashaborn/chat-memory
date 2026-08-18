@@ -5,7 +5,7 @@ from datetime import timedelta
 from typing import Any
 from uuid import UUID
 
-from rag_engine.lifeswitch_answer_provenance_receipt_v1 import (
+from seebx.capabilities.conversation.lifeswitch_provenance import (
     FinalAnswerLifeSwitchProvenanceReceiptV1,
     LifeSwitchProvenanceSourceRefV1,
     _sha256 as receipt_sha256,

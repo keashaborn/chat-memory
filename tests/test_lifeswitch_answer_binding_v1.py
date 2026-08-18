@@ -4,14 +4,14 @@ import datetime as dt
 import unittest
 import uuid
 
-from rag_engine.lifeswitch_answer_binding_v1 import (
+from seebx.capabilities.conversation.lifeswitch_answer_binding import (
     FinalAnswerLifeSwitchBindingV1,
 )
 from rag_engine.lifeswitch_data_plan_v1 import create_lifeswitch_data_plan_v1
 from rag_engine.lifeswitch_response_context_provider_v1 import (
     LifeSwitchPreparedContextV1,
 )
-from rag_engine.response_lifeswitch_integration_v2 import (
+from seebx.capabilities.conversation.lifeswitch_plan import (
     TrustedLifeSwitchResponsePlanV2,
 )
 from tests.test_lifeswitch_answer_provenance_receipt_v1 import new_plan, off_prior

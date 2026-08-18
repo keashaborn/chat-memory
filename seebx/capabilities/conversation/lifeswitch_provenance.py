@@ -11,7 +11,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from rag_engine.lifeswitch_answer_binding_v1 import FinalAnswerLifeSwitchBindingV1
+from seebx.capabilities.conversation.lifeswitch_answer_binding import FinalAnswerLifeSwitchBindingV1
 from rag_engine.lifeswitch_response_context_provider_v1 import LifeSwitchPreparedContextV1
 
 
