@@ -46,11 +46,11 @@ from seebx.capabilities.conversation.attachments import (
     MAX_ATTACHMENT_COUNT,
 )
 from seebx.contracts.identifiers import CanonicalJsonUUID
-from seebx.adapters.conversation_attachments import (
-    bind_attachments_to_message,
-    fetch_attachment_bindings,
-)
 from seebx.adapters.conversation_history import fetch_thread_message_rows
+from seebx.adapters.conversation_persistence import (
+    UserTranscriptPersistenceError,
+    persist_user_transcript,
+)
 from seebx.adapters.conversation_threads import (
     archive_thread,
     create_thread,
@@ -838,170 +838,51 @@ async def log_chat(req: Request):
 
     # Save to PostgreSQL (authoritative transcript).
     conn = None
-    transaction = None
     try:
         conn = await asyncpg.connect(DSN)
         await _set_connection_actor(conn, user_id)
-        transaction = conn.transaction()
-        await transaction.start()
-        # If thread_id was provided but the thread row doesn't exist (or belongs to another user),
-        # fix it so the sidebar can show the thread.
-        if thread_id:
-            thread_row = await conn.fetchrow(
-                "SELECT owner_user_id FROM threads WHERE id=$1 AND owner_user_id=$2",
-                thread_id,
-                user_id,
-            )
-
-            if thread_row is None:
-                # Create the thread with the provided id so the transcript is attached.
-                await conn.execute(
-                    "INSERT INTO threads(id, owner_user_id, user_id, title) VALUES($1, $2, $3, $4)",
-                    thread_id, user_id, user_id, "New chat"
-                )
-            elif str(thread_row["owner_user_id"] or "") != str(user_id):
-                # Never attach a message to an unowned, legacy, or foreign thread.
-                thread_id = None
-
-        if attachment_ids:
-            attachment_rows = await fetch_attachment_bindings(
-                conn,
-                owner_user_id=uuid.UUID(user_id),
-                thread_id=thread_id,
-                attachment_ids=attachment_ids,
-            )
-            if (
-                len(attachment_rows) != len(attachment_ids)
-                or any(row["status"] != "ready" or row["deleted_at"] is not None for row in attachment_rows)
-            ):
-                raise ValueError("attachment_binding_failed")
-            bound_message_ids = {row["message_id"] for row in attachment_rows}
-            if None not in bound_message_ids:
-                if len(bound_message_ids) != 1:
-                    raise ValueError("attachment_binding_failed")
-                existing_message_id = next(iter(bound_message_ids))
-                existing_message = await conn.fetchrow(
-                    """
-                    SELECT id FROM public.chat_log
-                    WHERE id=$1 AND owner_user_id=$2 AND thread_id=$3
-                      AND source=$4 AND text=$5
-                    """,
-                    existing_message_id,
-                    uuid.UUID(user_id),
-                    thread_id,
-                    source,
-                    text,
-                )
-                if existing_message is None:
-                    raise ValueError("attachment_binding_failed")
-                await transaction.commit()
-                transaction = None
-                return {
-                    "status": "ok",
-                    "id": str(existing_message["id"]),
-                    "request_id": request_id,
-                    "replayed": True,
-                }
-            if bound_message_ids != {None}:
-                raise ValueError("attachment_binding_failed")
-
-        if submission_id is not None:
-            existing_submission = await conn.fetchrow(
-                """
-                SELECT id FROM public.chat_log
-                WHERE id=$1 AND owner_user_id=$2
-                  AND thread_id IS NOT DISTINCT FROM $3
-                  AND source=$4 AND text=$5
-                """,
-                submission_id,
-                uuid.UUID(user_id),
-                thread_id,
-                source,
-                text,
-            )
-            if existing_submission is not None:
-                await transaction.commit()
-                transaction = None
-                return {
-                    "status": "ok",
-                    "id": str(existing_submission["id"]),
-                    "request_id": request_id,
-                    "replayed": True,
-                }
-            conflicting_submission = await conn.fetchrow(
-                """
-                SELECT id FROM public.chat_log
-                WHERE id=$1 AND owner_user_id=$2
-                """,
-                submission_id,
-                uuid.UUID(user_id),
-            )
-            if conflicting_submission is not None:
-                raise ValueError("submission_id_conflict")
-
-        await conn.execute(
-            "INSERT INTO chat_log("
-            "id,owner_user_id,user_id,user_id_alias,source,text,tags,thread_id,vantage_id,request_id,created_at"
-            ") VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
-            rec_id, user_id, user_id, user_id_alias, source, text, tags, thread_id, vantage_id, request_id, created_dt
+        result = await persist_user_transcript(
+            conn,
+            owner_user_id=uuid.UUID(user_id),
+            user_id_alias=user_id_alias,
+            source=source,
+            text=text,
+            tags=tags,
+            thread_id=thread_id,
+            vantage_id=vantage_id,
+            request_id=request_id,
+            message_id=uuid.UUID(rec_id),
+            submission_id=submission_id,
+            created_at=created_dt,
+            attachment_ids=attachment_ids,
         )
-
-        if attachment_ids:
-            bound_rows = await bind_attachments_to_message(
-                conn,
-                message_id=uuid.UUID(rec_id),
-                owner_user_id=uuid.UUID(user_id),
-                thread_id=thread_id,
-                attachment_ids=attachment_ids,
-            )
-            if len(bound_rows) != len(attachment_ids):
-                raise ValueError("attachment_binding_failed")
-
-        # Touch thread timestamp so list ordering works
-        if thread_id:
-            await conn.execute(
-                "UPDATE threads SET updated_at=now() WHERE id=$1 AND owner_user_id=$2",
-                thread_id, user_id
-            )
-
-        await transaction.commit()
-        transaction = None
-
-    except Exception as e:
-        print("pg error:", e)
-        conflict = str(e) in {
-            "attachment_binding_failed",
-            "submission_id_conflict",
-        } or (
-            submission_id is not None
-            and isinstance(e, asyncpg.UniqueViolationError)
-        )
-        conflict_detail = (
-            "attachment_binding_failed"
-            if str(e) == "attachment_binding_failed"
-            else "submission_conflict"
-        )
-        if transaction is not None:
-            try:
-                await transaction.rollback()
-            except Exception:
-                pass
+    except UserTranscriptPersistenceError as exc:
+        print("pg error:", exc.__cause__ or exc)
         return JSONResponse(
             {
-                "status": "conflict" if conflict else "unavailable",
-                "detail": conflict_detail if conflict else "transcript_write_failed",
+                "status": "conflict" if exc.conflict else "unavailable",
+                "detail": exc.code,
             },
-            status_code=409 if conflict else 503,
+            status_code=409 if exc.conflict else 503,
+        )
+    except Exception as exc:
+        print("pg error:", exc)
+        return JSONResponse(
+            {"status": "unavailable", "detail": "transcript_write_failed"},
+            status_code=503,
         )
     finally:
         if conn:
             await conn.close()
 
-    return {
+    response_payload = {
         "status": "ok",
-        "id": rec_id,
+        "id": str(result.message_id),
         "request_id": request_id,
     }
+    if result.replayed:
+        response_payload["replayed"] = True
+    return response_payload
 
 @app.post("/threads/new")
 async def threads_new(body: NewThreadReq, req: Request):

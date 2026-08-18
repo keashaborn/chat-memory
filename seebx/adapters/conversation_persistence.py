@@ -3,9 +3,17 @@ from __future__ import annotations
 """Atomic PostgreSQL persistence for conversation responses and evidence."""
 
 import json
-from typing import Any
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any, Sequence
 from uuid import UUID, uuid4
 
+import asyncpg
+
+from seebx.adapters.conversation_attachments import (
+    bind_attachments_to_message,
+    fetch_attachment_bindings,
+)
 from seebx.adapters.thread_selection import promote_resume_thread_v1
 from seebx.adapters.transcript_integrity import (
     insert_assistant_transcript_attestation_v1,
@@ -21,6 +29,222 @@ from seebx.contracts.transcript_integrity import (
     ATTESTED_ASSISTANT_SOURCE,
     text_sha256,
 )
+
+
+FETCH_USER_TRANSCRIPT_THREAD_SQL = (
+    "SELECT owner_user_id FROM threads WHERE id=$1 AND owner_user_id=$2"
+)
+CREATE_USER_TRANSCRIPT_THREAD_SQL = (
+    "INSERT INTO threads(id, owner_user_id, user_id, title) "
+    "VALUES($1, $2, $3, $4)"
+)
+FETCH_ATTACHMENT_REPLAY_SQL = """
+SELECT id FROM public.chat_log
+WHERE id=$1 AND owner_user_id=$2 AND thread_id=$3
+  AND source=$4 AND text=$5
+"""
+FETCH_EXACT_SUBMISSION_SQL = """
+SELECT id FROM public.chat_log
+WHERE id=$1 AND owner_user_id=$2
+  AND thread_id IS NOT DISTINCT FROM $3
+  AND source=$4 AND text=$5
+"""
+FETCH_CONFLICTING_SUBMISSION_SQL = """
+SELECT id FROM public.chat_log
+WHERE id=$1 AND owner_user_id=$2
+"""
+INSERT_USER_TRANSCRIPT_SQL = (
+    "INSERT INTO chat_log("
+    "id,owner_user_id,user_id,user_id_alias,source,text,tags,thread_id,"
+    "vantage_id,request_id,created_at"
+    ") VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)"
+)
+TOUCH_USER_TRANSCRIPT_THREAD_SQL = (
+    "UPDATE threads SET updated_at=now() WHERE id=$1 AND owner_user_id=$2"
+)
+
+
+@dataclass(frozen=True)
+class UserTranscriptPersistenceResult:
+    message_id: UUID
+    replayed: bool
+
+
+class UserTranscriptPersistenceError(RuntimeError):
+    def __init__(self, code: str, *, conflict: bool) -> None:
+        super().__init__(code)
+        self.code = code
+        self.conflict = conflict
+
+
+async def persist_user_transcript(
+    conn: Any,
+    *,
+    owner_user_id: UUID,
+    user_id_alias: str,
+    source: str,
+    text: str,
+    tags: list[Any],
+    thread_id: UUID | None,
+    vantage_id: str,
+    request_id: str,
+    message_id: UUID,
+    submission_id: UUID | None,
+    created_at: datetime,
+    attachment_ids: Sequence[UUID],
+) -> UserTranscriptPersistenceResult:
+    """Persist one user transcript row and attachment bindings atomically."""
+
+    owner = str(owner_user_id)
+    effective_thread_id = thread_id
+    transaction: Any | None = None
+    try:
+        transaction = conn.transaction()
+        await transaction.start()
+
+        if effective_thread_id:
+            thread_row = await conn.fetchrow(
+                FETCH_USER_TRANSCRIPT_THREAD_SQL,
+                effective_thread_id,
+                owner,
+            )
+            if thread_row is None:
+                await conn.execute(
+                    CREATE_USER_TRANSCRIPT_THREAD_SQL,
+                    effective_thread_id,
+                    owner,
+                    owner,
+                    "New chat",
+                )
+            elif str(thread_row["owner_user_id"] or "") != owner:
+                effective_thread_id = None
+
+        if attachment_ids:
+            attachment_rows = await fetch_attachment_bindings(
+                conn,
+                owner_user_id=owner_user_id,
+                thread_id=effective_thread_id,
+                attachment_ids=attachment_ids,
+            )
+            if (
+                len(attachment_rows) != len(attachment_ids)
+                or any(
+                    row["status"] != "ready" or row["deleted_at"] is not None
+                    for row in attachment_rows
+                )
+            ):
+                raise ValueError("attachment_binding_failed")
+            bound_message_ids = {row["message_id"] for row in attachment_rows}
+            if None not in bound_message_ids:
+                if len(bound_message_ids) != 1:
+                    raise ValueError("attachment_binding_failed")
+                existing_message_id = next(iter(bound_message_ids))
+                existing_message = await conn.fetchrow(
+                    FETCH_ATTACHMENT_REPLAY_SQL,
+                    existing_message_id,
+                    owner_user_id,
+                    effective_thread_id,
+                    source,
+                    text,
+                )
+                if existing_message is None:
+                    raise ValueError("attachment_binding_failed")
+                await transaction.commit()
+                transaction = None
+                return UserTranscriptPersistenceResult(
+                    message_id=UUID(str(existing_message["id"])),
+                    replayed=True,
+                )
+            if bound_message_ids != {None}:
+                raise ValueError("attachment_binding_failed")
+
+        if submission_id is not None:
+            existing_submission = await conn.fetchrow(
+                FETCH_EXACT_SUBMISSION_SQL,
+                submission_id,
+                owner_user_id,
+                effective_thread_id,
+                source,
+                text,
+            )
+            if existing_submission is not None:
+                await transaction.commit()
+                transaction = None
+                return UserTranscriptPersistenceResult(
+                    message_id=UUID(str(existing_submission["id"])),
+                    replayed=True,
+                )
+            conflicting_submission = await conn.fetchrow(
+                FETCH_CONFLICTING_SUBMISSION_SQL,
+                submission_id,
+                owner_user_id,
+            )
+            if conflicting_submission is not None:
+                raise ValueError("submission_id_conflict")
+
+        await conn.execute(
+            INSERT_USER_TRANSCRIPT_SQL,
+            str(message_id),
+            owner,
+            owner,
+            user_id_alias,
+            source,
+            text,
+            tags,
+            effective_thread_id,
+            vantage_id,
+            request_id,
+            created_at,
+        )
+
+        if attachment_ids:
+            bound_rows = await bind_attachments_to_message(
+                conn,
+                message_id=message_id,
+                owner_user_id=owner_user_id,
+                thread_id=effective_thread_id,
+                attachment_ids=attachment_ids,
+            )
+            if len(bound_rows) != len(attachment_ids):
+                raise ValueError("attachment_binding_failed")
+
+        if effective_thread_id:
+            await conn.execute(
+                TOUCH_USER_TRANSCRIPT_THREAD_SQL,
+                effective_thread_id,
+                owner,
+            )
+
+        await transaction.commit()
+        transaction = None
+        return UserTranscriptPersistenceResult(
+            message_id=message_id,
+            replayed=False,
+        )
+    except Exception as exc:
+        if transaction is not None:
+            try:
+                await transaction.rollback()
+            except Exception:
+                pass
+        conflict = str(exc) in {
+            "attachment_binding_failed",
+            "submission_id_conflict",
+        } or (
+            submission_id is not None
+            and isinstance(exc, asyncpg.UniqueViolationError)
+        )
+        detail = (
+            "attachment_binding_failed"
+            if str(exc) == "attachment_binding_failed"
+            else "submission_conflict"
+            if conflict
+            else "transcript_write_failed"
+        )
+        raise UserTranscriptPersistenceError(
+            detail,
+            conflict=conflict,
+        ) from exc
 
 
 async def persist_conversation_response(
@@ -228,6 +452,9 @@ async def persist_search_exchange(
 __all__ = [
     "ConversationPersistenceError",
     "SearchTranscriptPersistenceError",
+    "UserTranscriptPersistenceError",
+    "UserTranscriptPersistenceResult",
     "persist_conversation_response",
     "persist_search_exchange",
+    "persist_user_transcript",
 ]

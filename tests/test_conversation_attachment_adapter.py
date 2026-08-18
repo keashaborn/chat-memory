@@ -120,9 +120,16 @@ class ConversationAttachmentAdapterTests(unittest.IsolatedAsyncioTestCase):
             '@app.post("/threads/new")', 1
         )[0]
 
+        adapter_source = (
+            root / "seebx/adapters/conversation_persistence.py"
+        ).read_text(encoding="utf-8")
+
         self.assertNotIn("public.chat_attachments", log_route)
-        self.assertIn("fetch_attachment_bindings(", log_route)
-        self.assertIn("bind_attachments_to_message(", log_route)
+        self.assertNotIn("fetch_attachment_bindings(", log_route)
+        self.assertNotIn("bind_attachments_to_message(", log_route)
+        self.assertIn("persist_user_transcript(", log_route)
+        self.assertIn("fetch_attachment_bindings(", adapter_source)
+        self.assertIn("bind_attachments_to_message(", adapter_source)
 
     async def test_crud_store_owns_sql_actor_context_and_lifetime(self) -> None:
         records = tuple({"index": index} for index in range(5))
