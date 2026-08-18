@@ -3,6 +3,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 APP_SOURCE = (ROOT / "app.py").read_text(encoding="utf-8")
+ADAPTER_SOURCE = (
+    ROOT / "seebx/adapters/conversation_threads.py"
+).read_text(encoding="utf-8")
 MIGRATION = (
     ROOT / "ops/sql/20260724_thread_title_provenance.sql"
 ).read_text(encoding="utf-8")
@@ -19,7 +22,8 @@ def test_client_controlled_automatic_title_is_rejected():
 
 
 def test_manual_rename_sets_manual_provenance():
-    assert "SET title=$1, title_source='manual', updated_at=now()" in APP_SOURCE
+    assert "rename_thread_manual(" in APP_SOURCE
+    assert "SET title=$1, title_source='manual', updated_at=now()" in ADAPTER_SOURCE
 
 
 def test_migration_preserves_existing_titles_and_defaults_new_titles_to_automatic():

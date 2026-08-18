@@ -10,6 +10,9 @@ from rag_engine.thread_title_v1 import (
 
 ROOT = Path(__file__).resolve().parents[1]
 APP_SOURCE = (ROOT / "app.py").read_text(encoding="utf-8")
+ADAPTER_SOURCE = (
+    ROOT / "seebx/adapters/conversation_threads.py"
+).read_text(encoding="utf-8")
 MIGRATION = (
     ROOT / "ops/sql/20260724_thread_title_semantic_v1.sql"
 ).read_text(encoding="utf-8")
@@ -85,9 +88,11 @@ def test_invalid_or_generic_titles_do_not_freeze_the_placeholder():
 
 def test_backend_reads_canonical_transcript_and_atomically_freezes_title():
     assert '@app.post("/threads/{thread_id}/auto-title")' in APP_SOURCE
-    assert "FROM chat_log" in APP_SOURCE
-    assert "AND title_source='placeholder'" in APP_SOURCE
-    assert "SET title=$1, title_source='automatic'" in APP_SOURCE
+    assert "fetch_thread_title_transcript(" in APP_SOURCE
+    assert "update_thread_automatic_title(" in APP_SOURCE
+    assert "FROM chat_log" in ADAPTER_SOURCE
+    assert "AND title_source='placeholder'" in ADAPTER_SOURCE
+    assert "SET title=$1, title_source='automatic'" in ADAPTER_SOURCE
 
 
 def test_migration_adds_three_state_title_lifecycle():

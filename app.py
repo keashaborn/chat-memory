@@ -51,6 +51,16 @@ from seebx.adapters.conversation_attachments import (
     fetch_attachment_bindings,
 )
 from seebx.adapters.conversation_history import fetch_thread_message_rows
+from seebx.adapters.conversation_threads import (
+    archive_thread,
+    create_thread,
+    fetch_thread_title_state,
+    fetch_thread_title_transcript,
+    list_visible_threads,
+    rename_thread_manual,
+    set_thread_pinned,
+    update_thread_automatic_title,
+)
 
 
 class NewThreadReq(BaseModel):
@@ -1007,9 +1017,10 @@ async def threads_new(body: NewThreadReq, req: Request):
     try:
         await _set_connection_actor(conn, user_id)
         async with conn.transaction():
-            row = await conn.fetchrow(
-                "INSERT INTO threads(owner_user_id, user_id, title) VALUES ($1,$2,$3) RETURNING id, title, updated_at",
-                user_id, user_id, title
+            row = await create_thread(
+                conn,
+                owner_user_id=user_id,
+                title=title,
             )
             await select_active_thread_v1(
                 conn, owner_user_id=user_id, thread_id=row["id"]
@@ -1028,21 +1039,9 @@ async def threads_list(user_id: str, req: Request, vantage_id: str = "default"):
     conn = await asyncpg.connect(DSN)
     try:
         await _set_connection_actor(conn, user_id)
-        rows = await conn.fetch(
-            """
-            SELECT id,
-                   title,
-                   updated_at,
-                   pinned_at,
-                   pinned_at IS NOT NULL AS pinned
-            FROM threads
-            WHERE owner_user_id=$1
-              AND archived=false
-            ORDER BY (pinned_at IS NOT NULL) DESC,
-                     pinned_at DESC NULLS LAST,
-                     updated_at DESC
-            """,
-            user_id
+        rows = await list_visible_threads(
+            conn,
+            owner_user_id=user_id,
         )
         return [
             {
@@ -1317,14 +1316,11 @@ async def threads_rename(thread_id: str, body: RenameThreadReq, req: Request):
                 status_code=409,
             )
 
-        updated = await conn.fetchrow(
-            """
-            UPDATE threads
-            SET title=$1, title_source='manual', updated_at=now()
-            WHERE owner_user_id=$2 AND id=$3
-            RETURNING title, title_source
-            """,
-            title, _actor_uid, tid
+        updated = await rename_thread_manual(
+            conn,
+            owner_user_id=_actor_uid,
+            thread_id=tid,
+            title=title,
         )
         if not updated:
             return JSONResponse(
@@ -1358,16 +1354,11 @@ async def threads_pin(thread_id: str, body: PinThreadReq, req: Request):
     conn = await asyncpg.connect(DSN)
     try:
         await _set_connection_actor(conn, actor_uid)
-        updated = await conn.fetchrow(
-            """
-            UPDATE threads
-            SET pinned_at = CASE WHEN $1 THEN now() ELSE NULL END
-            WHERE owner_user_id=$2 AND id=$3
-            RETURNING pinned_at
-            """,
-            body.pinned,
-            actor_uid,
-            tid,
+        updated = await set_thread_pinned(
+            conn,
+            owner_user_id=actor_uid,
+            thread_id=tid,
+            pinned=body.pinned,
         )
         if not updated:
             return JSONResponse(
@@ -1402,14 +1393,10 @@ async def threads_auto_title(thread_id: str, req: Request):
     conn = await asyncpg.connect(DSN)
     try:
         await _set_connection_actor(conn, actor_uid)
-        current = await conn.fetchrow(
-            """
-            SELECT title, title_source
-            FROM threads
-            WHERE owner_user_id=$1 AND id=$2
-            """,
-            actor_uid,
-            tid,
+        current = await fetch_thread_title_state(
+            conn,
+            owner_user_id=actor_uid,
+            thread_id=tid,
         )
         if not current:
             return JSONResponse(
@@ -1426,16 +1413,10 @@ async def threads_auto_title(thread_id: str, req: Request):
                 "skipped": f"{current['title_source']}_title_preserved",
             }
 
-        transcript = await conn.fetch(
-            """
-            SELECT source, text, created_at, id
-            FROM chat_log
-            WHERE owner_user_id=$1 AND thread_id=$2
-            ORDER BY created_at ASC, id ASC
-            LIMIT 40
-            """,
-            actor_uid,
-            tid,
+        transcript = await fetch_thread_title_transcript(
+            conn,
+            owner_user_id=actor_uid,
+            thread_id=tid,
         )
     finally:
         await conn.close()
@@ -1495,18 +1476,11 @@ async def threads_auto_title(thread_id: str, req: Request):
     conn = await asyncpg.connect(DSN)
     try:
         await _set_connection_actor(conn, actor_uid)
-        updated = await conn.fetchrow(
-            """
-            UPDATE threads
-            SET title=$1, title_source='automatic', updated_at=now()
-            WHERE owner_user_id=$2
-              AND id=$3
-              AND title_source='placeholder'
-            RETURNING title, title_source
-            """,
-            title,
-            actor_uid,
-            tid,
+        updated = await update_thread_automatic_title(
+            conn,
+            owner_user_id=actor_uid,
+            thread_id=tid,
+            title=title,
         )
         if updated:
             return {
@@ -1517,14 +1491,10 @@ async def threads_auto_title(thread_id: str, req: Request):
                 "updated": True,
             }
 
-        current = await conn.fetchrow(
-            """
-            SELECT title, title_source
-            FROM threads
-            WHERE owner_user_id=$1 AND id=$2
-            """,
-            actor_uid,
-            tid,
+        current = await fetch_thread_title_state(
+            conn,
+            owner_user_id=actor_uid,
+            thread_id=tid,
         )
         if not current:
             return JSONResponse(
@@ -1556,9 +1526,10 @@ async def threads_archive(thread_id: str, req: Request):
     conn = await asyncpg.connect(DSN)
     try:
         await _set_connection_actor(conn, _actor_uid)
-        await conn.execute(
-            "UPDATE threads SET archived=true, updated_at=now() WHERE owner_user_id=$1 AND id=$2",
-            _actor_uid, tid
+        await archive_thread(
+            conn,
+            owner_user_id=_actor_uid,
+            thread_id=tid,
         )
         return {"status": "ok", "thread_id": str(tid), "archived": True}
     finally:
