@@ -490,6 +490,9 @@ class ConversationCompositionTests(unittest.IsolatedAsyncioTestCase):
             root / "seebx/capabilities/conversation/lifeswitch_plan.py",
             root / "seebx/capabilities/conversation/lifeswitch_answer_binding.py",
             root / "seebx/capabilities/conversation/lifeswitch_provenance.py",
+            root / "seebx/capabilities/conversation/lifeswitch_context.py",
+            root / "seebx/adapters/lifeswitch_context_postgres.py",
+            root / "seebx/adapters/lifeswitch_context_runtime.py",
         )
         legacy = (
             root / "rag_engine/response_composition_root_v0_2.py",
@@ -502,6 +505,8 @@ class ConversationCompositionTests(unittest.IsolatedAsyncioTestCase):
             root / "rag_engine/response_lifeswitch_integration_v2.py",
             root / "rag_engine/lifeswitch_answer_binding_v1.py",
             root / "rag_engine/lifeswitch_answer_provenance_receipt_v1.py",
+            root / "rag_engine/lifeswitch_response_context_provider_v1.py",
+            root / "rag_engine/lifeswitch_chat_runtime_v1.py",
         )
         for candidate in canonical:
             self.assertTrue(candidate.is_file(), candidate)

@@ -12,7 +12,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from seebx.capabilities.conversation.lifeswitch_answer_binding import FinalAnswerLifeSwitchBindingV1
-from rag_engine.lifeswitch_response_context_provider_v1 import LifeSwitchPreparedContextV1
+from seebx.capabilities.conversation.lifeswitch_context import LifeSwitchPreparedContextV1
 
 
 LIFESWITCH_PROVENANCE_SOURCE_REF_V1 = "lifeswitch_provenance_source_ref_v1"

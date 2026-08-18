@@ -7,7 +7,7 @@ from uuid import UUID
 
 from pydantic import ValidationError
 
-from rag_engine.lifeswitch_chat_runtime_v1 import (
+from seebx.adapters.lifeswitch_context_runtime import (
     LazyPostgresRestrictedLifeSwitchReadSessionV1,
     LifeSwitchChatPoolManagerV1,
     LifeSwitchChatRuntimeSettingsV1,
@@ -217,7 +217,7 @@ class LifeSwitchChatRuntimeV1Tests(unittest.IsolatedAsyncioTestCase):
         prepared = object()
 
         with patch(
-            "rag_engine.lifeswitch_chat_runtime_v1."
+            "seebx.adapters.lifeswitch_context_runtime."
             "PostgresRestrictedLifeSwitchReadSessionV1"
         ) as session_type:
             session_type.return_value.select = AsyncMock(return_value=prepared)
@@ -244,7 +244,7 @@ class LifeSwitchChatRuntimeV1Tests(unittest.IsolatedAsyncioTestCase):
         manager = FakePoolManager(settings)
 
         with patch(
-            "rag_engine.lifeswitch_chat_runtime_v1."
+            "seebx.adapters.lifeswitch_context_runtime."
             "PostgresRestrictedLifeSwitchReadSessionV1"
         ) as session_type:
             session_type.return_value.select = AsyncMock(return_value=object())

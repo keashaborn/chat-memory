@@ -8,7 +8,7 @@ from seebx.capabilities.conversation.lifeswitch_answer_binding import (
     FinalAnswerLifeSwitchBindingV1,
 )
 from rag_engine.lifeswitch_data_plan_v1 import create_lifeswitch_data_plan_v1
-from rag_engine.lifeswitch_response_context_provider_v1 import (
+from seebx.capabilities.conversation.lifeswitch_context import (
     LifeSwitchPreparedContextV1,
 )
 from seebx.capabilities.conversation.lifeswitch_plan import (

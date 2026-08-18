@@ -14,7 +14,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from rag_engine.lifeswitch_response_context_provider_v1 import (
+from seebx.capabilities.conversation.lifeswitch_context import (
     LifeSwitchPreparedContextV1,
 )
 from seebx.capabilities.conversation.memory_contracts import (

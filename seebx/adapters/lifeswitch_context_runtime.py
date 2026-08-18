@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Server-owned activation and dedicated pool for LifeSwitch chat context."""
+"""Runtime settings and dedicated pool for LifeSwitch context reads."""
 
 import asyncio
 import logging
@@ -19,9 +19,11 @@ from rag_engine.lifeswitch_coaching_self_shadow_observer_v2 import (
 from rag_engine.lifeswitch_coaching_self_shadow_runner_v2 import (
     SelfShadowInspectionV1,
 )
-from rag_engine.lifeswitch_response_context_provider_v1 import (
-    LifeSwitchPreparedContextV1,
+from seebx.adapters.lifeswitch_context_postgres import (
     PostgresRestrictedLifeSwitchReadSessionV1,
+)
+from seebx.capabilities.conversation.lifeswitch_context import (
+    LifeSwitchPreparedContextV1,
 )
 from seebx.capabilities.conversation.snapshot import ConversationSnapshotV1
 

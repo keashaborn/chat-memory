@@ -31,12 +31,12 @@ from seebx.capabilities.conversation.memory_contracts import (
 from seebx.capabilities.conversation.persistence import (
     persist_conversation_response,
 )
-from rag_engine.lifeswitch_chat_runtime_v1 import (
+from seebx.adapters.lifeswitch_context_runtime import (
     LazyPostgresRestrictedLifeSwitchReadSessionV1,
     LifeSwitchChatPoolManagerV1,
     LifeSwitchChatRuntimeSettingsV1,
 )
-from rag_engine.lifeswitch_response_context_provider_v1 import (
+from seebx.capabilities.conversation.lifeswitch_context import (
     LifeSwitchResponseContextProviderV1,
 )
 from rag_engine.lifeswitch_prior_answer_provenance_runtime_v1 import (

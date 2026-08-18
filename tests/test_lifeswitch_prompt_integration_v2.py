@@ -9,7 +9,7 @@ from rag_engine.lifeswitch_prompt_integration_v2 import (
     ContextKindV3,
     PromptReferenceContextBlockV3,
 )
-from rag_engine.lifeswitch_response_context_provider_v1 import (
+from seebx.capabilities.conversation.lifeswitch_context import (
     LifeSwitchPreparedContextV1,
 )
 from seebx.capabilities.conversation.lifeswitch_plan import (

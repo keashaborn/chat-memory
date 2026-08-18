@@ -68,7 +68,7 @@ def selected_context(base_plan, message: str):
         sections=(section,),
         generated_at=NOW,
     )
-    from rag_engine.lifeswitch_response_context_provider_v1 import (
+    from seebx.capabilities.conversation.lifeswitch_context import (
         LifeSwitchPreparedContextV1,
     )
 

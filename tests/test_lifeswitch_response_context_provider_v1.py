@@ -12,10 +12,12 @@ from rag_engine.lifeswitch_domain_context_v1 import (
     TrustedLifeSwitchContextRequestV1,
     create_lifeswitch_context_envelope_v1,
 )
-from rag_engine.lifeswitch_response_context_provider_v1 import (
+from seebx.adapters.lifeswitch_context_postgres import (
+    PostgresRestrictedLifeSwitchReadSessionV1,
+)
+from seebx.capabilities.conversation.lifeswitch_context import (
     LifeSwitchPreparedContextV1,
     LifeSwitchResponseContextProviderV1,
-    PostgresRestrictedLifeSwitchReadSessionV1,
 )
 from seebx.capabilities.conversation.snapshot import (
     create_current_only_conversation_snapshot_v1,
@@ -296,7 +298,7 @@ class LifeSwitchResponseContextProviderV1Tests(unittest.IsolatedAsyncioTestCase)
             "_owner_timezone",
             new=AsyncMock(return_value=("America/Chicago", "account_timezone")),
         ), patch(
-            "rag_engine.lifeswitch_response_context_provider_v1."
+            "seebx.adapters.lifeswitch_context_postgres."
             "LifeSwitchDomainContextProviderV1.select",
             new=AsyncMock(return_value=envelope),
         ):
@@ -340,11 +342,11 @@ class LifeSwitchResponseContextProviderV1Tests(unittest.IsolatedAsyncioTestCase)
             "_owner_timezone",
             new=AsyncMock(return_value=("America/Chicago", "account_timezone")),
         ), patch(
-            "rag_engine.lifeswitch_response_context_provider_v1."
+            "seebx.adapters.lifeswitch_context_postgres."
             "LifeSwitchDomainContextProviderV1.select",
             new=AsyncMock(return_value=envelope),
         ), self.assertLogs(
-            "rag_engine.lifeswitch_response_context_provider_v1",
+            "seebx.adapters.lifeswitch_context_postgres",
             level="WARNING",
         ) as captured:
             result = await session.select(
@@ -359,7 +361,7 @@ class LifeSwitchResponseContextProviderV1Tests(unittest.IsolatedAsyncioTestCase)
         self.assertEqual(
             captured.output,
             [
-                "WARNING:rag_engine.lifeswitch_response_context_provider_v1:"
+                "WARNING:seebx.adapters.lifeswitch_context_postgres:"
                 "LifeSwitch V2 self shadow observation unavailable"
             ],
         )

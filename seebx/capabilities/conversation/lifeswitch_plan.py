@@ -15,7 +15,7 @@ from rag_engine.lifeswitch_prompt_integration_v2 import (
     LifeSwitchPromptAugmentationRequestV2,
     assemble_prompt_with_lifeswitch_v2,
 )
-from rag_engine.lifeswitch_response_context_provider_v1 import (
+from seebx.capabilities.conversation.lifeswitch_context import (
     LifeSwitchPreparedContextV1,
 )
 from rag_engine.prior_lifeswitch_provenance_v1 import (
