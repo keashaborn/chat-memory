@@ -167,7 +167,7 @@ from seebx.capabilities.voice.synthesis import router as voice_tts_router
 from seebx.capabilities.voice.transcription import (
     router as voice_transcription_router,
 )
-from rag_engine.voice_realtime_preview_router import (
+from seebx.capabilities.voice.realtime_preview import (
     router as voice_realtime_preview_router,
 )
 from seebx.capabilities.voice.session import router as voice_session_router

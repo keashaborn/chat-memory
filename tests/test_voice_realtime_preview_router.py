@@ -4,13 +4,15 @@ import json
 import os
 import unittest
 import uuid
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from rag_engine import voice_realtime_preview_router as preview
+from seebx.adapters import openai_realtime
+from seebx.capabilities.voice import realtime_preview as preview
 from seebx.capabilities.voice.realtime_session import (
     RealtimePreviewSessionRegistry,
 )
@@ -43,6 +45,7 @@ class FakeResponse:
 class FakeAsyncClient:
     response = FakeResponse()
     calls: list[dict[str, Any]] = []
+    post_error: Exception | None = None
 
     def __init__(self, **kwargs: Any) -> None:
         self.kwargs = kwargs
@@ -54,6 +57,8 @@ class FakeAsyncClient:
         return None
 
     async def post(self, url: str, **kwargs: Any) -> FakeResponse:
+        if self.__class__.post_error is not None:
+            raise self.__class__.post_error
         self.__class__.calls.append({"url": url, **kwargs})
         return self.__class__.response
 
@@ -84,6 +89,7 @@ class VoiceRealtimePreviewRouterTests(unittest.TestCase):
     def setUp(self) -> None:
         FakeAsyncClient.calls = []
         FakeAsyncClient.response = FakeResponse()
+        FakeAsyncClient.post_error = None
         FakeSidebandController.instances = []
         app = FastAPI()
         app.include_router(preview.router)
@@ -171,7 +177,11 @@ class VoiceRealtimePreviewRouterTests(unittest.TestCase):
                     "VS_SERVICE_TOKEN": "test-service-token",
                 },
             ),
-            patch.object(preview.httpx, "AsyncClient", FakeAsyncClient),
+            patch.object(
+                openai_realtime.httpx,
+                "AsyncClient",
+                FakeAsyncClient,
+            ),
         ):
             response = self.client.post(
                 "/voice/realtime-preview/call",
@@ -316,7 +326,11 @@ class VoiceRealtimePreviewRouterTests(unittest.TestCase):
                     "VS_SERVICE_TOKEN": "test-service-token",
                 },
             ),
-            patch.object(preview.httpx, "AsyncClient", FakeAsyncClient),
+            patch.object(
+                openai_realtime.httpx,
+                "AsyncClient",
+                FakeAsyncClient,
+            ),
         ):
             response = self.client.post(
                 "/voice/realtime-preview/call",
@@ -330,6 +344,178 @@ class VoiceRealtimePreviewRouterTests(unittest.TestCase):
             response.json()["detail"]["error"],
             "openai_realtime_error",
         )
+
+    def test_canonical_capability_has_no_legacy_wrapper(self) -> None:
+        repository = Path(__file__).resolve().parents[1]
+        self.assertTrue(
+            (
+                repository
+                / "seebx/capabilities/voice/realtime_preview.py"
+            ).is_file()
+        )
+        self.assertFalse(
+            (
+                repository
+                / "rag_engine/voice_realtime_preview_router.py"
+            ).exists()
+        )
+
+    def test_provider_timeout_is_sanitized(self) -> None:
+        FakeAsyncClient.post_error = openai_realtime.httpx.ReadTimeout(
+            "private provider timeout"
+        )
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "OPENAI_API_KEY": "test-only-key",
+                    "VS_SERVICE_TOKEN": "test-service-token",
+                },
+            ),
+            patch.object(
+                openai_realtime.httpx,
+                "AsyncClient",
+                FakeAsyncClient,
+            ),
+        ):
+            response = self.client.post(
+                "/voice/realtime-preview/call",
+                headers=self._headers(),
+                content=OFFER_SDP,
+            )
+
+        self.assertEqual(response.status_code, 504)
+        self.assertEqual(
+            response.json()["detail"],
+            {"error": "openai_realtime_timeout"},
+        )
+        self.assertNotIn("private provider timeout", response.text)
+
+    def test_provider_unavailable_is_sanitized(self) -> None:
+        FakeAsyncClient.post_error = RuntimeError("private network detail")
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "OPENAI_API_KEY": "test-only-key",
+                    "VS_SERVICE_TOKEN": "test-service-token",
+                },
+            ),
+            patch.object(
+                openai_realtime.httpx,
+                "AsyncClient",
+                FakeAsyncClient,
+            ),
+        ):
+            response = self.client.post(
+                "/voice/realtime-preview/call",
+                headers=self._headers(),
+                content=OFFER_SDP,
+            )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(
+            response.json()["detail"],
+            {"error": "openai_realtime_unreachable"},
+        )
+        self.assertNotIn("private network detail", response.text)
+    def test_missing_provider_key_preserves_public_error(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "OPENAI_API_KEY": "",
+                "VS_SERVICE_TOKEN": "test-service-token",
+            },
+        ):
+            response = self.client.post(
+                "/voice/realtime-preview/call",
+                headers=self._headers(),
+                content=OFFER_SDP,
+            )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.json()["detail"], "missing_openai_key")
+        self.assertEqual(FakeAsyncClient.calls, [])
+
+    def test_missing_service_token_preserves_public_error(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "OPENAI_API_KEY": "test-only-key",
+                "VS_SERVICE_TOKEN": "",
+            },
+        ):
+            response = self.client.post(
+                "/voice/realtime-preview/call",
+                headers=self._headers(),
+                content=OFFER_SDP,
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["detail"], "missing_service_token")
+        self.assertEqual(FakeAsyncClient.calls, [])
+
+    def test_invalid_provider_answer_is_sanitized(self) -> None:
+        FakeAsyncClient.response = FakeResponse(
+            text="private invalid provider answer",
+        )
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "OPENAI_API_KEY": "test-only-key",
+                    "VS_SERVICE_TOKEN": "test-service-token",
+                },
+            ),
+            patch.object(
+                openai_realtime.httpx,
+                "AsyncClient",
+                FakeAsyncClient,
+            ),
+        ):
+            response = self.client.post(
+                "/voice/realtime-preview/call",
+                headers=self._headers(),
+                content=OFFER_SDP,
+            )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(
+            response.json()["detail"],
+            {"error": "invalid_openai_realtime_sdp"},
+        )
+        self.assertNotIn("private invalid provider answer", response.text)
+
+    def test_invalid_provider_call_id_is_sanitized(self) -> None:
+        FakeAsyncClient.response = FakeResponse(
+            location="/v1/realtime/calls/private-invalid-call-id",
+        )
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "OPENAI_API_KEY": "test-only-key",
+                    "VS_SERVICE_TOKEN": "test-service-token",
+                },
+            ),
+            patch.object(
+                openai_realtime.httpx,
+                "AsyncClient",
+                FakeAsyncClient,
+            ),
+        ):
+            response = self.client.post(
+                "/voice/realtime-preview/call",
+                headers=self._headers(),
+                content=OFFER_SDP,
+            )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(
+            response.json()["detail"],
+            {"error": "invalid_openai_realtime_call_id"},
+        )
+        self.assertNotIn("private-invalid-call-id", response.text)
 
 
 if __name__ == "__main__":

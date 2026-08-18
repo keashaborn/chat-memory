@@ -1,17 +1,23 @@
 from __future__ import annotations
 
-import json
-import os
-import re
 import uuid
 from typing import Any
 
-import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
 from seebx.core.ownership import require_actor_matches_owner
-from seebx.adapters.openai_chat import safety_identifier_v1
+from seebx.adapters.openai_realtime import (
+    OpenAIRealtimeProtocolError,
+    OpenAIRealtimeTimeoutError,
+    OpenAIRealtimeUnavailableError,
+    OpenAIRealtimeUpstreamError,
+    create_transcription_call,
+)
+from seebx.adapters.voice_realtime_config import (
+    VoiceRealtimeConfigurationError,
+    load_voice_realtime_secrets,
+)
 from seebx.capabilities.voice.realtime_session import (
     RealtimePreviewSessionRegistry,
 )
@@ -21,7 +27,6 @@ from rag_engine.voice_realtime_sideband_controller import (
 )
 from seebx.core.voice_identity import require_active_voice_session
 from seebx.contracts.voice_language import (
-    AUTO_VOICE_LANGUAGE,
     voice_language_from_request,
 )
 
@@ -30,15 +35,7 @@ router = APIRouter()
 preview_sessions = RealtimePreviewSessionRegistry()
 sideband_controller_factory = RealtimePreviewSidebandController
 
-OPENAI_REALTIME_CALLS_URL = (
-    os.getenv("OPENAI_REALTIME_CALLS_URL")
-    or "https://api.openai.com/v1/realtime/calls"
-).strip()
-REALTIME_TRANSCRIPTION_MODEL = "gpt-realtime-whisper"
-REALTIME_TRANSCRIPTION_DELAY = "low"
 MAX_SDP_BYTES = 128 * 1024
-MAX_SDP_RESPONSE_BYTES = 256 * 1024
-_CALL_ID_RE = re.compile(r"^rtc_[A-Za-z0-9_-]{1,120}$")
 NO_STORE_HEADERS = {
     "cache-control": "private, no-store, max-age=0, must-revalidate",
     "pragma": "no-cache",
@@ -88,35 +85,6 @@ def _public_upstream_status(status_code: int) -> int:
     return 502
 
 
-def _call_id_from_location(raw: str | None) -> str:
-    location = str(raw or "").strip()
-    call_id = location.rstrip("/").rsplit("/", 1)[-1]
-    if not _CALL_ID_RE.fullmatch(call_id):
-        raise HTTPException(
-            status_code=502,
-            detail={"error": "invalid_openai_realtime_call_id"},
-        )
-    return call_id
-
-
-def _transcription_session_config(language: str) -> dict[str, Any]:
-    transcription: dict[str, Any] = {
-        "model": REALTIME_TRANSCRIPTION_MODEL,
-        "delay": REALTIME_TRANSCRIPTION_DELAY,
-    }
-    if language != AUTO_VOICE_LANGUAGE:
-        transcription["language"] = language
-    return {
-        "type": "transcription",
-        "audio": {
-            "input": {
-                "transcription": transcription,
-                "turn_detection": None,
-            },
-        },
-    }
-
-
 @router.post("/voice/realtime-preview/call")
 async def create_realtime_preview_call(req: Request):
     owner_user_id = _owner_from_request(req)
@@ -151,85 +119,60 @@ async def create_realtime_preview_call(req: Request):
     if not offer_sdp.strip().startswith("v=0"):
         raise HTTPException(status_code=400, detail={"error": "invalid_sdp"})
 
-    api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
-    if not api_key:
-        raise HTTPException(status_code=500, detail="missing_openai_key")
-    service_token = (os.getenv("VS_SERVICE_TOKEN") or "").strip()
-    if not service_token:
-        raise HTTPException(status_code=503, detail="missing_service_token")
-
-    session_config = _transcription_session_config(language)
     try:
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(15.0, connect=10.0),
-        ) as client:
-            upstream = await client.post(
-                OPENAI_REALTIME_CALLS_URL,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "OpenAI-Safety-Identifier": safety_identifier_v1(
-                        owner_user_id
-                    ),
-                },
-                files={
-                    "sdp": (None, offer_sdp, "application/sdp"),
-                    "session": (
-                        None,
-                        json.dumps(session_config, separators=(",", ":")),
-                        "application/json",
-                    ),
-                },
-            )
-    except httpx.TimeoutException as exc:
+        secrets = load_voice_realtime_secrets()
+    except VoiceRealtimeConfigurationError as exc:
+        raise HTTPException(
+            status_code=(
+                500 if exc.code == "missing_openai_key" else 503
+            ),
+            detail=exc.code,
+        ) from exc
+
+    try:
+        provider_call = await create_transcription_call(
+            owner_user_id=owner_user_id,
+            offer_sdp=offer_sdp,
+            language=language,
+            api_key=secrets.openai_api_key,
+        )
+    except OpenAIRealtimeTimeoutError as exc:
         raise HTTPException(
             status_code=504,
             detail={"error": "openai_realtime_timeout"},
         ) from exc
-    except Exception as exc:
+    except OpenAIRealtimeUnavailableError as exc:
         raise HTTPException(
             status_code=502,
             detail={"error": "openai_realtime_unreachable"},
         ) from exc
-
-    provider_request_id = (
-        upstream.headers.get("x-request-id")
-        or upstream.headers.get("openai-request-id")
-    )
-    if upstream.status_code >= 400:
+    except OpenAIRealtimeUpstreamError as exc:
         raise HTTPException(
-            status_code=_public_upstream_status(upstream.status_code),
+            status_code=_public_upstream_status(exc.status_code),
             detail={
                 "error": "openai_realtime_error",
-                "upstream_status": upstream.status_code,
-                "provider_request_id": provider_request_id,
+                "upstream_status": exc.status_code,
+                "provider_request_id": exc.provider_request_id,
             },
-        )
-
-    answer_sdp = upstream.text
-    if not answer_sdp.strip().startswith("v=0"):
+        ) from exc
+    except OpenAIRealtimeProtocolError as exc:
         raise HTTPException(
             status_code=502,
-            detail={"error": "invalid_openai_realtime_sdp"},
-        )
-    if len(answer_sdp.encode("utf-8")) > MAX_SDP_RESPONSE_BYTES:
-        raise HTTPException(
-            status_code=502,
-            detail={"error": "openai_realtime_sdp_too_large"},
-        )
+            detail={"error": exc.code},
+        ) from exc
 
-    call_id = _call_id_from_location(upstream.headers.get("location"))
     session = preview_sessions.register(
         owner_user_id=owner_user_id,
         voice_session_id=voice_session_id,
         thread_id=thread_id,
-        openai_call_id=call_id,
+        openai_call_id=provider_call.call_id,
         language=language,
     )
     try:
         controller = sideband_controller_factory(
             session=session,
-            api_key=api_key,
-            service_token=service_token,
+            api_key=secrets.openai_api_key,
+            service_token=secrets.service_token,
         )
         session.controller = controller
         controller.start()
@@ -245,7 +188,7 @@ async def create_realtime_preview_call(req: Request):
         ) from exc
 
     return Response(
-        content=answer_sdp,
+        content=provider_call.answer_sdp,
         media_type="application/sdp",
         headers={
             **NO_STORE_HEADERS,
