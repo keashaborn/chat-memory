@@ -1,44 +1,31 @@
 from __future__ import annotations
 
 import math
-import os
 from typing import Any
 
-import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from seebx.core.ownership import require_actor_matches_owner
-from seebx.adapters.openai_chat import safety_identifier_v1
+from seebx.adapters.openai_transcription import (
+    OpenAITranscriptionConfigurationError,
+    OpenAITranscriptionInvalidResponseError,
+    OpenAITranscriptionTimeoutError,
+    OpenAITranscriptionUnavailableError,
+    transcribe_audio_with_openai,
+)
 from seebx.core.voice_observability import (
     voice_turn_id_from_request,
     voice_turn_response_headers,
 )
 from seebx.core.voice_identity import require_active_voice_session
 from seebx.contracts.voice_language import (
-    AUTO_VOICE_LANGUAGE,
-    transcription_prompt,
     voice_language_from_request,
 )
 
 
 router = APIRouter()
 
-OPENAI_TRANSCRIPTION_URL = (
-    os.getenv("OPENAI_TRANSCRIPTION_URL")
-    or "https://api.openai.com/v1/audio/transcriptions"
-).strip()
-
-ALLOWED_TRANSCRIPTION_MODELS = {
-    "gpt-4o-transcribe",
-    "gpt-4o-mini-transcribe",
-}
-_configured_model = (os.getenv("OPENAI_TRANSCRIPTION_MODEL") or "").strip()
-DEFAULT_TRANSCRIPTION_MODEL = (
-    _configured_model
-    if _configured_model in ALLOWED_TRANSCRIPTION_MODELS
-    else "gpt-4o-transcribe"
-)
 MAX_AUDIO_BYTES = 8 * 1024 * 1024
 MAX_TRANSCRIPT_CHARACTERS = 32_000
 SUPPORTED_AUDIO_TYPES = {
@@ -131,64 +118,48 @@ async def transcribe_voice_audio(req: Request):
             },
         )
 
-    api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
-    if not api_key:
-        raise HTTPException(status_code=500, detail="missing_openai_key")
-
     try:
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(60.0, connect=10.0)
-        ) as client:
-            data = {
-                "model": DEFAULT_TRANSCRIPTION_MODEL,
-                "response_format": "json",
-                "temperature": "0",
-                "include[]": "logprobs",
-                "prompt": transcription_prompt(language),
-            }
-            if language != AUTO_VOICE_LANGUAGE:
-                data["language"] = language
-            upstream = await client.post(
-                OPENAI_TRANSCRIPTION_URL,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "OpenAI-Safety-Identifier": safety_identifier_v1(owner_user_id),
-                },
-                files={"file": (filename, raw, content_type)},
-                data=data,
-            )
-    except httpx.TimeoutException as exc:
+        upstream = await transcribe_audio_with_openai(
+            owner_user_id=owner_user_id,
+            filename=filename,
+            raw_audio=raw,
+            content_type=content_type,
+            language=language,
+        )
+    except OpenAITranscriptionConfigurationError:
+        raise HTTPException(status_code=500, detail="missing_openai_key")
+    except OpenAITranscriptionTimeoutError as exc:
         raise HTTPException(
             status_code=504,
             detail={"error": "openai_transcription_timeout"},
         ) from exc
-    except Exception as exc:
+    except OpenAITranscriptionUnavailableError as exc:
         raise HTTPException(
             status_code=502,
             detail={"error": "openai_transcription_unreachable"},
         ) from exc
+    except OpenAITranscriptionInvalidResponseError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={"error": "invalid_openai_transcription_response"},
+        ) from exc
 
-    provider_request_id = (
-        upstream.headers.get("x-request-id")
-        or upstream.headers.get("openai-request-id")
-    )
     if upstream.status_code >= 400:
         raise HTTPException(
             status_code=_public_upstream_status(upstream.status_code),
             detail={
                 "error": "openai_transcription_error",
                 "upstream_status": upstream.status_code,
-                "provider_request_id": provider_request_id,
+                "provider_request_id": upstream.provider_request_id,
             },
         )
 
-    try:
-        payload = upstream.json()
-    except Exception as exc:
+    payload = upstream.payload
+    if payload is None:
         raise HTTPException(
             status_code=502,
             detail={"error": "invalid_openai_transcription_response"},
-        ) from exc
+        )
 
     transcript = str(payload.get("text") or "").strip()
     if not transcript:
@@ -201,10 +172,10 @@ async def transcribe_voice_audio(req: Request):
         {
             "transcript": transcript,
             "provider": "openai",
-            "model": DEFAULT_TRANSCRIPTION_MODEL,
+            "model": upstream.model,
             "language": language,
             "confidence": confidence,
-            "provider_request_id": provider_request_id,
+            "provider_request_id": upstream.provider_request_id,
         },
         headers={
             "cache-control": "no-store",

@@ -18,10 +18,20 @@ class VoiceResilienceContractTests(unittest.TestCase):
         self.assertIn("response_generation_timeout", source)
 
     def test_transcription_timeout_is_publicly_sanitized(self) -> None:
-        source = (ROOT / "rag_engine/voice_transcription_router.py").read_text()
-        self.assertIn("except httpx.TimeoutException", source)
-        self.assertIn("openai_transcription_timeout", source)
-        self.assertNotIn("str(exc)", source)
+        capability_source = (
+            ROOT / "seebx/capabilities/voice/transcription.py"
+        ).read_text()
+        adapter_source = (
+            ROOT / "seebx/adapters/openai_transcription.py"
+        ).read_text()
+        self.assertIn(
+            "except OpenAITranscriptionTimeoutError",
+            capability_source,
+        )
+        self.assertIn("openai_transcription_timeout", capability_source)
+        self.assertIn("except httpx.TimeoutException", adapter_source)
+        self.assertNotIn("str(exc)", capability_source)
+        self.assertNotIn("str(exc)", adapter_source)
 
     def test_tts_timeout_is_publicly_sanitized(self) -> None:
         source = (ROOT / "rag_engine/voice_tts_router.py").read_text()

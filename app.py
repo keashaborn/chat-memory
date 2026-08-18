@@ -164,7 +164,9 @@ class ChatAttachmentOwnerReq(BaseModel):
 
     user_id: CanonicalJsonUUID
 from rag_engine.voice_tts_router import router as voice_tts_router
-from rag_engine.voice_transcription_router import router as voice_transcription_router
+from seebx.capabilities.voice.transcription import (
+    router as voice_transcription_router,
+)
 from rag_engine.voice_realtime_preview_router import (
     router as voice_realtime_preview_router,
 )

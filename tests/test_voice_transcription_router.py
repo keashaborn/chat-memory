@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import unittest
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -9,7 +10,13 @@ from fastapi import FastAPI
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from rag_engine import voice_transcription_router as transcription
+from seebx.adapters import openai_transcription
+from seebx.adapters.openai_transcription import (
+    OpenAITranscriptionConfigurationError,
+    OpenAITranscriptionTimeoutError,
+    OpenAITranscriptionUnavailableError,
+)
+from seebx.capabilities.voice import transcription
 
 
 ACTOR = "1240822d-ac9a-4096-95aa-e2b24d36ef50"
@@ -31,6 +38,11 @@ class FakeResponse:
 
     def json(self) -> dict[str, Any]:
         return self._payload
+
+
+class InvalidJSONResponse(FakeResponse):
+    def json(self) -> dict[str, Any]:
+        raise ValueError("invalid json")
 
 
 class FakeAsyncClient:
@@ -112,7 +124,11 @@ class VoiceTranscriptionRouterTests(unittest.TestCase):
         )
         with (
             patch.dict(os.environ, {"OPENAI_API_KEY": "test-only-key"}),
-            patch.object(transcription.httpx, "AsyncClient", FakeAsyncClient),
+            patch.object(
+                openai_transcription.httpx,
+                "AsyncClient",
+                FakeAsyncClient,
+            ),
         ):
             response = self.client.post(
                 "/voice/openai/transcribe",
@@ -157,7 +173,11 @@ class VoiceTranscriptionRouterTests(unittest.TestCase):
         headers["x-vs-voice-language"] = "es"
         with (
             patch.dict(os.environ, {"OPENAI_API_KEY": "test-only-key"}),
-            patch.object(transcription.httpx, "AsyncClient", FakeAsyncClient),
+            patch.object(
+                openai_transcription.httpx,
+                "AsyncClient",
+                FakeAsyncClient,
+            ),
         ):
             response = self.client.post(
                 "/voice/openai/transcribe",
@@ -175,7 +195,11 @@ class VoiceTranscriptionRouterTests(unittest.TestCase):
         headers["x-vs-voice-language"] = "auto"
         with (
             patch.dict(os.environ, {"OPENAI_API_KEY": "test-only-key"}),
-            patch.object(transcription.httpx, "AsyncClient", FakeAsyncClient),
+            patch.object(
+                openai_transcription.httpx,
+                "AsyncClient",
+                FakeAsyncClient,
+            ),
         ):
             response = self.client.post(
                 "/voice/openai/transcribe",
@@ -227,6 +251,130 @@ class VoiceTranscriptionRouterTests(unittest.TestCase):
         self.assertNotIn(
             "/voice/openai/transcription-webrtc-offer",
             paths,
+        )
+
+    def test_canonical_capability_has_no_legacy_wrapper(self) -> None:
+        repository = Path(__file__).resolve().parents[1]
+        self.assertTrue(
+            (
+                repository / "seebx/capabilities/voice/transcription.py"
+            ).is_file()
+        )
+        self.assertFalse(
+            (repository / "rag_engine/voice_transcription_router.py").exists()
+        )
+
+    def test_missing_provider_key_preserves_public_error(self) -> None:
+        with patch.object(
+            transcription,
+            "transcribe_audio_with_openai",
+            AsyncMock(
+                side_effect=OpenAITranscriptionConfigurationError(
+                    "missing_openai_key"
+                )
+            ),
+        ):
+            response = self.client.post(
+                "/voice/openai/transcribe",
+                headers=self._headers(),
+                content=b"audio",
+            )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.json()["detail"], "missing_openai_key")
+
+    def test_provider_timeout_preserves_public_error(self) -> None:
+        with patch.object(
+            transcription,
+            "transcribe_audio_with_openai",
+            AsyncMock(
+                side_effect=OpenAITranscriptionTimeoutError(
+                    "openai_transcription_timeout"
+                )
+            ),
+        ):
+            response = self.client.post(
+                "/voice/openai/transcribe",
+                headers=self._headers(),
+                content=b"audio",
+            )
+
+        self.assertEqual(response.status_code, 504)
+        self.assertEqual(
+            response.json()["detail"]["error"],
+            "openai_transcription_timeout",
+        )
+
+    def test_provider_unavailable_preserves_public_error(self) -> None:
+        with patch.object(
+            transcription,
+            "transcribe_audio_with_openai",
+            AsyncMock(
+                side_effect=OpenAITranscriptionUnavailableError(
+                    "openai_transcription_unreachable"
+                )
+            ),
+        ):
+            response = self.client.post(
+                "/voice/openai/transcribe",
+                headers=self._headers(),
+                content=b"audio",
+            )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(
+            response.json()["detail"]["error"],
+            "openai_transcription_unreachable",
+        )
+
+    def test_upstream_rate_limit_preserves_public_status_and_request_id(
+        self,
+    ) -> None:
+        FakeAsyncClient.response = FakeResponse(status_code=429)
+        with (
+            patch.dict(os.environ, {"OPENAI_API_KEY": "test-only-key"}),
+            patch.object(
+                openai_transcription.httpx,
+                "AsyncClient",
+                FakeAsyncClient,
+            ),
+        ):
+            response = self.client.post(
+                "/voice/openai/transcribe",
+                headers=self._headers(),
+                content=b"audio",
+            )
+
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(
+            response.json()["detail"],
+            {
+                "error": "openai_transcription_error",
+                "upstream_status": 429,
+                "provider_request_id": "openai-request-voice-001",
+            },
+        )
+
+    def test_invalid_provider_json_preserves_public_error(self) -> None:
+        FakeAsyncClient.response = InvalidJSONResponse()
+        with (
+            patch.dict(os.environ, {"OPENAI_API_KEY": "test-only-key"}),
+            patch.object(
+                openai_transcription.httpx,
+                "AsyncClient",
+                FakeAsyncClient,
+            ),
+        ):
+            response = self.client.post(
+                "/voice/openai/transcribe",
+                headers=self._headers(),
+                content=b"audio",
+            )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(
+            response.json()["detail"]["error"],
+            "invalid_openai_transcription_response",
         )
 
 
