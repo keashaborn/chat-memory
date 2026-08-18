@@ -16,6 +16,7 @@ class ZepRuntimeRetirementContractTests(unittest.TestCase):
             "enqueue_captured_chat_log_message",
             "GOVERNED_MEMORY_ERASURE_PROXY_CONFIGURED",
             "CONVERSATION_BRIDGE_IDENTITY",
+            "rag_engine.memory_actor_auth_v1",
         ):
             self.assertNotIn(retired_symbol, source)
 

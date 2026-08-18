@@ -172,9 +172,7 @@ from rag_engine.voice_session_router import (
 )
 from rag_engine.voice_observability_v1 import voice_turn_id_from_request
 from rag_engine.lifeswitch_auth import require_actor_matches_owner
-from rag_engine.memory_actor_auth_v1 import (
-    require_memory_actor_v1,
-)
+from seebx.core.identity import require_actor
 from rag_engine.active_thread_selection_v1 import (
     ActiveThreadSelectionV1Error,
     clear_active_thread_v1,
@@ -771,7 +769,7 @@ async def admin_memory_review_plan(req: Request):
 # ---------- persistent chat memory ----------
 @app.post("/attachments")
 async def create_chat_attachment(body: ChatAttachmentCreateReq, req: Request):
-    owner = uuid.UUID(await require_memory_actor_v1(req, str(body.user_id)))
+    owner = uuid.UUID(await require_actor(req, str(body.user_id)))
     raw = body.content.encode("utf-8")
     if body.media_type not in SUPPORTED_ATTACHMENT_MEDIA_TYPES:
         return JSONResponse(
@@ -837,7 +835,7 @@ async def get_chat_attachment_status(
             {"status": "bad_request", "detail": "invalid_attachment_id"},
             status_code=400,
         )
-    owner = uuid.UUID(await require_memory_actor_v1(req, user_id))
+    owner = uuid.UUID(await require_actor(req, user_id))
     conn = await asyncpg.connect(DSN)
     try:
         await _set_connection_actor(conn, owner)
@@ -888,7 +886,7 @@ async def retry_chat_attachment(
             {"status": "bad_request", "detail": "invalid_attachment_id"},
             status_code=400,
         )
-    owner = uuid.UUID(await require_memory_actor_v1(req, str(body.user_id)))
+    owner = uuid.UUID(await require_actor(req, str(body.user_id)))
     conn = await asyncpg.connect(DSN)
     try:
         await _set_connection_actor(conn, owner)
@@ -949,7 +947,7 @@ async def delete_chat_attachment(
             {"status": "bad_request", "detail": "invalid_attachment_id"},
             status_code=400,
         )
-    owner = uuid.UUID(await require_memory_actor_v1(req, user_id))
+    owner = uuid.UUID(await require_actor(req, user_id))
     conn = await asyncpg.connect(DSN)
     try:
         await _set_connection_actor(conn, owner)
@@ -1001,7 +999,7 @@ async def log_chat(req: Request):
             },
             status_code=410,
         )
-    user_id_alias = await require_memory_actor_v1(
+    user_id_alias = await require_actor(
         req, body.get("user_id") or ""
     )
     if no_store:

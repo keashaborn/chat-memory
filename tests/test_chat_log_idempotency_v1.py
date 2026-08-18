@@ -135,7 +135,7 @@ class ChatLogSubmissionIdempotencyTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(
                 self.backend,
-                "require_memory_actor_v1",
+                "require_actor",
                 new=AsyncMock(return_value=str(OWNER)),
             ),
             patch.object(self.backend, "_set_connection_actor", new=AsyncMock()),

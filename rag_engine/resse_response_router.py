@@ -36,9 +36,9 @@ from rag_engine.lifeswitch_response_context_provider_v1 import (
 from rag_engine.lifeswitch_prior_answer_provenance_runtime_v1 import (
     InactivePriorLifeSwitchProvenanceProviderV1,
 )
-from rag_engine.memory_actor_auth_v1 import (
-    MemoryActorContextV1,
-    require_memory_actor_context_v1,
+from seebx.core.identity import (
+    ActorContext,
+    require_actor_context,
 )
 from rag_engine.openai_chat_provider_v1 import OpenAIChatGenerationConfigV1
 from rag_engine.openai_client import get_openai_client
@@ -262,7 +262,7 @@ async def resse_response_query(
     response_memory_mode = RESPONSE_MEMORY_MODE
     if not DSN:
         raise _no_store_http_exception(503, "response_runtime_unconfigured")
-    actor_context: MemoryActorContextV1 | None = None
+    actor_context: ActorContext | None = None
     voice_turn_id = voice_turn_id_from_request(req)
     tentative_exclusion_reason = successor_not_applicable_reason(
         no_store=payload.no_store,
@@ -279,7 +279,7 @@ async def resse_response_query(
         and tentative_exclusion_reason is None
     )
     try:
-        actor_context = await require_memory_actor_context_v1(
+        actor_context = await require_actor_context(
             req,
             str(payload.user_id),
         )

@@ -24,7 +24,7 @@ from rag_engine.governed_memory.response_provenance import (
     build_successor_not_applicable_provenance_v1,
 )
 from rag_engine import resse_response_router as response_router
-from rag_engine.memory_actor_auth_v1 import MemoryActorContextV1, TEXT_AUTHORITY
+from seebx.core.identity import ActorContext, TEXT_AUTHORITY
 from rag_engine.resse_response_router import (
     NO_STORE_HEADERS,
     ResseResponseRequestV1,
@@ -368,8 +368,8 @@ class ZepResponseRouterAuthenticationTests(unittest.IsolatedAsyncioTestCase):
             message_id=message_id,
         )
 
-    def context(self) -> MemoryActorContextV1:
-        return MemoryActorContextV1(
+    def context(self) -> ActorContext:
+        return ActorContext(
             owner_user_id=ACTOR,
             session_id=SESSION,
             authentication_manifest_sha256="a" * 64,
@@ -386,7 +386,7 @@ class ZepResponseRouterAuthenticationTests(unittest.IsolatedAsyncioTestCase):
             patch.object(response_router, "DSN", "synthetic-configured-dsn"),
             patch.object(
                 response_router,
-                "require_memory_actor_context_v1",
+                "require_actor_context",
                 new=authenticate,
             ),
             patch.object(response_router.asyncpg, "connect", connect),
@@ -421,7 +421,7 @@ class ZepResponseRouterAuthenticationTests(unittest.IsolatedAsyncioTestCase):
             patch.object(response_router, "DSN", "synthetic-configured-dsn"),
             patch.object(
                 response_router,
-                "require_memory_actor_context_v1",
+                "require_actor_context",
                 new=authenticate,
             ),
         ):
@@ -445,7 +445,8 @@ class ZepResponseRouterAuthenticationTests(unittest.IsolatedAsyncioTestCase):
             "live_authority_verifier=",
         ):
             self.assertNotIn(retired, source)
-        self.assertIn("require_memory_actor_context_v1(", source)
+        self.assertIn("require_actor_context(", source)
+        self.assertNotIn("memory_actor_auth_v1", source)
 
     def test_successor_import_graph_blocks_retired_response_modules(self) -> None:
         environment = dict(os.environ)
