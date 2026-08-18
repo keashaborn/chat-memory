@@ -6,11 +6,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
-from rag_engine.chat_history_clear_v1 import (
-    ChatHistoryClearError,
+from seebx.adapters.conversation_erasure import (
+    PostgresConversationErasureRepository,
     authorization_manifest_sha256,
-    clear_chat_history_v1,
 )
+from seebx.capabilities.conversation.erasure import ChatHistoryClearError
 
 
 OWNER = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
@@ -48,23 +48,40 @@ class FakeConnection:
         return self.row
 
 
-class ChatHistoryClearTests(unittest.IsolatedAsyncioTestCase):
+class FakeProvider:
+    def __init__(self, connection: FakeConnection) -> None:
+        self.value = connection
+        self.connection_count = 0
+
+    @asynccontextmanager
+    async def connection(self):
+        self.connection_count += 1
+        yield self.value
+
+
+class ConversationErasureAdapterTests(unittest.IsolatedAsyncioTestCase):
     async def test_all_scope_binds_owner_and_auth_without_zep(self) -> None:
         connection = FakeConnection()
-        result = await clear_chat_history_v1(
-            connection,
+        provider = FakeProvider(connection)
+        result = await PostgresConversationErasureRepository(
+            provider  # type: ignore[arg-type]
+        ).clear_history(
             owner_user_id=OWNER,
             authorization=AUTHORIZATION,
             operation_id=OPERATION,
             scope="all",
         )
         self.assertEqual(result.deleted_message_count, 4)
+        self.assertEqual(provider.connection_count, 1)
         self.assertEqual(connection.execute_calls[0][1], (str(OWNER),))
         self.assertEqual(
             connection.execute_calls[1][1],
             (authorization_manifest_sha256(AUTHORIZATION),),
         )
-        self.assertIn("chat_history_private.clear_history", connection.fetchrow_calls[0][0])
+        self.assertIn(
+            "chat_history_private.clear_history",
+            connection.fetchrow_calls[0][0],
+        )
         self.assertEqual(
             connection.fetchrow_calls[0][1],
             (OPERATION, "all", None, None),
@@ -73,9 +90,13 @@ class ChatHistoryClearTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.as_dict()["zep_called"])
 
     async def test_scope_shape_is_closed(self) -> None:
-        with self.assertRaisesRegex(ChatHistoryClearError, "invalid_chat_history_request"):
-            await clear_chat_history_v1(
-                FakeConnection(),
+        with self.assertRaisesRegex(
+            ChatHistoryClearError,
+            "invalid_chat_history_request",
+        ):
+            await PostgresConversationErasureRepository(
+                FakeProvider(FakeConnection())  # type: ignore[arg-type]
+            ).clear_history(
                 owner_user_id=OWNER,
                 authorization=AUTHORIZATION,
                 operation_id=OPERATION,
@@ -94,18 +115,16 @@ class ChatHistoryClearTests(unittest.IsolatedAsyncioTestCase):
                 "deleted_thread_count": 0,
             }
         )
-        result = await clear_chat_history_v1(
-            connection,
+        result = await PostgresConversationErasureRepository(
+            FakeProvider(connection)  # type: ignore[arg-type]
+        ).clear_history(
             owner_user_id=OWNER,
             authorization=AUTHORIZATION,
             operation_id=OPERATION,
             scope="message_tail",
             thread_id=THREAD,
         )
-        self.assertEqual(
-            connection.fetchrow_calls[0][1],
-            (OPERATION, THREAD),
-        )
+        self.assertEqual(connection.fetchrow_calls[0][1], (OPERATION, THREAD))
         self.assertIn(
             "chat_history_private.clear_message_tail",
             connection.fetchrow_calls[0][0],
@@ -120,12 +139,17 @@ class ChatHistoryClearTests(unittest.IsolatedAsyncioTestCase):
 
     def test_migration_cannot_touch_memory_zep_or_lifeswitch(self) -> None:
         migration = (
-            ROOT
-            / "chat-history-migrations/0001_owner_clear/forward.pgsql"
+            ROOT / "chat-history-migrations/0001_owner_clear/forward.pgsql"
         ).read_text()
-        self.assertIn("CREATE FUNCTION chat_history_private.clear_history", migration)
+        self.assertIn(
+            "CREATE FUNCTION chat_history_private.clear_history",
+            migration,
+        )
         self.assertIn("DELETE FROM public.chat_log", migration)
-        self.assertIn("DELETE FROM memory_ingest_private.memory_ingest_outbox", migration)
+        self.assertIn(
+            "DELETE FROM memory_ingest_private.memory_ingest_outbox",
+            migration,
+        )
         for forbidden in (
             "memory.claim",
             "memory.evidence",

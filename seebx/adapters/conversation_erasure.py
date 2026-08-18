@@ -1,15 +1,20 @@
 from __future__ import annotations
 
-"""Owner-scoped visible chat-history clearing that preserves Memory."""
+"""PostgreSQL adapter for the canonical conversation-erasure service."""
 
 import hashlib
 import re
-from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any
 from uuid import UUID
 
+from seebx.adapters.postgres import PostgresConnectionProvider
+from seebx.capabilities.conversation.erasure import (
+    ChatHistoryClearError,
+    ChatHistoryClearResultV1,
+    ChatHistoryScope,
+)
 
-CHAT_HISTORY_CLEAR_CONTRACT_VERSION = "chat_history_clear_v1"
+
 _BEARER_RE = re.compile(
     r"Bearer ([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)\Z",
     re.ASCII | re.IGNORECASE,
@@ -24,39 +29,6 @@ _RESULT_FIELDS = (
     "receipt_sha256",
     "completed_at",
 )
-
-
-class ChatHistoryClearError(RuntimeError):
-    def __init__(self, code: str, *, status_code: int) -> None:
-        super().__init__(code)
-        self.code = code
-        self.status_code = status_code
-
-
-@dataclass(frozen=True, slots=True)
-class ChatHistoryClearResultV1:
-    operation_id: UUID
-    scope: Literal["all", "recent", "thread", "message_tail"]
-    deleted_message_count: int
-    deleted_thread_count: int
-    deleted_outbox_count: int
-    receipt_sha256: str
-    completed_at: Any
-
-    def as_dict(self) -> dict[str, object]:
-        return {
-            "contract_version": CHAT_HISTORY_CLEAR_CONTRACT_VERSION,
-            "status": "completed",
-            "operation_id": str(self.operation_id),
-            "scope": self.scope,
-            "deleted_message_count": self.deleted_message_count,
-            "deleted_thread_count": self.deleted_thread_count,
-            "deleted_outbox_count": self.deleted_outbox_count,
-            "receipt_sha256": self.receipt_sha256,
-            "completed_at": self.completed_at,
-            "memory_retained": True,
-            "zep_called": False,
-        }
 
 
 def authorization_manifest_sha256(authorization: str) -> str:
@@ -83,13 +55,13 @@ def _bounded_count(value: object, code: str) -> int:
     return value
 
 
-async def clear_chat_history_v1(
+async def _clear_history_on_connection(
     connection: Any,
     *,
     owner_user_id: UUID,
     authorization: str,
     operation_id: UUID,
-    scope: Literal["all", "recent", "thread", "message_tail"],
+    scope: ChatHistoryScope,
     thread_id: UUID | None = None,
     recent_window_seconds: int | None = None,
 ) -> ChatHistoryClearResultV1:
@@ -153,9 +125,7 @@ async def clear_chat_history_v1(
         if message == "chat history thread is absent":
             raise ChatHistoryClearError("thread_not_found", status_code=404) from None
         if message == "chat history message is absent":
-            raise ChatHistoryClearError(
-                "message_not_found", status_code=404
-            ) from None
+            raise ChatHistoryClearError("message_not_found", status_code=404) from None
         if message == "invalid chat history clear request":
             raise ChatHistoryClearError(
                 "invalid_chat_history_request",
@@ -196,10 +166,35 @@ async def clear_chat_history_v1(
     )
 
 
+class PostgresConversationErasureRepository:
+    def __init__(self, provider: PostgresConnectionProvider) -> None:
+        if provider is None:
+            raise ValueError("PostgreSQL connection provider is required")
+        self._provider = provider
+
+    async def clear_history(
+        self,
+        *,
+        owner_user_id: UUID,
+        authorization: str,
+        operation_id: UUID,
+        scope: ChatHistoryScope,
+        thread_id: UUID | None = None,
+        recent_window_seconds: int | None = None,
+    ) -> ChatHistoryClearResultV1:
+        async with self._provider.connection() as connection:
+            return await _clear_history_on_connection(
+                connection,
+                owner_user_id=owner_user_id,
+                authorization=authorization,
+                operation_id=operation_id,
+                scope=scope,
+                thread_id=thread_id,
+                recent_window_seconds=recent_window_seconds,
+            )
+
+
 __all__ = [
-    "CHAT_HISTORY_CLEAR_CONTRACT_VERSION",
-    "ChatHistoryClearError",
-    "ChatHistoryClearResultV1",
+    "PostgresConversationErasureRepository",
     "authorization_manifest_sha256",
-    "clear_chat_history_v1",
 ]

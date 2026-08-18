@@ -47,6 +47,9 @@ from seebx.capabilities.conversation.attachments import (
 )
 from seebx.contracts.identifiers import CanonicalJsonUUID
 from seebx.adapters.conversation_history import fetch_thread_message_rows
+from seebx.adapters.conversation_erasure import (
+    PostgresConversationErasureRepository,
+)
 from seebx.adapters.postgres import PostgresConnectionProvider
 from seebx.adapters.conversation_persistence import (
     UserTranscriptPersistenceError,
@@ -142,6 +145,7 @@ from seebx.core.ownership import require_actor_matches_owner
 from seebx.core.identity import (
     require_actor,
     require_request_actor,
+    require_verified_supabase_request_identity,
 )
 from seebx.adapters.thread_selection import (
     ActiveThreadSelectionV1Error,
@@ -149,9 +153,9 @@ from seebx.adapters.thread_selection import (
     get_active_thread_v1,
     select_active_thread_v1,
 )
-from rag_engine.chat_history_clear_v1 import (
+from seebx.capabilities.conversation.erasure import (
     ChatHistoryClearError,
-    clear_chat_history_v1,
+    ConversationErasureService,
 )
 from rag_engine.thread_title_v1 import (
     generate_semantic_title,
@@ -461,8 +465,26 @@ async def _require_actor_for_thread(req: Request, thread_id: uuid.UUID):
     return None, str(actor_uuid)
 
 
+async def _require_verified_deletion_actor(req: Request):
+    try:
+        identity = await require_verified_supabase_request_identity(req)
+    except HTTPException as exc:
+        return _identity_error_response(exc), None
+    owner_user_id = parse_uuid(identity.actor_user_id)
+    if owner_user_id is None:
+        return JSONResponse(
+            {"status": "unavailable", "detail": "invalid_verified_actor"},
+            status_code=503,
+        ), None
+    return None, owner_user_id
+
+
 DSN = os.environ["POSTGRES_DSN"]
 POSTGRES = PostgresConnectionProvider(DSN)
+CONVERSATION_ERASURE = ConversationErasureService(
+    repository=PostgresConversationErasureRepository(POSTGRES),
+    zep_runtime=ZEP_MEMORY_RUNTIME,
+)
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
@@ -1012,10 +1034,9 @@ async def threads_active_clear(
 
 @app.post("/chat-history/clear")
 async def chat_history_clear(body: ChatHistoryClearReq, req: Request):
-    actor = _actor_user_id(req)
-    owner_user_id = parse_uuid(actor or "")
-    if owner_user_id is None:
-        return _actor_missing_response()
+    denied, owner_user_id = await _require_verified_deletion_actor(req)
+    if denied is not None:
+        return denied
     authorization = (req.headers.get("authorization") or "").strip()
     operation_id = (
         body.anchor_message_id
@@ -1024,16 +1045,14 @@ async def chat_history_clear(body: ChatHistoryClearReq, req: Request):
     )
 
     try:
-        async with POSTGRES.connection() as conn:
-            result = await clear_chat_history_v1(
-                conn,
-                owner_user_id=owner_user_id,
-                authorization=authorization,
-                operation_id=operation_id,
-                scope=body.scope,
-                thread_id=body.thread_id,
-                recent_window_seconds=body.recent_window_seconds,
-            )
+        result = await CONVERSATION_ERASURE.clear_history(
+            owner_user_id=owner_user_id,
+            authorization=authorization,
+            operation_id=operation_id,
+            scope=body.scope,
+            thread_id=body.thread_id,
+            recent_window_seconds=body.recent_window_seconds,
+        )
     except ChatHistoryClearError as exc:
         return JSONResponse(
             {"status": "error", "detail": exc.code},
@@ -1045,24 +1064,18 @@ async def chat_history_clear(body: ChatHistoryClearReq, req: Request):
 
 @app.delete("/memory/chat-and-zep/clear")
 async def chat_and_zep_full_clear(req: Request):
-    actor = _actor_user_id(req)
-    owner_user_id = parse_uuid(actor or "")
-    if owner_user_id is None:
-        return _actor_missing_response()
+    denied, owner_user_id = await _require_verified_deletion_actor(req)
+    if denied is not None:
+        return denied
     authorization = (req.headers.get("authorization") or "").strip()
     operation_id = uuid.uuid4()
 
     try:
-        async with ZEP_MEMORY_RUNTIME.owner_erasure_barrier(owner_user_id):
-            async with POSTGRES.connection() as conn:
-                result = await clear_chat_history_v1(
-                    conn,
-                    owner_user_id=owner_user_id,
-                    authorization=authorization,
-                    operation_id=operation_id,
-                    scope="all",
-                )
-            await ZEP_MEMORY_RUNTIME.delete_owner_memory(owner_user_id)
+        result = await CONVERSATION_ERASURE.clear_all_chat_and_memory(
+            owner_user_id=owner_user_id,
+            authorization=authorization,
+            operation_id=operation_id,
+        )
     except ChatHistoryClearError as exc:
         return JSONResponse(
             {"status": "error", "detail": exc.code},

@@ -5,6 +5,7 @@ import importlib
 import json
 import os
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
@@ -156,6 +157,71 @@ class ThreadHttpIdentityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             json.loads(denied.body)["detail"],
             "invalid_supabase_access_token",
+        )
+
+    async def test_history_clear_identity_failure_prevents_erasure(self) -> None:
+        authority = AsyncMock(
+            side_effect=HTTPException(
+                status_code=401,
+                detail="invalid_supabase_access_token",
+            )
+        )
+        erasure = AsyncMock()
+        body = self.backend.ChatHistoryClearReq(
+            scope="all",
+            confirmation="CLEAR CHAT HISTORY",
+        )
+        with (
+            patch.object(
+                self.backend,
+                "require_verified_supabase_request_identity",
+                new=authority,
+            ),
+            patch.object(
+                self.backend.CONVERSATION_ERASURE,
+                "clear_history",
+                new=erasure,
+            ),
+        ):
+            denied = await self.backend.chat_history_clear(body, request())
+        self.assertEqual(denied.status_code, 401)
+        self.assertEqual(
+            json.loads(denied.body)["detail"],
+            "invalid_supabase_access_token",
+        )
+        erasure.assert_not_awaited()
+
+    async def test_full_erasure_uses_verified_supabase_owner(self) -> None:
+        authority = AsyncMock(
+            return_value=SimpleNamespace(actor_user_id=OWNER)
+        )
+        erasure = AsyncMock(return_value=SimpleNamespace(
+            operation_id=UUID("6240822d-ac9a-4096-95aa-e2b24d36ef50"),
+            deleted_message_count=2,
+            deleted_thread_count=1,
+            deleted_outbox_count=0,
+            receipt_sha256="a" * 64,
+            completed_at="2026-08-18T00:00:00Z",
+        ))
+        with (
+            patch.object(
+                self.backend,
+                "require_verified_supabase_request_identity",
+                new=authority,
+            ),
+            patch.object(
+                self.backend.CONVERSATION_ERASURE,
+                "clear_all_chat_and_memory",
+                new=erasure,
+            ),
+        ):
+            response = await self.backend.chat_and_zep_full_clear(request())
+        self.assertEqual(response["status"], "completed")
+        authority.assert_awaited_once()
+        erasure.assert_awaited_once()
+        self.assertEqual(
+            erasure.await_args.kwargs["owner_user_id"],
+            UUID(OWNER),
         )
 
 
