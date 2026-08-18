@@ -5,12 +5,11 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
-from rag_engine.web_transcript_persistence_v1 import (
-    WEB_ASSISTANT_SOURCE,
-    WEB_USER_SOURCE,
-    WebTranscriptPersistenceError,
-    persist_web_exchange_v1,
+from seebx.capabilities.conversation.persistence import (
+    SearchTranscriptPersistenceError,
+    persist_search_exchange,
 )
+from seebx.contracts.conversation import WEB_ASSISTANT_SOURCE, WEB_USER_SOURCE
 
 
 OWNER = UUID("1240822d-ac9a-4096-95aa-e2b24d36ef50")
@@ -57,10 +56,10 @@ class FakeConnection:
         }
 
 
-class WebTranscriptPersistenceV1Tests(unittest.IsolatedAsyncioTestCase):
+class SearchTranscriptPersistenceTests(unittest.IsolatedAsyncioTestCase):
     async def test_exchange_is_atomic_memory_ineligible_and_ordered(self) -> None:
         conn = FakeConnection()
-        answer_id = await persist_web_exchange_v1(
+        answer_id = await persist_search_exchange(
             conn,
             owner_user_id=OWNER,
             thread_id=THREAD,
@@ -99,8 +98,8 @@ class WebTranscriptPersistenceV1Tests(unittest.IsolatedAsyncioTestCase):
 
     async def test_missing_owner_thread_fails_closed(self) -> None:
         conn = FakeConnection(owns_thread=False)
-        with self.assertRaises(WebTranscriptPersistenceError):
-            await persist_web_exchange_v1(
+        with self.assertRaises(SearchTranscriptPersistenceError):
+            await persist_search_exchange(
                 conn,
                 owner_user_id=OWNER,
                 thread_id=THREAD,
@@ -118,8 +117,8 @@ class WebTranscriptPersistenceV1Tests(unittest.IsolatedAsyncioTestCase):
 
     async def test_invisible_thread_rolls_back_exchange_and_promotion(self) -> None:
         conn = FakeConnection(visible_thread=False)
-        with self.assertRaises(WebTranscriptPersistenceError):
-            await persist_web_exchange_v1(
+        with self.assertRaises(SearchTranscriptPersistenceError):
+            await persist_search_exchange(
                 conn,
                 owner_user_id=OWNER,
                 thread_id=THREAD,

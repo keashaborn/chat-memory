@@ -22,7 +22,7 @@ from rag_engine.search_capability_manifest_v1 import (
     VOICE_SEARCH_AUTHORIZATION_BASIS,
     SearchCapabilityManifestV1,
 )
-from rag_engine.web_transcript_persistence_v1 import (
+from seebx.contracts.conversation import (
     WEB_ASSISTANT_SOURCE,
     WEB_USER_SOURCE,
 )

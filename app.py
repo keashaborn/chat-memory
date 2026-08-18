@@ -187,7 +187,7 @@ from rag_engine.thread_title_v1 import (
     generate_semantic_title,
     select_first_meaningful_exchange,
 )
-from rag_engine.web_transcript_persistence_v1 import WEB_ASSISTANT_SOURCE
+from seebx.contracts.conversation import WEB_ASSISTANT_SOURCE
 from rag_engine.admin_ai_operations_v1 import (
     AiOperationsError,
     acknowledge_admin_ai_operations_incident_v1,

@@ -26,7 +26,7 @@ from rag_engine.response_policy_v0_2 import (
     ConversationRole,
     ResponsePolicyConversationMessageV0_2,
 )
-from rag_engine.web_transcript_persistence_v1 import (
+from seebx.contracts.conversation import (
     WEB_ASSISTANT_SOURCE,
     WEB_USER_SOURCE,
 )

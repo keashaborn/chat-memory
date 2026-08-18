@@ -23,7 +23,7 @@ from seebx.capabilities.search.trusted_health import (
 from seebx.capabilities.search.authorization import (
     require_web_search_actor_v1,
 )
-from rag_engine.web_transcript_persistence_v1 import persist_web_exchange_v1
+from seebx.capabilities.conversation.persistence import persist_search_exchange
 from seebx.contracts.voice_language import (
     AUTO_VOICE_LANGUAGE,
     SUPPORTED_VOICE_LANGUAGE_IDS,
@@ -265,7 +265,7 @@ async def execute_search_plan_v1(
                 detail="search_transcript_store_unavailable",
             ) from None
         try:
-            answer_id = await persist_web_exchange_v1(
+            answer_id = await persist_search_exchange(
                 conn,
                 owner_user_id=owner,
                 thread_id=payload.thread_id,

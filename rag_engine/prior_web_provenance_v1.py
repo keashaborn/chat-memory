@@ -17,7 +17,7 @@ from rag_engine.response_conversation_snapshot_v1 import (
     ConversationSnapshotOutcome,
     ConversationSnapshotV1,
 )
-from rag_engine.web_transcript_persistence_v1 import WEB_ASSISTANT_SOURCE
+from seebx.contracts.conversation import WEB_ASSISTANT_SOURCE
 
 
 PRIOR_WEB_PROVENANCE_VERSION = "prior_web_provenance_v1"
