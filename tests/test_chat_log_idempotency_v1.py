@@ -138,10 +138,9 @@ class ChatLogSubmissionIdempotencyTests(unittest.IsolatedAsyncioTestCase):
                 "require_actor",
                 new=AsyncMock(return_value=str(OWNER)),
             ),
-            patch.object(self.backend, "_set_connection_actor", new=AsyncMock()),
             patch.object(
-                self.backend.asyncpg,
-                "connect",
+                self.backend.POSTGRES,
+                "connect_factory",
                 new=AsyncMock(return_value=connection),
             ),
         ):

@@ -1,5 +1,5 @@
 from typing import Any, Dict, List, Literal, Optional
-import os, time, uuid, hashlib, hmac, asyncpg, json
+import os, time, uuid, hashlib, hmac, json
 import asyncio
 import socket
 from datetime import datetime
@@ -47,6 +47,7 @@ from seebx.capabilities.conversation.attachments import (
 )
 from seebx.contracts.identifiers import CanonicalJsonUUID
 from seebx.adapters.conversation_history import fetch_thread_message_rows
+from seebx.adapters.postgres import PostgresConnectionProvider
 from seebx.adapters.conversation_persistence import (
     UserTranscriptPersistenceError,
     persist_user_transcript,
@@ -346,18 +347,6 @@ def parse_uuid(s: str) -> Optional[uuid.UUID]:
         return None
 
 
-async def _set_connection_actor(
-    conn: asyncpg.Connection,
-    owner_user_id: str | uuid.UUID,
-) -> str:
-    owner = parse_uuid(str(owner_user_id))
-    if owner is None:
-        raise ValueError("owner_user_id must be a UUID")
-    canonical = str(owner)
-    await conn.execute("SELECT set_config('app.user_id', $1, false)", canonical)
-    return canonical
-
-
 # ---------- actor / owner enforcement ----------
 def _actor_user_id(req: Request) -> Optional[str]:
     raw = (req.headers.get("x-vs-actor-user-id") or "").strip()
@@ -425,16 +414,12 @@ async def _require_actor_for_thread(req: Request, thread_id: uuid.UUID):
             status_code=400,
         ), None
 
-    conn = await asyncpg.connect(DSN)
-    try:
-        await _set_connection_actor(conn, actor_uuid)
+    async with POSTGRES.owner_connection(actor_uuid) as conn:
         found = await thread_belongs_to_owner(
             conn,
             owner_user_id=actor_uuid,
             thread_id=thread_id,
         )
-    finally:
-        await conn.close()
 
     if not found:
         return JSONResponse(
@@ -446,6 +431,7 @@ async def _require_actor_for_thread(req: Request, thread_id: uuid.UUID):
 
 
 DSN = os.environ["POSTGRES_DSN"]
+POSTGRES = PostgresConnectionProvider(DSN)
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
@@ -838,25 +824,23 @@ async def log_chat(req: Request):
     created_dt = datetime.utcnow()
 
     # Save to PostgreSQL (authoritative transcript).
-    conn = None
     try:
-        conn = await asyncpg.connect(DSN)
-        await _set_connection_actor(conn, user_id)
-        result = await persist_user_transcript(
-            conn,
-            owner_user_id=uuid.UUID(user_id),
-            user_id_alias=user_id_alias,
-            source=source,
-            text=text,
-            tags=tags,
-            thread_id=thread_id,
-            vantage_id=vantage_id,
-            request_id=request_id,
-            message_id=uuid.UUID(rec_id),
-            submission_id=submission_id,
-            created_at=created_dt,
-            attachment_ids=attachment_ids,
-        )
+        async with POSTGRES.owner_connection(user_id) as conn:
+            result = await persist_user_transcript(
+                conn,
+                owner_user_id=uuid.UUID(user_id),
+                user_id_alias=user_id_alias,
+                source=source,
+                text=text,
+                tags=tags,
+                thread_id=thread_id,
+                vantage_id=vantage_id,
+                request_id=request_id,
+                message_id=uuid.UUID(rec_id),
+                submission_id=submission_id,
+                created_at=created_dt,
+                attachment_ids=attachment_ids,
+            )
     except UserTranscriptPersistenceError as exc:
         print("pg error:", exc.__cause__ or exc)
         return JSONResponse(
@@ -872,9 +856,6 @@ async def log_chat(req: Request):
             {"status": "unavailable", "detail": "transcript_write_failed"},
             status_code=503,
         )
-    finally:
-        if conn:
-            await conn.close()
 
     response_payload = {
         "status": "ok",
@@ -895,9 +876,7 @@ async def threads_new(body: NewThreadReq, req: Request):
     if actor_err:
         return actor_err
 
-    conn = await asyncpg.connect(DSN)
-    try:
-        await _set_connection_actor(conn, user_id)
+    async with POSTGRES.owner_connection(user_id) as conn:
         async with conn.transaction():
             row = await create_thread(
                 conn,
@@ -908,8 +887,6 @@ async def threads_new(body: NewThreadReq, req: Request):
                 conn, owner_user_id=user_id, thread_id=row["id"]
             )
         return {"thread_id": str(row["id"]), "title": row["title"], "updated_at": row["updated_at"].isoformat()}
-    finally:
-        await conn.close()
 
 @app.get("/threads/list/{user_id}")
 async def threads_list(user_id: str, req: Request, vantage_id: str = "default"):
@@ -918,9 +895,7 @@ async def threads_list(user_id: str, req: Request, vantage_id: str = "default"):
     actor_err, user_id = await _require_actor_for_user(req, user_id_alias, vantage_id)
     if actor_err:
         return actor_err
-    conn = await asyncpg.connect(DSN)
-    try:
-        await _set_connection_actor(conn, user_id)
+    async with POSTGRES.owner_connection(user_id) as conn:
         rows = await list_visible_threads(
             conn,
             owner_user_id=user_id,
@@ -935,8 +910,6 @@ async def threads_list(user_id: str, req: Request, vantage_id: str = "default"):
             }
             for r in rows
         ]
-    finally:
-        await conn.close()
 
 @app.get("/threads/active/{user_id}")
 async def threads_active_get(user_id: str, req: Request, vantage_id: str = "default"):
@@ -947,16 +920,12 @@ async def threads_active_get(user_id: str, req: Request, vantage_id: str = "defa
     if actor_err:
         return actor_err
 
-    conn = await asyncpg.connect(DSN)
-    try:
-        await _set_connection_actor(conn, owner_user_id)
+    async with POSTGRES.owner_connection(owner_user_id) as conn:
         selected = await get_active_thread_v1(
             conn,
             owner_user_id=owner_user_id,
         )
         return selected or {"thread_id": None}
-    finally:
-        await conn.close()
 
 
 @app.post("/threads/active")
@@ -975,9 +944,7 @@ async def threads_active_select(body: ActiveThreadReq, req: Request):
             status_code=400,
         )
 
-    conn = await asyncpg.connect(DSN)
-    try:
-        await _set_connection_actor(conn, owner_user_id)
+    async with POSTGRES.owner_connection(owner_user_id) as conn:
         try:
             return await select_active_thread_v1(
                 conn,
@@ -989,8 +956,6 @@ async def threads_active_select(body: ActiveThreadReq, req: Request):
                 {"status": "not_found", "detail": exc.code},
                 status_code=404,
             )
-    finally:
-        await conn.close()
 
 
 @app.delete("/threads/active/{user_id}")
@@ -1006,16 +971,12 @@ async def threads_active_clear(
     if actor_err:
         return actor_err
 
-    conn = await asyncpg.connect(DSN)
-    try:
-        await _set_connection_actor(conn, owner_user_id)
+    async with POSTGRES.owner_connection(owner_user_id) as conn:
         await clear_active_thread_v1(
             conn,
             owner_user_id=owner_user_id,
         )
         return {"status": "ok", "thread_id": None}
-    finally:
-        await conn.close()
 
 
 @app.post("/chat-history/clear")
@@ -1031,25 +992,23 @@ async def chat_history_clear(body: ChatHistoryClearReq, req: Request):
         else uuid.uuid4()
     )
 
-    conn = await asyncpg.connect(DSN)
     try:
-        result = await clear_chat_history_v1(
-            conn,
-            owner_user_id=owner_user_id,
-            authorization=authorization,
-            operation_id=operation_id,
-            scope=body.scope,
-            thread_id=body.thread_id,
-            recent_window_seconds=body.recent_window_seconds,
-        )
+        async with POSTGRES.connection() as conn:
+            result = await clear_chat_history_v1(
+                conn,
+                owner_user_id=owner_user_id,
+                authorization=authorization,
+                operation_id=operation_id,
+                scope=body.scope,
+                thread_id=body.thread_id,
+                recent_window_seconds=body.recent_window_seconds,
+            )
     except ChatHistoryClearError as exc:
         return JSONResponse(
             {"status": "error", "detail": exc.code},
             status_code=exc.status_code,
             headers=SUCCESSOR_MEMORY_REFUSAL_HEADERS,
         )
-    finally:
-        await conn.close()
     return result.as_dict()
 
 
@@ -1064,8 +1023,7 @@ async def chat_and_zep_full_clear(req: Request):
 
     try:
         async with ZEP_MEMORY_RUNTIME.owner_erasure_barrier(owner_user_id):
-            conn = await asyncpg.connect(DSN)
-            try:
+            async with POSTGRES.connection() as conn:
                 result = await clear_chat_history_v1(
                     conn,
                     owner_user_id=owner_user_id,
@@ -1073,8 +1031,6 @@ async def chat_and_zep_full_clear(req: Request):
                     operation_id=operation_id,
                     scope="all",
                 )
-            finally:
-                await conn.close()
             await ZEP_MEMORY_RUNTIME.delete_owner_memory(owner_user_id)
     except ChatHistoryClearError as exc:
         return JSONResponse(
@@ -1120,9 +1076,7 @@ async def threads_messages(thread_id: str, req: Request, limit: int = 200):
     if actor_err:
         return actor_err
 
-    conn = await asyncpg.connect(DSN)
-    try:
-        await _set_connection_actor(conn, _actor_uid)
+    async with POSTGRES.owner_connection(_actor_uid) as conn:
         rows = await fetch_thread_message_rows(
             conn,
             owner_user_id=_actor_uid,
@@ -1156,8 +1110,6 @@ async def threads_messages(thread_id: str, req: Request, limit: int = 200):
                 )
             out.append(message)
         return out
-    finally:
-        await conn.close()
 
 
 @app.delete("/threads/{thread_id}/messages/{message_id}/truncate")
@@ -1186,9 +1138,7 @@ async def threads_rename(thread_id: str, body: RenameThreadReq, req: Request):
 
     title = (body.title or "").strip() or "New chat"
 
-    conn = await asyncpg.connect(DSN)
-    try:
-        await _set_connection_actor(conn, _actor_uid)
+    async with POSTGRES.owner_connection(_actor_uid) as conn:
         if body.title_source == "automatic":
             return JSONResponse(
                 {
@@ -1216,8 +1166,6 @@ async def threads_rename(thread_id: str, body: RenameThreadReq, req: Request):
             "title_source": updated["title_source"],
             "updated": True,
         }
-    finally:
-        await conn.close()
 
 
 @app.post("/threads/{thread_id}/pin")
@@ -1233,9 +1181,7 @@ async def threads_pin(thread_id: str, body: PinThreadReq, req: Request):
     if actor_err:
         return actor_err
 
-    conn = await asyncpg.connect(DSN)
-    try:
-        await _set_connection_actor(conn, actor_uid)
+    async with POSTGRES.owner_connection(actor_uid) as conn:
         updated = await set_thread_pinned(
             conn,
             owner_user_id=actor_uid,
@@ -1255,8 +1201,6 @@ async def threads_pin(thread_id: str, body: PinThreadReq, req: Request):
             "pinned": pinned_at is not None,
             "pinned_at": pinned_at.isoformat() if pinned_at else None,
         }
-    finally:
-        await conn.close()
 
 
 @app.post("/threads/{thread_id}/auto-title")
@@ -1272,9 +1216,7 @@ async def threads_auto_title(thread_id: str, req: Request):
     if actor_err:
         return actor_err
 
-    conn = await asyncpg.connect(DSN)
-    try:
-        await _set_connection_actor(conn, actor_uid)
+    async with POSTGRES.owner_connection(actor_uid) as conn:
         current = await fetch_thread_title_state(
             conn,
             owner_user_id=actor_uid,
@@ -1300,8 +1242,6 @@ async def threads_auto_title(thread_id: str, req: Request):
             owner_user_id=actor_uid,
             thread_id=tid,
         )
-    finally:
-        await conn.close()
 
     exchange = select_first_meaningful_exchange(transcript)
     if exchange is None:
@@ -1355,9 +1295,7 @@ async def threads_auto_title(thread_id: str, req: Request):
             "skipped": "no_meaningful_exchange",
         }
 
-    conn = await asyncpg.connect(DSN)
-    try:
-        await _set_connection_actor(conn, actor_uid)
+    async with POSTGRES.owner_connection(actor_uid) as conn:
         updated = await update_thread_automatic_title(
             conn,
             owner_user_id=actor_uid,
@@ -1391,8 +1329,6 @@ async def threads_auto_title(thread_id: str, req: Request):
             "updated": False,
             "skipped": f"{current['title_source']}_title_preserved",
         }
-    finally:
-        await conn.close()
 
 
 @app.post("/threads/{thread_id}/archive")
@@ -1405,17 +1341,13 @@ async def threads_archive(thread_id: str, req: Request):
     if actor_err:
         return actor_err
 
-    conn = await asyncpg.connect(DSN)
-    try:
-        await _set_connection_actor(conn, _actor_uid)
+    async with POSTGRES.owner_connection(_actor_uid) as conn:
         await archive_thread(
             conn,
             owner_user_id=_actor_uid,
             thread_id=tid,
         )
         return {"status": "ok", "thread_id": str(tid), "archived": True}
-    finally:
-        await conn.close()
 
 
 @app.delete("/threads/{thread_id}")
@@ -1497,10 +1429,7 @@ async def readyz():
     Avoids OpenAPI generation (currently broken).
     """
     try:
-        conn = await asyncpg.connect(DSN)
-        v = await conn.fetchval("select 1")
-        await conn.close()
-        if v != 1:
+        if await POSTGRES.readiness_value() != 1:
             raise RuntimeError("postgres select 1 failed")
     except Exception as e:
         return JSONResponse({"ok": False, "postgres": str(e)}, status_code=503)
