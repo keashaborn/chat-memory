@@ -65,7 +65,7 @@ from rag_engine.search_capability_manifest_v1 import (
     VOICE_SEARCH_AUTHORIZATION_BASIS,
     SearchCapabilityManifestV1,
 )
-from rag_engine.web_search_actor_auth_v1 import (
+from seebx.capabilities.search.authorization import (
     TEXT_SEARCH_AUTHORIZATION_VALUE,
     VOICE_SEARCH_AUTHORIZATION_HEADER,
     VOICE_SEARCH_AUTHORIZATION_VALUE,

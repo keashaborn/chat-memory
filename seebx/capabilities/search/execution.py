@@ -20,7 +20,9 @@ from seebx.capabilities.search.trusted_health import (
     TrustedWebRequestV1,
     trusted_web_query,
 )
-from rag_engine.web_search_actor_auth_v1 import require_web_search_actor_v1
+from seebx.capabilities.search.authorization import (
+    require_web_search_actor_v1,
+)
 from rag_engine.web_transcript_persistence_v1 import persist_web_exchange_v1
 from rag_engine.voice_language_v1 import (
     AUTO_VOICE_LANGUAGE,

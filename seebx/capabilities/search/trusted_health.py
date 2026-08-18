@@ -22,7 +22,6 @@ except ImportError:
             allow_reuse=True,
         )
 
-from rag_engine.web_search_actor_auth_v1 import require_web_search_actor_v1
 from rag_engine.citation_evidence_v1 import CITATION_EVIDENCE_CONTRACT
 from rag_engine.trusted_web_admission_v1 import (
     TRUSTED_HEALTH_MAX_ADMITTED_SOURCES,
@@ -70,6 +69,9 @@ from seebx.capabilities.search.runtime import (
     open_search_audit_session,
     safe_search_error_code,
     search_runtime_settings_from_env,
+)
+from seebx.capabilities.search.authorization import (
+    require_web_search_actor_v1,
 )
 
 

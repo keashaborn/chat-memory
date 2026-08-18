@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Authorization adapter for browser text and leased Realtime voice search."""
+"""Authorization policy for browser text and leased Realtime voice search."""
 
 from fastapi import HTTPException, Request
 

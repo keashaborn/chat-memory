@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from rag_engine.web_search_actor_auth_v1 import require_web_search_actor_v1
+from seebx.capabilities.search.authorization import (
+    require_web_search_actor_v1,
+)
 
 
 OWNER = "1240822d-ac9a-4096-95aa-e2b24d36ef50"
@@ -62,7 +65,7 @@ class WebSearchActorAuthV1Tests(unittest.IsolatedAsyncioTestCase):
             }
         )
         with patch(
-            "rag_engine.web_search_actor_auth_v1.require_active_voice_session",
+            "seebx.capabilities.search.authorization.require_active_voice_session",
             AsyncMock(return_value="lease"),
         ) as active_lease:
             actor = await require_web_search_actor_v1(
@@ -86,6 +89,12 @@ class WebSearchActorAuthV1Tests(unittest.IsolatedAsyncioTestCase):
                 internal_assertion_required=True,
             )
         self.assertEqual(raised.exception.status_code, 403)
+
+    def test_legacy_authorization_module_is_retired(self) -> None:
+        repository = Path(__file__).resolve().parents[1]
+        self.assertFalse(
+            (repository / "rag_engine/web_search_actor_auth_v1.py").exists()
+        )
 
 
 if __name__ == "__main__":
