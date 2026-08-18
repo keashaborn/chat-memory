@@ -34,10 +34,15 @@ class VoiceResilienceContractTests(unittest.TestCase):
         self.assertNotIn("str(exc)", adapter_source)
 
     def test_tts_timeout_is_publicly_sanitized(self) -> None:
-        source = (ROOT / "rag_engine/voice_tts_router.py").read_text()
-        self.assertIn("except httpx.TimeoutException", source)
-        self.assertIn("openai_tts_timeout", source)
-        self.assertNotIn("str(exc)", source)
+        capability_source = (
+            ROOT / "seebx/capabilities/voice/synthesis.py"
+        ).read_text()
+        adapter_source = (ROOT / "seebx/adapters/openai_tts.py").read_text()
+        self.assertIn("except OpenAITTSTimeoutError", capability_source)
+        self.assertIn("openai_tts_timeout", capability_source)
+        self.assertIn("except httpx.TimeoutException", adapter_source)
+        self.assertNotIn("str(exc)", capability_source)
+        self.assertNotIn("str(exc)", adapter_source)
 
 
 if __name__ == "__main__":

@@ -163,7 +163,7 @@ class ChatAttachmentOwnerReq(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     user_id: CanonicalJsonUUID
-from rag_engine.voice_tts_router import router as voice_tts_router
+from seebx.capabilities.voice.synthesis import router as voice_tts_router
 from seebx.capabilities.voice.transcription import (
     router as voice_transcription_router,
 )

@@ -2,13 +2,21 @@ from __future__ import annotations
 
 import os
 import unittest
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from rag_engine import voice_tts_router as tts
+from seebx.adapters import openai_tts
+from seebx.adapters.openai_tts import (
+    OpenAITTSConfigurationError,
+    OpenAITTSTimeoutError,
+    OpenAITTSUnavailableError,
+    OpenAITTSUpstreamError,
+)
+from seebx.capabilities.voice import synthesis as tts
 
 
 ACTOR = "1240822d-ac9a-4096-95aa-e2b24d36ef50"
@@ -17,17 +25,19 @@ VOICE_SESSION = "a872d3f2-2d5c-4ae3-9f02-d9f43a38899e"
 
 
 class FakeResponse:
-    status_code = 200
     headers = {"x-request-id": "openai-request-tts-001"}
 
-    def __init__(self) -> None:
+    def __init__(self, *, status_code: int = 200) -> None:
+        self.status_code = status_code
         self.closed = False
+        self.read = False
 
     async def aiter_raw(self):
         yield b"fake-"
         yield b"pcm"
 
     async def aread(self) -> bytes:
+        self.read = True
         return b""
 
     async def aclose(self) -> None:
@@ -37,11 +47,15 @@ class FakeResponse:
 class FakeAsyncClient:
     calls: list[dict[str, Any]] = []
     instances: list["FakeAsyncClient"] = []
+    response_status_code = 200
+    send_error: Exception | None = None
 
     def __init__(self, **kwargs: Any) -> None:
         self.kwargs = kwargs
         self.closed = False
-        self.response = FakeResponse()
+        self.response = FakeResponse(
+            status_code=self.__class__.response_status_code
+        )
         self.__class__.instances.append(self)
 
     def build_request(self, method: str, url: str, **kwargs: Any) -> dict[str, Any]:
@@ -51,6 +65,8 @@ class FakeAsyncClient:
 
     async def send(self, request: dict[str, Any], **kwargs: Any) -> FakeResponse:
         self.__class__.calls[-1]["send"] = kwargs
+        if self.__class__.send_error is not None:
+            raise self.__class__.send_error
         return self.response
 
     async def aclose(self) -> None:
@@ -61,6 +77,8 @@ class VoiceTTSObservabilityV1Tests(unittest.TestCase):
     def setUp(self) -> None:
         FakeAsyncClient.calls = []
         FakeAsyncClient.instances = []
+        FakeAsyncClient.response_status_code = 200
+        FakeAsyncClient.send_error = None
         app = FastAPI()
         app.include_router(tts.router)
         self.client = TestClient(app)
@@ -75,7 +93,11 @@ class VoiceTTSObservabilityV1Tests(unittest.TestCase):
     def test_echoes_voice_turn_and_provider_request_id(self) -> None:
         with (
             patch.dict(os.environ, {"OPENAI_API_KEY": "test-only-key"}),
-            patch.object(tts.httpx, "AsyncClient", FakeAsyncClient),
+            patch.object(
+                openai_tts.httpx,
+                "AsyncClient",
+                FakeAsyncClient,
+            ),
         ):
             response = self.client.post(
                 "/voice/tts",
@@ -258,6 +280,153 @@ class VoiceTTSObservabilityV1Tests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["conversation_style"], "warm")
+
+    def test_canonical_capability_has_no_legacy_wrapper(self) -> None:
+        repository = Path(__file__).resolve().parents[1]
+        self.assertTrue(
+            (repository / "seebx/capabilities/voice/synthesis.py").is_file()
+        )
+        self.assertFalse(
+            (repository / "rag_engine/voice_tts_router.py").exists()
+        )
+
+    def test_missing_provider_key_preserves_public_error(self) -> None:
+        with patch.object(
+            tts,
+            "open_tts_audio_stream",
+            AsyncMock(
+                side_effect=OpenAITTSConfigurationError(
+                    "missing_openai_key"
+                )
+            ),
+        ):
+            response = self.client.post(
+                "/voice/tts",
+                headers={"x-vs-actor-user-id": ACTOR},
+                json={"text": "Bounded test phrase."},
+            )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.json()["detail"], "missing_openai_key")
+
+    def test_provider_timeout_preserves_public_error(self) -> None:
+        with patch.object(
+            tts,
+            "open_tts_audio_stream",
+            AsyncMock(side_effect=OpenAITTSTimeoutError("timeout")),
+        ):
+            response = self.client.post(
+                "/voice/tts",
+                headers={"x-vs-actor-user-id": ACTOR},
+                json={"text": "Bounded test phrase."},
+            )
+
+        self.assertEqual(response.status_code, 504)
+        self.assertEqual(
+            response.json()["detail"]["error"],
+            "openai_tts_timeout",
+        )
+
+    def test_provider_unavailable_preserves_public_error(self) -> None:
+        with patch.object(
+            tts,
+            "open_tts_audio_stream",
+            AsyncMock(side_effect=OpenAITTSUnavailableError("offline")),
+        ):
+            response = self.client.post(
+                "/voice/tts",
+                headers={"x-vs-actor-user-id": ACTOR},
+                json={"text": "Bounded test phrase."},
+            )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(
+            response.json()["detail"]["error"],
+            "openai_tts_unreachable",
+        )
+
+    def test_upstream_rate_limit_preserves_public_error(self) -> None:
+        with patch.object(
+            tts,
+            "open_tts_audio_stream",
+            AsyncMock(
+                side_effect=OpenAITTSUpstreamError(
+                    status_code=429,
+                    provider_request_id="openai-request-tts-429",
+                )
+            ),
+        ):
+            response = self.client.post(
+                "/voice/tts",
+                headers={"x-vs-actor-user-id": ACTOR},
+                json={"text": "Bounded test phrase."},
+            )
+
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(
+            response.json()["detail"],
+            {
+                "error": "openai_tts_error",
+                "upstream_status": 429,
+                "provider_request_id": "openai-request-tts-429",
+            },
+        )
+
+    def test_real_upstream_error_consumes_and_closes_resources(self) -> None:
+        FakeAsyncClient.response_status_code = 500
+        with (
+            patch.dict(os.environ, {"OPENAI_API_KEY": "test-only-key"}),
+            patch.object(
+                openai_tts.httpx,
+                "AsyncClient",
+                FakeAsyncClient,
+            ),
+        ):
+            response = self.client.post(
+                "/voice/tts",
+                headers={"x-vs-actor-user-id": ACTOR},
+                json={"text": "Bounded test phrase."},
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.json()["detail"],
+            {
+                "error": "openai_tts_error",
+                "upstream_status": 500,
+                "provider_request_id": "openai-request-tts-001",
+            },
+        )
+        instance = FakeAsyncClient.instances[0]
+        self.assertTrue(instance.response.read)
+        self.assertTrue(instance.response.closed)
+        self.assertTrue(instance.closed)
+
+    def test_real_timeout_closes_client_without_exposing_error(self) -> None:
+        FakeAsyncClient.send_error = openai_tts.httpx.ReadTimeout(
+            "private provider detail"
+        )
+        with (
+            patch.dict(os.environ, {"OPENAI_API_KEY": "test-only-key"}),
+            patch.object(
+                openai_tts.httpx,
+                "AsyncClient",
+                FakeAsyncClient,
+            ),
+        ):
+            response = self.client.post(
+                "/voice/tts",
+                headers={"x-vs-actor-user-id": ACTOR},
+                json={"text": "Bounded test phrase."},
+            )
+
+        self.assertEqual(response.status_code, 504)
+        self.assertEqual(
+            response.json()["detail"],
+            {"error": "openai_tts_timeout"},
+        )
+        self.assertNotIn("private provider detail", response.text)
+        self.assertTrue(FakeAsyncClient.instances[0].closed)
 
 
 if __name__ == "__main__":

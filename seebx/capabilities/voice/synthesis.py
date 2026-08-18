@@ -1,15 +1,20 @@
 from __future__ import annotations
 
-import hashlib
-import os
 import uuid
 from enum import Enum
 from typing import Any
 
-import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from seebx.adapters.openai_tts import (
+    DEFAULT_TTS_VOICE,
+    OpenAITTSConfigurationError,
+    OpenAITTSTimeoutError,
+    OpenAITTSUnavailableError,
+    OpenAITTSUpstreamError,
+    open_tts_audio_stream,
+)
 from seebx.core.voice_observability import (
     voice_turn_id_from_request,
     voice_turn_response_headers,
@@ -23,10 +28,7 @@ from seebx.core.voice_identity import require_active_voice_session
 
 router = APIRouter()
 
-OPENAI_TTS_URL = os.getenv("OPENAI_TTS_URL") or "https://api.openai.com/v1/audio/speech"
-
 DEFAULT_TTS_MODEL = "gpt-4o-mini-tts"
-DEFAULT_TTS_VOICE = os.getenv("OPENAI_TTS_VOICE") or "marin"
 DEFAULT_TTS_SPEED = 1.0
 MAX_TTS_CHARS = 4096
 VOICE_CAPABILITIES_VERSION = "2026-07-30.1"
@@ -189,96 +191,59 @@ async def create_tts(req: Request):
             headers=NO_STORE_HEADERS,
         )
 
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise HTTPException(status_code=500, detail="missing_openai_key")
-
-    payload: dict[str, Any] = {
-        "model": model,
-        "voice": voice,
-        "input": text,
-        "response_format": "pcm",
-        "stream_format": "audio",
-        "speed": speed,
-    }
-
-    if model == "gpt-4o-mini-tts":
-        payload["instructions"] = instructions
-
-    client = httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0))
     try:
-        request = client.build_request(
-            "POST",
-            OPENAI_TTS_URL,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-                "OpenAI-Safety-Identifier": _safety_identifier(actor_user_id),
-            },
-            json=payload,
+        stream = await open_tts_audio_stream(
+            actor_user_id=actor_user_id,
+            model=model,
+            voice=voice,
+            text=text,
+            speed=speed,
+            instructions=instructions,
         )
-        upstream = await client.send(request, stream=True)
-    except httpx.TimeoutException as exc:
-        await client.aclose()
+    except OpenAITTSConfigurationError:
+        raise HTTPException(status_code=500, detail="missing_openai_key")
+    except OpenAITTSTimeoutError as exc:
         raise HTTPException(
             status_code=504, detail={"error": "openai_tts_timeout"}
         ) from exc
-    except Exception as exc:
-        await client.aclose()
+    except OpenAITTSUnavailableError as exc:
         raise HTTPException(
             status_code=502, detail={"error": "openai_tts_unreachable"}
         ) from exc
-
-    if upstream.status_code >= 400:
-        provider_request_id = upstream.headers.get("x-request-id") or upstream.headers.get("openai-request-id")
-        public_status = 429 if upstream.status_code == 429 else 503 if upstream.status_code >= 500 else 502
-        await upstream.aread()
-        await upstream.aclose()
-        await client.aclose()
+    except OpenAITTSUpstreamError as exc:
+        public_status = (
+            429
+            if exc.status_code == 429
+            else 503
+            if exc.status_code >= 500
+            else 502
+        )
         raise HTTPException(
             status_code=public_status,
             detail={
                 "error": "openai_tts_error",
-                "upstream_status": upstream.status_code,
-                "provider_request_id": provider_request_id,
+                "upstream_status": exc.status_code,
+                "provider_request_id": exc.provider_request_id,
             },
         )
 
-    provider_request_id = (
-        upstream.headers.get("x-request-id")
-        or upstream.headers.get("openai-request-id")
-    )
-
-    async def stream_audio():
-        try:
-            async for chunk in upstream.aiter_raw():
-                if chunk:
-                    yield chunk
-        finally:
-            await upstream.aclose()
-            await client.aclose()
-
     return StreamingResponse(
-        stream_audio(),
+        stream.iter_audio(),
         media_type="audio/pcm",
         headers={
             **NO_STORE_HEADERS,
             "x-vs-voice-provider": "openai",
-            "x-vs-voice-model": model,
+            "x-vs-voice-model": stream.model,
             "x-vs-audio-format": "pcm_s16le",
             "x-vs-audio-sample-rate": "24000",
             **(
-                {"x-vs-provider-request-id": provider_request_id}
-                if provider_request_id
+                {"x-vs-provider-request-id": stream.provider_request_id}
+                if stream.provider_request_id
                 else {}
             ),
             **voice_turn_response_headers(voice_turn_id),
         },
     )
-
-
-def _safety_identifier(actor_user_id: str) -> str:
-    return hashlib.sha256(actor_user_id.encode("utf-8")).hexdigest()
 
 
 @router.get("/voice/capabilities")
