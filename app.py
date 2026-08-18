@@ -21,9 +21,9 @@ from rag_engine.resse_response_router import (
     router as resse_response_router,
 )
 from rag_engine.zep_shadow_memory_v1 import ZepShadowConfigurationError
-from rag_engine.trusted_web_router import router as trusted_web_router
-from rag_engine.current_news_router import router as current_news_router
-from rag_engine.search_execution_router_v1 import (
+from seebx.capabilities.search.trusted_health import router as trusted_web_router
+from seebx.capabilities.search.current_news import router as current_news_router
+from seebx.capabilities.search.execution import (
     router as search_execution_router_v1,
 )
 from rag_engine.telemetry_router import router as telemetry_router

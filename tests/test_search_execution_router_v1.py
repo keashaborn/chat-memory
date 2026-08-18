@@ -17,6 +17,33 @@ ACTOR = UUID("1240822d-ac9a-4096-95aa-e2b24d36ef50")
 
 
 class SearchExecutionRouterV1Tests(unittest.TestCase):
+    def test_legacy_search_modules_export_canonical_capability(self) -> None:
+        from rag_engine.current_news_router import (
+            current_news_query as legacy_current_news_query,
+        )
+        from rag_engine.trusted_web_router import (
+            trusted_web_query as legacy_trusted_web_query,
+        )
+        from seebx.capabilities.search.current_news import (
+            current_news_query as canonical_current_news_query,
+        )
+        from seebx.capabilities.search.trusted_health import (
+            trusted_web_query as canonical_trusted_web_query,
+        )
+
+        self.assertEqual(
+            execute_search_plan_v1.__module__,
+            "seebx.capabilities.search.execution",
+        )
+        self.assertIs(
+            legacy_current_news_query,
+            canonical_current_news_query,
+        )
+        self.assertIs(
+            legacy_trusted_web_query,
+            canonical_trusted_web_query,
+        )
+
     def test_current_news_policy_violation_preserves_route(self) -> None:
         headers = _source_policy_violation_headers(
             route="current_news",
@@ -79,12 +106,12 @@ class SearchExecutionRouterV1IntegrationTests(
 
         with (
             patch(
-                "rag_engine.search_execution_router_v1."
+                "seebx.capabilities.search.execution."
                 "require_web_search_actor_v1",
                 new=AsyncMock(return_value=str(ACTOR)),
             ),
             patch(
-                "rag_engine.search_execution_router_v1.current_news_query",
+                "seebx.capabilities.search.execution.current_news_query",
                 new=current_news,
             ),
         ):
