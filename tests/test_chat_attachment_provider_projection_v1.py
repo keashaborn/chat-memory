@@ -14,10 +14,6 @@ from rag_engine.openai_chat_provider_v1 import (
     OpenAIChatMessageV1,
     OpenAIChatRequestV1,
 )
-from rag_engine.openai_chat_request_v3 import (
-    OpenAIChatMessageV2 as OpenAIChatMessageV3,
-    OpenAIChatRequestV3,
-)
 from rag_engine.openai_chat_request_v4 import (
     OpenAIChatMessageV2 as OpenAIChatMessageV4,
     OpenAIChatRequestV4,
@@ -25,19 +21,15 @@ from rag_engine.openai_chat_request_v4 import (
 from seebx.capabilities.conversation.composition import (
     ConversationResponseComposer,
 )
-from rag_engine.response_lifeswitch_integration_v1 import (
-    TrustedLifeSwitchResponsePlanV1,
-)
 from rag_engine.response_lifeswitch_integration_v2 import (
     TrustedLifeSwitchResponsePlanV2,
 )
-from tests.test_lifeswitch_answer_provenance_receipt_v1 import off_prior
+from tests.test_lifeswitch_answer_provenance_receipt_v1 import off_prior, selected_context
 from tests.test_conversation_composition import (
     CombinedOpenAIClient,
     SnapshotConn,
     command,
 )
-from tests.test_response_lifeswitch_integration_v1 import selected_context
 
 
 ATTACHMENT_ID = UUID("10000000-0000-4000-8000-000000000091")
@@ -64,7 +56,7 @@ def attachment_context():
 
 
 class ChatAttachmentProviderProjectionV1Tests(unittest.IsolatedAsyncioTestCase):
-    async def test_all_response_adapters_preserve_attachment_authority(self) -> None:
+    async def test_current_response_adapters_preserve_attachment_authority(self) -> None:
         client = CombinedOpenAIClient()
         root = ConversationResponseComposer(
             openai_client=client,
@@ -77,10 +69,6 @@ class ChatAttachmentProviderProjectionV1Tests(unittest.IsolatedAsyncioTestCase):
             ),
         )
         base = prepared.trusted_plan
-        lifeswitch_v1 = TrustedLifeSwitchResponsePlanV1.create(
-            base_response_plan=base,
-            lifeswitch_context=selected_context(base, CURRENT_MESSAGE),
-        )
         lifeswitch_v2 = TrustedLifeSwitchResponsePlanV2.create(
             base_response_plan=base,
             lifeswitch_context=selected_context(base, CURRENT_MESSAGE),
@@ -89,7 +77,6 @@ class ChatAttachmentProviderProjectionV1Tests(unittest.IsolatedAsyncioTestCase):
 
         requests = (
             OpenAIChatRequestV1.create(trusted_plan=base),
-            OpenAIChatRequestV3.create(source_plan=lifeswitch_v1),
             OpenAIChatRequestV4.create(source_plan=lifeswitch_v2),
         )
         for request in requests:
@@ -114,7 +101,6 @@ class ChatAttachmentProviderProjectionV1Tests(unittest.IsolatedAsyncioTestCase):
     def test_arbitrary_and_elevated_named_messages_remain_denied(self) -> None:
         for message_type in (
             OpenAIChatMessageV1,
-            OpenAIChatMessageV3,
             OpenAIChatMessageV4,
         ):
             with self.subTest(message_type=message_type.__module__):

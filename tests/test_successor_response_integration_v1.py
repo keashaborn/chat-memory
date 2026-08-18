@@ -40,7 +40,7 @@ from rag_engine.successor_memory_chat_adapter_v1 import (
 from seebx.capabilities.conversation.memory_contracts import (
     MemoryNotApplicableReason,
 )
-from tests.test_lifeswitch_answer_provenance_receipt_v1 import off_prior
+from tests.test_lifeswitch_answer_provenance_receipt_v1 import off_prior, selected_context
 from tests.test_lifeswitch_conversation_composition import CurrentProvider, PriorProvider
 from tests.test_conversation_composition import (
     ANSWER,
@@ -50,7 +50,6 @@ from tests.test_conversation_composition import (
     command,
 )
 from tests.test_response_persistence_v1 import FakeConnection
-from tests.test_response_lifeswitch_integration_v1 import selected_context
 from tests.test_response_orchestration_v0_2 import (
     ACTOR,
     FixedSafetyProvider,
