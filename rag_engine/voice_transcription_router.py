@@ -15,7 +15,7 @@ from rag_engine.voice_observability_v1 import (
     voice_turn_response_headers,
 )
 from rag_engine.voice_session_router import require_active_voice_session
-from rag_engine.voice_language_v1 import (
+from seebx.contracts.voice_language import (
     AUTO_VOICE_LANGUAGE,
     transcription_prompt,
     voice_language_from_request,

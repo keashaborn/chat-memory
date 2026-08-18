@@ -71,7 +71,7 @@ from seebx.capabilities.search.authorization import (
     VOICE_SEARCH_AUTHORIZATION_VALUE,
     require_web_search_actor_v1,
 )
-from rag_engine.voice_language_v1 import (
+from seebx.contracts.voice_language import (
     AUTO_VOICE_LANGUAGE,
     voice_language_from_request,
 )

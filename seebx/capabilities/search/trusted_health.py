@@ -55,7 +55,7 @@ from seebx.capabilities.search.provider import (
     TRUSTED_WEB_INSTRUCTIONS_V1,
     WEB_SOURCE_PROVENANCE_CONTRACT,
 )
-from rag_engine.voice_language_v1 import (
+from seebx.contracts.voice_language import (
     DEFAULT_VOICE_LANGUAGE,
     SUPPORTED_VOICE_LANGUAGE_IDS,
     response_language_instruction,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Backend-owned language catalog and validation for governed voice."""
+"""Backend-owned language catalog and validation shared across capabilities."""
 
 from typing import Any
 

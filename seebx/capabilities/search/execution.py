@@ -24,7 +24,7 @@ from seebx.capabilities.search.authorization import (
     require_web_search_actor_v1,
 )
 from rag_engine.web_transcript_persistence_v1 import persist_web_exchange_v1
-from rag_engine.voice_language_v1 import (
+from seebx.contracts.voice_language import (
     AUTO_VOICE_LANGUAGE,
     SUPPORTED_VOICE_LANGUAGE_IDS,
 )

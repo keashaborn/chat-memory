@@ -14,7 +14,7 @@ from rag_engine.voice_observability_v1 import (
     voice_turn_id_from_request,
     voice_turn_response_headers,
 )
-from rag_engine.voice_language_v1 import (
+from seebx.contracts.voice_language import (
     DEFAULT_VOICE_LANGUAGE,
     VOICE_LANGUAGE_CONTRACT_VERSION,
     VOICE_LANGUAGES,

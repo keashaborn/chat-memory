@@ -57,7 +57,7 @@ from rag_engine.server_response_signal_classifier_v0_2 import (
     OpenAIServerResponseSignalClassifierV0_2,
 )
 from rag_engine.search_capability_manifest_v1 import SearchCapabilityManifestV1
-from rag_engine.voice_language_v1 import (
+from seebx.contracts.voice_language import (
     DEFAULT_VOICE_LANGUAGE,
     SUPPORTED_VOICE_LANGUAGE_IDS,
 )

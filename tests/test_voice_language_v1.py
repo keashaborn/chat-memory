@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from rag_engine.voice_language_v1 import (
+from seebx.contracts.voice_language import (
     SUPPORTED_VOICE_LANGUAGE_IDS,
     VOICE_LANGUAGES,
     normalize_voice_language,

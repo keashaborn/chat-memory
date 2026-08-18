@@ -45,7 +45,7 @@ from rag_engine.response_policy_v0_2 import (
 )
 from rag_engine.response_source_awareness_v1 import MemorySourceStatusV1
 from rag_engine.search_capability_manifest_v1 import SearchCapabilityManifestV1
-from rag_engine.voice_language_v1 import (
+from seebx.contracts.voice_language import (
     DEFAULT_VOICE_LANGUAGE,
     SUPPORTED_VOICE_LANGUAGE_IDS,
 )

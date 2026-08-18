@@ -25,7 +25,7 @@ from seebx.capabilities.search.ods import (
     ODSGuidanceRecordV1,
     format_ods_guidance_for_model,
 )
-from rag_engine.voice_language_v1 import (
+from seebx.contracts.voice_language import (
     DEFAULT_VOICE_LANGUAGE,
     response_language_instruction,
 )
