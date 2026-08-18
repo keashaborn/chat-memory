@@ -679,7 +679,7 @@ class ChatMemoryLifecycleRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(
                 explicit_preference_correction_command_v1(message)
             )
-        route = (ROOT / "rag_engine/resse_response_router.py").read_text()
+        route = (ROOT / "seebx/capabilities/conversation/router.py").read_text()
         function = route[route.index("async def resse_response_query(") :]
         self.assertIn("CHAT_MEMORY_LIFECYCLE_RUNTIME.apply_if_requested(", function)
         self.assertIn("owner_user_id=owner", function)

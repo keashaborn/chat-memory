@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Authenticated, backend-owned RESSE response endpoint."""
+"""Authenticated, backend-owned conversation response endpoint."""
 
 import asyncio
 import os

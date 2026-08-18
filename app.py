@@ -19,7 +19,9 @@ from seebx.capabilities.conversation.zep_runtime import (
     ZEP_PROMPT_SETTINGS,
     ZEP_MEMORY_RUNTIME,
 )
-from rag_engine.resse_response_router import router as resse_response_router
+from seebx.capabilities.conversation.router import (
+    router as conversation_router,
+)
 from rag_engine.zep_shadow_memory_v1 import ZepShadowConfigurationError
 from seebx.capabilities.search.trusted_health import router as trusted_web_router
 from seebx.capabilities.search.current_news import router as current_news_router
@@ -200,7 +202,7 @@ SUCCESSOR_MEMORY_REFUSAL_HEADERS = {
 
 
 app = FastAPI(title="Brains API", version="1.0.0")
-app.include_router(resse_response_router, prefix="/response")
+app.include_router(conversation_router, prefix="/response")
 app.include_router(trusted_web_router, prefix="/trusted-web")
 app.include_router(current_news_router, prefix="/current-news")
 app.include_router(search_execution_router_v1, prefix="/search")

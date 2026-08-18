@@ -7,7 +7,9 @@ import unittest
 class ResseResponsePriorLifeSwitchProvenanceV1Tests(unittest.TestCase):
     def test_router_uses_single_v4_text_and_voice_response_path(self) -> None:
         source = (
-            pathlib.Path(__file__).parents[1] / "rag_engine" / "resse_response_router.py"
+            pathlib.Path(__file__).parents[1]
+            / "seebx"
+            / "capabilities/conversation/router.py"
         ).read_text(encoding="utf-8")
         self.assertIn("IntegratedLifeSwitchResponseCompositionRootV0_4", source)
         self.assertIn("InactivePriorLifeSwitchProvenanceProviderV1", source)

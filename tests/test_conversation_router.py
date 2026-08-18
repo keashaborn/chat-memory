@@ -20,9 +20,9 @@ from seebx.capabilities.conversation.memory_contracts import (
     build_memory_no_selection_provenance_v1,
     build_memory_not_applicable_provenance_v1,
 )
-from rag_engine import resse_response_router as response_router
+from seebx.capabilities.conversation import router as response_router
 from seebx.core.identity import ActorContext, TEXT_AUTHORITY
-from rag_engine.resse_response_router import (
+from seebx.capabilities.conversation.router import (
     NO_STORE_HEADERS,
     ResseResponseRequestV1,
     apply_no_store_headers,
@@ -40,16 +40,16 @@ THREAD = UUID("5240822d-ac9a-4096-95aa-e2b24d36ef50")
 ROOT = Path(__file__).resolve().parents[1]
 
 
-class ResseResponseRouterTests(unittest.TestCase):
+class ConversationRouterTests(unittest.TestCase):
     def test_normal_chat_generation_is_backend_owned(self) -> None:
-        source = (ROOT / "rag_engine/resse_response_router.py").read_text()
+        source = (ROOT / "seebx/capabilities/conversation/router.py").read_text()
         self.assertIn("generation_config = OpenAIChatGenerationConfigV1()", source)
         self.assertIn("generation_config=generation_config", source)
         self.assertNotIn("OPENAI_CHAT_MODEL", source)
         self.assertNotIn("normalize_chat_model", source)
 
     def test_attachment_sql_is_owned_by_postgres_adapter(self) -> None:
-        source = (ROOT / "rag_engine/resse_response_router.py").read_text()
+        source = (ROOT / "seebx/capabilities/conversation/router.py").read_text()
         adapter = (
             ROOT / "seebx/adapters/conversation_attachments.py"
         ).read_text()
@@ -73,7 +73,7 @@ class ResseResponseRouterTests(unittest.TestCase):
             )
 
     def test_search_capability_is_header_derived_and_not_public_payload(self) -> None:
-        source = (ROOT / "rag_engine/resse_response_router.py").read_text()
+        source = (ROOT / "seebx/capabilities/conversation/router.py").read_text()
         self.assertIn("require_web_search_actor_v1(", source)
         self.assertIn("SearchCapabilityManifestV1.create(", source)
         self.assertIn("req.headers.get(VOICE_SEARCH_AUTHORIZATION_HEADER)", source)
@@ -91,7 +91,7 @@ class ResseResponseRouterTests(unittest.TestCase):
             )
 
     def test_retired_response_preferences_are_absent_from_successor_route(self) -> None:
-        source = (ROOT / "rag_engine/resse_response_router.py").read_text()
+        source = (ROOT / "seebx/capabilities/conversation/router.py").read_text()
         self.assertNotIn("assistant_response_preferences", source)
         self.assertNotIn("SUCCESSOR_RESPONSE_DEFAULTS", source)
         self.assertNotIn("payload.assistant_name", source)
@@ -328,7 +328,7 @@ class ResseResponseRouterTests(unittest.TestCase):
         )
 
     def test_zep_is_the_only_eligible_chat_memory_provider(self) -> None:
-        source = (ROOT / "rag_engine/resse_response_router.py").read_text()
+        source = (ROOT / "seebx/capabilities/conversation/router.py").read_text()
         self.assertIn("memory_provider = zep_memory_provider", source)
         self.assertIn("zep_prompt_memory_unavailable", source)
         for retired_symbol in (
@@ -341,7 +341,7 @@ class ResseResponseRouterTests(unittest.TestCase):
             self.assertNotIn(retired_symbol, source)
 
     def test_non_zep_routes_retain_not_applicable_provenance_lifecycle(self) -> None:
-        source = (ROOT / "rag_engine/resse_response_router.py").read_text()
+        source = (ROOT / "seebx/capabilities/conversation/router.py").read_text()
         self.assertIn(
             """        else:
             if exclusion_reason is None:
@@ -446,7 +446,7 @@ class ZepResponseRouterAuthenticationTests(unittest.IsolatedAsyncioTestCase):
         authenticate.assert_not_awaited()
 
     def test_retired_live_authority_is_absent_from_zep_text_router(self) -> None:
-        source = (ROOT / "rag_engine/resse_response_router.py").read_text()
+        source = (ROOT / "seebx/capabilities/conversation/router.py").read_text()
         for retired in (
             "SUCCESSOR_LIVE_AUTHORITY_FACTORY",
             "successor_live_authority_from_environment",
@@ -480,7 +480,7 @@ class ZepResponseRouterAuthenticationTests(unittest.IsolatedAsyncioTestCase):
             "        raise AssertionError('blocked import:'+name)\n"
             "    return original(name,*args,**kwargs)\n"
             "builtins.__import__=guarded\n"
-            "import rag_engine.resse_response_router\n"
+            "import seebx.capabilities.conversation.router\n"
             "assert all(name not in sys.modules for name in blocked)\n"
         )
         result = subprocess.run(

@@ -45,7 +45,7 @@ class ZepRuntimeRetirementContractTests(unittest.TestCase):
 
     def test_live_response_roots_do_not_import_retired_memory_packages(self) -> None:
         for relative in (
-            "rag_engine/resse_response_router.py",
+            "seebx/capabilities/conversation/router.py",
             "rag_engine/response_composition_root_v0_2.py",
             "rag_engine/response_composition_root_v0_4.py",
         ):
@@ -54,7 +54,7 @@ class ZepRuntimeRetirementContractTests(unittest.TestCase):
             self.assertNotIn("successor_memory_chat_adapter_v1", source)
 
     def test_live_router_uses_one_conversation_persistence_service(self) -> None:
-        source = (ROOT / "rag_engine/resse_response_router.py").read_text()
+        source = (ROOT / "seebx/capabilities/conversation/router.py").read_text()
         self.assertIn(
             "seebx.capabilities.conversation.persistence",
             source,

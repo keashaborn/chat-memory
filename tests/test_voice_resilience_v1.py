@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from rag_engine.resse_response_router import RESPONSE_QUERY_DEADLINE_SECONDS
+from seebx.capabilities.conversation.router import RESPONSE_QUERY_DEADLINE_SECONDS
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,7 +13,7 @@ class VoiceResilienceContractTests(unittest.TestCase):
     def test_response_query_has_bounded_deadline(self) -> None:
         self.assertGreaterEqual(RESPONSE_QUERY_DEADLINE_SECONDS, 30.0)
         self.assertLessEqual(RESPONSE_QUERY_DEADLINE_SECONDS, 120.0)
-        source = (ROOT / "rag_engine/resse_response_router.py").read_text()
+        source = (ROOT / "seebx/capabilities/conversation/router.py").read_text()
         self.assertIn("asyncio.wait_for(", source)
         self.assertIn("response_generation_timeout", source)
 

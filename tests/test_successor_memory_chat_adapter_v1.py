@@ -347,7 +347,7 @@ class SuccessorRouterImportTests(unittest.TestCase):
     def test_router_import_does_not_import_legacy_memory_provider(self) -> None:
         script = (
             "import sys\n"
-            "import rag_engine.resse_response_router\n"
+            "import seebx.capabilities.conversation.router\n"
             "assert 'rag_engine.governed_memory_provider_v1' not in sys.modules\n"
         )
         result = subprocess.run(

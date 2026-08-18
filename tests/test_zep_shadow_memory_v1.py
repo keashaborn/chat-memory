@@ -173,7 +173,7 @@ class ZepShadowSettingsTests(unittest.TestCase):
     def test_route_uses_authenticated_owner_after_transcript_persistence(
         self,
     ) -> None:
-        route = (ROOT / "rag_engine/resse_response_router.py").read_text()
+        route = (ROOT / "seebx/capabilities/conversation/router.py").read_text()
         dispatch = route.index("ZEP_MEMORY_RUNTIME.dispatch_turn(")
         self.assertLess(
             route.index("await persist_conversation_response("),
@@ -194,7 +194,7 @@ class ZepShadowSettingsTests(unittest.TestCase):
 
     def test_shadow_and_prompt_retrieval_are_separate_owner_bound_paths(self) -> None:
         adapter = (ROOT / "rag_engine/zep_shadow_memory_v1.py").read_text()
-        route = (ROOT / "rag_engine/resse_response_router.py").read_text()
+        route = (ROOT / "seebx/capabilities/conversation/router.py").read_text()
         self.assertIn("get_user_context", adapter)
         self.assertIn("user.get_threads", adapter)
         self.assertIn(".graph.search(", adapter)
@@ -215,7 +215,7 @@ class ZepShadowSettingsTests(unittest.TestCase):
 
     def test_conversation_capability_owns_the_single_shared_runtime(self) -> None:
         app = (ROOT / "app.py").read_text()
-        route = (ROOT / "rag_engine/resse_response_router.py").read_text()
+        route = (ROOT / "seebx/capabilities/conversation/router.py").read_text()
         runtime = (
             ROOT / "seebx/capabilities/conversation/zep_runtime.py"
         ).read_text()
