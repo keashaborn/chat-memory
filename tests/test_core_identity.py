@@ -8,7 +8,7 @@ import uuid
 
 from starlette.requests import Request
 
-from rag_engine.supabase_actor_auth import VerifiedSupabaseIdentity
+from seebx.adapters.supabase import VerifiedSupabaseIdentity
 from seebx.core.identity import (
     TEXT_AUTHORITY,
     VOICE_AUTHORITY,

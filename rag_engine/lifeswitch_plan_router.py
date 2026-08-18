@@ -6,7 +6,7 @@ import json
 import decimal
 import datetime as _dt
 from fastapi import APIRouter, HTTPException, Query, Body, Request
-from rag_engine.lifeswitch_auth import require_actor_matches_owner
+from seebx.core.ownership import require_actor_matches_owner
 from rag_engine.lifeswitch_db import connect_lifeswitch
 from fastapi.responses import JSONResponse
 

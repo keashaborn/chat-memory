@@ -567,7 +567,7 @@ class CaptureRouteLiveAuthorityTests(unittest.IsolatedAsyncioTestCase):
         status_code: int,
         detail: str,
     ) -> None:
-        from rag_engine.supabase_actor_auth import VerifiedSupabaseIdentity
+        from seebx.adapters.supabase import VerifiedSupabaseIdentity
 
         identity = VerifiedSupabaseIdentity(
             actor_user_id=str(OWNER_A),

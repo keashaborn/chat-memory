@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, field_validator
 
-from rag_engine.lifeswitch_auth import require_actor_matches_owner
+from seebx.core.ownership import require_actor_matches_owner
 
 
 router = APIRouter()

@@ -5,7 +5,7 @@ import os
 import asyncpg
 from fastapi import Request
 
-from rag_engine.lifeswitch_auth import require_authenticated_actor
+from seebx.core.ownership import require_authenticated_actor
 
 
 DSN = (

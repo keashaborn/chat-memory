@@ -8,7 +8,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from rag_engine.lifeswitch_auth import require_actor_matches_owner
+from seebx.core.ownership import require_actor_matches_owner
 from rag_engine.openai_chat_provider_v1 import safety_identifier_v1
 from rag_engine.voice_observability_v1 import (
     voice_turn_id_from_request,

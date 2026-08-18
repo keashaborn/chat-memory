@@ -1,19 +1,5 @@
-"""Authority, policy, configuration, audit, and error boundaries."""
+"""Authority, policy, configuration, audit, and error boundaries.
 
-from .identity import (
-    ActorContext,
-    TEXT_AUTHORITY,
-    VOICE_AUTHORITY,
-    actor_authority,
-    require_actor,
-    require_actor_context,
-)
-
-__all__ = [
-    "ActorContext",
-    "TEXT_AUTHORITY",
-    "VOICE_AUTHORITY",
-    "actor_authority",
-    "require_actor",
-    "require_actor_context",
-]
+Import concrete submodules explicitly so a pure ownership check does not load
+provider clients, voice routing, or database dependencies as a side effect.
+"""

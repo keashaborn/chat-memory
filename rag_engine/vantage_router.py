@@ -17,7 +17,7 @@ from seebx.adapters.openai import complete_chat, complete_chat_messages, normali
 from .prompt_builder import build_system_prompt
 from .role_overlay import overlay_to_instructions
 from .retriever_unified import retrieve_personal_memory, unified_retrieve
-from .lifeswitch_auth import require_actor_matches_owner
+from seebx.core.ownership import require_actor_matches_owner
 from .memory_v1_shadow import run_memory_v1_runtime
 from .memory_v1_v5_shadow_trace import run_memory_v1_v5_shadow_trace
 from .memory_v1_v5_shadow_trace_store import (

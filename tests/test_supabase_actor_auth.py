@@ -11,10 +11,8 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from rag_engine.supabase_actor_auth import (
-    SupabaseAuthSettings,
-    require_verified_supabase_actor,
-)
+from seebx.adapters.supabase import SupabaseAuthSettings
+from seebx.core.identity import require_verified_supabase_actor
 
 
 ACTOR = "1240822d-ac9a-4096-95aa-e2b24d36ef50"
@@ -91,7 +89,7 @@ class SupabaseActorAuthTests(unittest.TestCase):
                 clear=False,
             ),
             patch(
-                "rag_engine.supabase_actor_auth._jwks_client",
+                "seebx.adapters.supabase._jwks_client",
                 return_value=FakeJwksClient(self.public_key),
             ),
         ):

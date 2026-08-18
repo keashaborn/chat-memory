@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-"""Verify the original Supabase user JWT at the Brains trust boundary."""
+"""Supabase issuer, JWKS, and JWT verification adapter."""
 
-import asyncio
 import hashlib
 import json
 import os
@@ -13,7 +12,6 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 import jwt
-from fastapi import HTTPException, Request
 from jwt import PyJWKClient
 from jwt.exceptions import (
     InvalidTokenError,
@@ -23,7 +21,6 @@ from jwt.exceptions import (
 
 
 _ALLOWED_ALGORITHMS = ("ES256", "RS256")
-_MAX_TOKEN_LENGTH = 16_384
 _JWKS_CACHE_SECONDS = 600
 
 
@@ -112,24 +109,6 @@ def _jwks_client(jwks_url: str) -> PyJWKClient:
         lifespan=_JWKS_CACHE_SECONDS,
         timeout=5,
     )
-
-
-def _bearer_token(req: Request) -> str:
-    authorization = (req.headers.get("authorization") or "").strip()
-    scheme, separator, raw_token = authorization.partition(" ")
-    token = raw_token.strip()
-    if (
-        not separator
-        or scheme.lower() != "bearer"
-        or not token
-        or len(token) > _MAX_TOKEN_LENGTH
-        or any(char.isspace() for char in token)
-    ):
-        raise HTTPException(
-            status_code=401,
-            detail="missing_or_invalid_supabase_bearer",
-        )
-    return token
 
 
 def verify_supabase_access_token_identity(
@@ -228,118 +207,12 @@ def verify_supabase_access_token(
     ).actor_user_id
 
 
-async def require_verified_supabase_identity(
-    req: Request,
-    owner_user_id: str,
-) -> VerifiedSupabaseIdentity:
-    token = _bearer_token(req)
-    try:
-        identity = await asyncio.to_thread(
-            verify_supabase_access_token_identity,
-            token,
-        )
-    except SupabaseAuthConfigurationError:
-        raise HTTPException(
-            status_code=503,
-            detail="supabase_auth_configuration_invalid",
-        ) from None
-    except SupabaseAuthUnavailable:
-        raise HTTPException(
-            status_code=503,
-            detail="supabase_jwks_unavailable",
-        ) from None
-    except SupabaseAccessTokenInvalid:
-        raise HTTPException(
-            status_code=401,
-            detail="invalid_supabase_access_token",
-        ) from None
-    try:
-        owner = _uuid_text(owner_user_id)
-    except SupabaseAccessTokenInvalid:
-        raise HTTPException(status_code=400, detail="invalid_owner_user_id") from None
-    if identity.actor_user_id != owner:
-        raise HTTPException(
-            status_code=403,
-            detail="supabase_actor_owner_mismatch",
-        )
-    asserted_actor = (req.headers.get("x-vs-actor-user-id") or "").strip()
-    if not asserted_actor:
-        raise HTTPException(status_code=401, detail="missing_actor_user_id")
-    try:
-        asserted_actor = _uuid_text(asserted_actor)
-    except SupabaseAccessTokenInvalid:
-        raise HTTPException(status_code=401, detail="invalid_actor_user_id") from None
-    if asserted_actor != identity.actor_user_id:
-        raise HTTPException(status_code=403, detail="actor_assertion_mismatch")
-    return identity
-
-
-async def require_verified_supabase_actor(
-    req: Request,
-    owner_user_id: str,
-) -> str:
-    token = _bearer_token(req)
-    try:
-        verified_actor = await asyncio.to_thread(
-            verify_supabase_access_token,
-            token,
-        )
-    except SupabaseAuthConfigurationError:
-        raise HTTPException(
-            status_code=503,
-            detail="supabase_auth_configuration_invalid",
-        ) from None
-    except SupabaseAuthUnavailable:
-        raise HTTPException(
-            status_code=503,
-            detail="supabase_jwks_unavailable",
-        ) from None
-    except SupabaseAccessTokenInvalid:
-        raise HTTPException(
-            status_code=401,
-            detail="invalid_supabase_access_token",
-        ) from None
-
-    try:
-        owner = _uuid_text(owner_user_id)
-    except SupabaseAccessTokenInvalid:
-        raise HTTPException(
-            status_code=400,
-            detail="invalid_owner_user_id",
-        ) from None
-    if verified_actor != owner:
-        raise HTTPException(
-            status_code=403,
-            detail="supabase_actor_owner_mismatch",
-        )
-
-    asserted_actor = (req.headers.get("x-vs-actor-user-id") or "").strip()
-    if not asserted_actor:
-        raise HTTPException(status_code=401, detail="missing_actor_user_id")
-    try:
-        asserted_actor = _uuid_text(asserted_actor)
-    except SupabaseAccessTokenInvalid:
-        raise HTTPException(
-            status_code=401,
-            detail="invalid_actor_user_id",
-        ) from None
-    if asserted_actor != verified_actor:
-        raise HTTPException(
-            status_code=403,
-            detail="actor_assertion_mismatch",
-        )
-
-    return verified_actor
-
-
 __all__ = [
     "SupabaseAccessTokenInvalid",
     "SupabaseAuthConfigurationError",
     "SupabaseAuthSettings",
     "SupabaseAuthUnavailable",
     "VerifiedSupabaseIdentity",
-    "require_verified_supabase_identity",
-    "require_verified_supabase_actor",
     "verify_supabase_access_token",
     "verify_supabase_access_token_identity",
 ]

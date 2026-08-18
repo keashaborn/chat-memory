@@ -171,7 +171,7 @@ from rag_engine.voice_session_router import (
     router as voice_session_router,
 )
 from rag_engine.voice_observability_v1 import voice_turn_id_from_request
-from rag_engine.lifeswitch_auth import require_actor_matches_owner
+from seebx.core.ownership import require_actor_matches_owner
 from seebx.core.identity import require_actor
 from rag_engine.active_thread_selection_v1 import (
     ActiveThreadSelectionV1Error,

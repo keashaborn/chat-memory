@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from rag_engine.lifeswitch_auth import require_actor_matches_owner
+from seebx.core.ownership import require_actor_matches_owner
 
 
 ACTOR_A = "11111111-1111-4111-8111-111111111111"

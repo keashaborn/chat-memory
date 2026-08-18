@@ -5,7 +5,7 @@ import asyncio
 import uuid
 import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Request
-from rag_engine.lifeswitch_auth import require_actor_matches_owner
+from seebx.core.ownership import require_actor_matches_owner
 from rag_engine.lifeswitch_db import connect_lifeswitch
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from fastapi import HTTPException, Request
 
-from rag_engine.lifeswitch_auth import require_actor_matches_owner
-from rag_engine.supabase_actor_auth import require_verified_supabase_actor
+from seebx.core.ownership import require_actor_matches_owner
+from seebx.core.identity import require_verified_supabase_actor
 from rag_engine.voice_session_router import require_active_voice_session
 
 
