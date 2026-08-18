@@ -8,16 +8,18 @@ from collections import deque
 from contextlib import suppress
 from typing import Any, Callable
 
-import httpx
-
 from seebx.adapters.openai_realtime_sideband import (
     open_realtime_sideband_connection,
+)
+from seebx.adapters.voice_governed_turns import (
+    GovernedVoiceTurnHTTPTransport,
+    GovernedVoiceTurnTimeoutError,
+    GovernedVoiceTurnUnavailableError,
 )
 from seebx.contracts.voice_language import VOICE_LANGUAGE_HEADER
 from seebx.capabilities.voice.realtime_session import RealtimePreviewSession
 
 
-BRAINS_INTERNAL_BASE_URL = "http://127.0.0.1:8088"
 MAX_SIDEBAND_MESSAGE_BYTES = 256 * 1024
 MAX_TRANSCRIPT_CHARS = 32_768
 MAX_PENDING_TURNS = 8
@@ -47,11 +49,14 @@ class RealtimePreviewSidebandController:
         session: RealtimePreviewSession,
         api_key: str,
         service_token: str,
-        internal_base_url: str = BRAINS_INTERNAL_BASE_URL,
+        internal_base_url: str | None = None,
         sideband_connection_factory: Callable[..., Any] = (
             open_realtime_sideband_connection
         ),
-        http_client_factory: Callable[..., Any] = httpx.AsyncClient,
+        http_client_factory: Callable[..., Any] | None = None,
+        governed_turn_transport_factory: Callable[..., Any] = (
+            GovernedVoiceTurnHTTPTransport
+        ),
     ) -> None:
         if not api_key.strip():
             raise ValueError("api_key is required")
@@ -60,11 +65,14 @@ class RealtimePreviewSidebandController:
         self.session = session
         self._api_key = api_key.strip()
         self._service_token = service_token.strip()
-        self._internal_base_url = internal_base_url.rstrip("/")
+        self._internal_base_url = internal_base_url
         self._sideband_connection_factory = (
             sideband_connection_factory
         )
         self._http_client_factory = http_client_factory
+        self._governed_turn_transport_factory = (
+            governed_turn_transport_factory
+        )
         self._connected = asyncio.Event()
         self._closing = False
         self._websocket: Any | None = None
@@ -278,9 +286,10 @@ class RealtimePreviewSidebandController:
             self._next_completed_index += 1
 
     async def _turn_worker(self) -> None:
-        async with self._http_client_factory(
-            timeout=httpx.Timeout(100.0, connect=5.0),
-        ) as client:
+        async with self._governed_turn_transport_factory(
+            internal_base_url=self._internal_base_url,
+            http_client_factory=self._http_client_factory,
+        ) as transport:
             while True:
                 (
                     sequence,
@@ -299,7 +308,7 @@ class RealtimePreviewSidebandController:
                         )
                         continue
                     await self._process_governed_turn(
-                        client=client,
+                        transport=transport,
                         sequence=sequence,
                         item_id=item_id,
                         transcript=transcript,
@@ -322,7 +331,7 @@ class RealtimePreviewSidebandController:
     async def _process_governed_turn(
         self,
         *,
-        client: Any,
+        transport: Any,
         sequence: int,
         item_id: str,
         transcript: str,
@@ -359,10 +368,9 @@ class RealtimePreviewSidebandController:
                     "supabase_fresh_voice_lease_v1"
                 ),
             }
-            search_response = await client.post(
-                f"{self._internal_base_url}/search/execute",
+            search_response = await transport.execute_search(
                 headers=search_headers,
-                json={
+                payload={
                     "user_id": self.session.owner_user_id,
                     "thread_id": str(self.session.thread_id),
                     "query": transcript,
@@ -412,10 +420,9 @@ class RealtimePreviewSidebandController:
                 )
                 return
 
-        log_response = await client.post(
-            f"{self._internal_base_url}/log",
+        log_response = await transport.persist_transcript(
             headers=headers,
-            json={
+            payload={
                 "user_id": self.session.owner_user_id,
                 "text": transcript,
                 "source": "voice/realtime-preview:user",
@@ -448,8 +455,7 @@ class RealtimePreviewSidebandController:
                 "governed transcript message binding was invalid"
             )
 
-        response = await client.post(
-            f"{self._internal_base_url}/response/query",
+        response = await transport.generate_response(
             headers={
                 **headers,
                 **(
@@ -462,7 +468,7 @@ class RealtimePreviewSidebandController:
                     else {}
                 ),
             },
-            json={
+            payload={
                 "user_id": self.session.owner_user_id,
                 "message": transcript,
                 "message_id": persisted_message_id,
@@ -548,8 +554,8 @@ class RealtimePreviewSidebandController:
             return "sideband_not_ready"
         if isinstance(exc, RealtimePreviewSidebandError):
             return "realtime_preview_protocol_error"
-        if isinstance(exc, httpx.TimeoutException):
+        if isinstance(exc, GovernedVoiceTurnTimeoutError):
             return "governed_response_timeout"
-        if isinstance(exc, httpx.HTTPError):
+        if isinstance(exc, GovernedVoiceTurnUnavailableError):
             return "governed_response_unavailable"
         return "realtime_preview_unavailable"

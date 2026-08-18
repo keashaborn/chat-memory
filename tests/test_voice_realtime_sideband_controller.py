@@ -7,8 +7,13 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from seebx.adapters import voice_governed_turns
 from seebx.adapters.openai_realtime_sideband import (
     open_realtime_sideband_connection,
+)
+from seebx.adapters.voice_governed_turns import (
+    GovernedVoiceTurnHTTPTransport,
+    GovernedVoiceTurnTimeoutError,
 )
 from seebx.capabilities.voice.realtime_session import (
     RealtimePreviewSessionRegistry,
@@ -110,6 +115,13 @@ class FakeWebSocket:
 
     async def send(self, message: str) -> None:
         self.sent.append(message)
+
+
+class TimeoutHTTPClient(FakeHTTPClient):
+    async def post(self, url: str, **kwargs: Any) -> FakeHTTPResponse:
+        raise voice_governed_turns.httpx.ReadTimeout(
+            "private loopback timeout"
+        )
 
 
 class RealtimePreviewSidebandControllerTests(
@@ -450,6 +462,59 @@ class RealtimePreviewSidebandControllerTests(
         self.assertEqual(call["ping_timeout"], 20)
         self.assertEqual(call["max_size"], 256 * 1024)
         self.assertEqual(call["max_queue"], 32)
+
+    async def test_governed_transport_owns_paths_timeout_and_lifetime(
+        self,
+    ) -> None:
+        timeout_clients: list[TimeoutHTTPClient] = []
+
+        def timeout_client_factory(**kwargs: Any) -> TimeoutHTTPClient:
+            client = TimeoutHTTPClient(**kwargs)
+            timeout_clients.append(client)
+            return client
+
+        transport = GovernedVoiceTurnHTTPTransport(
+            http_client_factory=timeout_client_factory,
+        )
+        with self.assertRaises(GovernedVoiceTurnTimeoutError):
+            async with transport:
+                await transport.persist_transcript(
+                    headers={"x-vs-service-token": "test"},
+                    payload={"text": "bounded"},
+                )
+
+        self.assertEqual(
+            timeout_clients[0].kwargs["timeout"].connect,
+            5.0,
+        )
+        self.assertEqual(
+            self.controller._public_error(
+                GovernedVoiceTurnTimeoutError(
+                    "private loopback timeout"
+                )
+            ),
+            "governed_response_timeout",
+        )
+
+    def test_capability_has_no_direct_loopback_http_effects(self) -> None:
+        repository = Path(__file__).resolve().parents[1]
+        capability_source = (
+            repository
+            / "seebx/capabilities/voice/realtime_sideband.py"
+        ).read_text()
+        adapter_source = (
+            repository
+            / "seebx/adapters/voice_governed_turns.py"
+        ).read_text()
+
+        for forbidden in (
+            "import httpx",
+            "client.post(",
+            "http://127.0.0.1:8088",
+        ):
+            self.assertNotIn(forbidden, capability_source)
+        self.assertIn("import httpx", adapter_source)
+        self.assertIn("http://127.0.0.1:8088", adapter_source)
 
 
 if __name__ == "__main__":
