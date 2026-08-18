@@ -28,7 +28,7 @@ from seebx.adapters.openai_chat import (
     OpenAIChatRequestV1,
     OpenAIChatResponseV1,
 )
-from rag_engine.response_orchestration_v0_2 import TrustedResponsePlanV0_2
+from seebx.capabilities.conversation.orchestration import TrustedResponsePlanV0_2
 from rag_engine.search_capability_output_validator_v1 import (
     validate_search_capability_output_v1,
 )

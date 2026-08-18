@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from seebx.adapters.openai_chat import OpenAIChatResponseV1
 from rag_engine.response_finalization_v1 import FinalizedTrustedResponseV1
-from rag_engine.response_orchestration_v0_2 import TrustedResponsePlanV0_2
+from seebx.capabilities.conversation.orchestration import TrustedResponsePlanV0_2
 
 
 RESPONSE_INSPECTION_VERSION = "response_inspection_v1"

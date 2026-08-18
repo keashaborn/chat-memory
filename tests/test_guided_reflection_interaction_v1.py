@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from seebx.capabilities.conversation.prompt import ASSEMBLY_MANIFEST_VERSION
-from rag_engine.response_orchestration_v0_2 import (
+from seebx.capabilities.conversation.orchestration import (
     ORCHESTRATOR_VERSION,
     SHADOW_TRACE_VERSION,
     TRUSTED_PLAN_VERSION,

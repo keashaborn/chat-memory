@@ -32,7 +32,7 @@ from seebx.capabilities.conversation.snapshot import (
     create_conversation_snapshot_v1,
     create_current_only_conversation_snapshot_v1,
 )
-from rag_engine.response_orchestration_v0_2 import (
+from seebx.capabilities.conversation.orchestration import (
     TRUSTED_SAFETY_ASSESSOR_COMPONENTS_V0_2,
     TrustedPolicySignalsEnvelopeV0_2,
     TrustedResponseOrchestratorV0_2,

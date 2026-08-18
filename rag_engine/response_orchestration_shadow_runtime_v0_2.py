@@ -24,7 +24,7 @@ from rag_engine.openai_moderation_adapter_v0_2 import (
 from seebx.capabilities.conversation.snapshot import (
     ConversationSnapshotV1,
 )
-from rag_engine.response_orchestration_v0_2 import (
+from seebx.capabilities.conversation.orchestration import (
     SanitizedResponseShadowTraceV0_2,
     TrustedResponseOrchestratorV0_2,
     TrustedResponseRequestV0_2,

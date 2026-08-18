@@ -41,7 +41,7 @@ from rag_engine.response_finalization_v3 import (
 from rag_engine.response_lifeswitch_integration_v2 import (
     TrustedLifeSwitchResponsePlanV2,
 )
-from rag_engine.response_orchestration_v0_2 import TrustedResponsePlanV0_2
+from seebx.capabilities.conversation.orchestration import TrustedResponsePlanV0_2
 
 
 class LifeSwitchCompositionError(RuntimeError):

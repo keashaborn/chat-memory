@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-"""Trusted, side-effect-free composition of the RESSE response plan.
+"""Trusted, side-effect-free composition of the SeeBx conversation plan.
 
-This module is not imported by the live route.  It is the backend-owned seam
-between authenticated request handling, safety assessment, governed-Memory
-successor context, canonical FM selection, and provider-neutral prompt assembly. Browser values
-can be represented only by their field names for legacy-audit purposes; their
-values have no input path here.
+The canonical conversation composers invoke this backend-owned seam between
+authenticated request handling, safety assessment, memory context, canonical
+FM selection, and provider-neutral prompt assembly. Browser values can be
+represented only by their field names for legacy-audit purposes; their values
+have no input path here.
 """
 
 import hashlib

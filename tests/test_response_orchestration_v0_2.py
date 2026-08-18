@@ -11,7 +11,7 @@ from seebx.capabilities.conversation.prompt import ContextKind
 from seebx.capabilities.conversation.snapshot import (
     create_current_only_conversation_snapshot_v1,
 )
-from rag_engine.response_orchestration_v0_2 import (
+from seebx.capabilities.conversation.orchestration import (
     ResponseOrchestrationError,
     SanitizedResponseShadowTraceV0_2,
     TRUSTED_SAFETY_ASSESSOR_COMPONENTS_V0_2,

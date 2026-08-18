@@ -38,7 +38,7 @@ from rag_engine.response_finalization_v1 import (
     FinalizedTrustedResponseV1,
     finalize_trusted_response_v1,
 )
-from rag_engine.response_orchestration_v0_2 import (
+from seebx.capabilities.conversation.orchestration import (
     TrustedPolicySignalsEnvelopeV0_2,
     TrustedResponseOrchestratorV0_2,
     TrustedResponsePlanV0_2,

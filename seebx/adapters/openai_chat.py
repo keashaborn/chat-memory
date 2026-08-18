@@ -28,7 +28,7 @@ from seebx.capabilities.conversation.prompt import (
     AssembledPromptV1,
     PromptReferenceContextBlockV1,
 )
-from rag_engine.response_orchestration_v0_2 import TrustedResponsePlanV0_2
+from seebx.capabilities.conversation.orchestration import TrustedResponsePlanV0_2
 
 
 OPENAI_CHAT_REQUEST_VERSION = "openai_chat_request_v2"
