@@ -10,6 +10,13 @@ Candidate evidence:
 
 - Batch 01, dead Qdrant runtime surface: `10b5cb4a`
 - Batch 02, core actor identity extraction: `fb252149`
+- Batch 03, conversation memory contract extraction: `d06549df`
+- Structural target, component, and database ledgers: `65a98f2a`
+- Conversation persistence consolidation: `da426677`
+- Voice synthetic canary contract repair: `e7005538`
+
+The current runtime service, timer, container, database, and cron disposition is
+tracked in `docs/SEEBX_RUNTIME_ASSET_LEDGER_V1.md`.
 
 ## Purpose
 

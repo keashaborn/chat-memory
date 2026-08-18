@@ -27,11 +27,12 @@ Source commit: `49f9e60cf4321c8e42c359845c1a62a8c987614d`
 | `memory_actor_auth_v1.py` | Batch 02 candidate reduces it to a compatibility re-export; live callers use `seebx.core.identity` directly | `seebx.core.identity` | EXTRACTED; compatibility RETIRE pending | Candidate `fb252149`; prove dormant callers migrated before deleting wrapper |
 | Platform PostgreSQL connection | Live on `127.0.0.1:5432`, database `memory` | clean platform PostgreSQL | CONSOLIDATE | Migrate only required schemas/functions and prove exact row/ACL parity |
 | LifeSwitch PostgreSQL connection | Live on `127.0.0.1:55433`, database `lifeswitch` | LifeSwitch domain PostgreSQL | KEEP | Remove fallback to `POSTGRES_DSN`; retain isolated credentials |
-| Redis container | Running but no `REDIS_URL` in live service | capability-specific cache/queue only if proven | DECIDE | Trace consumers and remove if no live caller |
+| Redis container | Running; no `REDIS_URL` in the live service, no live process connection, 203 keys/~1.07 MB | none unless a scheduled consumer is proven | RETIRE CANDIDATE | Inventory key types/TTL and every timer/script before a rollback-safe stop; retain only if a named capability needs it |
 | Qdrant runtime surface in `app.py` | Imported/configured but no live caller; no service/container | none | RETIRE | Batch 01 removes code/health surface; later remove dependency/config after dormant artifacts are archived |
 | `requirements-ci.txt` and `pyproject.toml` | CI dependencies include retired systems; package metadata describes governed-memory successor | SeeBx application package | REBUILD | Inventory real runtime/test dependency sets before replacement |
 | Git daily sync | Active timer/service root | operations | KEEP | Verify remote/branch policy and avoid competing writer paths |
-| Voice synthetic canary | Active timer/service root | voice operations | KEEP | Preserve admin evidence consumer and owner-safe synthetic data |
+| Legacy `eval_all_users.sh` cron | Runs daily at 03:00; reads absent Qdrant `memory_raw`; recent runs do no useful work | none | RETIRE CANDIDATE | Back up the exact crontab and logs, remove only the one line, then prove no replacement scheduler depends on it |
+| Voice synthetic canary | Active hourly but failed because its request used a field intentionally rejected by the live TTS route | voice operations | KEEP + REPAIR | Candidate `e7005538` aligns it with server-owned `conversation_style`; deploy and run one bounded canary before clearing historical failure state |
 
 ## Conversation and memory
 
