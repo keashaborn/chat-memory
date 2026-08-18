@@ -24,13 +24,17 @@ jobs:
       - name: Install the current test runtime
         run: python -m pip install --disable-pip-version-check -r requirements-ci.txt
 
-      - name: Reject retired governed-memory runtime paths
+      - name: Reject retired home-built memory runtime paths
         shell: bash
         run: |
           set -euo pipefail
           retired_paths=(
+            Dockerfile.ci
+            docker-compose.ci.yml
+            rag_engine/memory_v1_store.py
             rag_engine/successor_memory_chat_adapter_v1.py
             rag_engine/zep_memory_provider_v1.py
+            ops/systemd/memory-v1-active-runtime-manifest-v1.json
             tests/test_successor_memory_chat_adapter_v1.py
             tests/test_successor_response_integration_v1.py
           )
@@ -38,7 +42,7 @@ jobs:
             test ! -e "$path"
           done
           if git grep -nE \
-            'rag_engine\.governed_memory|rag_engine\.governed_memory_provider_v1|successor_memory_chat_adapter_v1|governed_memory_successor_v1' \
+            'rag_engine\.governed_memory|rag_engine\.governed_memory_provider_v1|rag_engine\.memory_v1|successor_memory_chat_adapter_v1|governed_memory_successor_v1' \
             -- app.py 'seebx/**/*.py' rag_engine/lifeswitch_prompt_integration_v2.py; then
             exit 1
           fi

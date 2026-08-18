@@ -1,1 +1,0 @@
-DROP FUNCTION memory.read_owner_governed_claim_lifecycle_v1(integer);

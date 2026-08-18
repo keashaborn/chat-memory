@@ -1,13 +1,11 @@
 fastapi==0.120.4
 uvicorn[standard]==0.38.0
 asyncpg==0.30.0
-cffi==2.1.0
 cryptography==49.0.0
+httpx==0.28.1
 pydantic==2.12.3
 PyJWT==2.13.0
-pycparser==3.0
 requests==2.32.3
-qdrant-client==1.10.1
 openai==2.6.1
 websockets==15.0.1
-pytest==9.1.1
+zep-cloud==3.25.0

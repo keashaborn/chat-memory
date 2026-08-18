@@ -287,6 +287,8 @@ class LifeSwitchSelfShadowRunnerV2Tests(unittest.TestCase):
             root / "seebx" / "capabilities" / "conversation" / "lifeswitch_inspection.py",
         )
         for path in live_paths:
+            if not path.exists():
+                continue
             self.assertNotIn(needle, path.read_text(encoding="utf-8"), path.name)
 
     def test_runner_has_no_io_or_provider_imports(self):

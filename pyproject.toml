@@ -3,25 +3,24 @@ requires = ["setuptools==84.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "governed-memory-successor"
-version = "0.0.0"
-description = "Hash-bound clean governed-Memory successor candidate"
+name = "seebx-backend"
+version = "0.1.0"
+description = "SeeBx backend with Zep conversation memory and LifeSwitch domain services"
 requires-python = "==3.12.*"
 dependencies = [
   "asyncpg==0.30.0",
   "cryptography==49.0.0",
   "fastapi==0.120.4",
+  "httpx==0.28.1",
+  "openai==2.6.1",
+  "pydantic==2.12.3",
   "PyJWT==2.13.0",
+  "requests==2.32.3",
   "uvicorn==0.38.0",
+  "websockets==15.0.1",
   "zep-cloud==3.25.0",
 ]
 
-[project.scripts]
-governed-memory-http = "rag_engine.governed_memory.runtime.application:main"
-
 [tool.setuptools.packages.find]
-include = ["rag_engine.governed_memory", "rag_engine.governed_memory.*"]
+include = ["rag_engine", "rag_engine.*", "seebx", "seebx.*"]
 namespaces = false
-
-[tool.setuptools.package-data]
-"rag_engine.governed_memory.provider_assets" = ["*.json", "*.txt"]
