@@ -6,7 +6,13 @@ from unittest.mock import AsyncMock
 from uuid import UUID
 
 from seebx.adapters.conversation_attachments import (
+    CREATE_ATTACHMENT_SQL,
+    DELETE_ATTACHMENT_SQL,
+    FETCH_ATTACHMENT_STATUS_SQL,
+    FETCH_RETRY_CANDIDATE_SQL,
     OWNER_CONTEXT_SQL,
+    UPDATE_RETRY_STATUS_SQL,
+    ConversationAttachmentPostgresStore,
     fetch_ready_message_attachments,
 )
 
@@ -52,6 +58,78 @@ class ConversationAttachmentAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("attachment.deleted_at IS NULL", query)
         self.assertIn("attachment.content IS NOT NULL", query)
         self.assertIn("array_position($4::uuid[], attachment.id)", query)
+
+    async def test_crud_store_owns_sql_actor_context_and_lifetime(self) -> None:
+        records = tuple({"index": index} for index in range(5))
+        connection = SimpleNamespace(
+            execute=AsyncMock(return_value="SELECT 1"),
+            fetchrow=AsyncMock(side_effect=records),
+            close=AsyncMock(return_value=None),
+        )
+        connect = AsyncMock(return_value=connection)
+        store = ConversationAttachmentPostgresStore(
+            dsn="postgresql://bounded-test",
+            connect_factory=connect,
+        )
+
+        async with store.owner_connection(OWNER) as owned:
+            self.assertIs(owned, connection)
+            created = await store.create_attachment(
+                owned,
+                attachment_id=ATTACHMENT,
+                owner_user_id=OWNER,
+                thread_id=THREAD,
+                filename="bounded.md",
+                media_type="text/markdown",
+                content="bounded",
+                content_sha256="a" * 64,
+                byte_size=7,
+            )
+            status = await store.fetch_attachment_status(
+                owned,
+                attachment_id=ATTACHMENT,
+                owner_user_id=OWNER,
+            )
+            retry = await store.fetch_retry_candidate(
+                owned,
+                attachment_id=ATTACHMENT,
+                owner_user_id=OWNER,
+            )
+            updated = await store.update_retry_status(
+                owned,
+                attachment_id=ATTACHMENT,
+                owner_user_id=OWNER,
+                status="ready",
+            )
+            deleted = await store.delete_attachment(
+                owned,
+                attachment_id=ATTACHMENT,
+                owner_user_id=OWNER,
+            )
+
+        self.assertEqual(
+            (created, status, retry, updated, deleted),
+            records,
+        )
+        connect.assert_awaited_once_with("postgresql://bounded-test")
+        connection.execute.assert_awaited_once_with(
+            OWNER_CONTEXT_SQL,
+            str(OWNER),
+        )
+        connection.close.assert_awaited_once_with()
+        queries = tuple(
+            call.args[0] for call in connection.fetchrow.await_args_list
+        )
+        self.assertEqual(
+            queries,
+            (
+                CREATE_ATTACHMENT_SQL,
+                FETCH_ATTACHMENT_STATUS_SQL,
+                FETCH_RETRY_CANDIDATE_SQL,
+                UPDATE_RETRY_STATUS_SQL,
+                DELETE_ATTACHMENT_SQL,
+            ),
+        )
 
 
 if __name__ == "__main__":

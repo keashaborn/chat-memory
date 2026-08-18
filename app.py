@@ -1,4 +1,4 @@
-from typing import Annotated, Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 import os, time, uuid, hashlib, hmac, asyncpg, json
 import asyncio
 import socket
@@ -9,10 +9,8 @@ from fastapi.openapi.utils import get_openapi
 from openai import OpenAI
 from pydantic import (
     BaseModel,
-    BeforeValidator,
     ConfigDict,
     Field,
-    field_validator,
     model_validator,
 )
 from seebx.capabilities.conversation.zep_runtime import (
@@ -41,11 +39,13 @@ from rag_engine.lifeswitch_account_timezone_router_v1 import (
 )
 from rag_engine.catalog_router import router as catalog_router
 from rag_engine.vb_tagging import infer_vb_tags
-from seebx.capabilities.conversation.attachments import (
-    MAX_ATTACHMENT_BYTES,
-    MAX_ATTACHMENT_COUNT,
-    SUPPORTED_ATTACHMENT_MEDIA_TYPES,
+from seebx.capabilities.conversation.attachment_routes import (
+    router as conversation_attachment_router,
 )
+from seebx.capabilities.conversation.attachments import (
+    MAX_ATTACHMENT_COUNT,
+)
+from seebx.contracts.identifiers import CanonicalJsonUUID
 class NewThreadReq(BaseModel):
     user_id: str
     title: Optional[str] = None
@@ -57,21 +57,6 @@ class PinThreadReq(BaseModel):
 class ActiveThreadReq(BaseModel):
     user_id: str
     thread_id: str
-
-
-def _canonical_json_uuid(value: Any) -> uuid.UUID:
-    if type(value) is not str:
-        raise ValueError("UUID must be a canonical JSON string")
-    try:
-        parsed = uuid.UUID(value)
-    except (AttributeError, ValueError) as exc:
-        raise ValueError("UUID must be canonical lowercase hyphenated text") from exc
-    if str(parsed) != value:
-        raise ValueError("UUID must be canonical lowercase hyphenated text")
-    return parsed
-
-
-CanonicalJsonUUID = Annotated[uuid.UUID, BeforeValidator(_canonical_json_uuid)]
 
 
 class ChatHistoryClearReq(BaseModel):
@@ -124,45 +109,6 @@ class ChatHistoryClearReq(BaseModel):
         return self
 
 
-class ChatAttachmentCreateReq(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    user_id: CanonicalJsonUUID
-    thread_id: CanonicalJsonUUID
-    filename: str = Field(min_length=1, max_length=160)
-    media_type: Literal["text/plain", "text/markdown"]
-    content: str = Field(min_length=1)
-    content_sha256: str
-
-    @field_validator("filename")
-    @classmethod
-    def safe_filename(cls, value: str) -> str:
-        name = value.strip()
-        if not name or any(ch in name for ch in ("/", "\\", "\x00", "\r", "\n")):
-            raise ValueError("invalid filename")
-        return name
-
-    @field_validator("content_sha256")
-    @classmethod
-    def valid_hash(cls, value: str) -> str:
-        if len(value) != 64 or any(ch not in "0123456789abcdef" for ch in value):
-            raise ValueError("invalid content hash")
-        return value
-
-    @model_validator(mode="after")
-    def exact_content(self) -> "ChatAttachmentCreateReq":
-        raw = self.content.encode("utf-8")
-        if len(raw) > MAX_ATTACHMENT_BYTES:
-            raise ValueError("attachment exceeds byte limit")
-        if hashlib.sha256(raw).hexdigest() != self.content_sha256:
-            raise ValueError("attachment content hash mismatch")
-        return self
-
-
-class ChatAttachmentOwnerReq(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    user_id: CanonicalJsonUUID
 from seebx.capabilities.voice.synthesis import router as voice_tts_router
 from seebx.capabilities.voice.transcription import (
     router as voice_transcription_router,
@@ -769,213 +715,7 @@ async def admin_memory_review_plan(req: Request):
 
 
 # ---------- persistent chat memory ----------
-@app.post("/attachments")
-async def create_chat_attachment(body: ChatAttachmentCreateReq, req: Request):
-    owner = uuid.UUID(await require_actor(req, str(body.user_id)))
-    raw = body.content.encode("utf-8")
-    if body.media_type not in SUPPORTED_ATTACHMENT_MEDIA_TYPES:
-        return JSONResponse(
-            {"status": "bad_request", "detail": "unsupported_attachment_type"},
-            status_code=400,
-        )
-    attachment_id = uuid.uuid4()
-    conn = await asyncpg.connect(DSN)
-    try:
-        await _set_connection_actor(conn, owner)
-        row = await conn.fetchrow(
-            """
-            INSERT INTO public.chat_attachments(
-                id,owner_user_id,thread_id,filename,media_type,content,
-                content_sha256,byte_size,status
-            )
-            SELECT $1,$2,thread.id,$4,$5,$6,$7,$8,'ready'
-            FROM public.threads AS thread
-            WHERE thread.id=$3 AND thread.owner_user_id=$2
-            RETURNING id,thread_id,filename,media_type,content_sha256,byte_size,
-                      status,created_at
-            """,
-            attachment_id,
-            owner,
-            body.thread_id,
-            body.filename,
-            body.media_type,
-            body.content,
-            body.content_sha256,
-            len(raw),
-        )
-        if row is None:
-            return JSONResponse(
-                {"status": "not_found", "detail": "thread_not_found"},
-                status_code=404,
-            )
-        return {
-            "status": "ok",
-            "attachment": {
-                "id": str(row["id"]),
-                "thread_id": str(row["thread_id"]),
-                "filename": row["filename"],
-                "media_type": row["media_type"],
-                "content_sha256": row["content_sha256"],
-                "byte_size": row["byte_size"],
-                "processing_status": row["status"],
-                "created_at": row["created_at"].isoformat(),
-            },
-        }
-    finally:
-        await conn.close()
-
-
-@app.get("/attachments/{attachment_id}")
-async def get_chat_attachment_status(
-    attachment_id: str,
-    user_id: str,
-    req: Request,
-):
-    aid = parse_uuid(attachment_id)
-    if aid is None:
-        return JSONResponse(
-            {"status": "bad_request", "detail": "invalid_attachment_id"},
-            status_code=400,
-        )
-    owner = uuid.UUID(await require_actor(req, user_id))
-    conn = await asyncpg.connect(DSN)
-    try:
-        await _set_connection_actor(conn, owner)
-        row = await conn.fetchrow(
-            """
-            SELECT id,thread_id,message_id,filename,media_type,content_sha256,
-                   byte_size,status,created_at,updated_at,deleted_at
-            FROM public.chat_attachments
-            WHERE id=$1 AND owner_user_id=$2
-            """,
-            aid,
-            owner,
-        )
-        if row is None:
-            return JSONResponse(
-                {"status": "not_found", "detail": "attachment_not_found"},
-                status_code=404,
-            )
-        return {
-            "status": "ok",
-            "attachment": {
-                "id": str(row["id"]),
-                "thread_id": str(row["thread_id"]),
-                "message_id": str(row["message_id"]) if row["message_id"] else None,
-                "filename": row["filename"],
-                "media_type": row["media_type"],
-                "content_sha256": row["content_sha256"],
-                "byte_size": row["byte_size"],
-                "processing_status": row["status"],
-                "created_at": row["created_at"].isoformat(),
-                "updated_at": row["updated_at"].isoformat(),
-                "deleted_at": row["deleted_at"].isoformat() if row["deleted_at"] else None,
-            },
-        }
-    finally:
-        await conn.close()
-
-
-@app.post("/attachments/{attachment_id}/retry")
-async def retry_chat_attachment(
-    attachment_id: str,
-    body: ChatAttachmentOwnerReq,
-    req: Request,
-):
-    aid = parse_uuid(attachment_id)
-    if aid is None:
-        return JSONResponse(
-            {"status": "bad_request", "detail": "invalid_attachment_id"},
-            status_code=400,
-        )
-    owner = uuid.UUID(await require_actor(req, str(body.user_id)))
-    conn = await asyncpg.connect(DSN)
-    try:
-        await _set_connection_actor(conn, owner)
-        current = await conn.fetchrow(
-            """
-            SELECT id,content,content_sha256,byte_size
-            FROM public.chat_attachments
-            WHERE id=$1 AND owner_user_id=$2 AND deleted_at IS NULL
-            """,
-            aid,
-            owner,
-        )
-        if current is None:
-            return JSONResponse(
-                {"status": "not_found", "detail": "attachment_not_found"},
-                status_code=404,
-            )
-        raw = (current["content"] or "").encode("utf-8")
-        next_status = (
-            "ready"
-            if len(raw) == current["byte_size"]
-            and hashlib.sha256(raw).hexdigest() == current["content_sha256"]
-            else "error"
-        )
-        row = await conn.fetchrow(
-            """
-            UPDATE public.chat_attachments
-            SET status=$3,updated_at=now()
-            WHERE id=$1 AND owner_user_id=$2 AND deleted_at IS NULL
-            RETURNING id,status
-            """,
-            aid,
-            owner,
-            next_status,
-        )
-        code = 200 if row["status"] == "ready" else 409
-        return JSONResponse(
-            {
-                "status": "ok" if code == 200 else "error",
-                "attachment_id": str(row["id"]),
-                "processing_status": row["status"],
-            },
-            status_code=code,
-        )
-    finally:
-        await conn.close()
-
-
-@app.delete("/attachments/{attachment_id}")
-async def delete_chat_attachment(
-    attachment_id: str,
-    user_id: str,
-    req: Request,
-):
-    aid = parse_uuid(attachment_id)
-    if aid is None:
-        return JSONResponse(
-            {"status": "bad_request", "detail": "invalid_attachment_id"},
-            status_code=400,
-        )
-    owner = uuid.UUID(await require_actor(req, user_id))
-    conn = await asyncpg.connect(DSN)
-    try:
-        await _set_connection_actor(conn, owner)
-        row = await conn.fetchrow(
-            """
-            UPDATE public.chat_attachments
-            SET content=NULL,status='deleted',deleted_at=COALESCE(deleted_at,now()),
-                updated_at=now()
-            WHERE id=$1 AND owner_user_id=$2
-            RETURNING id,deleted_at
-            """,
-            aid,
-            owner,
-        )
-        if row is None:
-            return JSONResponse(
-                {"status": "not_found", "detail": "attachment_not_found"},
-                status_code=404,
-            )
-        return {
-            "status": "ok",
-            "attachment_id": str(row["id"]),
-            "deleted_at": row["deleted_at"].isoformat(),
-        }
-    finally:
-        await conn.close()
+app.include_router(conversation_attachment_router)
 
 
 @app.post("/log")
