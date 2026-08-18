@@ -284,7 +284,7 @@ class LifeSwitchSelfShadowRunnerV2Tests(unittest.TestCase):
             root / "seebx" / "capabilities/conversation/router.py",
             root / "seebx" / "capabilities/conversation/lifeswitch_composition.py",
             root / "rag_engine" / "lifeswitch_response_context_provider_v1.py",
-            root / "rag_engine" / "response_inspection_v4.py",
+            root / "seebx" / "capabilities" / "conversation" / "lifeswitch_inspection.py",
         )
         for path in live_paths:
             self.assertNotIn(needle, path.read_text(encoding="utf-8"), path.name)

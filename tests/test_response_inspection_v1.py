@@ -6,7 +6,7 @@ from uuid import UUID
 from seebx.capabilities.conversation.composition import (
     ConversationResponseComposer,
 )
-from rag_engine.response_inspection_v1 import build_response_inspection_v1
+from seebx.capabilities.conversation.inspection import build_response_inspection_v1
 from tests.test_conversation_composition import (
     ANSWER,
     CORRELATION,

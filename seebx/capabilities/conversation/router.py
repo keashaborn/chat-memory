@@ -55,8 +55,8 @@ from seebx.capabilities.conversation.composition import (
 from seebx.capabilities.conversation.lifeswitch_composition import (
     LifeSwitchConversationComposer,
 )
-from rag_engine.response_inspection_v4 import build_response_inspection_v4
-from rag_engine.response_inspection_v2 import build_response_inspection_v2
+from seebx.capabilities.conversation.lifeswitch_inspection import build_response_inspection_v4
+from seebx.capabilities.conversation.inspection import build_response_inspection_v2
 from rag_engine.usage_ledger_v1 import persist_openai_chat_usage_v1
 from rag_engine.usage_ledger_v1 import persist_openai_chat_usage_v2
 from rag_engine.voice_observability_v1 import (

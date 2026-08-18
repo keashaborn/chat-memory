@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Content-free inspection of the exact RESSE response execution.
+"""Content-free inspection of exact SeeBx conversation execution.
 
 This contract may expose control decisions and counts to authorized operators.
 It must never contain prompt text, conversation text, Memory content, FM prose,
@@ -17,7 +17,7 @@ from seebx.capabilities.conversation.finalization import FinalizedTrustedRespons
 from seebx.capabilities.conversation.orchestration import TrustedResponsePlanV0_2
 
 
-RESPONSE_INSPECTION_VERSION = "response_inspection_v1"
+RESPONSE_INSPECTION_V1 = "response_inspection_v1"
 
 
 class _StrictFrozenModel(BaseModel):
@@ -78,7 +78,7 @@ class VoiceDeliveryInspectionV1(_StrictFrozenModel):
 
 
 class ResponseInspectionV1(_StrictFrozenModel):
-    contract_version: Literal["response_inspection_v1"] = RESPONSE_INSPECTION_VERSION
+    contract_version: Literal["response_inspection_v1"] = RESPONSE_INSPECTION_V1
     delivery: VoiceDeliveryInspectionV1 | None = None
     before_openai: BeforeOpenAIInspectionV1
     openai: OpenAIInspectionV1
@@ -175,8 +175,71 @@ def build_response_inspection_v1(
     )
 
 
+RESPONSE_INSPECTION_V2 = "response_inspection_v2"
+
+
+class BeforeOpenAIInspectionV2(BeforeOpenAIInspectionV1):
+    interaction_version: str
+    interaction: str
+    question_policy: str
+    interaction_reason_codes: tuple[str, ...]
+
+
+class ResponseInspectionV2(_StrictFrozenModel):
+    contract_version: Literal["response_inspection_v2"] = (
+        RESPONSE_INSPECTION_V2
+    )
+    delivery: VoiceDeliveryInspectionV1 | None = None
+    before_openai: BeforeOpenAIInspectionV2
+    openai: OpenAIInspectionV1
+    after_openai: AfterOpenAIInspectionV1
+
+
+def build_response_inspection_v2(
+    *,
+    trusted_plan: TrustedResponsePlanV0_2,
+    provider_response: OpenAIChatResponseV1,
+    finalized: FinalizedTrustedResponseV1,
+    transcript_persistence: Literal["persisted", "skipped"],
+    voice_turn_id: UUID | None = None,
+) -> ResponseInspectionV2:
+    """Project validated interaction metadata without private content."""
+
+    plan = TrustedResponsePlanV0_2.model_validate_json(
+        trusted_plan.model_dump_json()
+    )
+    base = build_response_inspection_v1(
+        trusted_plan=plan,
+        provider_response=provider_response,
+        finalized=finalized,
+        transcript_persistence=transcript_persistence,
+        voice_turn_id=voice_turn_id,
+    )
+    trace = plan.shadow_trace
+    return ResponseInspectionV2(
+        delivery=base.delivery,
+        before_openai=BeforeOpenAIInspectionV2(
+            **base.before_openai.model_dump(mode="python"),
+            interaction_version=trace.interaction_version,
+            interaction=trace.interaction,
+            question_policy=plan.policy_decision.question_policy.value,
+            interaction_reason_codes=trace.interaction_reason_codes,
+        ),
+        openai=base.openai,
+        after_openai=base.after_openai,
+    )
+
+
 __all__ = [
-    "RESPONSE_INSPECTION_VERSION",
+    "RESPONSE_INSPECTION_V1",
+    "RESPONSE_INSPECTION_V2",
+    "AfterOpenAIInspectionV1",
+    "BeforeOpenAIInspectionV1",
+    "BeforeOpenAIInspectionV2",
+    "OpenAIInspectionV1",
     "ResponseInspectionV1",
+    "ResponseInspectionV2",
+    "VoiceDeliveryInspectionV1",
     "build_response_inspection_v1",
+    "build_response_inspection_v2",
 ]
