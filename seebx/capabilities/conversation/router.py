@@ -57,8 +57,7 @@ from seebx.capabilities.conversation.lifeswitch_composition import (
 )
 from seebx.capabilities.conversation.lifeswitch_inspection import build_response_inspection_v4
 from seebx.capabilities.conversation.inspection import build_response_inspection_v2
-from rag_engine.usage_ledger_v1 import persist_openai_chat_usage_v1
-from rag_engine.usage_ledger_v1 import persist_openai_chat_usage_v2
+from seebx.adapters.usage_postgres import persist_openai_chat_usage
 from rag_engine.voice_observability_v1 import (
     voice_turn_id_from_request,
     voice_turn_response_headers,
@@ -460,22 +459,13 @@ async def resse_response_query(
                 memory_provenance=execution.successor_memory_provenance,
             )
         persistence_started_ns = time.monotonic_ns()
-        if lifeswitch_enabled:
-            await persist_openai_chat_usage_v2(
-                conn,
-                owner_user_id=owner,
-                answer_id=finalized.answer_id,
-                source_channel="voice" if voice_turn_id is not None else "chat",
-                provider_response=execution.provider_response,
-            )
-        else:
-            await persist_openai_chat_usage_v1(
-                conn,
-                owner_user_id=owner,
-                answer_id=finalized.answer_id,
-                source_channel="voice" if voice_turn_id is not None else "chat",
-                provider_response=execution.provider_response,
-            )
+        await persist_openai_chat_usage(
+            conn,
+            owner_user_id=owner,
+            answer_id=finalized.answer_id,
+            source_channel="voice" if voice_turn_id is not None else "chat",
+            provider_response=execution.provider_response,
+        )
         if not payload.no_store:
             await persist_conversation_response(
                 conn,
