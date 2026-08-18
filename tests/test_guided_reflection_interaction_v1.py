@@ -14,7 +14,7 @@ from rag_engine.response_policy_prompt_v0_2 import (
     RESPONSE_POLICY_PROMPT_VERSION,
     render_response_policy_prompt_v0_2,
 )
-from rag_engine.response_policy_v0_2 import (
+from seebx.capabilities.conversation.policy import (
     Closure,
     ControllingPolicyDisposition,
     ConversationRole,

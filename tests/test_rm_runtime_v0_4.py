@@ -9,7 +9,7 @@ from seebx.capabilities.conversation.prompt import (
     assemble_prompt,
 )
 from rag_engine.response_policy_prompt_v0_2 import render_response_policy_prompt_v0_2
-from rag_engine.response_policy_v0_2 import (
+from seebx.capabilities.conversation.policy import (
     ConversationRole,
     FMLevel,
     GateState,

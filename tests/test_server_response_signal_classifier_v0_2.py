@@ -6,7 +6,7 @@ from typing import Any
 import httpx
 from openai import APITimeoutError
 
-from rag_engine.response_policy_v0_2 import (
+from seebx.capabilities.conversation.policy import (
     Closure,
     ConversationRole,
     FMLevel,

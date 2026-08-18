@@ -38,7 +38,7 @@ from seebx.capabilities.conversation.orchestration import (
     TrustedResponseOrchestratorV0_2,
     TrustedResponseRequestV0_2,
 )
-from rag_engine.response_policy_v0_2 import (
+from seebx.capabilities.conversation.policy import (
     ConversationRole,
     ResponsePolicyConversationMessageV0_2,
     ResponsePolicyInputV0_2,

@@ -19,7 +19,7 @@ from rag_engine.fm_selection_envelope_v0_2 import (
     ORDINARY_LIGHT_PRIMARY_IDS,
     select_fm_v0_2,
 )
-from rag_engine.response_policy_v0_2 import (
+from seebx.capabilities.conversation.policy import (
     ConversationRole,
     FMLevel,
     GateState,

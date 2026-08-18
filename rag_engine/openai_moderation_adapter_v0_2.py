@@ -12,7 +12,7 @@ could accidentally bypass the high-stakes gate.
 from collections.abc import Mapping
 from typing import Any
 
-from rag_engine.response_policy_v0_2 import (
+from seebx.capabilities.conversation.policy import (
     GateState,
     ResponsePolicyInputV0_2,
     SafetyAssessmentV0_2,

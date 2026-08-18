@@ -35,7 +35,7 @@ from seebx.capabilities.conversation.composition import GovernedMemoryAssemblyV1
 from seebx.capabilities.conversation.snapshot import (
     create_current_only_conversation_snapshot_v1,
 )
-from rag_engine.response_policy_v0_2 import ResponsePolicySignalsV0_2
+from seebx.capabilities.conversation.policy import ResponsePolicySignalsV0_2
 from rag_engine.response_source_awareness_v1 import MemorySourceStatusV1
 from rag_engine.successor_memory_chat_adapter_v1 import (
     SuccessorMemoryChatAdapterV1,

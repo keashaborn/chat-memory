@@ -13,7 +13,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from rag_engine.response_policy_v0_2 import ResponseMode
+from seebx.capabilities.conversation.policy import ResponseMode
 
 
 ASSISTANT_RESPONSE_PREFERENCES_VERSION = "assistant_response_preferences_v1"

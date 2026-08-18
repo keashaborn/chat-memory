@@ -21,7 +21,7 @@ from seebx.capabilities.conversation.orchestration import (
     TrustedResponseRequestV0_2,
     _plan_sha256,
 )
-from rag_engine.response_policy_v0_2 import (
+from seebx.capabilities.conversation.policy import (
     ConversationRole,
     FMLevel,
     GateState,

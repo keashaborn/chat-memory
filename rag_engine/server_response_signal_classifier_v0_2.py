@@ -22,7 +22,7 @@ from typing import Any, Literal, Mapping
 from openai import APIConnectionError, APIStatusError
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from rag_engine.response_policy_v0_2 import (
+from seebx.capabilities.conversation.policy import (
     DOMAIN_CLASSIFIER_UNAVAILABLE_REASON,
     GateState,
     ResponsePolicyInputV0_2,

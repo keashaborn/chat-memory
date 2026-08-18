@@ -11,7 +11,7 @@ from rag_engine.governed_memory.response_provenance import (
 from seebx.capabilities.conversation.snapshot import (
     create_current_only_conversation_snapshot_v1,
 )
-from rag_engine.response_policy_v0_2 import ResponsePolicySignalsV0_2
+from seebx.capabilities.conversation.policy import ResponsePolicySignalsV0_2
 from rag_engine.response_source_awareness_v1 import MemorySourceStatusV1
 from seebx.capabilities.conversation.memory_context import (
     InactiveMemoryContextProviderV1,

@@ -20,7 +20,7 @@ if str(ROOT) not in sys.path:
 from rag_engine.response_policy_prompt_v0_2 import (  # noqa: E402
     render_response_policy_prompt_v0_2,
 )
-from rag_engine.response_policy_v0_2 import (  # noqa: E402
+from seebx.capabilities.conversation.policy import (  # noqa: E402
     ConversationRole,
     ResponsePolicyConversationMessageV0_2,
     ResponsePolicyInputV0_2,

@@ -34,7 +34,7 @@ from rag_engine.fm_runtime_bundle_v0_2 import (
     record_epistemic_status,
     record_provenance_refs,
 )
-from rag_engine.response_policy_v0_2 import (
+from seebx.capabilities.conversation.policy import (
     FMLevel as PolicyFMLevel,
     GateState,
     ResponseMode as PolicyResponseMode,

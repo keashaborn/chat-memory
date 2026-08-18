@@ -16,7 +16,7 @@ from typing import Any, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from rag_engine.response_policy_v0_2 import FMLevel, GateState, ResponseMode, ResponsePolicyDecisionV0_2
+from seebx.capabilities.conversation.policy import FMLevel, GateState, ResponseMode, ResponsePolicyDecisionV0_2
 
 
 REQUEST_CONTRACT_VERSION = "rm_selection_request_v0_4"

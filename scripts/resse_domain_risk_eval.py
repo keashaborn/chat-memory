@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from rag_engine.response_policy_v0_2 import (
+from seebx.capabilities.conversation.policy import (
     ConversationRole,
     ResponsePolicyConversationMessageV0_2,
     ResponsePolicyInputV0_2,

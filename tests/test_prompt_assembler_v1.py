@@ -32,7 +32,7 @@ from rag_engine.prior_web_provenance_v1 import (
 from rag_engine.response_policy_prompt_v0_2 import (
     render_response_policy_prompt_v0_2,
 )
-from rag_engine.response_policy_v0_2 import (
+from seebx.capabilities.conversation.policy import (
     ConversationRole,
     Closure,
     FMLevel,

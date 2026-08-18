@@ -27,7 +27,7 @@ from rag_engine.qdrant_compat import make_qdrant_client  # noqa: E402
 from seebx.capabilities.conversation.snapshot import (  # noqa: E402
     create_current_only_conversation_snapshot_v1,
 )
-from rag_engine.response_policy_v0_2 import ResponsePolicySignalsV0_2  # noqa: E402
+from seebx.capabilities.conversation.policy import ResponsePolicySignalsV0_2  # noqa: E402
 
 
 CONTRACT_VERSION = "memory_v1_v5_2_evidence_context_stance_typed_shadow_v1"

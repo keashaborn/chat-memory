@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-"""Pure, fail-closed response-policy decisions for RESSE.
+"""Pure, fail-closed response-policy decisions for SeeBx conversations.
 
 This module accepts only typed inputs. It does not assemble prompts, retrieve
-Memory V1 records, query a corpus, call a model, read configuration, log, or
-mutate state. A future server adapter is responsible for constructing the
-trusted signals after authentication and input-safety assessment.
+memory records, query a corpus, call a model, read configuration, log, or
+mutate state. The canonical conversation composition layer constructs trusted
+signals after authentication and input-safety assessment.
 """
 
 import hashlib

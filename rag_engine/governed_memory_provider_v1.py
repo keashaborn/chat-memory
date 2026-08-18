@@ -54,7 +54,7 @@ from seebx.adapters.openai import embed_text
 from rag_engine.qdrant_compat import make_qdrant_client
 from seebx.capabilities.conversation.composition import GovernedMemoryAssemblyV1
 from seebx.capabilities.conversation.snapshot import ConversationSnapshotV1
-from rag_engine.response_policy_v0_2 import ResponsePolicySignalsV0_2
+from seebx.capabilities.conversation.policy import ResponsePolicySignalsV0_2
 
 
 CLAIM_SOURCE = SourceContractVersionV1(

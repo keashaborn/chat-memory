@@ -32,7 +32,7 @@ from rag_engine.governed_memory.runtime.openai_adapters import (
 from seebx.capabilities.conversation.prompt import PromptReferenceContextBlockV1
 from seebx.capabilities.conversation.composition import GovernedMemoryAssemblyV1
 from seebx.capabilities.conversation.snapshot import ConversationSnapshotV1
-from rag_engine.response_policy_v0_2 import ResponsePolicySignalsV0_2
+from seebx.capabilities.conversation.policy import ResponsePolicySignalsV0_2
 from rag_engine.response_source_awareness_v1 import MemorySourceStatusV1
 
 

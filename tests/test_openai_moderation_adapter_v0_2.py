@@ -14,7 +14,7 @@ from rag_engine.openai_moderation_adapter_v0_2 import (
     OpenAIModerationAdapterV0_2,
     assess_openai_moderation_v0_2,
 )
-from rag_engine.response_policy_v0_2 import (
+from seebx.capabilities.conversation.policy import (
     ConversationRole,
     GateState,
     ResponsePolicyConversationMessageV0_2,

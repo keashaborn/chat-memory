@@ -44,7 +44,7 @@ from seebx.capabilities.conversation.orchestration import (
     TrustedResponsePlanV0_2,
     TrustedResponseRequestV0_2,
 )
-from rag_engine.response_policy_v0_2 import (
+from seebx.capabilities.conversation.policy import (
     ResponsePolicyInputV0_2,
     ResponsePolicySignalsV0_2,
 )

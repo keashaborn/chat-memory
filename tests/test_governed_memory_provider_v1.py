@@ -16,7 +16,7 @@ from rag_engine.memory_v1_entity_scope_resolver_v2 import (
 from seebx.capabilities.conversation.snapshot import (
     create_current_only_conversation_snapshot_v1,
 )
-from rag_engine.response_policy_v0_2 import ResponsePolicySignalsV0_2
+from seebx.capabilities.conversation.policy import ResponsePolicySignalsV0_2
 from tests.test_memory_v1_selection_envelope_v1 import (
     FakeProvider,
     MemoryLane,

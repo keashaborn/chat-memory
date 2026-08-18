@@ -13,7 +13,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from rag_engine.response_policy_v0_2 import (
+from seebx.capabilities.conversation.policy import (
     POLICY_VERSION,
     Closure,
     FMLevel,

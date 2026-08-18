@@ -24,7 +24,7 @@ from rag_engine.assistant_response_preferences_v1 import (
     compiled_preference_marker_v1,
     render_assistant_response_preferences_v1,
 )
-from rag_engine.response_policy_v0_2 import ResponseMode
+from seebx.capabilities.conversation.policy import ResponseMode
 
 
 OWNER = UUID("1240822d-ac9a-4096-95aa-e2b24d36ef50")

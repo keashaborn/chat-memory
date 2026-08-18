@@ -8,7 +8,7 @@ import unittest
 
 from pydantic import ValidationError
 
-from rag_engine.response_policy_v0_2 import (
+from seebx.capabilities.conversation.policy import (
     ASSISTANT_PROFILE_ID,
     MODE_PRECEDENCE,
     Closure,
@@ -29,7 +29,7 @@ from rag_engine.response_policy_v0_2 import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MODULE = ROOT / "rag_engine" / "response_policy_v0_2.py"
+MODULE = ROOT / "seebx" / "capabilities" / "conversation" / "policy.py"
 
 
 def request(
