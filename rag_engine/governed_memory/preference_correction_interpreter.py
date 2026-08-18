@@ -318,7 +318,7 @@ def openai_preference_correction_interpreter_from_environment_v1(
     # This module is also packaged in the isolated worker runtime, which must
     # remain importable without Brains-only provider modules. The factory is
     # called only by the Brains chat lifecycle when the feature is enabled.
-    from rag_engine.openai_client import get_openai_client
+    from seebx.adapters.openai import get_openai_client
 
     return OpenAIPreferenceCorrectionInterpreterV1(
         client=get_openai_client(),

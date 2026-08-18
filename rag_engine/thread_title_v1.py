@@ -2,7 +2,7 @@ import json
 import re
 from typing import Any, Mapping, Optional, Sequence, Tuple
 
-from rag_engine.openai_client import normalize_chat_model
+from seebx.adapters.openai import normalize_chat_model
 
 
 _GREETING_ONLY = re.compile(

@@ -23,7 +23,7 @@ from rag_engine.assistant_response_preferences_v1 import (
     ResponseLength,
     TechnicalDepth,
 )
-from rag_engine.openai_client import get_openai_client
+from seebx.adapters.openai import get_openai_client
 
 
 ASSISTANT_PREFERENCE_COMPILER_VERSION = "assistant_preference_compiler_v3"

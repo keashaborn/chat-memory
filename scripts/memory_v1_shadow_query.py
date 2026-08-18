@@ -18,7 +18,7 @@ from rag_engine.memory_v1_projection import (
     ClaimVectorIndex,
 )
 from rag_engine.memory_v1_retrieval import build_memory_packet
-from rag_engine.openai_client import embed_text
+from seebx.adapters.openai import embed_text
 from rag_engine.qdrant_compat import make_qdrant_client
 
 

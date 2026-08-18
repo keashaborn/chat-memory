@@ -50,7 +50,7 @@ from rag_engine.memory_v1_shadow import (
 )
 from rag_engine.memory_v1_v5_claim_lane_adapter_v2 import V5ClaimLaneAdapterV2
 from rag_engine.memory_v1_v5_shadow_candidate import discover_v5_shadow_candidates
-from rag_engine.openai_client import embed_text
+from seebx.adapters.openai import embed_text
 from rag_engine.qdrant_compat import make_qdrant_client
 from rag_engine.response_composition_root_v0_2 import GovernedMemoryAssemblyV1
 from rag_engine.response_conversation_snapshot_v1 import ConversationSnapshotV1

@@ -20,7 +20,7 @@ from rag_engine.memory_v1_projection import (
     ClaimVectorIndex,
     process_owner_projection_outbox,
 )
-from rag_engine.openai_client import embed_text
+from seebx.adapters.openai import embed_text
 from rag_engine.qdrant_compat import make_qdrant_client
 from scripts.memory_v1_authenticated_owners import (
     MAX_AUTHENTICATED_OWNERS,

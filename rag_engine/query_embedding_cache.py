@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Callable, Dict, List, Sequence
 
-from .openai_client import embed_text
+from seebx.adapters.openai import embed_text
 
 
 class QueryEmbeddingCache:

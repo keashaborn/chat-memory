@@ -13,7 +13,7 @@ import json
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from .openai_client import complete_chat, complete_chat_messages, normalize_chat_model
+from seebx.adapters.openai import complete_chat, complete_chat_messages, normalize_chat_model
 from .prompt_builder import build_system_prompt
 from .role_overlay import overlay_to_instructions
 from .retriever_unified import retrieve_personal_memory, unified_retrieve

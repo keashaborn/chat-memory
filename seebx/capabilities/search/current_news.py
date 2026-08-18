@@ -528,7 +528,7 @@ async def current_news_query(
         ) from None
 
     try:
-        from rag_engine.openai_client import get_openai_client
+        from seebx.adapters.openai import get_openai_client
 
         provider = OpenAITrustedWebProviderV1(
             get_openai_client(),

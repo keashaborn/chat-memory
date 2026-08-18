@@ -44,7 +44,7 @@ from seebx.core.identity import (
     require_actor_context,
 )
 from rag_engine.openai_chat_provider_v1 import OpenAIChatGenerationConfigV1
-from rag_engine.openai_client import get_openai_client
+from seebx.adapters.openai import get_openai_client
 from rag_engine.response_composition_root_v0_2 import (
     AuthenticatedResponseCommandV0_2,
     InactiveResponseCompositionRootV0_2,

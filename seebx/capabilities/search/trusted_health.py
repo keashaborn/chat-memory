@@ -302,7 +302,7 @@ async def trusted_web_query(
                 answer=_decline_answer(policy),
             )
 
-        from rag_engine.openai_client import get_openai_client
+        from seebx.adapters.openai import get_openai_client
 
         provider = OpenAITrustedWebProviderV1(
             get_openai_client(),

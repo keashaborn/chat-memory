@@ -12,7 +12,7 @@ from .memory_v1_projection import ClaimVectorIndex
 from .memory_v1_intent import classify_memory_intent
 from .memory_v1_retrieval import build_memory_packet
 from .memory_v1_store import actor_uuid
-from .openai_client import embed_text
+from seebx.adapters.openai import embed_text
 from .qdrant_compat import make_qdrant_client
 
 

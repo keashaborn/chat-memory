@@ -1,5 +1,6 @@
-# rag_engine/openai_client.py
+"""Shared OpenAI SDK adapter for SeeBx capabilities."""
 
+import hashlib
 import os
 from typing import List, Dict, Any, Tuple
 from openai import OpenAI
@@ -20,7 +21,7 @@ from openai import OpenAI
 # routed to another provider. This prevents stale cookies, old UI settings,
 # or future env vars from reactivating non-OpenAI providers accidentally.
 
-DEFAULT_CHAT_MODEL = (os.getenv("VANTAGE_MODEL") or os.getenv("OPENAI_CHAT_MODEL") or "gpt-5.2").strip()
+DEFAULT_CHAT_MODEL = (os.getenv("OPENAI_CHAT_MODEL") or "gpt-5.2").strip()
 
 _ALLOWED_CHAT_MODELS = {
     "gpt-5.2",
@@ -79,7 +80,8 @@ def _get_client(provider: str = "openai") -> OpenAI:
     if not api_key:
         raise RuntimeError("Missing OPENAI_API_KEY")
 
-    cache_key = (base_url, "OPENAI_API_KEY")
+    key_fingerprint = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+    cache_key = (base_url, key_fingerprint)
     c = _client_cache.get(cache_key)
     if c is None:
         c = OpenAI(api_key=api_key, base_url=base_url)
