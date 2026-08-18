@@ -17,6 +17,9 @@ Candidate evidence:
 - Voice contract vocabulary alignment: `d39476d3`
 - Canonical search capability package: `6cf361ec`
 - Shared search runtime boundary: `3caf9ac1`
+- Search audit, wrappers, authorization, planning, evidence, provider, and
+  registry ownership: `685703e7`, `7f9a49a4`, `c38149c2`, `30ecece6`,
+  `07c80b71`, `64c8f321`, `0986ca9b`
 
 The current runtime service, timer, container, database, and cron disposition is
 tracked in `docs/SEEBX_RUNTIME_ASSET_LEDGER_V1.md`.
@@ -169,7 +172,7 @@ candidate evidence, never production authority.
 | `app.py` composition plus 36 direct routes and SQL | `seebx.main` plus capability routers/services | move one contract-tested route family at a time; keep external behavior stable |
 | governed-memory actor types in live auth | `seebx.core.identity` | Batch 02 candidate completed; retain compatibility re-export only for named dormant callers |
 | `resse_response_router.py` and 72-module closure | `capabilities.conversation` | extract generic response contracts, then select one Zep-aware composition flow |
-| separate trusted-web, search, and news engines | one search capability with policy profiles | preserve provider, source, cache, and audit behavior while removing duplicate orchestration |
+| canonical search package plus shared legacy adapters | one search capability with trusted-health and current-news policy profiles | search now owns routing, planning, source policy, provider, evidence, and audit; move shared OpenAI, voice-language, transcript, and authority boundaries only with their owning capabilities |
 | domain SQL reachable from response code | LifeSwitch capability read contracts | no direct cross-capability database access |
 | old `memory` PostgreSQL plus isolated LifeSwitch PostgreSQL | clean platform PostgreSQL plus isolated LifeSwitch PostgreSQL | migrate only verified platform schemas; do not restore the retired database wholesale |
 | provider and secret settings in service environment | validated config plus provider adapters and managed secret/config stores | fail closed when required values are absent; no fallback across stores |
@@ -186,7 +189,7 @@ not define a second architecture.
 |---|---|---|---|---|---|---|
 | Identity and ownership | `core.identity`, `core.ownership`, `core.policy` | Supabase JWT verification plus extracted actor contract | Supabase Auth identity; PostgreSQL owner/RLS state | Supabase Auth **KEEP** | KEEP; remove retired-memory naming | prove all mounted routes obtain the same verified actor and no request field or cookie is owner authority |
 | Conversation and transcripts | `capabilities.conversation` | `resse_response_router.py`, parallel composition paths, chat routes in `app.py` | platform PostgreSQL for threads/messages/receipts | Zep **KEEP for memory only**; OpenAI behind model adapter | CONSOLIDATE | freeze live request/response/provenance behavior, select one composer, and prove Zep deletion/outage behavior |
-| Search and current information | `capabilities.search` | canonical search package now mounted; legacy modules are compatibility re-exports | platform PostgreSQL search audit/cache | provider clients behind search adapters | CONSOLIDATE IN PROGRESS | finish shared audit/provider lifecycle, name remaining compatibility callers, then prove route/OpenAPI and stored-audit parity |
+| Search and current information | `capabilities.search` | canonical package owns routing, planning, authorization, registry, policy, provider, evidence, admission, audit, NCBI, and ODS; legacy search wrappers are retired | platform PostgreSQL search audit/cache | provider clients behind shared adapters | CANONICALIZED; SHARED ADAPTER EXTRACTION PENDING | isolate shared OpenAI, voice-language, transcript, and core-authority boundaries; then prove disposable-database audit parity and authenticated frontend behavior before deployment |
 | Voice | `capabilities.voice` with transcription, realtime, synthesis, and lease sub-capabilities | separate live routers and repaired synthetic canary candidate | platform PostgreSQL session/lease/audit state | OpenAI speech behind voice adapters | KEEP + CONSOLIDATE | bounded canary deployment, owner/lease contract tests, and removal of unrelated response-memory imports |
 | Preferences, export, and forms | separate reusable capabilities | unmounted preferences, retired export response, unsafe unmounted forms router, active frontend callers | clean platform PostgreSQL | schema-driven product **DECIDE**, only if owner/RLS/export requirements fit | REBUILD OR RETIRE | make a product decision per capability; never remount current forms code; reconcile every frontend caller |
 | LifeSwitch domain | `capabilities.nutrition`, `training`, `measurements`, `plans` | large mounted routers and overlapping catalog/read paths | isolated LifeSwitch PostgreSQL | no external product selected; Supabase remains an infrastructure option | KEEP + SPLIT | remove platform-database fallback, establish one catalog, and prove each router uses a domain service instead of raw cross-capability SQL |

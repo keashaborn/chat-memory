@@ -57,9 +57,10 @@ Source commit: `49f9e60cf4321c8e42c359845c1a62a8c987614d`
 
 | Component | Verified current state | Target owner | Disposition | Gate |
 |---|---|---|---|---|
-| Trusted-web router | Live; 17-module/4,909-line closure | search capability | KEEP + CONSOLIDATE | Share provider, normalization, cache, and audit contracts |
-| Search execution router | Live; 21-module/6,242-line closure | search capability | CONSOLIDATE | Merge duplicate provider/orchestration logic |
-| Current-news router | Live; 18-module/5,594-line closure | search policy/profile | CONSOLIDATE | Express freshness/source policy without separate engine |
+| Trusted-health search profile | Candidate mounts `seebx.capabilities.search.trusted_health`; provider, policy, registry, evidence, admission, and audit have one canonical owner | search capability | KEEP | Preserve approved domains, NCBI/ODS behavior, source evidence, and audit semantics through deployment verification |
+| Search executor | Candidate owns plan, budget, authorization, and execution under `seebx.capabilities.search` | search capability | KEEP + FINISH SHARED BOUNDARIES | Move transcript persistence and shared language/model adapters through their owning capabilities; preserve server-owned budgets and owner authority |
+| Current-news search profile | Candidate expresses current news through the same provider, registry, evidence, admission, audit, and runtime boundaries | search capability policy profile | KEEP | Preserve freshness/source policy and exact public contract; do not recreate a separate engine |
+| Legacy search-owned `rag_engine` modules | Candidate removes or moves 14 router, authorization, plan, budget, evidence, audit, provider, policy, registry, NCBI, and ODS modules; no candidate caller imports those paths | none | RETIRE CANDIDATE COMPLETE | Keep Git rollback; verify deployment import graph, routes, authenticated behavior, ODS timer, and stored audit records before production retirement is accepted |
 | Legacy RAG/vector modules | Mostly dormant with Qdrant/Vantage dependencies | none or offline evaluation | ARCHIVE then RETIRE | Generated import graph and no runtime settings/services |
 | `catalog_router.py` | Live against old platform `catalog_dev` | catalog capability in LifeSwitch database | MIGRATE + CONSOLIDATE | Repoint after row/function parity; do not keep two writable catalogs |
 | LifeSwitch nutrition catalog access | Live against isolated database `catalog_dev` | same catalog capability | KEEP | Becomes sole catalog after callers cut over |
