@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import unittest
 import uuid
+from pathlib import Path
 
-from rag_engine.voice_realtime_session_manager import (
+from seebx.capabilities.voice.realtime_session import (
     RealtimePreviewSessionRegistry,
 )
 
@@ -14,6 +15,17 @@ THREAD_ID = uuid.UUID("a401fdc5-92ee-4eeb-ad64-a98603c7dc69")
 
 
 class RealtimePreviewSessionRegistryTests(unittest.TestCase):
+    def test_canonical_module_has_no_legacy_wrapper(self) -> None:
+        repository = Path(__file__).resolve().parents[1]
+        self.assertTrue(
+            (
+                repository / "seebx/capabilities/voice/realtime_session.py"
+            ).is_file()
+        )
+        self.assertFalse(
+            (repository / "rag_engine/voice_realtime_session_manager.py").exists()
+        )
+
     def test_expired_sessions_fail_closed(self) -> None:
         now = [100.0]
         registry = RealtimePreviewSessionRegistry(

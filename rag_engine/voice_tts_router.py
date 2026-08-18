@@ -10,7 +10,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from rag_engine.voice_observability_v1 import (
+from seebx.core.voice_observability import (
     voice_turn_id_from_request,
     voice_turn_response_headers,
 )

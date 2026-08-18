@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 
 from seebx.core.ownership import require_actor_matches_owner
 from seebx.adapters.openai_chat import safety_identifier_v1
-from rag_engine.voice_observability_v1 import (
+from seebx.core.voice_observability import (
     voice_turn_id_from_request,
     voice_turn_response_headers,
 )

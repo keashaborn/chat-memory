@@ -58,7 +58,7 @@ from seebx.capabilities.conversation.lifeswitch_composition import (
 from seebx.capabilities.conversation.lifeswitch_inspection import build_response_inspection_v4
 from seebx.capabilities.conversation.inspection import build_response_inspection_v2
 from seebx.adapters.usage_postgres import persist_openai_chat_usage
-from rag_engine.voice_observability_v1 import (
+from seebx.core.voice_observability import (
     voice_turn_id_from_request,
     voice_turn_response_headers,
 )

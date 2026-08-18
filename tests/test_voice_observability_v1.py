@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 
-from rag_engine.voice_observability_v1 import (
+from seebx.core.voice_observability import (
     voice_turn_id_from_request,
     voice_turn_response_headers,
 )
@@ -28,6 +29,15 @@ class VoiceObservabilityV1Tests(unittest.TestCase):
             )
 
         self.client = TestClient(app)
+
+    def test_canonical_module_has_no_legacy_wrapper(self) -> None:
+        repository = Path(__file__).resolve().parents[1]
+        self.assertTrue(
+            (repository / "seebx/core/voice_observability.py").is_file()
+        )
+        self.assertFalse(
+            (repository / "rag_engine/voice_observability_v1.py").exists()
+        )
 
     def test_accepts_and_echoes_uuid(self) -> None:
         response = self.client.get(

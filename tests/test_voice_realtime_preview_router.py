@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from rag_engine import voice_realtime_preview_router as preview
-from rag_engine.voice_realtime_session_manager import (
+from seebx.capabilities.voice.realtime_session import (
     RealtimePreviewSessionRegistry,
 )
 

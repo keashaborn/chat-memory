@@ -18,7 +18,7 @@ from seebx.adapters.supabase import (
     VerifiedSupabaseIdentity,
     verify_supabase_access_token_identity,
 )
-from rag_engine.voice_observability_v1 import voice_turn_id_from_request
+from seebx.core.voice_observability import voice_turn_id_from_request
 from seebx.core.voice_identity import require_active_voice_session
 
 

@@ -6,7 +6,7 @@ import unittest
 import uuid
 from typing import Any
 
-from rag_engine.voice_realtime_session_manager import (
+from seebx.capabilities.voice.realtime_session import (
     RealtimePreviewSessionRegistry,
 )
 from rag_engine.voice_realtime_sideband_controller import (
