@@ -36,7 +36,6 @@ from seebx.capabilities.search.ncbi import (
 from seebx.capabilities.search.ods import (
     NIHODSClientV1,
     ODSClientError,
-    load_cached_ods_creatine_guidance,
     trusted_web_query_uses_ods,
 )
 from seebx.capabilities.search.policy import (
@@ -60,6 +59,7 @@ from seebx.contracts.voice_language import (
     SUPPORTED_VOICE_LANGUAGE_IDS,
     response_language_instruction,
 )
+from seebx.adapters.search_cache import load_cached_ods_creatine_guidance
 from seebx.adapters.search_audit import open_search_audit_session
 from seebx.capabilities.search.runtime import (
     NO_STORE_HEADERS,

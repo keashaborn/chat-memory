@@ -2,10 +2,9 @@ from __future__ import annotations
 
 """One server-owned search plan and executor for text and Realtime voice."""
 
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from uuid import UUID, uuid4
 
-import asyncpg
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -23,7 +22,10 @@ from seebx.capabilities.search.trusted_health import (
 from seebx.capabilities.search.authorization import (
     require_web_search_actor_v1,
 )
-from seebx.adapters.conversation_persistence import persist_search_exchange
+from seebx.adapters.search_transcript import (
+    SearchTranscriptStoreUnavailableError,
+    persist_search_exchange_with_dsn,
+)
 from seebx.contracts.voice_language import (
     AUTO_VOICE_LANGUAGE,
     SUPPORTED_VOICE_LANGUAGE_IDS,
@@ -258,17 +260,10 @@ async def execute_search_plan_v1(
         )
     else:
         try:
-            conn = await asyncpg.connect(dsn, command_timeout=15)
-        except Exception:
-            raise HTTPException(
-                status_code=503,
-                detail="search_transcript_store_unavailable",
-            ) from None
-        try:
-            answer_id = await persist_search_exchange(
-                conn,
+            answer_id = await persist_search_exchange_with_dsn(
+                postgres_dsn=dsn,
                 owner_user_id=owner,
-                thread_id=payload.thread_id,
+                thread_id=cast(UUID, payload.thread_id),
                 request_id=request_id,
                 query=payload.query,
                 answer=answer,
@@ -280,8 +275,11 @@ async def execute_search_plan_v1(
                 admitted_sources=admitted_sources,
                 consulted_source_count=consulted_count,
             )
-        finally:
-            await conn.close()
+        except SearchTranscriptStoreUnavailableError:
+            raise HTTPException(
+                status_code=503,
+                detail="search_transcript_store_unavailable",
+            ) from None
 
     return JSONResponse(
         {
