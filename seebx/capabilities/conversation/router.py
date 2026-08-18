@@ -63,7 +63,7 @@ from rag_engine.voice_observability_v1 import (
     voice_turn_id_from_request,
     voice_turn_response_headers,
 )
-from rag_engine.search_capability_manifest_v1 import (
+from seebx.contracts.search import (
     TEXT_SEARCH_AUTHORIZATION_BASIS,
     VOICE_SEARCH_AUTHORIZATION_BASIS,
     SearchCapabilityManifestV1,

@@ -9,7 +9,7 @@ from rag_engine.response_finalization_v1 import (
     ResponseFinalizationError,
     finalize_trusted_response_v1,
 )
-from rag_engine.search_capability_manifest_v1 import (
+from seebx.contracts.search import (
     TEXT_SEARCH_AUTHORIZATION_BASIS,
     SearchCapabilityManifestV1,
 )

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from rag_engine.search_capability_manifest_v1 import SearchCapabilityManifestV1
+from seebx.contracts.search import SearchCapabilityManifestV1
 
 
 SEARCH_CAPABILITY_OUTPUT_VALIDATOR_VERSION = (

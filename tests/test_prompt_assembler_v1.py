@@ -46,7 +46,7 @@ from rag_engine.response_policy_v0_2 import (
     decide_response_policy_v0_2,
 )
 from rag_engine.response_source_awareness_v1 import MemorySourceStatusV1
-from rag_engine.search_capability_manifest_v1 import (
+from seebx.contracts.search import (
     TEXT_SEARCH_AUTHORIZATION_BASIS,
     SearchCapabilityManifestV1,
 )

@@ -18,7 +18,7 @@ from seebx.capabilities.conversation.composition import (
 )
 from rag_engine.response_conversation_snapshot_v1 import USER_SOURCE
 from rag_engine.response_policy_v0_2 import ResponsePolicySignalsV0_2
-from rag_engine.search_capability_manifest_v1 import (
+from seebx.contracts.search import (
     VOICE_SEARCH_AUTHORIZATION_BASIS,
     SearchCapabilityManifestV1,
 )

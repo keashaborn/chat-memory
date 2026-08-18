@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from rag_engine.search_capability_manifest_v1 import (
+from seebx.contracts.search import (
     TEXT_SEARCH_AUTHORIZATION_BASIS,
     VOICE_SEARCH_AUTHORIZATION_BASIS,
     SearchCapabilityManifestV1,

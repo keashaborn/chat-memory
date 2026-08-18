@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import unittest
 
 from pydantic import ValidationError
 
-from rag_engine.search_capability_manifest_v1 import (
+from seebx.contracts.search import (
     SEARCH_CAPABILITY_AUTHORITY,
     TEXT_SEARCH_AUTHORIZATION_BASIS,
     VOICE_SEARCH_AUTHORIZATION_BASIS,
@@ -77,6 +78,24 @@ class SearchCapabilityManifestV1Tests(unittest.TestCase):
         payload["authorization_basis"] = VOICE_SEARCH_AUTHORIZATION_BASIS
         with self.assertRaises(ValidationError):
             SearchCapabilityManifestV1.model_validate(payload)
+
+
+    def test_contract_has_one_canonical_owner_and_no_legacy_wrapper(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        self.assertTrue((root / "seebx/contracts/search.py").is_file())
+        self.assertFalse(
+            (root / "rag_engine/search_capability_manifest_v1.py").exists()
+        )
+        for relative in (
+            "rag_engine/prompt_assembler_v1.py",
+            "rag_engine/response_orchestration_v0_2.py",
+            "rag_engine/search_capability_output_validator_v1.py",
+            "seebx/capabilities/conversation/composition.py",
+            "seebx/capabilities/conversation/router.py",
+        ):
+            source = (root / relative).read_text(encoding="utf-8")
+            self.assertNotIn("rag_engine.search_capability_manifest_v1", source)
+            self.assertIn("seebx.contracts.search", source)
 
 
 if __name__ == "__main__":

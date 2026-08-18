@@ -42,7 +42,7 @@ from rag_engine.response_source_awareness_v1 import (
     render_base_source_awareness_v1,
     web_source_status_v1,
 )
-from rag_engine.search_capability_manifest_v1 import SearchCapabilityManifestV1
+from seebx.contracts.search import SearchCapabilityManifestV1
 from seebx.contracts.voice_language import (
     DEFAULT_VOICE_LANGUAGE,
     SUPPORTED_VOICE_LANGUAGE_IDS,
