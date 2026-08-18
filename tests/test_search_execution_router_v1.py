@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
 from fastapi import HTTPException, Request
 
-from rag_engine.search_execution_router_v1 import (
+from seebx.capabilities.search.execution import (
     SearchExecutionRequestV1,
     _source_policy_violation_headers,
     execute_search_plan_v1,
@@ -17,32 +18,19 @@ ACTOR = UUID("1240822d-ac9a-4096-95aa-e2b24d36ef50")
 
 
 class SearchExecutionRouterV1Tests(unittest.TestCase):
-    def test_legacy_search_modules_export_canonical_capability(self) -> None:
-        from rag_engine.current_news_router import (
-            current_news_query as legacy_current_news_query,
-        )
-        from rag_engine.trusted_web_router import (
-            trusted_web_query as legacy_trusted_web_query,
-        )
-        from seebx.capabilities.search.current_news import (
-            current_news_query as canonical_current_news_query,
-        )
-        from seebx.capabilities.search.trusted_health import (
-            trusted_web_query as canonical_trusted_web_query,
-        )
-
+    def test_legacy_search_router_wrappers_are_retired(self) -> None:
         self.assertEqual(
             execute_search_plan_v1.__module__,
             "seebx.capabilities.search.execution",
         )
-        self.assertIs(
-            legacy_current_news_query,
-            canonical_current_news_query,
-        )
-        self.assertIs(
-            legacy_trusted_web_query,
-            canonical_trusted_web_query,
-        )
+        repository = Path(__file__).resolve().parents[1]
+        for relative_path in (
+            "rag_engine/current_news_router.py",
+            "rag_engine/search_execution_router_v1.py",
+            "rag_engine/trusted_web_router.py",
+        ):
+            with self.subTest(relative_path=relative_path):
+                self.assertFalse((repository / relative_path).exists())
 
     def test_current_news_policy_violation_preserves_route(self) -> None:
         headers = _source_policy_violation_headers(

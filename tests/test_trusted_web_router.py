@@ -6,7 +6,7 @@ from uuid import UUID
 from fastapi import Response
 from pydantic import ValidationError
 
-from rag_engine.trusted_web_router import (
+from seebx.capabilities.search.trusted_health import (
     TrustedWebRequestV1,
     apply_trusted_web_no_store_headers,
 )

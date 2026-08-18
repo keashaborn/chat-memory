@@ -8,7 +8,7 @@ from uuid import UUID
 from fastapi import Response
 from pydantic import ValidationError
 
-from rag_engine.current_news_router import (
+from seebx.capabilities.search.current_news import (
     CURRENT_NEWS_CITATION_REPAIR_INSTRUCTIONS_V1,
     CurrentNewsRequestV1,
     CurrentNewsResponseV1,
@@ -67,7 +67,9 @@ class FakeProvider:
 
 class CurrentNewsRouterTests(unittest.TestCase):
     def test_current_news_instructions_forbid_access_disclaimers(self) -> None:
-        from rag_engine.current_news_router import CURRENT_NEWS_INSTRUCTIONS_V1
+        from seebx.capabilities.search.current_news import (
+            CURRENT_NEWS_INSTRUCTIONS_V1,
+        )
 
         self.assertIn("Never claim that you lack access", CURRENT_NEWS_INSTRUCTIONS_V1)
         self.assertIn("current-news sources", CURRENT_NEWS_INSTRUCTIONS_V1)
