@@ -15,8 +15,8 @@ from rag_engine.governed_memory.response_provenance import (
     SuccessorMemoryNotApplicableReason,
     build_successor_exposed_provenance_v1,
 )
-from rag_engine.openai_chat_provider_v1 import OpenAIChatRequestV1
-from rag_engine.openai_chat_request_v4 import OpenAIChatRequestV4
+from seebx.adapters.openai_chat import OpenAIChatRequestV1
+from seebx.adapters.lifeswitch_openai_chat import OpenAIChatRequestV4
 from rag_engine.prompt_assembler_v1 import (
     ContextKind,
     PromptReferenceContextBlockV1,

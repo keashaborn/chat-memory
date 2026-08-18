@@ -11,7 +11,7 @@ from typing import Any, Callable
 import httpx
 from websockets.asyncio.client import connect
 
-from rag_engine.openai_chat_provider_v1 import safety_identifier_v1
+from seebx.adapters.openai_chat import safety_identifier_v1
 from seebx.contracts.voice_language import VOICE_LANGUAGE_HEADER
 from rag_engine.voice_realtime_session_manager import RealtimePreviewSession
 

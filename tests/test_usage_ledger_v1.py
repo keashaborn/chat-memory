@@ -4,8 +4,8 @@ import unittest
 from typing import Any
 from uuid import UUID
 
-from rag_engine.openai_chat_provider_v1 import OpenAIChatCompletionsAdapterV1
-from rag_engine.openai_chat_request_v4 import OpenAIChatCompletionsAdapterV3
+from seebx.adapters.openai_chat import OpenAIChatCompletionsAdapterV1
+from seebx.adapters.lifeswitch_openai_chat import OpenAIChatCompletionsAdapterV3
 from rag_engine import usage_ledger_v1
 from rag_engine.usage_ledger_v1 import (
     AdminUsageSummaryRequestV1,

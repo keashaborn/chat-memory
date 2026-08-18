@@ -10,7 +10,7 @@ from rag_engine.lifeswitch_answer_provenance_receipt_v1 import (
     LifeSwitchProvenanceSourceRefV1,
     _sha256 as receipt_sha256,
 )
-from rag_engine.openai_chat_request_v4 import OpenAIChatCompletionsAdapterV3
+from seebx.adapters.lifeswitch_openai_chat import OpenAIChatCompletionsAdapterV3
 from rag_engine.prior_lifeswitch_provenance_v1 import (
     prior_lifeswitch_provenance_requested_v1,
     select_prior_lifeswitch_provenance_v1,

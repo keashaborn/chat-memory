@@ -4,7 +4,7 @@ import unittest
 from typing import Any
 from uuid import UUID
 
-from rag_engine.openai_chat_provider_v1 import OpenAIChatCompletionsAdapterV1
+from seebx.adapters.openai_chat import OpenAIChatCompletionsAdapterV1
 from rag_engine.response_finalization_v1 import finalize_trusted_response_v1
 from rag_engine.response_persistence_v1 import (
     ResponsePersistenceError,

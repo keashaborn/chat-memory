@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from seebx.capabilities.conversation.memory_contracts import (
     MemoryAnswerProvenanceV1,
 )
-from rag_engine.openai_chat_provider_v1 import (
+from seebx.adapters.openai_chat import (
     OpenAIChatCompletionsAdapterV1,
     OpenAIChatGenerationConfigV1,
     OpenAIChatRequestV1,

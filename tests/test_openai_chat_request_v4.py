@@ -5,7 +5,7 @@ import unittest
 
 from pydantic import ValidationError
 
-from rag_engine.openai_chat_request_v4 import (
+from seebx.adapters.lifeswitch_openai_chat import (
     OpenAIChatMessageV2,
     OpenAIChatRequestV4,
 )

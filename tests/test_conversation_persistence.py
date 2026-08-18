@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from uuid import UUID
 
-from rag_engine.openai_chat_request_v4 import OpenAIChatCompletionsAdapterV3
+from seebx.adapters.lifeswitch_openai_chat import OpenAIChatCompletionsAdapterV3
 from rag_engine.response_finalization_v3 import finalize_trusted_response_v3
 from seebx.capabilities.conversation.persistence import (
     ConversationPersistenceError,

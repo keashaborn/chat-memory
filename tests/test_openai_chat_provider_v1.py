@@ -10,7 +10,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from rag_engine.openai_chat_provider_v1 import (
+from seebx.adapters.openai_chat import (
     DEFAULT_MAX_COMPLETION_TOKENS,
     OPENAI_CHAT_ADAPTER_VERSION,
     OpenAIChatCompletionsAdapterV1,

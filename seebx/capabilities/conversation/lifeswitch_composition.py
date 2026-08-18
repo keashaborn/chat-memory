@@ -23,8 +23,8 @@ from seebx.capabilities.conversation.memory_contracts import (
 from rag_engine.lifeswitch_prior_answer_provenance_runtime_v1 import (
     PriorLifeSwitchPreparedContextV1,
 )
-from rag_engine.openai_chat_provider_v1 import OpenAIChatGenerationConfigV1
-from rag_engine.openai_chat_request_v4 import (
+from seebx.adapters.openai_chat import OpenAIChatGenerationConfigV1
+from seebx.adapters.lifeswitch_openai_chat import (
     OpenAIChatCompletionsAdapterV3,
     OpenAIChatRequestV4,
     OpenAIChatResponseV3,

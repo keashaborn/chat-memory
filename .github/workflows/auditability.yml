@@ -55,10 +55,10 @@ jobs:
               rag_engine/prompt_assembler_v1.py \
               rag_engine/response_composition_root_v0_2.py \
               rag_engine/response_orchestration_v0_2.py \
-              rag_engine/openai_chat_provider_v1.py \
+              seebx/adapters/openai_chat.py \
               rag_engine/lifeswitch_prompt_integration_v2.py \
               rag_engine/lifeswitch_answer_binding_v1.py \
-              rag_engine/openai_chat_request_v4.py \
+              seebx/adapters/lifeswitch_openai_chat.py \
               rag_engine/usage_ledger_v1.py \
               rag_engine/response_finalization_v1.py \
               rag_engine/response_finalization_v3.py \

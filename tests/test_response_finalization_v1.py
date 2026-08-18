@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from uuid import UUID
 
-from rag_engine.openai_chat_provider_v1 import OpenAIChatCompletionsAdapterV1
+from seebx.adapters.openai_chat import OpenAIChatCompletionsAdapterV1
 from rag_engine.response_finalization_v1 import (
     AssistantOutputKind,
     ResponseFinalizationError,

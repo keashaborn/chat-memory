@@ -10,11 +10,11 @@ from pydantic import ValidationError
 from seebx.capabilities.conversation.attachments import (
     build_attachment_context_block_v1,
 )
-from rag_engine.openai_chat_provider_v1 import (
+from seebx.adapters.openai_chat import (
     OpenAIChatMessageV1,
     OpenAIChatRequestV1,
 )
-from rag_engine.openai_chat_request_v4 import (
+from seebx.adapters.lifeswitch_openai_chat import (
     OpenAIChatMessageV2 as OpenAIChatMessageV4,
     OpenAIChatRequestV4,
 )

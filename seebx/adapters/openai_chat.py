@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Typed OpenAI Chat Completions boundary for RESSE prompt assemblies.
+"""Typed OpenAI Chat Completions boundary for SeeBx conversation assemblies.
 
 This module does not discover credentials, read environment variables, select
 memory, select Fractal Monism content, or mutate live routing.  The live server

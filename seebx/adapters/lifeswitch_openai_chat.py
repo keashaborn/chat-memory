@@ -11,7 +11,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from rag_engine.openai_chat_provider_v1 import (
+from seebx.adapters.openai_chat import (
     OpenAIChatGenerationConfigV1,
     OpenAIChatProviderContractError,
     OpenAIChatProviderError,

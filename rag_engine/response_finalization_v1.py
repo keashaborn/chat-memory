@@ -23,7 +23,7 @@ from rag_engine.chat_integrity import (
     AssistantOutputKind,
     AssistantTranscriptAttestationV1,
 )
-from rag_engine.openai_chat_provider_v1 import (
+from seebx.adapters.openai_chat import (
     OpenAIChatGenerationConfigV1,
     OpenAIChatRequestV1,
     OpenAIChatResponseV1,

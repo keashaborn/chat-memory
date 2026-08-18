@@ -22,8 +22,8 @@ from rag_engine.lifeswitch_answer_binding_v1 import (
 from rag_engine.lifeswitch_answer_provenance_receipt_v1 import (
     FinalAnswerLifeSwitchProvenanceReceiptV1,
 )
-from rag_engine.openai_chat_provider_v1 import OpenAIChatGenerationConfigV1
-from rag_engine.openai_chat_request_v4 import (
+from seebx.adapters.openai_chat import OpenAIChatGenerationConfigV1
+from seebx.adapters.lifeswitch_openai_chat import (
     OpenAIChatRequestV4,
     OpenAIChatResponseV3,
 )
