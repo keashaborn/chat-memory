@@ -7,7 +7,6 @@ import logging
 import time
 from uuid import UUID, uuid4
 
-import asyncpg
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -25,12 +24,6 @@ except ImportError:
 
 from rag_engine.web_search_actor_auth_v1 import require_web_search_actor_v1
 from rag_engine.citation_evidence_v1 import CITATION_EVIDENCE_CONTRACT
-from rag_engine.trusted_web_audit_v1 import (
-    acquire_trusted_web_rate_limit_v1,
-    finish_trusted_web_audit_v1,
-    query_sha256,
-    start_trusted_web_audit_v1,
-)
 from rag_engine.trusted_web_admission_v1 import (
     TRUSTED_HEALTH_MAX_ADMITTED_SOURCES,
     WEB_EVIDENCE_ADMISSION_CONTRACT,
@@ -70,8 +63,11 @@ from rag_engine.voice_language_v1 import (
 )
 from seebx.capabilities.search.runtime import (
     NO_STORE_HEADERS,
+    SearchAuditStoreUnavailableError,
+    SearchRateLimitExceededError,
     SearchRuntimeConfigurationError,
     apply_search_no_store_headers,
+    open_search_audit_session,
     safe_search_error_code,
     search_runtime_settings_from_env,
 )
@@ -237,7 +233,38 @@ async def trusted_web_query(
         ) from None
 
     try:
-        conn = await asyncpg.connect(dsn, command_timeout=15)
+        audit = await open_search_audit_session(
+            postgres_dsn=dsn,
+            actor_user_id=owner,
+            requests_per_minute=settings.requests_per_minute,
+            search_id=search_id,
+            request_id=request_id,
+            query=payload.query,
+            policy_version=policy.policy_version,
+            topic=policy.topic.value,
+            disposition=policy.disposition.value,
+            allowed_domains=policy.allowed_domains,
+        )
+    except SearchAuditStoreUnavailableError as exc:
+        logger.error(
+            "[trusted_web] search_id=%s status=failed error_type=%s",
+            search_id,
+            type(exc.__cause__).__name__,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="trusted_web_audit_store_unavailable",
+        ) from None
+    except SearchRateLimitExceededError:
+        response.headers["retry-after"] = "60"
+        logger.warning(
+            "[trusted_web] search_id=%s status=rate_limited",
+            search_id,
+        )
+        raise HTTPException(
+            status_code=429,
+            detail="trusted_web_rate_limited",
+        ) from None
     except Exception as exc:
         logger.error(
             "[trusted_web] search_id=%s status=failed error_type=%s",
@@ -246,41 +273,13 @@ async def trusted_web_query(
         )
         raise HTTPException(
             status_code=503,
-            detail="trusted_web_audit_store_unavailable",
+            detail="trusted_web_unavailable",
         ) from None
-    audit_started = False
+
     try:
-        allowed = await acquire_trusted_web_rate_limit_v1(
-            conn,
-            actor_user_id=owner,
-            requests_per_minute=settings.requests_per_minute,
-        )
-        if not allowed:
-            response.headers["retry-after"] = "60"
-            logger.warning(
-                "[trusted_web] search_id=%s status=rate_limited",
-                search_id,
-            )
-            raise HTTPException(status_code=429, detail="trusted_web_rate_limited")
-
-        await start_trusted_web_audit_v1(
-            conn,
-            search_id=search_id,
-            actor_user_id=owner,
-            request_id=request_id,
-            query_hash=query_sha256(payload.query),
-            policy_version=policy.policy_version,
-            topic=policy.topic.value,
-            disposition=policy.disposition.value,
-            allowed_domains=policy.allowed_domains,
-        )
-        audit_started = True
-
         if policy.disposition != TrustedWebDispositionV1.SEARCH:
             latency_ms = round((time.monotonic_ns() - started_ns) / 1_000_000)
-            await finish_trusted_web_audit_v1(
-                conn,
-                search_id=search_id,
+            await audit.finish(
                 status=policy.disposition.value,
                 latency_ms=latency_ms,
             )
@@ -310,7 +309,9 @@ async def trusted_web_query(
         if trusted_web_topic_uses_ncbi(policy.topic):
             ods_records = ()
             if trusted_web_query_uses_ods(payload.query):
-                ods_record = await load_cached_ods_creatine_guidance(conn)
+                ods_record = await load_cached_ods_creatine_guidance(
+                    audit.connection
+                )
                 if ods_record is None:
                     ods_record = NIHODSClientV1().creatine_exercise_performance()
                 ods_records = (ods_record,)
@@ -368,9 +369,7 @@ async def trusted_web_query(
             policy_pack="trusted_health",
         )
         latency_ms = round((time.monotonic_ns() - started_ns) / 1_000_000)
-        await finish_trusted_web_audit_v1(
-            conn,
-            search_id=search_id,
+        await audit.finish(
             status="completed",
             latency_ms=latency_ms,
             provider_response_id=result.provider_response_id,
@@ -418,55 +417,43 @@ async def trusted_web_query(
     except HTTPException:
         raise
     except asyncio.TimeoutError as exc:
-        if audit_started:
-            await finish_trusted_web_audit_v1(
-                conn,
-                search_id=search_id,
-                status="failed",
-                latency_ms=round(
-                    (time.monotonic_ns() - started_ns) / 1_000_000
-                ),
-                error_code="trusted_web_timeout",
-            )
+        await audit.finish(
+            status="failed",
+            latency_ms=round(
+                (time.monotonic_ns() - started_ns) / 1_000_000
+            ),
+            error_code="trusted_web_timeout",
+        )
         raise HTTPException(status_code=504, detail="trusted_web_timeout") from exc
     except ODSClientError as exc:
-        if audit_started:
-            await finish_trusted_web_audit_v1(
-                conn,
-                search_id=search_id,
-                status="failed",
-                latency_ms=round(
-                    (time.monotonic_ns() - started_ns) / 1_000_000
-                ),
-                error_code=safe_search_error_code(exc),
-            )
+        await audit.finish(
+            status="failed",
+            latency_ms=round(
+                (time.monotonic_ns() - started_ns) / 1_000_000
+            ),
+            error_code=safe_search_error_code(exc),
+        )
         raise HTTPException(status_code=503, detail="trusted_web_ods_unavailable") from None
     except NCBIClientError as exc:
-        if audit_started:
-            await finish_trusted_web_audit_v1(
-                conn,
-                search_id=search_id,
-                status="failed",
-                latency_ms=round(
-                    (time.monotonic_ns() - started_ns) / 1_000_000
-                ),
-                error_code=safe_search_error_code(exc),
-            )
+        await audit.finish(
+            status="failed",
+            latency_ms=round(
+                (time.monotonic_ns() - started_ns) / 1_000_000
+            ),
+            error_code=safe_search_error_code(exc),
+        )
         raise HTTPException(
             status_code=503,
             detail="trusted_web_pubmed_unavailable",
         ) from None
     except TrustedWebProviderSecurityError as exc:
-        if audit_started:
-            await finish_trusted_web_audit_v1(
-                conn,
-                search_id=search_id,
-                status="blocked",
-                latency_ms=round(
-                    (time.monotonic_ns() - started_ns) / 1_000_000
-                ),
-                error_code=safe_search_error_code(exc),
-            )
+        await audit.finish(
+            status="blocked",
+            latency_ms=round(
+                (time.monotonic_ns() - started_ns) / 1_000_000
+            ),
+            error_code=safe_search_error_code(exc),
+        )
         logger.error(
             "[trusted_web] search_id=%s status=blocked reason=%s",
             search_id,
@@ -477,34 +464,28 @@ async def trusted_web_query(
             detail="trusted_web_source_policy_violation",
         ) from None
     except TrustedWebProviderError as exc:
-        if audit_started:
-            await finish_trusted_web_audit_v1(
-                conn,
-                search_id=search_id,
-                status="failed",
-                latency_ms=round(
-                    (time.monotonic_ns() - started_ns) / 1_000_000
-                ),
-                error_code=safe_search_error_code(exc),
-            )
+        await audit.finish(
+            status="failed",
+            latency_ms=round(
+                (time.monotonic_ns() - started_ns) / 1_000_000
+            ),
+            error_code=safe_search_error_code(exc),
+        )
         raise HTTPException(
             status_code=503,
             detail="trusted_web_provider_unavailable",
         ) from None
     except Exception as exc:
-        if audit_started:
-            try:
-                await finish_trusted_web_audit_v1(
-                    conn,
-                    search_id=search_id,
-                    status="failed",
-                    latency_ms=round(
-                        (time.monotonic_ns() - started_ns) / 1_000_000
-                    ),
-                    error_code=type(exc).__name__[:100],
-                )
-            except Exception:
-                pass
+        try:
+            await audit.finish(
+                status="failed",
+                latency_ms=round(
+                    (time.monotonic_ns() - started_ns) / 1_000_000
+                ),
+                error_code=type(exc).__name__[:100],
+            )
+        except Exception:
+            pass
         logger.error(
             "[trusted_web] search_id=%s status=failed error_type=%s",
             search_id,
@@ -515,7 +496,7 @@ async def trusted_web_query(
             detail="trusted_web_unavailable",
         ) from None
     finally:
-        await conn.close()
+        await audit.close()
 
 
 __all__ = [
