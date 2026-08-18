@@ -1,0 +1,132 @@
+# SeeBx component ledger v1
+
+Status: cleanup control ledger; no retirement authority
+
+Evidence date: 2026-08-17 America/Chicago (2026-08-18 UTC)
+
+Source commit: `49f9e60cf4321c8e42c359845c1a62a8c987614d`
+
+## Dispositions
+
+- **KEEP**: correct capability and ownership boundary; tighten as needed.
+- **CONSOLIDATE**: necessary behavior split among overlapping paths.
+- **EXTRACT**: retain generic logic while removing retired-package coupling.
+- **REBUILD**: useful product capability whose implementation is unsafe or
+  obsolete.
+- **DECIDE**: product requirement or build-versus-buy decision is unresolved.
+- **ARCHIVE**: preserve immutable evidence outside the active repository.
+- **RETIRE**: proven unused, but deletion still requires a separate manifest,
+  backup, authorization, and verification.
+
+## Runtime and platform
+
+| Component | Verified current state | Target owner | Disposition | Gate |
+|---|---|---|---|---|
+| `app.py` composition/root routes | Live; 1,985 lines; 36 direct routes | `main.py` plus capability routers | CONSOLIDATE | Move SQL and product behavior out; preserve API contracts until frontend cutover |
+| Supabase actor verification | Live owner authority | `core.identity` and `core.ownership` | KEEP | Preserve JWT verification, owner matching, and fail-closed behavior |
+| `memory_actor_auth_v1.py` | Batch 02 candidate reduces it to a compatibility re-export; live callers use `seebx.core.identity` directly | `seebx.core.identity` | EXTRACTED; compatibility RETIRE pending | Candidate `fb252149`; prove dormant callers migrated before deleting wrapper |
+| Platform PostgreSQL connection | Live on `127.0.0.1:5432`, database `memory` | clean platform PostgreSQL | CONSOLIDATE | Migrate only required schemas/functions and prove exact row/ACL parity |
+| LifeSwitch PostgreSQL connection | Live on `127.0.0.1:55433`, database `lifeswitch` | LifeSwitch domain PostgreSQL | KEEP | Remove fallback to `POSTGRES_DSN`; retain isolated credentials |
+| Redis container | Running but no `REDIS_URL` in live service | capability-specific cache/queue only if proven | DECIDE | Trace consumers and remove if no live caller |
+| Qdrant runtime surface in `app.py` | Imported/configured but no live caller; no service/container | none | RETIRE | Batch 01 removes code/health surface; later remove dependency/config after dormant artifacts are archived |
+| `requirements-ci.txt` and `pyproject.toml` | CI dependencies include retired systems; package metadata describes governed-memory successor | SeeBx application package | REBUILD | Inventory real runtime/test dependency sets before replacement |
+| Git daily sync | Active timer/service root | operations | KEEP | Verify remote/branch policy and avoid competing writer paths |
+| Voice synthetic canary | Active timer/service root | voice operations | KEEP | Preserve admin evidence consumer and owner-safe synthetic data |
+
+## Conversation and memory
+
+| Component | Verified current state | Target owner | Disposition | Gate |
+|---|---|---|---|---|
+| `resse_response_router.py` | Live; one route; reaches 72 modules/33,999 lines | `capabilities.conversation` | CONSOLIDATE + RENAME | One Zep-aware response path with domain/search adapters |
+| Response composition v0.2/v0.4 chains | Both imported; live mode selects LifeSwitch v0.4 | conversation service | CONSOLIDATE | Freeze exact live behavior, remove unused branch, version external contract only |
+| Zep provider/runtime | Live; prompt mode on | `adapters.zep` | KEEP | Verify owner/thread binding, failure mode, deletion, and provenance |
+| Old successor-memory adapter | Live only for excluded/no-memory surfaces | no-memory context provider | EXTRACT then RETIRE | Replace with explicit `NoMemoryContext` contract |
+| Governed-memory package | 56 files; 16 reachable through response/auth coupling, 40 dormant | none after extraction | EXTRACT then ARCHIVE/RETIRE | Zero live imports and migration/runtime callers |
+| `memory_v1*` code | 45 files/26,764 lines in `rag_engine`; no live roots | none | ARCHIVE then RETIRE | Preserve approved evidence separately; zero service/timer/frontend callers |
+| Vantage code/routers | Unmounted/dormant | none | ARCHIVE then RETIRE | Confirm frontend `/vantage/query` caller removal and preserve required audit evidence |
+| RESSE policy/evaluation code | Mostly dormant; live router name is misleading | evaluation archive | RENAME live component; ARCHIVE/RETIRE dormant code | Preserve any controlling decision artifact outside active imports |
+| Direct cards/Vantage routes in `app.py` | Mounted but return retired conflict responses | none | RETIRE after frontend cutover | Remove `/api/identity` and inspect callers first |
+| Chat/thread routes | Live and PostgreSQL-backed | conversation capability | KEEP + CONSOLIDATE | One authenticated router/service; preserve thread semantics |
+| Chat history clear | Live; secure DB functions; hidden dependency on legacy memory outbox | conversation deletion service | CONSOLIDATE | Replace outbox dependency only after Zep deletion and replay semantics are tested |
+| Full chat + Zep clear | Live | conversation deletion service | KEEP | Verify atomic/compensating behavior and owner isolation |
+| Attachments | Live; direct routes in `app.py` | conversation attachments | CONSOLIDATE | Move storage/processing behind adapter; keep stored-first contract |
+| User export | Route exists but returns retirement conflict; frontend still calls it | privacy/export capability | REBUILD | Owner-scoped export contract, bounded data, audit, and frontend test |
+
+## Search, retrieval, and catalog
+
+| Component | Verified current state | Target owner | Disposition | Gate |
+|---|---|---|---|---|
+| Trusted-web router | Live; 17-module/4,909-line closure | search capability | KEEP + CONSOLIDATE | Share provider, normalization, cache, and audit contracts |
+| Search execution router | Live; 21-module/6,242-line closure | search capability | CONSOLIDATE | Merge duplicate provider/orchestration logic |
+| Current-news router | Live; 18-module/5,594-line closure | search policy/profile | CONSOLIDATE | Express freshness/source policy without separate engine |
+| Legacy RAG/vector modules | Mostly dormant with Qdrant/Vantage dependencies | none or offline evaluation | ARCHIVE then RETIRE | Generated import graph and no runtime settings/services |
+| `catalog_router.py` | Live against old platform `catalog_dev` | catalog capability in LifeSwitch database | MIGRATE + CONSOLIDATE | Repoint after row/function parity; do not keep two writable catalogs |
+| LifeSwitch nutrition catalog access | Live against isolated database `catalog_dev` | same catalog capability | KEEP | Becomes sole catalog after callers cut over |
+
+## LifeSwitch domain capabilities
+
+| Component | Verified current state | Target owner | Disposition | Gate |
+|---|---|---|---|---|
+| Nutrition router | Live; 17 routes/1,503-line closure plus overlapping catalog paths | `capabilities.nutrition` | KEEP + SPLIT | Separate log, foods, meal plans, and catalog contracts |
+| Training router | Live; 41 routes/2,956-line closure | `capabilities.training` | KEEP + SPLIT | Separate sessions, exercises, plans, and analytics without duplicate endpoints |
+| Measurements | Live | `capabilities.measurements` | KEEP | Retain owner checks and isolated PostgreSQL |
+| Plan/domain context | Live across multiple readers/adapters | `capabilities.plans` | CONSOLIDATE | One read model and one write authority; retire legacy fallback |
+| LifeSwitch snapshots | Installed schema; currently empty | plans/recovery if required | DECIDE | Prove product caller and retention need |
+| Agentic plan observation | Live import path | plans read model | CONSOLIDATE | Move SQL behind domain adapter; no response-router SQL |
+| Duplicate nutrition batch routes | Live candidate duplication | nutrition service | CONSOLIDATE | Frontend caller trace and response equivalence |
+
+## Preferences, forms, administration, and archive
+
+| Component | Verified current state | Target owner | Disposition | Gate |
+|---|---|---|---|---|
+| Assistant response preferences | Backend router is owner-aware but unmounted; frontend calls it | preferences capability | RESTORE through refactor or RETIRE | Determine intended product behavior; do not remount implicitly |
+| `user_settings` schema | Two empty tables in old database | platform preferences | MIGRATE/REBUILD if retained | Current authenticated API and schema contract |
+| Forms router | Unmounted; trusts request-provided owner ID | forms capability | REBUILD or RETIRE | Never remount current implementation; require verified identity/RLS |
+| Frontend forms surfaces | Active callers exist | forms capability | DECIDE | Product decision plus migration/removal UX |
+| Telemetry router | Live and large/custom | observability capability | CONSOLIDATE behind OpenTelemetry contract | Define redacted trace/request/job correlation; select storage/alert backend separately |
+| AI operations incidents | Live routes; four empty tables | operations | KEEP or REPLACE | Confirm consumer and alert delivery; product comparison |
+| Admin memory workbench/health routes | Mounted retirement responses | none | RETIRE | Remove frontend/admin callers and historical tests first |
+| Archive/document library | Separate planned capability; not chat memory | archive capability | DECIDE | Product evaluation for storage, extraction, mapping, export, and deletion |
+
+## Voice
+
+| Component | Verified current state | Target owner | Disposition | Gate |
+|---|---|---|---|---|
+| Voice session lease | Live PostgreSQL-backed authority | voice capability | KEEP | Preserve authenticated lease boundary |
+| Transcription router | Live; 18-module/7,922-line closure | voice transcription adapter | CONSOLIDATE | Remove unrelated response/memory dependency drag |
+| Realtime voice preview | Live; 19-module/8,872-line closure | voice realtime adapter | CONSOLIDATE | Same conversation authority; bounded preview path |
+| Synthetic canary | Active timer | voice operations | KEEP | Synthetic-only data and clear alert ownership |
+
+## Work Runner
+
+| Component | Verified current state | Target owner | Disposition | Gate |
+|---|---|---|---|---|
+| SeeBx job request/approval contracts | Not yet connected to cleaned backend | work capability | BUILD | Versioned contracts, explicit actor/target/tool authority |
+| Work Runner sandbox manager | Separate server and repository | Work Runner | KEEP + CONTINUE | Disposable frontend/backend copies, no production credentials/data |
+| Queue/scheduler | Not selected | work adapter | PILOT Supabase Queues/`pgmq`; Temporal deferred | Immutable job/receipt contracts first; failure/idempotency/load test before selection |
+
+## Database schema disposition summary
+
+| Current database/schema | Current direct or indirect use | Disposition |
+|---|---|---|
+| old `public` | chat, threads, attachments, telemetry, voice lease | MIGRATE to clean platform database |
+| old `chat_history_private` | live deletion functions | MIGRATE after outbox decoupling |
+| old `chat_integrity` | response attestation/snapshot | MIGRATE |
+| old `trusted_web` | live search cache/audit/transcripts | MIGRATE |
+| old `lifeswitch_usage` | live usage ledger | MIGRATE, likely rename platform usage |
+| old `ai_operations` | live admin code; no estimated rows | DECIDE/possibly migrate |
+| old `catalog_dev` | live catalog router; duplicate of isolated catalog | CONSOLIDATE into isolated catalog |
+| old `user_settings` | router unmounted; empty | REBUILD/MIGRATE only if preferences retained |
+| old `memory_ingest_private` | two terminal outbox rows; indirect deletion-function dependency | DECOUPLE, archive evidence, retire |
+| old `memory` | 160 tables; no verified live SQL reference | ARCHIVE then RETIRE after zero-dependency proof |
+| five old Vantage schemas | no verified live Python reference; historical data present | ARCHIVE then RETIRE after exact backup/approval |
+| isolated `lifeswitch_*` schemas | live canonical domain data | KEEP |
+| isolated `catalog_dev` | live canonical domain catalog candidate | KEEP and become sole catalog |
+
+## Ledger maintenance rule
+
+No component is deleted because it looks old. A retirement row advances only
+after static imports, mounted routes, frontend callers, SQL/functions, services,
+timers, environment settings, data retention, backups, tests, and rollback are
+all explicitly resolved. Newly discovered components are added here before any
+mutation batch is approved.
