@@ -75,10 +75,12 @@ from seebx.contracts.voice_language import (
     AUTO_VOICE_LANGUAGE,
     voice_language_from_request,
 )
-from rag_engine.zep_shadow_memory_v1 import ZepShadowRuntimeV1
 from rag_engine.zep_memory_provider_v1 import (
     ZepMemoryChatProviderV1,
-    ZepPromptSettingsV1,
+)
+from seebx.capabilities.conversation.zep_runtime import (
+    ZEP_MEMORY_RUNTIME,
+    ZEP_PROMPT_SETTINGS,
 )
 
 
@@ -93,13 +95,6 @@ NO_STORE_HEADERS = {
     "pragma": "no-cache",
     "expires": "0",
 }
-ZEP_SHADOW_RUNTIME = ZepShadowRuntimeV1.from_environment(
-    os.environ,
-    logger=logger,
-)
-ZEP_PROMPT_SETTINGS = ZepPromptSettingsV1.from_environment(os.environ)
-
-
 RESPONSE_MEMORY_MODE = MEMORY_MODE_ZEP
 
 
@@ -156,7 +151,7 @@ async def close_lifeswitch_chat_pool_v1() -> None:
     try:
         await LIFESWITCH_CHAT_POOL.close()
     finally:
-        await ZEP_SHADOW_RUNTIME.close()
+        await ZEP_MEMORY_RUNTIME.close()
 
 
 def apply_no_store_headers(response: Response) -> None:
@@ -336,7 +331,7 @@ async def resse_response_query(
         and ZEP_PROMPT_SETTINGS.enabled_for(owner)
     )
     if tentative_zep_eligible and not zep_prompt_enabled:
-        ZEP_SHADOW_RUNTIME.dispatch_retrieval(
+        ZEP_MEMORY_RUNTIME.dispatch_retrieval(
             owner_user_id=owner,
             thread_id=thread_id,
         )
@@ -395,7 +390,7 @@ async def resse_response_query(
                     "zep_prompt_memory_unavailable",
                 )
             zep_memory_provider = ZepMemoryChatProviderV1(
-                ZEP_SHADOW_RUNTIME,
+                ZEP_MEMORY_RUNTIME,
                 logger=logger,
             )
             memory_provider = zep_memory_provider
@@ -508,7 +503,7 @@ async def resse_response_query(
             and not payload.no_store
             and (zep_eligible or voice_turn_id is not None)
         ):
-            ZEP_SHADOW_RUNTIME.dispatch_turn(
+            ZEP_MEMORY_RUNTIME.dispatch_turn(
                 owner_user_id=owner,
                 thread_id=thread_id,
                 user_message_id=payload.message_id,
@@ -590,6 +585,5 @@ async def resse_response_query(
 __all__ = [
     "response_memory_provenance_for_mode",
     "router",
-    "should_coordinate_chat_memory_ingest",
     "memory_not_applicable_reason",
 ]

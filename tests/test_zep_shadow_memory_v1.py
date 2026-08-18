@@ -174,13 +174,9 @@ class ZepShadowSettingsTests(unittest.TestCase):
         self,
     ) -> None:
         route = (ROOT / "rag_engine/resse_response_router.py").read_text()
-        dispatch = route.index("ZEP_SHADOW_RUNTIME.dispatch_turn(")
+        dispatch = route.index("ZEP_MEMORY_RUNTIME.dispatch_turn(")
         self.assertLess(
-            route.index("await persist_finalized_response_v3("),
-            dispatch,
-        )
-        self.assertLess(
-            route.index("await persist_finalized_response_v1("),
+            route.index("await persist_conversation_response("),
             dispatch,
         )
         dispatch_block = route[dispatch : dispatch + 400]
@@ -192,7 +188,7 @@ class ZepShadowSettingsTests(unittest.TestCase):
         self.assertIn("payload.message_id is not None", dispatch_guard)
         self.assertIn("not payload.no_store", dispatch_guard)
         self.assertIn(
-            "successor_eligible or voice_turn_id is not None",
+            "zep_eligible or voice_turn_id is not None",
             dispatch_guard,
         )
 
@@ -205,7 +201,7 @@ class ZepShadowSettingsTests(unittest.TestCase):
         self.assertIn("search_owner_context", adapter)
         self.assertIn("prompt_bound=false", adapter)
         self.assertIn("prompt_bound=true", adapter)
-        retrieval = route.index("ZEP_SHADOW_RUNTIME.dispatch_retrieval(")
+        retrieval = route.index("ZEP_MEMORY_RUNTIME.dispatch_retrieval(")
         self.assertLess(route.index("owner = actor_context.owner_user_id"), retrieval)
         self.assertLess(retrieval, route.index("openai_client = get_openai_client()"))
         retrieval_block = route[retrieval : retrieval + 220]
@@ -216,6 +212,23 @@ class ZepShadowSettingsTests(unittest.TestCase):
         self.assertNotIn("zep", command_block.casefold())
         self.assertIn("ZepMemoryChatProviderV1", route)
         self.assertIn("ZEP_PROMPT_SETTINGS.enabled_for(owner)", route)
+
+    def test_conversation_capability_owns_the_single_shared_runtime(self) -> None:
+        app = (ROOT / "app.py").read_text()
+        route = (ROOT / "rag_engine/resse_response_router.py").read_text()
+        runtime = (
+            ROOT / "seebx/capabilities/conversation/zep_runtime.py"
+        ).read_text()
+        self.assertIn(
+            "from seebx.capabilities.conversation.zep_runtime import (",
+            app,
+        )
+        self.assertIn(
+            "from seebx.capabilities.conversation.zep_runtime import (",
+            route,
+        )
+        self.assertNotIn("ZepShadowRuntimeV1.from_environment", route)
+        self.assertEqual(runtime.count("ZepShadowRuntimeV1.from_environment"), 1)
 
 
 class ZepCloudShadowTransportTests(unittest.IsolatedAsyncioTestCase):

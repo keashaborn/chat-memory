@@ -15,11 +15,11 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from rag_engine.resse_response_router import (
+from seebx.capabilities.conversation.zep_runtime import (
     ZEP_PROMPT_SETTINGS,
-    ZEP_SHADOW_RUNTIME,
-    router as resse_response_router,
+    ZEP_MEMORY_RUNTIME,
 )
+from rag_engine.resse_response_router import router as resse_response_router
 from rag_engine.zep_shadow_memory_v1 import ZepShadowConfigurationError
 from seebx.capabilities.search.trusted_health import router as trusted_web_router
 from seebx.capabilities.search.current_news import router as current_news_router
@@ -1443,7 +1443,7 @@ async def chat_and_zep_full_clear(req: Request):
     operation_id = uuid.uuid4()
 
     try:
-        async with ZEP_SHADOW_RUNTIME.owner_erasure_barrier(owner_user_id):
+        async with ZEP_MEMORY_RUNTIME.owner_erasure_barrier(owner_user_id):
             conn = await asyncpg.connect(DSN)
             try:
                 result = await clear_chat_history_v1(
@@ -1455,7 +1455,7 @@ async def chat_and_zep_full_clear(req: Request):
                 )
             finally:
                 await conn.close()
-            await ZEP_SHADOW_RUNTIME.delete_owner_memory(owner_user_id)
+            await ZEP_MEMORY_RUNTIME.delete_owner_memory(owner_user_id)
     except ChatHistoryClearError as exc:
         return JSONResponse(
             {"status": "error", "detail": exc.code},
