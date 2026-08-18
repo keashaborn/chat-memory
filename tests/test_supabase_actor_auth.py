@@ -12,7 +12,10 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from seebx.adapters.supabase import SupabaseAuthSettings
-from seebx.core.identity import require_verified_supabase_actor
+from seebx.core.identity import (
+    require_verified_supabase_actor,
+    require_verified_supabase_request_identity,
+)
 
 
 ACTOR = "1240822d-ac9a-4096-95aa-e2b24d36ef50"
@@ -97,8 +100,44 @@ class SupabaseActorAuthTests(unittest.TestCase):
                 require_verified_supabase_actor(request, owner)
             )
 
+    def verify_request(self, request: Request):
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "SUPABASE_ISSUER": SETTINGS.issuer,
+                    "SUPABASE_JWKS_URL": SETTINGS.jwks_url,
+                },
+                clear=False,
+            ),
+            patch(
+                "seebx.adapters.supabase._jwks_client",
+                return_value=FakeJwksClient(self.public_key),
+            ),
+        ):
+            return asyncio.run(
+                require_verified_supabase_request_identity(request)
+            )
+
     def test_verified_subject_is_the_actor_authority(self) -> None:
         self.assertEqual(self.verify(self.request(self.token())), ACTOR)
+
+    def test_ownerless_request_identity_is_still_token_and_assertion_bound(self) -> None:
+        identity = self.verify_request(self.request(self.token()))
+        self.assertEqual(identity.actor_user_id, ACTOR)
+        with self.assertRaises(HTTPException) as caught:
+            self.verify_request(
+                self.request(self.token(), asserted_actor=OTHER_ACTOR)
+            )
+        self.assertEqual(caught.exception.status_code, 403)
+        self.assertEqual(caught.exception.detail, "actor_assertion_mismatch")
+        with self.assertRaises(HTTPException) as missing:
+            self.verify_request(self.request(None))
+        self.assertEqual(missing.exception.status_code, 401)
+        self.assertEqual(
+            missing.exception.detail,
+            "missing_or_invalid_supabase_bearer",
+        )
 
     def test_forged_actor_header_is_rejected(self) -> None:
         with self.assertRaises(HTTPException) as caught:

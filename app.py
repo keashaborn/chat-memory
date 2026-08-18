@@ -139,7 +139,10 @@ from seebx.capabilities.voice.session import router as voice_session_router
 from seebx.core.voice_identity import require_active_voice_session
 from seebx.core.voice_observability import voice_turn_id_from_request
 from seebx.core.ownership import require_actor_matches_owner
-from seebx.core.identity import require_actor
+from seebx.core.identity import (
+    require_actor,
+    require_request_actor,
+)
 from seebx.adapters.thread_selection import (
     ActiveThreadSelectionV1Error,
     clear_active_thread_v1,
@@ -369,12 +372,28 @@ def _owner_mismatch_response() -> JSONResponse:
     )
 
 
+def _identity_error_response(exc: HTTPException) -> JSONResponse:
+    status = {
+        400: "bad_request",
+        401: "unauthorized",
+        403: "forbidden",
+        503: "unavailable",
+    }.get(exc.status_code, "error")
+    return JSONResponse(
+        {
+            "status": status,
+            "detail": str(exc.detail),
+        },
+        status_code=exc.status_code,
+    )
+
+
 async def _require_actor_for_user(req: Request, requested_user_id: str, vantage_id: str = "default"):
     """
-    Service token proves trusted infrastructure.
-    x-vs-actor-user-id identifies the authenticated user resolved by the frontend.
-    Memory ownership is the exact authenticated Supabase UUID. Legacy Vantage
-    aliases are not owners and are never resolved here.
+    The service token proves trusted infrastructure; it is not user authority.
+    Supabase or an active voice-session lease proves the asserted actor, and
+    the requested owner must be that exact UUID. Legacy Vantage aliases are
+    not owners and are never resolved here.
     """
     actor = _actor_user_id(req)
     if not actor:
@@ -395,7 +414,11 @@ async def _require_actor_for_user(req: Request, requested_user_id: str, vantage_
     if actor_uuid != requested_uuid:
         return _owner_mismatch_response(), str(requested_uuid)
 
-    return None, str(requested_uuid)
+    try:
+        verified_actor = await require_actor(req, str(requested_uuid))
+    except HTTPException as exc:
+        return _identity_error_response(exc), None
+    return None, verified_actor
 
 
 async def _require_actor_for_thread(req: Request, thread_id: uuid.UUID):
@@ -413,6 +436,14 @@ async def _require_actor_for_thread(req: Request, thread_id: uuid.UUID):
             {"status": "bad_request", "detail": "invalid_actor_user_id"},
             status_code=400,
         ), None
+
+    try:
+        verified_actor = await require_request_actor(req)
+    except HTTPException as exc:
+        return _identity_error_response(exc), None
+    verified_actor_uuid = parse_uuid(verified_actor)
+    if verified_actor_uuid != actor_uuid:
+        return _owner_mismatch_response(), None
 
     async with POSTGRES.owner_connection(actor_uuid) as conn:
         found = await thread_belongs_to_owner(

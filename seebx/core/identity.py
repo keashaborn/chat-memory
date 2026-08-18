@@ -10,7 +10,10 @@ from uuid import UUID
 
 from fastapi import HTTPException, Request
 
-from seebx.core.ownership import require_actor_matches_owner
+from seebx.core.ownership import (
+    require_actor_matches_owner,
+    require_authenticated_actor,
+)
 from seebx.adapters.supabase import (
     SupabaseAccessTokenInvalid,
     SupabaseAuthConfigurationError,
@@ -60,9 +63,8 @@ def _request_uuid(value: object, *, status_code: int, detail: str) -> str:
         raise HTTPException(status_code=status_code, detail=detail) from None
 
 
-async def require_verified_supabase_identity(
+async def _verified_supabase_identity(
     request: Request,
-    owner_user_id: str,
 ) -> VerifiedSupabaseIdentity:
     token = _bearer_token(request)
     try:
@@ -86,6 +88,30 @@ async def require_verified_supabase_identity(
             detail="invalid_supabase_access_token",
         ) from None
 
+    return identity
+
+
+def _require_asserted_actor(
+    request: Request,
+    identity: VerifiedSupabaseIdentity,
+) -> None:
+    asserted_actor = (request.headers.get("x-vs-actor-user-id") or "").strip()
+    if not asserted_actor:
+        raise HTTPException(status_code=401, detail="missing_actor_user_id")
+    asserted_actor = _request_uuid(
+        asserted_actor,
+        status_code=401,
+        detail="invalid_actor_user_id",
+    )
+    if asserted_actor != identity.actor_user_id:
+        raise HTTPException(status_code=403, detail="actor_assertion_mismatch")
+
+
+async def require_verified_supabase_identity(
+    request: Request,
+    owner_user_id: str,
+) -> VerifiedSupabaseIdentity:
+    identity = await _verified_supabase_identity(request)
     owner = _request_uuid(
         owner_user_id,
         status_code=400,
@@ -97,16 +123,15 @@ async def require_verified_supabase_identity(
             detail="supabase_actor_owner_mismatch",
         )
 
-    asserted_actor = (request.headers.get("x-vs-actor-user-id") or "").strip()
-    if not asserted_actor:
-        raise HTTPException(status_code=401, detail="missing_actor_user_id")
-    asserted_actor = _request_uuid(
-        asserted_actor,
-        status_code=401,
-        detail="invalid_actor_user_id",
-    )
-    if asserted_actor != identity.actor_user_id:
-        raise HTTPException(status_code=403, detail="actor_assertion_mismatch")
+    _require_asserted_actor(request, identity)
+    return identity
+
+
+async def require_verified_supabase_request_identity(
+    request: Request,
+) -> VerifiedSupabaseIdentity:
+    identity = await _verified_supabase_identity(request)
+    _require_asserted_actor(request, identity)
     return identity
 
 
@@ -122,6 +147,16 @@ def actor_authority(request: Request) -> str:
     if voice_turn_id_from_request(request) is not None:
         return VOICE_AUTHORITY
     return TEXT_AUTHORITY
+
+
+async def require_request_actor(request: Request) -> str:
+    """Return an actor proven by Supabase or an active voice-session lease."""
+    if voice_turn_id_from_request(request) is not None:
+        owner = require_authenticated_actor(request)
+        await require_active_voice_session(request, owner)
+        return owner
+    identity = await require_verified_supabase_request_identity(request)
+    return identity.actor_user_id
 
 
 async def require_actor(request: Request, owner_user_id: str) -> str:
@@ -176,7 +211,9 @@ __all__ = [
     "VOICE_AUTHORITY",
     "actor_authority",
     "require_actor",
+    "require_request_actor",
     "require_actor_context",
     "require_verified_supabase_actor",
     "require_verified_supabase_identity",
+    "require_verified_supabase_request_identity",
 ]

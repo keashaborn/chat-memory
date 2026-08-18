@@ -14,6 +14,7 @@ from seebx.core.identity import (
     VOICE_AUTHORITY,
     actor_authority,
     require_actor,
+    require_request_actor,
     require_actor_context,
 )
 
@@ -44,6 +45,26 @@ class ActorAuthorizationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await require_actor(req, OWNER), OWNER)
         self.assertEqual(actor_authority(req), TEXT_AUTHORITY)
         verified_actor.assert_awaited_once_with(req, OWNER)
+
+    @patch(
+        "seebx.core.identity.require_verified_supabase_request_identity",
+        new_callable=AsyncMock,
+    )
+    @patch("seebx.core.identity.voice_turn_id_from_request")
+    async def test_text_request_actor_uses_verified_supabase_identity(
+        self,
+        turn_id,
+        verified_identity,
+    ) -> None:
+        turn_id.return_value = None
+        verified_identity.return_value = VerifiedSupabaseIdentity(
+            actor_user_id=OWNER,
+            session_id=SESSION,
+            authentication_manifest_sha256="a" * 64,
+        )
+        req = request()
+        self.assertEqual(await require_request_actor(req), OWNER)
+        verified_identity.assert_awaited_once_with(req)
 
     @patch(
         "seebx.core.identity.require_verified_supabase_identity",
@@ -84,6 +105,22 @@ class ActorAuthorizationTest(unittest.IsolatedAsyncioTestCase):
         req = request()
         self.assertEqual(await require_actor(req, OWNER), OWNER)
         self.assertEqual(actor_authority(req), VOICE_AUTHORITY)
+        active_session.assert_awaited_once_with(req, OWNER)
+
+    @patch(
+        "seebx.core.identity.require_active_voice_session",
+        new_callable=AsyncMock,
+    )
+    @patch("seebx.core.identity.voice_turn_id_from_request")
+    async def test_voice_request_actor_requires_active_owner_bound_lease(
+        self,
+        turn_id,
+        active_session,
+    ) -> None:
+        turn_id.return_value = uuid.uuid4()
+        active_session.return_value = uuid.UUID(SESSION)
+        req = request()
+        self.assertEqual(await require_request_actor(req), OWNER)
         active_session.assert_awaited_once_with(req, OWNER)
 
     @patch(
