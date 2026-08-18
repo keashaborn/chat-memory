@@ -1,8 +1,0 @@
-{
-  "vectors": {
-    "size": 3072,
-    "distance": "Dot"
-  },
-  "on_disk_payload": true,
-  "replication_factor": 1
-}

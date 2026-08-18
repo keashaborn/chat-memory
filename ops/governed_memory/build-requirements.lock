@@ -1,6 +1,0 @@
-# Build backend lock for CPython 3.12 on Linux x86_64.
-# The candidate builder accepts only the named universal wheel and verifies
-# this digest before extracting it into an invocation-owned no-pip venv.
-# setuptools 84 includes the PEP 517 wheel builder; no wheel package is needed.
-setuptools==84.0.0 \
-    --hash=sha256:51a52592b3b99e102b609654876bd65f19f999935166d1352678931132b0c670
