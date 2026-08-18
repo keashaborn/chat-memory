@@ -53,6 +53,24 @@ class ZepRuntimeRetirementContractTests(unittest.TestCase):
             self.assertNotIn("rag_engine.governed_memory", source)
             self.assertNotIn("successor_memory_chat_adapter_v1", source)
 
+    def test_live_router_uses_one_conversation_persistence_service(self) -> None:
+        source = (ROOT / "rag_engine/resse_response_router.py").read_text()
+        self.assertIn(
+            "seebx.capabilities.conversation.persistence",
+            source,
+        )
+        self.assertEqual(source.count("persist_conversation_response("), 1)
+        self.assertNotIn("response_persistence_v1", source)
+        self.assertNotIn("response_persistence_v3", source)
+
+        for relative in (
+            "rag_engine/response_persistence_v1.py",
+            "rag_engine/response_persistence_v3.py",
+        ):
+            compatibility_source = (ROOT / relative).read_text()
+            self.assertIn("persist_conversation_response", compatibility_source)
+            self.assertNotIn("INSERT INTO public.chat_log", compatibility_source)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -25,6 +25,9 @@ from seebx.capabilities.conversation.memory_contracts import (
     MemoryNotApplicableReason,
     MemoryResponseConfigurationError,
 )
+from seebx.capabilities.conversation.persistence import (
+    persist_conversation_response,
+)
 from rag_engine.lifeswitch_chat_runtime_v1 import (
     LazyPostgresRestrictedLifeSwitchReadSessionV1,
     LifeSwitchChatPoolManagerV1,
@@ -51,8 +54,6 @@ from rag_engine.response_composition_root_v0_4 import (
 )
 from rag_engine.response_inspection_v4 import build_response_inspection_v4
 from rag_engine.response_inspection_v2 import build_response_inspection_v2
-from rag_engine.response_persistence_v1 import persist_finalized_response_v1
-from rag_engine.response_persistence_v3 import persist_finalized_response_v3
 from rag_engine.usage_ledger_v1 import persist_openai_chat_usage_v1
 from rag_engine.usage_ledger_v1 import persist_openai_chat_usage_v2
 from rag_engine.voice_observability_v1 import (
@@ -486,14 +487,6 @@ async def resse_response_query(
                 source_channel="voice" if voice_turn_id is not None else "chat",
                 provider_response=execution.provider_response,
             )
-            if not payload.no_store:
-                await persist_finalized_response_v3(
-                    conn,
-                    owner_user_id=owner,
-                    thread_id=thread_id,
-                    request_id=request_id,
-                    finalized=finalized,
-                )
         else:
             await persist_openai_chat_usage_v1(
                 conn,
@@ -502,14 +495,14 @@ async def resse_response_query(
                 source_channel="voice" if voice_turn_id is not None else "chat",
                 provider_response=execution.provider_response,
             )
-            if not payload.no_store:
-                await persist_finalized_response_v1(
-                    conn,
-                    owner_user_id=owner,
-                    thread_id=thread_id,
-                    request_id=request_id,
-                    finalized=finalized,
-                )
+        if not payload.no_store:
+            await persist_conversation_response(
+                conn,
+                owner_user_id=owner,
+                thread_id=thread_id,
+                request_id=request_id,
+                finalized=finalized,
+            )
         if (
             payload.message_id is not None
             and not payload.no_store
