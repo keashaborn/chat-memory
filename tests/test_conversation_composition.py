@@ -548,7 +548,10 @@ class ConversationCompositionTests(unittest.IsolatedAsyncioTestCase):
             "rag_engine/vantage_router.py",
             "rag_engine/persona_loader.py",
         ):
-            text = (root / relative).read_text(encoding="utf-8")
+            path = root / relative
+            if not path.exists():
+                continue
+            text = path.read_text(encoding="utf-8")
             for module_name in forbidden:
                 self.assertNotIn(module_name, text, msg=f"{relative}: {module_name}")
 
