@@ -1,0 +1,1761 @@
+{
+  "entries": [
+    {
+      "path": "governed-memory-migrations/0001_foundation/forward.pgsql",
+      "sha256": "d67c94be3c4fa026334b87a4683a942cee930eeb1654e66f7b3f73b031927d91",
+      "size_bytes": 499769
+    },
+    {
+      "path": "governed-memory-migrations/0001_foundation/package.json",
+      "sha256": "e51216e18fedda41a2ab26c24511a82d348e06eda26c9a83be1b670ecc45e13f",
+      "size_bytes": 1798
+    },
+    {
+      "path": "governed-memory-migrations/0001_foundation/rollback.pgsql",
+      "sha256": "7d0a1473357e737518bd7de4d6f2599dac8d48ca55254925398b8c5f81b0816e",
+      "size_bytes": 11423
+    },
+    {
+      "path": "governed-memory-migrations/0002_conversation_bridge/forward.pgsql",
+      "sha256": "a0bd3e3bde5d009cc7ec4779399669e698697600df06ed74e77bbc41d904a3f1",
+      "size_bytes": 268851
+    },
+    {
+      "path": "governed-memory-migrations/0002_conversation_bridge/package.json",
+      "sha256": "a9ebd353f21681c1ce55c347d8d151e3a1080c86a83d06719447d30feb4dce6f",
+      "size_bytes": 7454
+    },
+    {
+      "path": "governed-memory-migrations/0002_conversation_bridge/rollback.pgsql",
+      "sha256": "5ec7c3f008a3b035d26482090b50363b14931e57bbb9d0295fb8f65a760536b4",
+      "size_bytes": 15911
+    },
+    {
+      "path": "governed-memory-migrations/0003_owner_claim_detail/forward.pgsql",
+      "sha256": "a8f79613f766da18131f52d5f0c0008d3b20f120c76bc1cb3ff64d81712954d5",
+      "size_bytes": 3510
+    },
+    {
+      "path": "governed-memory-migrations/0003_owner_claim_detail/package.json",
+      "sha256": "4bff2faa1576fcec5c971ec0842a705958e6a33a8ad7bd9e02b49592634a26f0",
+      "size_bytes": 1677
+    },
+    {
+      "path": "governed-memory-migrations/0003_owner_claim_detail/rollback.pgsql",
+      "sha256": "6f50f6f70ac35ede0a7ae98fa98593f4404457717ca242c8f9fe0bfd57789b68",
+      "size_bytes": 927
+    },
+    {
+      "path": "governed-memory-migrations/0004_pilot_marker/forward.pgsql",
+      "sha256": "90b4d1aac35a538a24444d33273e516f484252a9e4a5ea67f495a04499f6ff58",
+      "size_bytes": 7023
+    },
+    {
+      "path": "governed-memory-migrations/0004_pilot_marker/package.json",
+      "sha256": "00e9cae13891fdc0e1bb8e025679cd44155d20bda1a7bab31bdab48f5e542b59",
+      "size_bytes": 1486
+    },
+    {
+      "path": "governed-memory-migrations/0004_pilot_marker/rollback.pgsql",
+      "sha256": "01da1e6bab14009fe05ce0f644af27bc8cae48988c629f0c0308654b87e31775",
+      "size_bytes": 929
+    },
+    {
+      "path": "governed-memory-migrations/0005_bounded_auto_admission/forward.pgsql",
+      "sha256": "4aeb257d8fb41ed9ceb78f0c626a205d67f398506b69ed1b9c42ede056e5b0a6",
+      "size_bytes": 42772
+    },
+    {
+      "path": "governed-memory-migrations/0005_bounded_auto_admission/package.json",
+      "sha256": "fe6782b152dd66b90b60901e85f81cee0b32fd9592e4d890fecf5fab6b561bc4",
+      "size_bytes": 1581
+    },
+    {
+      "path": "governed-memory-migrations/0005_bounded_auto_admission/rollback.pgsql",
+      "sha256": "2ba0f3d98974651ac4d70a5ede821a4514f9c197e918b7664e92c4b3a9f63b68",
+      "size_bytes": 35745
+    },
+    {
+      "path": "governed-memory-migrations/0006_source_erasure_projection_recovery/forward.pgsql",
+      "sha256": "8d627e4cab2eb0d609f7b9f26854701b255d15a9ff6c75534372d0a9ce9709dc",
+      "size_bytes": 26683
+    },
+    {
+      "path": "governed-memory-migrations/0006_source_erasure_projection_recovery/package.json",
+      "sha256": "f2ed7e1b584a459cc504fe2498add642c478154d6300886a5640c2e27723493a",
+      "size_bytes": 1411
+    },
+    {
+      "path": "governed-memory-migrations/0006_source_erasure_projection_recovery/rollback.pgsql",
+      "sha256": "a2ee1e15def9192e34924dffb6e13d1e91aa364c0ea7773083e1e49cba473db8",
+      "size_bytes": 25367
+    },
+    {
+      "path": "governed-memory-migrations/0007_personal_object_location_admission/disposable_proof_receipt.json",
+      "sha256": "2b55cdcf34b36955f8e83267038b2858d28581a104c62d83c543a396dfb2e7c3",
+      "size_bytes": 2598
+    },
+    {
+      "path": "governed-memory-migrations/0007_personal_object_location_admission/forward.pgsql",
+      "sha256": "0e065edcce8d301c5cbcdc83d7718d598c2f18dd4fbf2693472cd2894c4c05e1",
+      "size_bytes": 47418
+    },
+    {
+      "path": "governed-memory-migrations/0007_personal_object_location_admission/live_activation_receipt.json",
+      "sha256": "f3827afb069eda15ee1d1c2725e1dc9eb31731abe11ef43c3c31cdf59e4f900e",
+      "size_bytes": 1977
+    },
+    {
+      "path": "governed-memory-migrations/0007_personal_object_location_admission/package.json",
+      "sha256": "7bd00e36ee3d6a08822a25e3365bfd043e4c8768ac3b332428eadd0a4cb7aaae",
+      "size_bytes": 2418
+    },
+    {
+      "path": "governed-memory-migrations/0007_personal_object_location_admission/rollback.pgsql",
+      "sha256": "ca49a506910229b9885eafd8a2c780be6e256078bd240ecede9c5fecd2f0f02e",
+      "size_bytes": 43656
+    },
+    {
+      "path": "governed-memory-migrations/manifest.json",
+      "sha256": "412032b9ded977e536d1634a53b5e2d78ff1bff574e877dae1cca8e9daaf245d",
+      "size_bytes": 6365
+    },
+    {
+      "path": "governed-memory-migrations/predicate_catalog.json",
+      "sha256": "3e9e62b8281c31067c0416b33e7a2ccb12f2a6e7b5f6f88c090e9eb332c9fcdd",
+      "size_bytes": 3191
+    },
+    {
+      "path": "governed-memory-migrations/roles_preflight.pgsql",
+      "sha256": "f823b0f6815a669084dd88e5c4650317a36cf786e64a15317421a76c0091f02b",
+      "size_bytes": 9322
+    },
+    {
+      "path": "governed-memory-migrations/schema_contract.json",
+      "sha256": "0f67935024051eebe3ad1072823fe29832d568a0845f8a90281712bb875d87b0",
+      "size_bytes": 40545
+    },
+    {
+      "path": "governed-migration-ci/MANIFEST.sha256",
+      "sha256": "ae068131565a9d003d37dacf7e38f1bae637e31b2eb60025099c5234cffc59b7",
+      "size_bytes": 3691
+    },
+    {
+      "path": "governed-migration-ci/README.md",
+      "sha256": "46f640a65ac66e1b074a470766321da9f31fef1e996cc1acf2eabb3dd9271cb2",
+      "size_bytes": 1929
+    },
+    {
+      "path": "governed-migration-ci/ci/activation-contract.json",
+      "sha256": "6783c3e2fe591b6b91eb7bf7a01517f6af97faeaa07c5ba4a4c2f5c85c8ea305",
+      "size_bytes": 2030
+    },
+    {
+      "path": "governed-migration-ci/ci/auditability.workflow.candidate.yml",
+      "sha256": "bb383ec1222690b3828e3de69be339f68a8da57f3c54de84d6ab42d930892112",
+      "size_bytes": 3776
+    },
+    {
+      "path": "governed-migration-ci/contract/governed-function-creation-package-v1.schema.json",
+      "sha256": "6eec7ac6775c638f887276da321958609daff46447735f5479ada7113fb4f577",
+      "size_bytes": 1093
+    },
+    {
+      "path": "governed-migration-ci/contract/governed-function-migration-package-v1.schema.json",
+      "sha256": "84bb56a16fbc8f4e4f7f1e0d5b5de242f32f6f563080030b036b5a5261dcc235",
+      "size_bytes": 1089
+    },
+    {
+      "path": "governed-migration-ci/contract/governed-migration-package-v1.schema.json",
+      "sha256": "254d0659239d10dc69708a12ee3f88de9bb5338f82ddb649e309cbb0e28b9a44",
+      "size_bytes": 1943
+    },
+    {
+      "path": "governed-migration-ci/docs/FULL_CHAIN_MIGRATION_CI.md",
+      "sha256": "21461393c760323a0f2987be8bfe2eebb2def88e547fe3009e85f2820920d699",
+      "size_bytes": 6484
+    },
+    {
+      "path": "governed-migration-ci/docs/GOVERNED_FUNCTION_CREATIONS.md",
+      "sha256": "bf717cc8230db1b12b157088e4b86d1ac050fcc70a592f61b5caa33a762dc370",
+      "size_bytes": 1189
+    },
+    {
+      "path": "governed-migration-ci/docs/GOVERNED_FUNCTION_MIGRATIONS.md",
+      "sha256": "bea34b9fe294fc36f1f9c8e04a4b6159f543488dd6c964bb5708e59bf68ba2d8",
+      "size_bytes": 1220
+    },
+    {
+      "path": "governed-migration-ci/fixtures/gm_ci_add_governed_record_v1/forward.pgsql",
+      "sha256": "0d39f4087f19e7a02fd1409de9a5d269413ac39a826aa488e46fc1554d375e1d",
+      "size_bytes": 694
+    },
+    {
+      "path": "governed-migration-ci/fixtures/gm_ci_add_governed_record_v1/package.json",
+      "sha256": "7443987fa3b3f463f141fa6e1f1a5c1cf52c1490a1e94275ca964ac6fa7cf52a",
+      "size_bytes": 2653
+    },
+    {
+      "path": "governed-migration-ci/fixtures/gm_ci_add_governed_record_v1/rollback.pgsql",
+      "sha256": "1fc9926c57d4d1c39d3d527c38abddd61b0b98944790b397823940192848c023",
+      "size_bytes": 32
+    },
+    {
+      "path": "governed-migration-ci/registry/external-deployed-sql-v1.json",
+      "sha256": "1b0fe08dc794ab29469641bceac8b67f2f3efb69a03df738e0f2d599b0c6fc62",
+      "size_bytes": 1567
+    },
+    {
+      "path": "governed-migration-ci/registry/governed-function-creations-v1.json",
+      "sha256": "16583245462aff1c9363c41218958357ba3b67a56c213ba500d941372180e834",
+      "size_bytes": 696
+    },
+    {
+      "path": "governed-migration-ci/registry/governed-function-migrations-v1.json",
+      "sha256": "5ad150152ddf057789c76ea0f2f0508729cf6c9c875c443e2bdccb12244e06e8",
+      "size_bytes": 1067
+    },
+    {
+      "path": "governed-migration-ci/registry/governed-migrations-v1.json",
+      "sha256": "edbe68850dc6577210e0bec27ca1432bf30f16c8ac1b354bfe7200c07e9a4007",
+      "size_bytes": 1296
+    },
+    {
+      "path": "governed-migration-ci/registry/legacy-sql-path-aliases-v1.json",
+      "sha256": "9b46c778937928032b534e73705193d24ed99dc67d36500ab07effbe46ae9b43",
+      "size_bytes": 1397
+    },
+    {
+      "path": "governed-migration-ci/tests/test_full_chain_harness.py",
+      "sha256": "dbb2e6f495c70755fb3fe73de27698416753951f262863a5deec6522ec5c326c",
+      "size_bytes": 7324
+    },
+    {
+      "path": "governed-migration-ci/tests/test_function_creation_full_chain_harness.py",
+      "sha256": "a480e3b749001761724671fe18c91499cfc9df97d01db500ae508a1e265bd900",
+      "size_bytes": 10584
+    },
+    {
+      "path": "governed-migration-ci/tests/test_function_full_chain_harness.py",
+      "sha256": "43270c549cfdb9bfc118e7fd5a2c320b5126e471cd39b9bf7b7c6ea2b8558fee",
+      "size_bytes": 4383
+    },
+    {
+      "path": "governed-migration-ci/tests/test_governed_function_creation.py",
+      "sha256": "31cc3831ba6da58868cda3c4b9495c8eb9786b4453513647123270b814d9fac8",
+      "size_bytes": 10519
+    },
+    {
+      "path": "governed-migration-ci/tests/test_governed_function_migration.py",
+      "sha256": "38e6bcab1d479c4852ae62a56ad6dfc095f5e9c8912ad6996aeeaf205cc3275a",
+      "size_bytes": 12333
+    },
+    {
+      "path": "governed-migration-ci/tests/test_governed_migration.py",
+      "sha256": "f3c697ba2d95d572f5d8c1a17f555e4085497178f35e6905da10fc9bc480a553",
+      "size_bytes": 32016
+    },
+    {
+      "path": "governed-migration-ci/tests/test_structured_fixture_plan.py",
+      "sha256": "c945974243a82ad9f33d0f630ed212aac39feb3ff434455e94693f046920fc21",
+      "size_bytes": 11584
+    },
+    {
+      "path": "governed-migration-ci/tools/full_chain_harness.py",
+      "sha256": "f45efd2d9026b089ec88a84614f8cf394d82320cf754670f3d34f1844e73ad9b",
+      "size_bytes": 30478
+    },
+    {
+      "path": "governed-migration-ci/tools/function_creation_full_chain_harness.py",
+      "sha256": "50d92e28aa45fd1674551a4fbe3752392b793109ef88ae8afbe732067421bb03",
+      "size_bytes": 7742
+    },
+    {
+      "path": "governed-migration-ci/tools/function_full_chain_harness.py",
+      "sha256": "23498e41d06a4bd3407f9bfb2fbc73fc39e1c8f1d9cfd7911c8bc8351717616e",
+      "size_bytes": 10025
+    },
+    {
+      "path": "governed-migration-ci/tools/governed_function_creation.py",
+      "sha256": "3f6d922de09c1a7e995f2ecc15856dd748ed0447e23c59a671c17ca58ea60eeb",
+      "size_bytes": 18419
+    },
+    {
+      "path": "governed-migration-ci/tools/governed_function_migration.py",
+      "sha256": "f37847356cea2b5a519d6f7129955cd5e564fb74cad920fdb7166a3b6fbf9960",
+      "size_bytes": 22709
+    },
+    {
+      "path": "governed-migration-ci/tools/governed_migration.py",
+      "sha256": "4e4460f8508893e0fea658022b328d046883a248285410fe6a38cfee7a27c2ad",
+      "size_bytes": 45948
+    },
+    {
+      "path": "governed-migration-ci/tools/structured_fixture_plan.py",
+      "sha256": "5bdc9f5f527cf97448cb687633680dea53756d5f78fad23892b2c34bb8894387",
+      "size_bytes": 13159
+    },
+    {
+      "path": "governed-migration-ci/tools/validate_function_creations.py",
+      "sha256": "1d8a929b521c66c42495c0aec67193909f2695bb0234b7c6998e26811d54146e",
+      "size_bytes": 4857
+    },
+    {
+      "path": "governed-migration-ci/tools/validate_function_migrations.py",
+      "sha256": "0d9c351857e50c3ce87e14ea5bd6c32c61bf1e3ebcedcca92da6511b1f519b9b",
+      "size_bytes": 4617
+    },
+    {
+      "path": "governed-migration-ci/tools/validate_repository_migrations.py",
+      "sha256": "cfce043869a125e664fadddd27c5e00c44f4f51fc50d19617a6e0c40e17db690",
+      "size_bytes": 21490
+    },
+    {
+      "path": "governed-migration-ci/tools/verify_manifest.py",
+      "sha256": "ff69ce40744c2be6362a1bb84ea493234cf6c03215c70a475ba6172b9cfb8e09",
+      "size_bytes": 2146
+    },
+    {
+      "path": "ops/governed_memory/bootstrap_contract.json",
+      "sha256": "25929995ae856f2c1ce88784a6039034536ef8a819fab8362ef91cdf4d25567c",
+      "size_bytes": 15771
+    },
+    {
+      "path": "ops/governed_memory/build-requirements.lock",
+      "sha256": "138427d8971322f844edef21946cccb55944cfe8b8f322770a051b6642d401dc",
+      "size_bytes": 388
+    },
+    {
+      "path": "ops/governed_memory/calibration/semantic_retrieval.unapproved.json",
+      "sha256": "f4aadc10a35a1b4e56c41d36bcb77fa2c60b9d51f5181f348d05f870202a752b",
+      "size_bytes": 379
+    },
+    {
+      "path": "ops/governed_memory/compose.candidate.yaml",
+      "sha256": "9846dfe2676c869669da149ec52c93216adbc3aa3b8776089290e3e55331e8b0",
+      "size_bytes": 2578
+    },
+    {
+      "path": "ops/governed_memory/controller-requirements.lock",
+      "sha256": "39a8617d70d001f0aed4c4a5590837602126126454ab3f5f778fe16f52f22d22",
+      "size_bytes": 943
+    },
+    {
+      "path": "ops/governed_memory/current_component_disposition.json",
+      "sha256": "4a369b9c13f4f8404bba62e410d9a51fbe78dd644c5010fe7201b81ab5524428",
+      "size_bytes": 11665
+    },
+    {
+      "path": "ops/governed_memory/history/phase5/disposable_proof_receipt.json",
+      "sha256": "f9ed42fc666a25086786a76e04c9bdc1bb63efc80fdf320555b1e93d5dae104e",
+      "size_bytes": 1439
+    },
+    {
+      "path": "ops/governed_memory/history/phase5/runtime_build_receipt.json",
+      "sha256": "d0eb6f552cca7a67e66fe38d7d5c090b6e021b6ac79800db2ae6209b7e529f4c",
+      "size_bytes": 2135
+    },
+    {
+      "path": "ops/governed_memory/history/phase6b/component_disposition.json",
+      "sha256": "a17f16bd71f594176df861b39886d23eb95f94ba93ed76ffcf283958dc0cca9c",
+      "size_bytes": 4856
+    },
+    {
+      "path": "ops/governed_memory/history/phase6b/disposable_proof_receipt.json",
+      "sha256": "55e3993e5f403b095a804bcd9b0a40e52c06f295586a5aa4288d9aa75e9df7e8",
+      "size_bytes": 2876
+    },
+    {
+      "path": "ops/governed_memory/history/phase6b/runtime_build_receipt.json",
+      "sha256": "ecedbab61970ac00cf40431073b5cbd359afed289cf90e951a41eb0b4c081e69",
+      "size_bytes": 2141
+    },
+    {
+      "path": "ops/governed_memory/history/phase6e/disposable_proof_receipt.json",
+      "sha256": "79ed0cf79299f856b8a0ab77d420386adf3705f286f6c78b21225cba8eed1097",
+      "size_bytes": 9559
+    },
+    {
+      "path": "ops/governed_memory/history/phase6e/runtime_build_receipt.json",
+      "sha256": "cfe7a60c2e69de5a1603f86717f72d093f6fc2e623c2cb627008dbabb97c1c86",
+      "size_bytes": 2141
+    },
+    {
+      "path": "ops/governed_memory/history/phase7c/disposable_proof_receipt.json",
+      "sha256": "d4ef8b5b855a57e308f468f1db80feef9bab826840c014006ea68bcad8db80d0",
+      "size_bytes": 9559
+    },
+    {
+      "path": "ops/governed_memory/history/phase7c/runtime_build_receipt.json",
+      "sha256": "210cd0fe1bdaf60089668b3d2c8d37be760ed9b867e0909d4e83ebcc204e84b2",
+      "size_bytes": 2141
+    },
+    {
+      "path": "ops/governed_memory/history/phase8d/phase8a_successor_installation_stack_retirement.json",
+      "sha256": "593e1c76e66905c8855625c88c42b1cb080c5e0f0380230cbb03246eaafccae6",
+      "size_bytes": 20733
+    },
+    {
+      "path": "ops/governed_memory/history/phase8f/component_disposition.json",
+      "sha256": "c69f9012b5a9b8bef64121baacf3e2289d13771776d7d6c333551f93b416861f",
+      "size_bytes": 6345
+    },
+    {
+      "path": "ops/governed_memory/installation/current/contract.json",
+      "sha256": "8a263d5c112229143205562a718edafed4fe25afdd57b3542562a987b5890c2a",
+      "size_bytes": 31855
+    },
+    {
+      "path": "ops/governed_memory/installation/current/controller_plan.json",
+      "sha256": "89f15d157fa1a8ad951b4f88f02db31f2c26dab5bf96c232e7f0a41e773f9cce",
+      "size_bytes": 26534
+    },
+    {
+      "path": "ops/governed_memory/installation/current/controller_runtime_contract.json",
+      "sha256": "931d947aacb4473f3d906ed35b7ca61b36c15894769a6573b608b8b73f3b6fab",
+      "size_bytes": 13389
+    },
+    {
+      "path": "ops/governed_memory/installation/current/disposable_proof_contract.json",
+      "sha256": "61eea2dfe528081b1d7fb24ffe59cc2360bfce5a8c19f5cb292b1eca83543180",
+      "size_bytes": 11451
+    },
+    {
+      "path": "ops/governed_memory/installation/current/disposable_proof_receipt.schema.json",
+      "sha256": "358b6a31d80c58f5520edd06bebeeef210cac8a58cf9291759e681b6bd72e638",
+      "size_bytes": 6475
+    },
+    {
+      "path": "ops/governed_memory/installation/current/empty_rollback_receipt.schema.json",
+      "sha256": "41b5397368c280f35d03bc256e4dd5f143bf25a350db40e6fba0bcfdb586d189",
+      "size_bytes": 4683
+    },
+    {
+      "path": "ops/governed_memory/installation/current/execution_contract.json",
+      "sha256": "142693065ad2614c52fba6cad4117a53f6e397c591a92b5b870c0fc0597917e5",
+      "size_bytes": 17537
+    },
+    {
+      "path": "ops/governed_memory/installation/current/install_receipt.schema.json",
+      "sha256": "637bc1772ec5c05e8e34c63f3dbe525fe572d1ee1a6f0d7fcca478364d68fb5d",
+      "size_bytes": 4614
+    },
+    {
+      "path": "ops/governed_memory/installation/current/live_proof_receipt.schema.json",
+      "sha256": "39a42f042a85adc699b310a7d64d7b46b50023725019b96bef04e1f27800fd39",
+      "size_bytes": 7267
+    },
+    {
+      "path": "ops/governed_memory/installation/current/migration_manifest.json",
+      "sha256": "5a216df5ff299e4b3a50b301b09d7eb8bfa7bcedd17ea624833816c93899ab2d",
+      "size_bytes": 2025
+    },
+    {
+      "path": "ops/governed_memory/installation/current/package_manifest.json",
+      "sha256": "c4f6e657d864a3fc60271dc8e875c12c193b91bb6fc5815314c7dd0182c4af8e",
+      "size_bytes": 10292
+    },
+    {
+      "path": "ops/governed_memory/installation/current/postgres/migration_bindings.json",
+      "sha256": "cc9c1905bb24c32e000238add8c09dcfdd71ffa2a672e1d09d218743881fec15",
+      "size_bytes": 2081
+    },
+    {
+      "path": "ops/governed_memory/installation/current/postgres/native_stage_contract.json",
+      "sha256": "a6fdf66ccc75e30c5e8a3e3ba56993297c921db4f599c909653eefde14a561c8",
+      "size_bytes": 28327
+    },
+    {
+      "path": "ops/governed_memory/installation/current/postgres/roles_preflight.pgsql",
+      "sha256": "21994b66b3d1612180ab458ea6f83258598e963138f604b88ada57ad4f23229e",
+      "size_bytes": 9480
+    },
+    {
+      "path": "ops/governed_memory/installation/postgres/canonical_cluster.pgsql.in",
+      "sha256": "5e3238856349ca9928d9a20d7658959effdaf6472a795d959ad0707fa9bbbae0",
+      "size_bytes": 8259
+    },
+    {
+      "path": "ops/governed_memory/installation/postgres/canonical_cluster_rollback.pgsql.in",
+      "sha256": "5adec472f5b3277b5a2137fc5e7e8f1d50e587a54302246f6b87cef28442d277",
+      "size_bytes": 43085
+    },
+    {
+      "path": "ops/governed_memory/installation/store_spec-v6.json",
+      "sha256": "d27617a9e117893c8d49f2a7428e76fcfecf4c63e50c454dadbfc4d9ed6a986a",
+      "size_bytes": 6317
+    },
+    {
+      "path": "ops/governed_memory/installation/systemd/governed-memory-stores-v6.service.in",
+      "sha256": "168a8a69906a179c4b0e0f62fd549cf723006af50a39b7b384ce3c84c73a398c",
+      "size_bytes": 2031
+    },
+    {
+      "path": "ops/governed_memory/phase8g_disposable_proof_receipt.json",
+      "sha256": "9ce44ac7d3ed08970d88f9ad40df14f82c9ad677af2629a9ff2f7d2aa9385e76",
+      "size_bytes": 9676
+    },
+    {
+      "path": "ops/governed_memory/phase9j_controller_runtime_release_receipt.json",
+      "sha256": "9884fa9db3be81039b691a25866994d6033c5cf9175030ea82de401a2bbe6334",
+      "size_bytes": 2142
+    },
+    {
+      "path": "ops/governed_memory/pilot_contract.json",
+      "sha256": "9b865c8e726a6e34ac17873822abc161286658e3f2fcbcf0b6611903a1fc192a",
+      "size_bytes": 13022
+    },
+    {
+      "path": "ops/governed_memory/qdrant_alias.create.json",
+      "sha256": "0ed30cf2496c13f5d1b69174e658bef6aed4a1ddd258ac09ec2d2c231beec0bb",
+      "size_bytes": 180
+    },
+    {
+      "path": "ops/governed_memory/qdrant_collection.create.json",
+      "sha256": "b5b384823849088f29264371e52bab463b456e8c836eceb85e6c4be9c3c2d098",
+      "size_bytes": 117
+    },
+    {
+      "path": "ops/governed_memory/release_receipt.schema.json",
+      "sha256": "002f6235fca03a42cd5e2620e21e6ee73f9caf3bd5d9d537ed7f43dca509d13a",
+      "size_bytes": 4207
+    },
+    {
+      "path": "ops/governed_memory/runtime-requirements.lock",
+      "sha256": "94ca231656579ce3b8f09c308e34dc8a03b8d1cf445f7a3681193767cd7db365",
+      "size_bytes": 2086
+    },
+    {
+      "path": "ops/governed_memory/runtime_build_receipt.json",
+      "sha256": "25ca53e683e53f79b726909ef64bc8afad30269cce3f59804cf66335667a8108",
+      "size_bytes": 2141
+    },
+    {
+      "path": "ops/governed_memory/runtime_manifest.json",
+      "sha256": "0920af9197f0b2ab9d0c06c631eadeb93c741062d49ec4a0e0e477aac477ea6c",
+      "size_bytes": 36297
+    },
+    {
+      "path": "ops/governed_memory/source_migrations/0001_trusted_web_response_lineage/forward.pgsql",
+      "sha256": "143042ed897c0922a22c83a61ed11af9d7646c890a725790972f090fc3c0c173",
+      "size_bytes": 1974
+    },
+    {
+      "path": "ops/governed_memory/source_migrations/0001_trusted_web_response_lineage/rollback.pgsql",
+      "sha256": "b113de704f7e47374f8ac424edc5a31405dba49c32d2ba5c348c6850ce81017b",
+      "size_bytes": 911
+    },
+    {
+      "path": "ops/governed_memory/source_migrations/0002_legacy_memory_chat_fk_detach/forward.pgsql",
+      "sha256": "5e20a5ce6906896afbcb8fae19d2a33931c29cfc389ca7b58af2cb393cd13e52",
+      "size_bytes": 1275
+    },
+    {
+      "path": "ops/governed_memory/source_migrations/0002_legacy_memory_chat_fk_detach/rollback.pgsql",
+      "sha256": "107a6f101c00bf11282c61af0c042764c68eb8da3a2c486a19a45a8d9718aedf",
+      "size_bytes": 902
+    },
+    {
+      "path": "ops/governed_memory/source_migrations/0003_chat_memory_command_coordination/forward.pgsql",
+      "sha256": "7b1c2e9c75d6ab1de150f0b7fa5f1e5ccc792951c7e4179d4ded6104261cf710",
+      "size_bytes": 7661
+    },
+    {
+      "path": "ops/governed_memory/source_migrations/0003_chat_memory_command_coordination/rollback.pgsql",
+      "sha256": "3ec91f29941479ea3378b007bce333d19b1f1c5280dd253cd0273ad8c76cb272",
+      "size_bytes": 585
+    },
+    {
+      "path": "ops/governed_memory/staged_prefix_disposition_contract.json",
+      "sha256": "50c86899b801dcbfd972c1e09a76c2b501d96015c4df0d12a3790e08c6cd0eb8",
+      "size_bytes": 14465
+    },
+    {
+      "path": "ops/governed_memory/supabase_session_authority/contract.json",
+      "sha256": "539bf8546df4d2b3910c1068ed6721b05749cdd4ff225c6b2fb11991a8e77b5c",
+      "size_bytes": 2192
+    },
+    {
+      "path": "ops/governed_memory/supabase_session_authority/forward.pgsql",
+      "sha256": "67030b83d855941e0c99b6d40bc329f60c9bba5b45e4f398689b742700b4b4e9",
+      "size_bytes": 3591
+    },
+    {
+      "path": "ops/governed_memory/supabase_session_authority/rollback.pgsql",
+      "sha256": "e3fe0bac0970681afd6f5b755cb5714618e8aee1cee9b3dda0fa9091c3fb5f30",
+      "size_bytes": 1784
+    },
+    {
+      "path": "ops/governed_memory/systemd/governed-memory-http.service.in",
+      "sha256": "bae268e017ef36012a15279e7128bb18151c665b23a4a170928c3e9d934e93c5",
+      "size_bytes": 1228
+    },
+    {
+      "path": "ops/governed_memory/systemd/governed-memory-worker.service.in",
+      "sha256": "f7330699d338a4cb7893cccace5fdb877e587657b490d28212d23b312d5ccaa8",
+      "size_bytes": 1339
+    },
+    {
+      "path": "ops/governed_memory/systemd/governed-memory-worker.timer.in",
+      "sha256": "dce3334ed98e77f3e4532f129f787fdb8e826e3f29830feb01c997dbc00e6779",
+      "size_bytes": 211
+    },
+    {
+      "path": "rag_engine/governed_memory/__init__.py",
+      "sha256": "e197aac8b5fce8627f12892c50bb6ed346f84fff4107825e8305a3835898f014",
+      "size_bytes": 1317
+    },
+    {
+      "path": "rag_engine/governed_memory/admission.py",
+      "sha256": "a28181e343c3a6197e56d37393510caf2c53b1e87be1ac793dc3ce17c9754b7a",
+      "size_bytes": 38179
+    },
+    {
+      "path": "rag_engine/governed_memory/api.py",
+      "sha256": "f9e1dfbf7c06716236af53eae323cab6382098c401cc1501dd34d0db27019560",
+      "size_bytes": 7479
+    },
+    {
+      "path": "rag_engine/governed_memory/auth.py",
+      "sha256": "f66e48fa7c537469fab54cafe38cf3af42cb349bb85b17f5bd91c2802706cb37",
+      "size_bytes": 3412
+    },
+    {
+      "path": "rag_engine/governed_memory/chat_commands.py",
+      "sha256": "a2505ebfeb74066b07c8e94ee31f8549969db40462950954b30eab84283abc9c",
+      "size_bytes": 3258
+    },
+    {
+      "path": "rag_engine/governed_memory/contracts.py",
+      "sha256": "26de39f720abef725dd425f02a819c1c6f1e3e3c8908f653b621c67326f248f0",
+      "size_bytes": 30514
+    },
+    {
+      "path": "rag_engine/governed_memory/conversation_capture.py",
+      "sha256": "46dbdabebba417b413a33c0ab7d6f2c0e5249ae2d636f6fe4c9e10aa1880a00b",
+      "size_bytes": 8884
+    },
+    {
+      "path": "rag_engine/governed_memory/conversation_deletion.py",
+      "sha256": "cc9d56613f86f7b42949baf3da543395fc7b64aae891eafffbd8e0ff9bb0f569",
+      "size_bytes": 11213
+    },
+    {
+      "path": "rag_engine/governed_memory/conversation_erasure_http.py",
+      "sha256": "aeab1a2fac448a2e1e3f9d66a53612f24cbfe62cea61cb1352131ca1cc678cdb",
+      "size_bytes": 9380
+    },
+    {
+      "path": "rag_engine/governed_memory/conversation_source.py",
+      "sha256": "5ae582ef54cf75d1b5c7926ec17fc620eec19c668bab60aecc655ace93ce13a1",
+      "size_bytes": 3391
+    },
+    {
+      "path": "rag_engine/governed_memory/deletion_contracts.py",
+      "sha256": "b38a6d2777b28b838244245793f48e27daf3c4a5fbcc5344cedaf81ffa3fae2e",
+      "size_bytes": 36906
+    },
+    {
+      "path": "rag_engine/governed_memory/eligibility.py",
+      "sha256": "e977ac13562ff426612629e16c5a700351ea7084418cd18cbdc2ec48eca05f4a",
+      "size_bytes": 32947
+    },
+    {
+      "path": "rag_engine/governed_memory/exclusive_cutover.py",
+      "sha256": "f60eae2d2743ee5e764d3fd578563c61a5577fcd600fd93165fa03ae48f5f944",
+      "size_bytes": 1516
+    },
+    {
+      "path": "rag_engine/governed_memory/extraction.py",
+      "sha256": "fb19a9deafb3a2c97a0bafad181b9b9801389577daed18a310f2e34740b7bffe",
+      "size_bytes": 76256
+    },
+    {
+      "path": "rag_engine/governed_memory/http_api.py",
+      "sha256": "10ed932c36c335cfc3c02999442bc406af5d1946e9e93a0c31bce0d812c6e059",
+      "size_bytes": 44024
+    },
+    {
+      "path": "rag_engine/governed_memory/http_auth.py",
+      "sha256": "bf37f271e6add4626a933e3b3fde2d5f1a91bbfb1793a57430d72b1b000f8918",
+      "size_bytes": 13656
+    },
+    {
+      "path": "rag_engine/governed_memory/http_runtime.py",
+      "sha256": "2b85e694ed1bf52f63b38b2fdfbde3fa007314050f746abb2d97171d5c0efec0",
+      "size_bytes": 18327
+    },
+    {
+      "path": "rag_engine/governed_memory/http_service.py",
+      "sha256": "263cde0ede2c4424709fdb4ee2b521f09616232ac9173f8c46d287bd7437231e",
+      "size_bytes": 62409
+    },
+    {
+      "path": "rag_engine/governed_memory/http_store.py",
+      "sha256": "acf31bdf534469eab980d7a39a46051b614f38acbcfc77523d5d65f6a5fd9213",
+      "size_bytes": 12960
+    },
+    {
+      "path": "rag_engine/governed_memory/lifecycle.py",
+      "sha256": "27af31090481e50ed3d812130f678de300ce69fbccf4b7f96c46eae0880f8651",
+      "size_bytes": 33995
+    },
+    {
+      "path": "rag_engine/governed_memory/postgres_adapter.py",
+      "sha256": "a90922eee387653dabad7db2f7757764210f06c9127dfce64d47e628e7c2c18f",
+      "size_bytes": 11576
+    },
+    {
+      "path": "rag_engine/governed_memory/preference_correction_interpreter.py",
+      "sha256": "8d3cd7ba6eb14a1e06dc00ea6fe5cf74471f22727a70abaafa87da84ca57c619",
+      "size_bytes": 12052
+    },
+    {
+      "path": "rag_engine/governed_memory/projection.py",
+      "sha256": "1b050c8305dd0330080e6ec12164ad2c7772626b6d2b27e64d0da0b3dc38cad6",
+      "size_bytes": 31610
+    },
+    {
+      "path": "rag_engine/governed_memory/provider_assets/__init__.py",
+      "sha256": "1f3def3b11d7875d7005a175a1fc446f5e1e7ea7f7b226399470bd6c71cd1a7b",
+      "size_bytes": 52
+    },
+    {
+      "path": "rag_engine/governed_memory/provider_assets/extraction_instructions.txt",
+      "sha256": "3c04e5455c98a40720fc21dbb4b19b5ba4a39d4ecd5b690313e6b9966b7232bb",
+      "size_bytes": 2247
+    },
+    {
+      "path": "rag_engine/governed_memory/provider_assets/extraction_output.schema.json",
+      "sha256": "3d906c640ec693abad01e0b6426491e746b12a4c51767a4d76dab5bd7adb8fcd",
+      "size_bytes": 4349
+    },
+    {
+      "path": "rag_engine/governed_memory/provider_assets/predicate_catalog.json",
+      "sha256": "e9812af781293f42c396f7c62d0dc646db7de64a732675d6e2bd5587b0088a7c",
+      "size_bytes": 2255
+    },
+    {
+      "path": "rag_engine/governed_memory/repository.py",
+      "sha256": "ee11d4f46833c3984bd02c2dea9d434fd4946d410189c34260a3d657318cfa99",
+      "size_bytes": 27053
+    },
+    {
+      "path": "rag_engine/governed_memory/response_contracts.py",
+      "sha256": "281fb7efbab9c8160f0c037b02734e67924b7bb0dbbfef15b1fdd13be659f710",
+      "size_bytes": 7807
+    },
+    {
+      "path": "rag_engine/governed_memory/response_postgres.py",
+      "sha256": "0523705e931286784f81d4920256269b5036b2da067a351adb81f9a1f407d908",
+      "size_bytes": 8626
+    },
+    {
+      "path": "rag_engine/governed_memory/response_provenance.py",
+      "sha256": "6897ff36fe474870137d4a642ef4f9279d6d3070fdab066fd765a95b222871ac",
+      "size_bytes": 13262
+    },
+    {
+      "path": "rag_engine/governed_memory/response_provider.py",
+      "sha256": "852311e1d2ff3b36034cb2e42f3eaa33cce39658dec1ad5ff5efd7e049ced389",
+      "size_bytes": 25635
+    },
+    {
+      "path": "rag_engine/governed_memory/response_relevance.py",
+      "sha256": "bf4d8bcf472e4c6c6f91c478740311defa5153b86531c455203c0e17fa0e5a60",
+      "size_bytes": 8239
+    },
+    {
+      "path": "rag_engine/governed_memory/response_runtime.py",
+      "sha256": "afe1796c1dcdb74e3ab38246f0023a7c4d4320596dd6903f491abc385103098b",
+      "size_bytes": 24215
+    },
+    {
+      "path": "rag_engine/governed_memory/retrieval.py",
+      "sha256": "ccfc5b19a0542e64331f850a3a2ddbeca37d91874b6d424b8403815d2ae715f3",
+      "size_bytes": 58687
+    },
+    {
+      "path": "rag_engine/governed_memory/runtime/__init__.py",
+      "sha256": "167fe314e9d8a6a9c01d2c6a2af5722a452d1c6afc8a1680a5bd0f92026111a3",
+      "size_bytes": 1157
+    },
+    {
+      "path": "rag_engine/governed_memory/runtime/__main__.py",
+      "sha256": "6b5b7ce7d0abf55345145bb92da81f789b1a1b52030fd41382d315b38e4dd678",
+      "size_bytes": 175
+    },
+    {
+      "path": "rag_engine/governed_memory/runtime/application.py",
+      "sha256": "9e7b26784bb40060dfc002f46044215b4fffcba065db2ea8513907fab21decd7",
+      "size_bytes": 5330
+    },
+    {
+      "path": "rag_engine/governed_memory/runtime/calibration.py",
+      "sha256": "7bf3cf76ce16cc751e4e247d421d1bfc2414753a759c6d4a23cd0e13b0c1132d",
+      "size_bytes": 14594
+    },
+    {
+      "path": "rag_engine/governed_memory/runtime/deletion_coordinator.py",
+      "sha256": "0666229fc32b489bca9523580058f2963fd1efd40eb4ec928434857bcc0dc513",
+      "size_bytes": 15048
+    },
+    {
+      "path": "rag_engine/governed_memory/runtime/deletion_postgres.py",
+      "sha256": "e80d643fc7c45f178c399f9de7f47315abb9f0aeaaf8f0f14e76500932e27471",
+      "size_bytes": 45727
+    },
+    {
+      "path": "rag_engine/governed_memory/runtime/environment.py",
+      "sha256": "12f9ccc5b74ef7a7f46a116da1e3241d739418c9c8e22ab5de212dab1a9627ab",
+      "size_bytes": 200
+    },
+    {
+      "path": "rag_engine/governed_memory/runtime/https_transport.py",
+      "sha256": "b9a1abfac1ab23bfe07cfbf85e3a6cb34fe13963770b1104981792d3e7ab02e2",
+      "size_bytes": 10031
+    },
+    {
+      "path": "rag_engine/governed_memory/runtime/live_supabase.py",
+      "sha256": "c1c88dd857e3f1018c9066f87e6f39e664bcfbc6d11b75d7c364d89242064e91",
+      "size_bytes": 17803
+    },
+    {
+      "path": "rag_engine/governed_memory/runtime/once_worker.py",
+      "sha256": "a9b57aa0cb1cd29ce99cd5b3a9870588165f374c6e5a47cecebcc1ba36d74606",
+      "size_bytes": 11116
+    },
+    {
+      "path": "rag_engine/governed_memory/runtime/openai_adapters.py",
+      "sha256": "3f4410e735a5c42c3b7f2d9fdbaa090c86cea96324775874c78b493adb559d3b",
+      "size_bytes": 28111
+    },
+    {
+      "path": "rag_engine/governed_memory/runtime/pilot_marker.py",
+      "sha256": "72c450ec49d8d44115ccb769e7198615f8b00ee4260f08d7463f360ed6410de0",
+      "size_bytes": 6407
+    },
+    {
+      "path": "rag_engine/governed_memory/runtime/qdrant_adapter.py",
+      "sha256": "139b5963bcc4196e6d6de1164a7180acd31def5073f34f1b350b0cca940ee84f",
+      "size_bytes": 20028
+    },
+    {
+      "path": "rag_engine/governed_memory/runtime/qdrant_transport.py",
+      "sha256": "5db2cfef32dbda6dc00b90a5519521d5b00f63140aa30cb01774bd3cc0f92d13",
+      "size_bytes": 8318
+    },
+    {
+      "path": "rag_engine/governed_memory/runtime/rebuild_adapters.py",
+      "sha256": "97340cf5f40548355ad2735a9dca3142a7d01e13018e7ee8e3bc7eb2948a1792",
+      "size_bytes": 21584
+    },
+    {
+      "path": "rag_engine/governed_memory/runtime/rebuild_application.py",
+      "sha256": "c82b4ff646f650d67057a057ce6eb69338b6ca4aacd07ac60e22e684b48c02d7",
+      "size_bytes": 7414
+    },
+    {
+      "path": "rag_engine/governed_memory/runtime/rebuild_controller.py",
+      "sha256": "bf7ef7b748b1437e98486eb43cedc1d018d6a9f1470896a3b29726181de23e1f",
+      "size_bytes": 14736
+    },
+    {
+      "path": "rag_engine/governed_memory/runtime/rebuild_qdrant_transport.py",
+      "sha256": "17d90ead05500b66998b79654f1237a2b56805c5856db8aa1f2cd9deb98cdb61",
+      "size_bytes": 9512
+    },
+    {
+      "path": "rag_engine/governed_memory/runtime/worker_application.py",
+      "sha256": "f729a693a2d4d041c9be3968a880672c38e9e81dc68aae826baa1d7e2534e28c",
+      "size_bytes": 21833
+    },
+    {
+      "path": "rag_engine/governed_memory/runtime/worker_bridge.py",
+      "sha256": "e282e3d0b41e382681a2b318842b1421a8130a86cd92334d4ee45920850d3a05",
+      "size_bytes": 25815
+    },
+    {
+      "path": "rag_engine/governed_memory/runtime/worker_postgres.py",
+      "sha256": "6e64a3de8e4ec565f65747750117153e3a42f9b4e2887591e02b504d213cf953",
+      "size_bytes": 32216
+    },
+    {
+      "path": "rag_engine/governed_memory/runtime/zep_deletion.py",
+      "sha256": "197fc2ca71ff450ff9718b6ab16d7577c594f1975fb82060599aa3a3d4f9576c",
+      "size_bytes": 11328
+    },
+    {
+      "path": "rag_engine/governed_memory/successor_live_authority.py",
+      "sha256": "b33e6ac0d42f4a2ebc8d13efff43b895133a3574fa10599d11dc2b0a28b75239",
+      "size_bytes": 1558
+    },
+    {
+      "path": "rag_engine/governed_memory/worker.py",
+      "sha256": "cc0ba16e48509d5ae898d8b4b4cbd195ebd148240c18f814580a6d0e03876808",
+      "size_bytes": 52895
+    },
+    {
+      "path": "rag_engine/governed_memory_chat_lifecycle_v1.py",
+      "sha256": "6bf68bb450a8f7867ea1e7db0dabe901c3b4b6c2de953dfc7029d7388a47ed78",
+      "size_bytes": 27312
+    },
+    {
+      "path": "rag_engine/governed_memory_erasure_proxy_v1.py",
+      "sha256": "c22a8efd4f81509c91b0735adb57a46d473f4f05b200edd2526c68657271a78e",
+      "size_bytes": 10129
+    },
+    {
+      "path": "tests/memory/__init__.py",
+      "sha256": "91bbb2b4388e1f241fce3ab183beae9d024bec86a30f8aa3de8e06061ceb9882",
+      "size_bytes": 70
+    },
+    {
+      "path": "tests/memory/_fixtures.py",
+      "sha256": "697181df6a2d37ce5dd5f8dfa747a3ef6eb6c2e44fb03a7eea1b167fc28c5167",
+      "size_bytes": 22881
+    },
+    {
+      "path": "tests/memory/resource_identity_test_support.py",
+      "sha256": "05f3db8ca188ba9eb15860b178a08624c203f5410374514c11bd0b45ba490cc0",
+      "size_bytes": 3750
+    },
+    {
+      "path": "tests/memory/test_admission.py",
+      "sha256": "b0d2b19ebc57780a7089211c92b3e61765bb70184d557f9dbba68852d8db6d55",
+      "size_bytes": 14025
+    },
+    {
+      "path": "tests/memory/test_auth_claim_artifacts.py",
+      "sha256": "a42e11be5523caeab7a0940b92d9381161072ac4b4057f7cc44a711db8927d58",
+      "size_bytes": 38350
+    },
+    {
+      "path": "tests/memory/test_bootstrap_phase9_disposable_store_substrate.py",
+      "sha256": "e0a770f5170dc56bf560124ec342aaa21db4ca98bac2b86b826b94897e113bd2",
+      "size_bytes": 15221
+    },
+    {
+      "path": "tests/memory/test_build_provenance.py",
+      "sha256": "cc4d5f277aac4be04118ba07b3344753f80b7e6bf797cc45f2af604722e2e934",
+      "size_bytes": 11205
+    },
+    {
+      "path": "tests/memory/test_canonical_cluster_rollback.py",
+      "sha256": "c63881eb099be457529a71fcb938823c1170483c275ac36356722af992c20118",
+      "size_bytes": 8415
+    },
+    {
+      "path": "tests/memory/test_chat_lifecycle_runtime.py",
+      "sha256": "a5233a084b6b4a8342f638449e5f55b7ccbf6162a8b1c0873e50a072f8daab4d",
+      "size_bytes": 25742
+    },
+    {
+      "path": "tests/memory/test_chat_memory_e2e.py",
+      "sha256": "199fd573ac997f6cac3566268ff651d0ca42b8c8747c188ad2f9772466718353",
+      "size_bytes": 11543
+    },
+    {
+      "path": "tests/memory/test_chat_memory_ingest_coordination.py",
+      "sha256": "6a34f5223fcee37cd4c7c8edad968619772f33b0b9c9987010b926a771cd2988",
+      "size_bytes": 5551
+    },
+    {
+      "path": "tests/memory/test_controller_runtime_builder.py",
+      "sha256": "68397ef2b2c5839d5cc11a2c28cc1690e444f1fb23210fedebeaf1b71a1ffd83",
+      "size_bytes": 49930
+    },
+    {
+      "path": "tests/memory/test_conversation_bridge.py",
+      "sha256": "618823a2497cd85af81c7d542d374ab53ce0ab16d2b8f798bae196d0ad9318b4",
+      "size_bytes": 17963
+    },
+    {
+      "path": "tests/memory/test_conversation_capture.py",
+      "sha256": "d2fefda71d5f953acba94354958cea7a0ca739b19a2e6eeb3a0bba66c7d9acd1",
+      "size_bytes": 25914
+    },
+    {
+      "path": "tests/memory/test_conversation_deletion.py",
+      "sha256": "49ec9e9f1ca6b02b2ee46232a2e9f04ae06f57ba82009de1d587edcad81ccc42",
+      "size_bytes": 33980
+    },
+    {
+      "path": "tests/memory/test_conversation_erasure_http.py",
+      "sha256": "b43056eca82005f59098bbf5f56ae013d70eabdff37d420dd2d5adc411c9538e",
+      "size_bytes": 21369
+    },
+    {
+      "path": "tests/memory/test_deletion_contracts.py",
+      "sha256": "cd5c06bccc289b539f8486a59f74bccbadadd9435e18d5a17e08baaaf84790f4",
+      "size_bytes": 11803
+    },
+    {
+      "path": "tests/memory/test_deletion_coordinator.py",
+      "sha256": "f123de30bc40cacf66f6d87f2f8ad8d605a7a9822f9e3ac0079828a969d66e8b",
+      "size_bytes": 26991
+    },
+    {
+      "path": "tests/memory/test_disposable_installation_live_proof.py",
+      "sha256": "6c2e568a9df55d4fe93d4c1030b70a3b2909eb4b654ce428975fed2d1e76d674",
+      "size_bytes": 209729
+    },
+    {
+      "path": "tests/memory/test_dormant_store_install_controller.py",
+      "sha256": "ab1cce21e2373207df46f36e627159a64f40f377104f48ab98c26ae76dab5909",
+      "size_bytes": 27525
+    },
+    {
+      "path": "tests/memory/test_durable_live_proof_receipt_publication.py",
+      "sha256": "26f4b73cd21472f950121917de0675adfd001cd5aaba42dafa246d6b271caee3",
+      "size_bytes": 27614
+    },
+    {
+      "path": "tests/memory/test_durable_receipts.py",
+      "sha256": "24ad929e043a07871a1ea0d53560b5b4c9da2d2064900d1d03f05a0a4e7f05d8",
+      "size_bytes": 16153
+    },
+    {
+      "path": "tests/memory/test_eligibility.py",
+      "sha256": "b39bc6e541b5377a6c179bc419b075b78d1edf298039ce6fc2ee86ae28465fbb",
+      "size_bytes": 14288
+    },
+    {
+      "path": "tests/memory/test_empty_rollback_authority.py",
+      "sha256": "e4e702b886717030c09789d619087bb352d40c65fcc9ac33f8da7817d7b3dcce",
+      "size_bytes": 40933
+    },
+    {
+      "path": "tests/memory/test_empty_rollback_execution.py",
+      "sha256": "7b9a5d4d66bd23eb3c470002c3f71e12a74c93c9df9dec528ddcb89b74121207",
+      "size_bytes": 90197
+    },
+    {
+      "path": "tests/memory/test_empty_rollback_plan.py",
+      "sha256": "073103e4d8516e50e0e60d6a6412c7332d07aeb6494545d3c7a3b30dc043d1b4",
+      "size_bytes": 16551
+    },
+    {
+      "path": "tests/memory/test_exclusive_cutover.py",
+      "sha256": "e6fe2837364ae5223fad895982377415a140ea82710c5b93fac82bae9358309c",
+      "size_bytes": 15801
+    },
+    {
+      "path": "tests/memory/test_execute_phase9_disposable_live_proof_controller.py",
+      "sha256": "972a49e2d331e762bbd749d9dd849b409ee7c30de347f49364562d23b976913b",
+      "size_bytes": 43246
+    },
+    {
+      "path": "tests/memory/test_execute_phase9_staged_prefix_disposition.py",
+      "sha256": "a15730279054bf2b9ab2f1be07ea71c34ec213dcfab9a088faca14fc48849d42",
+      "size_bytes": 20114
+    },
+    {
+      "path": "tests/memory/test_execution_authority_state.py",
+      "sha256": "ba38496403089df100b79227ed4ddbdde3aa1cef865c821e776d01b039533045",
+      "size_bytes": 43852
+    },
+    {
+      "path": "tests/memory/test_extraction.py",
+      "sha256": "c302585889d97b35f9eee770509194b16207a748e25a38568706fef4c90811ec",
+      "size_bytes": 28862
+    },
+    {
+      "path": "tests/memory/test_governed_memory_erasure_proxy_v1.py",
+      "sha256": "1d10e5b66d94ff1144fc2070a586949865bb168b9758b4b9386831ceb26cf2b2",
+      "size_bytes": 10381
+    },
+    {
+      "path": "tests/memory/test_http_api.py",
+      "sha256": "581e6fe1ae50937086d3c08ad08d8a76bf04e6e385927b022dba5df45c5ccca9",
+      "size_bytes": 44033
+    },
+    {
+      "path": "tests/memory/test_http_auth.py",
+      "sha256": "8a51d5a792d730b98f2f7b5e691d46e62d6c9732f5d5b02c105f754e16279655",
+      "size_bytes": 16064
+    },
+    {
+      "path": "tests/memory/test_http_live_auth_mapping.py",
+      "sha256": "1520dc42dd2c4f8d7370a2a697542b287d328355a446a4fdcf7788d663e35166",
+      "size_bytes": 20180
+    },
+    {
+      "path": "tests/memory/test_http_runtime.py",
+      "sha256": "5da516db61209924d47d2ef1a3a971670d23816b0a39186f70fa14f30adeec10",
+      "size_bytes": 18378
+    },
+    {
+      "path": "tests/memory/test_http_service.py",
+      "sha256": "5695f7534c7adefb01331a033b34945d402ee9cad01d86705543ddd9355dfbd8",
+      "size_bytes": 57813
+    },
+    {
+      "path": "tests/memory/test_http_store.py",
+      "sha256": "d4d8ee6b4eabc80eb727fadea94a7c0390b1b1d4999fddaf299ce8bed0ebb01b",
+      "size_bytes": 13768
+    },
+    {
+      "path": "tests/memory/test_https_transport.py",
+      "sha256": "1ec30a1c05b3376830947ab2a1362aea57e9c1ca6469d4bd955228b45088c372",
+      "size_bytes": 5374
+    },
+    {
+      "path": "tests/memory/test_installation_authority.py",
+      "sha256": "059cf3c3b2e176c0ca96505b71b2a612bbc82adb5502f4e4e414b11fbdbb7ef1",
+      "size_bytes": 21546
+    },
+    {
+      "path": "tests/memory/test_installation_composition.py",
+      "sha256": "5a454aacb5aeac06148e3de637f3f9a1fe6e0ced4693329d8096665916691054",
+      "size_bytes": 68002
+    },
+    {
+      "path": "tests/memory/test_installation_durability_anchors.py",
+      "sha256": "ce124986213a369e720cdf89392142faa7cf4c216925bb495c0c5bccf1ab16f0",
+      "size_bytes": 20219
+    },
+    {
+      "path": "tests/memory/test_installation_durable_journal.py",
+      "sha256": "f120f9806818f8d51f42798b567a07e07cc994b3be76e9b5f3d6637c0998be43",
+      "size_bytes": 41863
+    },
+    {
+      "path": "tests/memory/test_installation_execution_contracts.py",
+      "sha256": "594f26d45f5aa8f38bccee0c3a60e164b0a2f4cd68bd5ff6c07a82f0aa49d0c5",
+      "size_bytes": 17537
+    },
+    {
+      "path": "tests/memory/test_installation_package.py",
+      "sha256": "9836a75e3e94dbe317831fc5fa6b5236ecd4e267651f45e23f20df6d0671873a",
+      "size_bytes": 38552
+    },
+    {
+      "path": "tests/memory/test_installation_receipts.py",
+      "sha256": "01fdaab2970f73c087ce50475e6855f42cdd5db69dae940f598f441afc024738",
+      "size_bytes": 10092
+    },
+    {
+      "path": "tests/memory/test_installation_resource_identity_security.py",
+      "sha256": "bcf9acc8899420121ea25ef3adf6bc8e80df979a19b9dfcf64790b132c50b2b8",
+      "size_bytes": 15156
+    },
+    {
+      "path": "tests/memory/test_installation_runtime_capability.py",
+      "sha256": "1a7ca919c1d5b196c991f66c126c6b9f105e4ee8843b6e2341629f07abb721da",
+      "size_bytes": 45847
+    },
+    {
+      "path": "tests/memory/test_installation_store_contracts.py",
+      "sha256": "0369e860c91376750a5ad956bbf973fb7644ed9291543c4c1a392f1efe85822e",
+      "size_bytes": 32241
+    },
+    {
+      "path": "tests/memory/test_installation_synthetic_proof.py",
+      "sha256": "e13317e9590378aa661f61aa946544e403094bfcff0b6769011130293f71e4e8",
+      "size_bytes": 13758
+    },
+    {
+      "path": "tests/memory/test_intake_boundary.py",
+      "sha256": "042fbd3876ed664ef6dad60d5b9ae042776639b0efdca65327932f6c466db649",
+      "size_bytes": 7155
+    },
+    {
+      "path": "tests/memory/test_lifecycle.py",
+      "sha256": "db11a722e0388675cf77190b1e5e445762907cc4c4151351664f8d7ee20a619f",
+      "size_bytes": 20330
+    },
+    {
+      "path": "tests/memory/test_linux_live_adapters.py",
+      "sha256": "85bc4dfea5a3127d80d9c5d024760a0fd18dbeb512ff7bfe969736b4606db0ea",
+      "size_bytes": 42745
+    },
+    {
+      "path": "tests/memory/test_linux_live_transports.py",
+      "sha256": "5dda1c47ad85422772ad791deafff37e1298bf647b94d105826422659c949aa4",
+      "size_bytes": 14166
+    },
+    {
+      "path": "tests/memory/test_linux_runtime_publication_primitives.py",
+      "sha256": "816fea6c1994e3961cc7028b35ba3857f6514016cb9174cd202417dc0afcb6d3",
+      "size_bytes": 5837
+    },
+    {
+      "path": "tests/memory/test_linux_store_effects.py",
+      "sha256": "ee850cf967bb0990d095e2861629683c1cbeff3d2d47df966f4bd4e3edb07e33",
+      "size_bytes": 34768
+    },
+    {
+      "path": "tests/memory/test_linux_store_readiness.py",
+      "sha256": "1ee4a1239cc762f1e9f54792151a22587056b5f732ecf1c9bb4e32e25687184d",
+      "size_bytes": 16918
+    },
+    {
+      "path": "tests/memory/test_live_rollback_marker.py",
+      "sha256": "66217c3d3b19f6c2475e6a24ec9cfade51973011c33c9b46444a8bf0536d14e4",
+      "size_bytes": 12705
+    },
+    {
+      "path": "tests/memory/test_once_worker.py",
+      "sha256": "6c2400081371a9b2e828b13c0a4cf8757b6a7d730fc2ed56e3adb85362d943ab",
+      "size_bytes": 15371
+    },
+    {
+      "path": "tests/memory/test_openai_adapters.py",
+      "sha256": "171904885f592d94390bc859f92d5d81ec0eafb00e0ef48d00787bdd8150e304",
+      "size_bytes": 21075
+    },
+    {
+      "path": "tests/memory/test_personal_object_location_admission.py",
+      "sha256": "7e8468e213eef9313ec3c03f68e3ca64a6d912edd312c1bfa5b2376ec579adc5",
+      "size_bytes": 9463
+    },
+    {
+      "path": "tests/memory/test_phase9_permitted_candidate.py",
+      "sha256": "a6919c52d5b74e900f7d89a7cd260e391ffac3b43a5a1b45a37cb29e707ae3f1",
+      "size_bytes": 8324
+    },
+    {
+      "path": "tests/memory/test_pilot_marker.py",
+      "sha256": "8c364a45c7b0a58bdf95bb11cb74c164541d898a58be12356e2a0bed1ff29500",
+      "size_bytes": 5763
+    },
+    {
+      "path": "tests/memory/test_postgres_native_stages.py",
+      "sha256": "a1deda9437f8da8a946c3f15a66f0503811747f4a5b9f3868ee3bb894f71cb04",
+      "size_bytes": 27692
+    },
+    {
+      "path": "tests/memory/test_preference_correction_interpreter.py",
+      "sha256": "f8c620325d0dda9e6a6865a18686c5027456953d0b13b6d490bf998bcfcaa3dc",
+      "size_bytes": 7966
+    },
+    {
+      "path": "tests/memory/test_process_death_arm_receipt.py",
+      "sha256": "0be1b3c74af1ee93cba28946a272dbc850f66c1f812a70660ab7202340e81344",
+      "size_bytes": 19367
+    },
+    {
+      "path": "tests/memory/test_projection.py",
+      "sha256": "71f24fa3c2e7692c0846ab84b6496cd0ebedd989b15bbb3a77492be0cd7bf749",
+      "size_bytes": 14179
+    },
+    {
+      "path": "tests/memory/test_prompt_and_binding.py",
+      "sha256": "3a2df0f73d1a2d6ff79585988ee3f28fbbe17b4796f188e3e2dd905e90dfa381",
+      "size_bytes": 25922
+    },
+    {
+      "path": "tests/memory/test_psycopg_postgres_adapter.py",
+      "sha256": "db0febb504be4d11d8f28a29da17054815593fa8b5eb640b57efb56407c28b5f",
+      "size_bytes": 11776
+    },
+    {
+      "path": "tests/memory/test_publish_phase9_controller_runtime.py",
+      "sha256": "753d4ae5b986411ecc1cb70839d3be6dad0f8607a3903b3752ff9fdede88a4b7",
+      "size_bytes": 17468
+    },
+    {
+      "path": "tests/memory/test_publish_phase9_staged_prefix_permit.py",
+      "sha256": "342437c65be27df4cbd8e2519707b42384d9d799624a3796bb79be2dcd0e1d23",
+      "size_bytes": 22382
+    },
+    {
+      "path": "tests/memory/test_qdrant_adapter.py",
+      "sha256": "4b2ed92c30586e2425a32962647508419e4292de33dc40a448587240354e2f57",
+      "size_bytes": 17828
+    },
+    {
+      "path": "tests/memory/test_qdrant_transport.py",
+      "sha256": "493346575d4f9297b946542048e06ec06e12313787e76705bb264ada1dd6c242",
+      "size_bytes": 5909
+    },
+    {
+      "path": "tests/memory/test_rebuild_adapters.py",
+      "sha256": "190df1e9ff4b00bfb422852c46f3abb45820d8d9c08ace1afc3837555a88493b",
+      "size_bytes": 14107
+    },
+    {
+      "path": "tests/memory/test_rebuild_application.py",
+      "sha256": "7f8a36e260c3f845d223e405247fb227ec3a80765da161a3a009ce8a426cb9c9",
+      "size_bytes": 1940
+    },
+    {
+      "path": "tests/memory/test_rebuild_controller.py",
+      "sha256": "382e99d64672243cf5442540477ac1c21b1549ac7e31fb44b38e85560b6fadfe",
+      "size_bytes": 10948
+    },
+    {
+      "path": "tests/memory/test_rebuild_qdrant_transport.py",
+      "sha256": "05edcfa6ca726b5eb6c9b2decc258a5e408c4b810cd8d4299012d656d91bb921",
+      "size_bytes": 3878
+    },
+    {
+      "path": "tests/memory/test_release_contracts.py",
+      "sha256": "0f109f55a1f28e2549a8acd29f76928ea242f66b76d64bab66e4f6cbe07193cb",
+      "size_bytes": 48973
+    },
+    {
+      "path": "tests/memory/test_response_provenance.py",
+      "sha256": "104da7652677f81a4a2780fd04af0fdbc86b6f0ae03e932e8811f3c6c3b468a1",
+      "size_bytes": 4388
+    },
+    {
+      "path": "tests/memory/test_response_provider.py",
+      "sha256": "9221f2824df11cffc7e6ac1b0fe4f5a416c17cb1b753cb326e181563e2a9ae3f",
+      "size_bytes": 20077
+    },
+    {
+      "path": "tests/memory/test_response_relevance.py",
+      "sha256": "784ad1c8b2a88d3a786a872222734c0fc4d5da818c120eef9d1ea61e0473e112",
+      "size_bytes": 5012
+    },
+    {
+      "path": "tests/memory/test_response_runtime.py",
+      "sha256": "4ac719c35fe88a6442a2d23a45c15f0cd1f34bbcf52cad197c237485e0f59a19",
+      "size_bytes": 20868
+    },
+    {
+      "path": "tests/memory/test_retrieval.py",
+      "sha256": "8c956b7daa87210843e489d74c922067f73c4aaa9780bc7310e64664dc3967d1",
+      "size_bytes": 12970
+    },
+    {
+      "path": "tests/memory/test_retrieval_calibration.py",
+      "sha256": "d44a2508a7c3aa17d01a92c980c7705e1c0b4790a5aff88de8b838ee633e6e73",
+      "size_bytes": 7721
+    },
+    {
+      "path": "tests/memory/test_rollback_live_adapter.py",
+      "sha256": "fbfa58683087b94a5ee98bb3093513535962f0b1feb87347617b8e920dfbf5ef",
+      "size_bytes": 42492
+    },
+    {
+      "path": "tests/memory/test_runtime_input_stager.py",
+      "sha256": "863b6827534c8752b61ba97ce73c477e2be8144b407e8bdf7a855956763e35b5",
+      "size_bytes": 8129
+    },
+    {
+      "path": "tests/memory/test_runtime_inventory.py",
+      "sha256": "01a36627f865700f28a99df7142038de1bc703e7bd25c26c908cd4e34e80d0c9",
+      "size_bytes": 62463
+    },
+    {
+      "path": "tests/memory/test_runtime_publication_transport.py",
+      "sha256": "78893b1a39c5f4b29624c17769e9de8b960b3d5af8ee58b98716802fd6cd2d2c",
+      "size_bytes": 45352
+    },
+    {
+      "path": "tests/memory/test_runtime_release.py",
+      "sha256": "0cdc475751b6caccfc9063f011d36a2691f5e957c9e1ddd69c152f3a6bbfa7e7",
+      "size_bytes": 19656
+    },
+    {
+      "path": "tests/memory/test_schema_and_rls.py",
+      "sha256": "16ebe8ffdfd541dba4883a1f4e12e1d50c2d5b1a48322a741974bc70f7423d93",
+      "size_bytes": 205375
+    },
+    {
+      "path": "tests/memory/test_staged_prefix_disposition.py",
+      "sha256": "f71eb90b58fb3324789f3850e633662a1181044665d3dba4b2133aa932afad49",
+      "size_bytes": 27490
+    },
+    {
+      "path": "tests/memory/test_standalone_cpython_inspector.py",
+      "sha256": "4158bf803ccd72911bafea8486c995da972b76765de918f4eacd945494e138ee",
+      "size_bytes": 4566
+    },
+    {
+      "path": "tests/memory/test_successor_live_authority.py",
+      "sha256": "bf2f117d107efd91dcca250c35785a21235b2139bb7352dfb8c21d5711791cd4",
+      "size_bytes": 1897
+    },
+    {
+      "path": "tests/memory/test_worker_application.py",
+      "sha256": "ba4fd67dbd22d21dfd8038efcf087103f83686bf55b1f3965ab5d500182c024f",
+      "size_bytes": 14560
+    },
+    {
+      "path": "tests/memory/test_worker_bridge.py",
+      "sha256": "6f4ea655bb8242325eb80f6c3218360dca19743f9d40afb76632b9ba485c1a36",
+      "size_bytes": 15446
+    },
+    {
+      "path": "tests/memory/test_worker_postgres.py",
+      "sha256": "dd31d725794c71eda0eaf59e84acc14eefc40d3730585ce0136e1376e6037a41",
+      "size_bytes": 20947
+    },
+    {
+      "path": "tests/memory/test_worker_recovery.py",
+      "sha256": "270bad00b097f653320fc84d5d32c33a3cb363f03e0e14271d24fc7fd28f2db1",
+      "size_bytes": 45871
+    },
+    {
+      "path": "tests/memory/test_zep_deletion.py",
+      "sha256": "761e13b14352150f289fa14411ecd56cca10de0383aaff36428d34d990474062",
+      "size_bytes": 9760
+    },
+    {
+      "path": "tests/memory_integration/__init__.py",
+      "sha256": "0cac7fa489a010be7d92cdde442b3e140b77481f6500c64b7109f95c6b174208",
+      "size_bytes": 68
+    },
+    {
+      "path": "tests/memory_integration/local_jwks_server.py",
+      "sha256": "42854a926015313a227e11b3a2181af3d84bbcdb68022a5e314e916850f35c49",
+      "size_bytes": 6065
+    },
+    {
+      "path": "tests/memory_integration/test_conversation_deletion_disposable.py",
+      "sha256": "a1a697804456b99925be69b706497452537d0bfa83bd7f6c2f0e138dca3d5ac3",
+      "size_bytes": 100284
+    },
+    {
+      "path": "tests/memory_integration/test_governed_memory_http_vertical_slice.py",
+      "sha256": "31882676cf55007635493944000a1adaa38330f8dfbe0a747dba131ef0f79547",
+      "size_bytes": 105320
+    },
+    {
+      "path": "tests/test_conversation_memory_contracts.py",
+      "sha256": "13e61473524a0962ec2af10577c26f498c849c2eb677996549b1353b0dce5fe6",
+      "size_bytes": 4998
+    },
+    {
+      "path": "tools/governed_memory_install/__init__.py",
+      "sha256": "3ee668f113132ca4fed54d0500daa4dc4b7e1e69552ebc3f4741be5b14cb03d5",
+      "size_bytes": 77
+    },
+    {
+      "path": "tools/governed_memory_install/authority.py",
+      "sha256": "4d0495ea636c3cbd09faf149df7f52f4d028c563dd9007d2972f6a7275e764fc",
+      "size_bytes": 24834
+    },
+    {
+      "path": "tools/governed_memory_install/authority_state.py",
+      "sha256": "206cb4dfce2164896477aec31429d9ba94c08705fd3e2ec4bd09e51898cf88d7",
+      "size_bytes": 62831
+    },
+    {
+      "path": "tools/governed_memory_install/controller.py",
+      "sha256": "3aecf264c6e9aa98076dc7246f1765f9490866107dc97c52d2242a3225c78f5a",
+      "size_bytes": 43263
+    },
+    {
+      "path": "tools/governed_memory_install/controller_runtime.py",
+      "sha256": "d6028a0fe01598b7074e7f19e465b8043ec959a5b17fc86258823acb7c4531ec",
+      "size_bytes": 62799
+    },
+    {
+      "path": "tools/governed_memory_install/disposable_proof_harness.py",
+      "sha256": "e7f632f31d18d44541f189685c54dbf73202a9ce01568031270e701b5db52b19",
+      "size_bytes": 35818
+    },
+    {
+      "path": "tools/governed_memory_install/durable_receipts.py",
+      "sha256": "32e5441bd62dbcc5e011374124420fb7d654f11da7e275bbe4adcf7744ecbdb7",
+      "size_bytes": 33974
+    },
+    {
+      "path": "tools/governed_memory_install/execution_authority.py",
+      "sha256": "5177aead706fd0fafd242d0ef30056f2b592afc2769e94641289d6692d644a21",
+      "size_bytes": 13041
+    },
+    {
+      "path": "tools/governed_memory_install/execution_capability.py",
+      "sha256": "55bbb7804fe0ef306d19b816296cde5f3319f5305bbaf64037f408bf90068a5d",
+      "size_bytes": 25838
+    },
+    {
+      "path": "tools/governed_memory_install/execution_lock.py",
+      "sha256": "b7ddd700d46991da0db16c64213c63bc0b2540b1517826d86f488db7f7c7c0ec",
+      "size_bytes": 13492
+    },
+    {
+      "path": "tools/governed_memory_install/host_boundary.py",
+      "sha256": "57782aa5d81201f10c88dd3fa6d5f9c6884440d126a00de8267b1583e38f73b5",
+      "size_bytes": 24072
+    },
+    {
+      "path": "tools/governed_memory_install/image_preflight.py",
+      "sha256": "7b82d3d369747741ea515a6fe80dbf6e8c220d63c96848beaa3c568688f0fc24",
+      "size_bytes": 6855
+    },
+    {
+      "path": "tools/governed_memory_install/install_backend.py",
+      "sha256": "bed666de623003a4e58c6b764d3e7b7950e9df8e4e460bd40af9649e4e35df06",
+      "size_bytes": 35252
+    },
+    {
+      "path": "tools/governed_memory_install/install_entrypoint.py",
+      "sha256": "ba5541dc6ef47d0db558476801d95f829f4967b7550fd3d129e6532d868885a1",
+      "size_bytes": 35349
+    },
+    {
+      "path": "tools/governed_memory_install/journal.py",
+      "sha256": "104effa1872aa782680963e90b3b5c0034829366326ee8aad97f12e0231b2c32",
+      "size_bytes": 27198
+    },
+    {
+      "path": "tools/governed_memory_install/linux_live_adapters.py",
+      "sha256": "7de5181623dd8205288fed851594e988d388795b4f09af1ea10e18304b78c215",
+      "size_bytes": 108003
+    },
+    {
+      "path": "tools/governed_memory_install/linux_live_transports.py",
+      "sha256": "a0fe5544ebb2fce6053d354cfd2f8003ee4f2ad9afcb4e1bcf58ef0dea7bdba8",
+      "size_bytes": 29626
+    },
+    {
+      "path": "tools/governed_memory_install/linux_plan.py",
+      "sha256": "f8ce5ea2ee4a229a2441e05e44654437fea4509e721fd9442ba3d643e15fee6e",
+      "size_bytes": 25036
+    },
+    {
+      "path": "tools/governed_memory_install/linux_store_effects.py",
+      "sha256": "5988f36c1c224ea006ed54785ac18ef50d4c9cd3a150c88530619484d722b0fb",
+      "size_bytes": 82177
+    },
+    {
+      "path": "tools/governed_memory_install/linux_store_readiness.py",
+      "sha256": "32b3b2c9b6c005bf43cc226adbe31a26452e2594ca3ae2c0cdc413ad118cebc6",
+      "size_bytes": 23712
+    },
+    {
+      "path": "tools/governed_memory_install/live_rollback_marker.py",
+      "sha256": "353b0c29d5cad6a20f774148ebc2dc8b418f8af2727583a861f4dabbb9ffb82c",
+      "size_bytes": 22029
+    },
+    {
+      "path": "tools/governed_memory_install/package.py",
+      "sha256": "c8e67649527825989b2083455dcc55a7f85cf15d7a8715546ea3fc403e1c853c",
+      "size_bytes": 128350
+    },
+    {
+      "path": "tools/governed_memory_install/package_capability.py",
+      "sha256": "363ad1f0ad447c0c68326b5552e041be0fd0b896eb80d09d1ba1cf4d46654a59",
+      "size_bytes": 12059
+    },
+    {
+      "path": "tools/governed_memory_install/postgres_native_stages.py",
+      "sha256": "897ba2f27a838ffb16111ffba4543e092b0aeb3d2a3697b3de5e4a6a38ccd74d",
+      "size_bytes": 79363
+    },
+    {
+      "path": "tools/governed_memory_install/psycopg_postgres_adapter.py",
+      "sha256": "a6c54a5f3f041f698d32635c71d400cccabbbfe4a53b92c4d41546e1a6d85a9b",
+      "size_bytes": 64194
+    },
+    {
+      "path": "tools/governed_memory_install/receipts.py",
+      "sha256": "ab11a5e2ce5ad23327e079bf200dce815932e242f102476899be174fcff8f848",
+      "size_bytes": 17043
+    },
+    {
+      "path": "tools/governed_memory_install/resource_identity.py",
+      "sha256": "e37e29f2ff4bf48df80ce09fbd53fc28f2e40d8e12a13fc73eb1c6a1d89d6d8a",
+      "size_bytes": 32965
+    },
+    {
+      "path": "tools/governed_memory_install/rollback.py",
+      "sha256": "4c43b078482255ec1faef8009109025f824423153eaf60135e21db132d1c21aa",
+      "size_bytes": 27745
+    },
+    {
+      "path": "tools/governed_memory_install/rollback_authority.py",
+      "sha256": "46e4268b7f1375467a6ecbeb6ddcb9149e1fd79ed980e30ce3648f89bc08de06",
+      "size_bytes": 47600
+    },
+    {
+      "path": "tools/governed_memory_install/rollback_entrypoint.py",
+      "sha256": "c895a988758731933768f2a3c625bd33faec987fecad29cec8370dbf0f00c4e7",
+      "size_bytes": 111811
+    },
+    {
+      "path": "tools/governed_memory_install/rollback_journal.py",
+      "sha256": "b618fc9a23991944f2cbc2c940d3dfc78228cde56b89b6a5e39a56ac31e91ea6",
+      "size_bytes": 21692
+    },
+    {
+      "path": "tools/governed_memory_install/rollback_live_adapter.py",
+      "sha256": "73487911a8e7fbbaf13f46b139e42c81ff0dac787146c734ac62aeb4b82fd7c8",
+      "size_bytes": 110487
+    },
+    {
+      "path": "tools/governed_memory_install/secure_file.py",
+      "sha256": "92abe7221151c0fdaa24829b78a5b7db18f5589b3e307a8a19b822f0677867f6",
+      "size_bytes": 5159
+    },
+    {
+      "path": "tools/governed_memory_install/store_readiness.py",
+      "sha256": "9df67ec73aa9455b76034b9b0d165c8ec027214d75e0782e4e6d69d1f25ef959",
+      "size_bytes": 11029
+    },
+    {
+      "path": "tools/governed_memory_install/store_supervisor.py",
+      "sha256": "f154279ca8850a497ee6a3a20efe8ce5a7ba19b3c74d5e939a01001c8fa5520e",
+      "size_bytes": 16687
+    },
+    {
+      "path": "tools/governed_memory_install/store_supervisor_launcher.py",
+      "sha256": "e67207c57264fe87cf802b17b6874f5d86983234fb0249f64db6d84d883c5b2e",
+      "size_bytes": 5658
+    },
+    {
+      "path": "tools/governed_memory_install/synthetic_backend.py",
+      "sha256": "c2806714a675149d0340c5dc170a25c34f8af4af27654b80dc27142d2b854ca0",
+      "size_bytes": 10751
+    },
+    {
+      "path": "tools/governed_memory_release/__init__.py",
+      "sha256": "cb6bb29aa9f7b417346a6e456153692c5d830462887afeb900ec4059a05965f8",
+      "size_bytes": 178
+    },
+    {
+      "path": "tools/governed_memory_release/build_candidate_runtime.py",
+      "sha256": "3b6a396cf1f4e5aa4c58257b99482a08fd88939a9d5c11bcc971deb5a3681a54",
+      "size_bytes": 38045
+    },
+    {
+      "path": "tools/governed_memory_release/controller_runtime_builder.py",
+      "sha256": "768d50265de4c80c81c7e17229b9935747a470a0219f6edfafe45cee098ad5ba",
+      "size_bytes": 68861
+    },
+    {
+      "path": "tools/governed_memory_release/inspect_standalone_cpython.py",
+      "sha256": "c0d0ec2bb5c5ca51634c3afb8c563003d7bb0206869ad5ddd6693fb4386f1106",
+      "size_bytes": 10331
+    },
+    {
+      "path": "tools/governed_memory_release/linux_runtime_publication_primitives.py",
+      "sha256": "8b66dc948f5fb795a901fe618e5cfc89d9130dfbc325d826ed977829d66015dc",
+      "size_bytes": 40768
+    },
+    {
+      "path": "tools/governed_memory_release/release_guard.py",
+      "sha256": "1a3b98ab25237b0ffe3ed2e5be28d2909d20e96e56d2c0558ef7b153412f67d3",
+      "size_bytes": 97932
+    },
+    {
+      "path": "tools/governed_memory_release/runtime_input_stager.py",
+      "sha256": "cd09123225826066d54f123c4836be308095697f854e13089b12f2aaa50317e3",
+      "size_bytes": 13851
+    },
+    {
+      "path": "tools/governed_memory_release/runtime_publication_transport.py",
+      "sha256": "f1f6ec8d806e260936045e46f69e6445fb451a7971fc23741a7fd55c3c20e568",
+      "size_bytes": 72414
+    },
+    {
+      "path": "tools/governed_memory_validation/bootstrap_phase9_disposable_store_substrate.py",
+      "sha256": "2b8c0ada76e5c2b7b347e10e43a98bb3f913a5973e115670a243c8ebf08c761c",
+      "size_bytes": 23122
+    },
+    {
+      "path": "tools/governed_memory_validation/durable_live_proof_receipt.py",
+      "sha256": "2a4031bbbe332a8aae851b0fe5f0d1d32f55d757127c21750f5b2604a65a2ab6",
+      "size_bytes": 41560
+    },
+    {
+      "path": "tools/governed_memory_validation/execute_phase9_disposable_live_proof_controller.py",
+      "sha256": "5e96e8e8f77736282895963431ea689d9a908724490b160bac1a31ce7161ec97",
+      "size_bytes": 49077
+    },
+    {
+      "path": "tools/governed_memory_validation/execute_phase9_staged_prefix_disposition.py",
+      "sha256": "9a31988db91f084cf74da37d8f6089056d7210d52e8d0738c80ece57d9e83e34",
+      "size_bytes": 38790
+    },
+    {
+      "path": "tools/governed_memory_validation/generate_installation_package_manifest.py",
+      "sha256": "39f2f3582f3760f8e5dfd3835c42b0a8b597c9937f78d788f31e32abea48b2ce",
+      "size_bytes": 1017
+    },
+    {
+      "path": "tools/governed_memory_validation/generate_staged_prefix_disposition_contract.py",
+      "sha256": "4b9d3e525e9cb2e2bc265e63af3462ff057bd3504ce37f2b1d67776a157fba2a",
+      "size_bytes": 8306
+    },
+    {
+      "path": "tools/governed_memory_validation/issue_disposable_installation_live_proof.py",
+      "sha256": "1ee48cabe7c427a2a96769ced0fe966f641201bdf3f2283dcf419509f9c410d2",
+      "size_bytes": 115397
+    },
+    {
+      "path": "tools/governed_memory_validation/phase9_permitted_candidate.py",
+      "sha256": "245a42db91f1f9f246230e84a6833d45174470657400af8b8a89eb2b3903622c",
+      "size_bytes": 8361
+    },
+    {
+      "path": "tools/governed_memory_validation/postgres_bootstrap.pgsql",
+      "sha256": "9cdda41a1056bec45409e13002bcdd5a234b13d6a4cc18306668bd38085ca5eb",
+      "size_bytes": 12659
+    },
+    {
+      "path": "tools/governed_memory_validation/process_death_arm_receipt.py",
+      "sha256": "ae191d86be754485626fbe1d2eb889ac7c9fba6de6578bf2970b180f7ae6733f",
+      "size_bytes": 34059
+    },
+    {
+      "path": "tools/governed_memory_validation/publish_phase9_controller_runtime.py",
+      "sha256": "128a23aacbfc5f7edfa453046f472855ce4de00bfbe9af840bf31134e616371e",
+      "size_bytes": 37869
+    },
+    {
+      "path": "tools/governed_memory_validation/publish_phase9_staged_prefix_permit.py",
+      "sha256": "37c69886d8afc5a419153a2490976b97fdb9660ee92a1e7a5f8150ed7d04a602",
+      "size_bytes": 30668
+    },
+    {
+      "path": "tools/governed_memory_validation/run_disposable_installation_live_proof.py",
+      "sha256": "c0f1b509508add366ecfecdb231b78580ca269a0080247ac9ea52c0818c57c81",
+      "size_bytes": 191474
+    },
+    {
+      "path": "tools/governed_memory_validation/run_disposable_successor.sh",
+      "sha256": "e98a3214e20be1e2cdea4fed1160e50a5dce10af140dbacfa2bc2a7f38c19df0",
+      "size_bytes": 106492
+    },
+    {
+      "path": "tools/governed_memory_validation/run_installation_synthetic_proof.py",
+      "sha256": "5c7da9da1fbceaaece4bbe614a22a8271d2dce01a650196cbf6dd64da598e7b9",
+      "size_bytes": 6606
+    },
+    {
+      "path": "tools/governed_memory_validation/run_memory_unit_tests.py",
+      "sha256": "fef6e163460744c84ca6a05d2f4cba3d8168bc9e0fe1ffd0e9d41f5be5a4ce30",
+      "size_bytes": 981
+    },
+    {
+      "path": "tools/governed_memory_validation/runtime_packages.json",
+      "sha256": "ed9273d6bd6dad6cf5680c478dff1beab453f66ab607914994fe8dc2b9d4e882",
+      "size_bytes": 910
+    },
+    {
+      "path": "tools/governed_memory_validation/staged_prefix_disposition.py",
+      "sha256": "99a82e9a3fa60977ae5d52d6cb07e31361d5d7f25cc1a152500871eaaed22a48",
+      "size_bytes": 76385
+    },
+    {
+      "path": "tools/governed_memory_validation/verify_migration_manifest.py",
+      "sha256": "dbbcecb52f5c4134527d9f141509b7acbc9f2fffa449ab89fef7edd2a7b877e8",
+      "size_bytes": 26238
+    },
+    {
+      "path": "tools/governed_memory_validation/verify_store_migration_manifest.py",
+      "sha256": "bd8a2931636722f5a6cba030d3fb1497038ce8d41e38035d9e36291e45c8202d",
+      "size_bytes": 12979
+    }
+  ],
+  "entries_sha256": "f60c6dbcc5b2c3708bfd12e209760533a348c006f757d993cfe3d197efddb9e4",
+  "recovery": {
+    "authority": "git_history",
+    "command_template": "git archive SOURCE_COMMIT -- PATHS_FROM_THIS_MANIFEST",
+    "production_unchanged": true
+  },
+  "retirement_family": "governed_memory_successor_chain",
+  "schema_version": "seebx_legacy_memory_retirement_manifest_v1",
+  "source_commit": "92c70279d643d5dc7c222f161c19a812f21e7a86",
+  "source_tree": "b34c8f222a8c0df8b526a7bca1a47c7d16fd6a74",
+  "target_bytes": 8293689,
+  "target_count": 349
+}
