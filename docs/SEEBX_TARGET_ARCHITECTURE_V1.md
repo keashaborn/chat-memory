@@ -22,7 +22,7 @@ classification fields, and product decision register are controlled by
 
 ## Verified starting point
 
-- Production `app.py` is 1,985 lines and owns 36 routes directly; the isolated cleanup candidate is now 1,654 lines with 32 direct routes after moving attachment CRUD, message binding, and the full thread-history read query behind conversation capability/adapter boundaries.
+- Production `app.py` is 1,985 lines and owns 36 routes directly; the isolated cleanup candidate is now 1,625 lines with 32 direct routes after moving attachment CRUD/binding/history plus thread creation, listing, pinning, renaming, archiving, and title-state SQL behind conversation adapters.
 - Eighteen additional routers are mounted.
 - `rag_engine` contains 232 Python files and 113,531 lines.
 - The live service/import roots reach 107 `rag_engine` files and 49,851 lines.
