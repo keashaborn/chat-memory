@@ -60,13 +60,13 @@ from seebx.contracts.voice_language import (
     SUPPORTED_VOICE_LANGUAGE_IDS,
     response_language_instruction,
 )
+from seebx.adapters.search_audit import open_search_audit_session
 from seebx.capabilities.search.runtime import (
     NO_STORE_HEADERS,
     SearchAuditStoreUnavailableError,
     SearchRateLimitExceededError,
     SearchRuntimeConfigurationError,
     apply_search_no_store_headers,
-    open_search_audit_session,
     safe_search_error_code,
     search_runtime_settings_from_env,
 )

@@ -2,17 +2,18 @@ from __future__ import annotations
 
 import os
 import unittest
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 from fastapi import Response
 
+from seebx.adapters.search_audit import open_search_audit_session
 from seebx.capabilities.search.runtime import (
     SearchAuditStoreUnavailableError,
     SearchRateLimitExceededError,
     SearchRuntimeConfigurationError,
     apply_search_no_store_headers,
-    open_search_audit_session,
     safe_search_error_code,
     search_postgres_dsn_from_env,
     search_runtime_settings_from_env,
@@ -67,6 +68,14 @@ class SearchRuntimeV1Tests(unittest.TestCase):
             "nosniff",
         )
 
+    def test_capability_runtime_is_sql_free(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        source = (root / "seebx/capabilities/search/runtime.py").read_text()
+        self.assertNotIn("asyncpg", source)
+        self.assertNotIn(".execute(", source)
+        self.assertNotIn(".fetchval(", source)
+        self.assertTrue((root / "seebx/adapters/search_audit.py").is_file())
+
     def test_error_codes_never_expose_unbounded_messages(self) -> None:
         self.assertEqual(
             safe_search_error_code(RuntimeError("bounded_code")),
@@ -103,19 +112,19 @@ class SearchAuditSessionV1Tests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch(
-                "seebx.capabilities.search.runtime.asyncpg.connect",
+                "seebx.adapters.search_audit.asyncpg.connect",
                 connect,
             ),
             patch(
-                "seebx.capabilities.search.runtime.acquire_trusted_web_rate_limit_v1",
+                "seebx.adapters.search_audit.acquire_trusted_web_rate_limit_v1",
                 acquire,
             ),
             patch(
-                "seebx.capabilities.search.runtime.start_trusted_web_audit_v1",
+                "seebx.adapters.search_audit.start_trusted_web_audit_v1",
                 start,
             ),
             patch(
-                "seebx.capabilities.search.runtime.finish_trusted_web_audit_v1",
+                "seebx.adapters.search_audit.finish_trusted_web_audit_v1",
                 finish,
             ),
         ):
@@ -158,7 +167,7 @@ class SearchAuditSessionV1Tests(unittest.IsolatedAsyncioTestCase):
     async def test_connect_failure_has_a_stable_domain_error(self) -> None:
         connect = AsyncMock(side_effect=OSError("database unavailable"))
         with patch(
-            "seebx.capabilities.search.runtime.asyncpg.connect",
+            "seebx.adapters.search_audit.asyncpg.connect",
             connect,
         ):
             with self.assertRaises(SearchAuditStoreUnavailableError):
@@ -169,15 +178,15 @@ class SearchAuditSessionV1Tests(unittest.IsolatedAsyncioTestCase):
         start = AsyncMock()
         with (
             patch(
-                "seebx.capabilities.search.runtime.asyncpg.connect",
+                "seebx.adapters.search_audit.asyncpg.connect",
                 AsyncMock(return_value=connection),
             ),
             patch(
-                "seebx.capabilities.search.runtime.acquire_trusted_web_rate_limit_v1",
+                "seebx.adapters.search_audit.acquire_trusted_web_rate_limit_v1",
                 AsyncMock(return_value=False),
             ),
             patch(
-                "seebx.capabilities.search.runtime.start_trusted_web_audit_v1",
+                "seebx.adapters.search_audit.start_trusted_web_audit_v1",
                 start,
             ),
         ):
@@ -191,15 +200,15 @@ class SearchAuditSessionV1Tests(unittest.IsolatedAsyncioTestCase):
         connection = AsyncMock()
         with (
             patch(
-                "seebx.capabilities.search.runtime.asyncpg.connect",
+                "seebx.adapters.search_audit.asyncpg.connect",
                 AsyncMock(return_value=connection),
             ),
             patch(
-                "seebx.capabilities.search.runtime.acquire_trusted_web_rate_limit_v1",
+                "seebx.adapters.search_audit.acquire_trusted_web_rate_limit_v1",
                 AsyncMock(return_value=True),
             ),
             patch(
-                "seebx.capabilities.search.runtime.start_trusted_web_audit_v1",
+                "seebx.adapters.search_audit.start_trusted_web_audit_v1",
                 AsyncMock(side_effect=ValueError("audit insert failed")),
             ),
         ):

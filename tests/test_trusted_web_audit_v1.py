@@ -5,12 +5,12 @@ import json
 from pathlib import Path
 from uuid import UUID, uuid4
 
-from seebx.capabilities.search.audit import (
+from seebx.adapters.search_audit import (
     acquire_trusted_web_rate_limit_v1,
     finish_trusted_web_audit_v1,
-    query_sha256,
     start_trusted_web_audit_v1,
 )
+from seebx.capabilities.search.audit import query_sha256
 from seebx.capabilities.search.provider import TrustedWebSourceV1
 
 
