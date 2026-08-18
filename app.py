@@ -39,7 +39,7 @@ from rag_engine.lifeswitch_account_timezone_router_v1 import (
 )
 from rag_engine.catalog_router import router as catalog_router
 from rag_engine.vb_tagging import infer_vb_tags
-from rag_engine.chat_attachment_context_v1 import (
+from seebx.capabilities.conversation.attachments import (
     MAX_ATTACHMENT_BYTES,
     MAX_ATTACHMENT_COUNT,
     SUPPORTED_ATTACHMENT_MEDIA_TYPES,

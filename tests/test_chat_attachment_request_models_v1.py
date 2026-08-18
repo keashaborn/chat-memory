@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from app import ChatAttachmentCreateReq, ChatAttachmentOwnerReq
-from rag_engine.chat_attachment_context_v1 import MAX_ATTACHMENT_BYTES
+from seebx.capabilities.conversation.attachments import MAX_ATTACHMENT_BYTES
 
 
 OWNER_ID = "11111111-1111-4111-8111-111111111111"

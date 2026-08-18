@@ -4,7 +4,7 @@ import hashlib
 import unittest
 from uuid import UUID
 
-from rag_engine.chat_attachment_context_v1 import (
+from seebx.capabilities.conversation.attachments import (
     MAX_ATTACHMENT_BYTES,
     MAX_ATTACHMENT_CONTEXT_BYTES,
     MAX_ATTACHMENT_TOTAL_BYTES,

@@ -12,7 +12,10 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from rag_engine.chat_attachment_context_v1 import (
+from seebx.adapters.conversation_attachments import (
+    fetch_ready_message_attachments,
+)
+from seebx.capabilities.conversation.attachments import (
     MAX_ATTACHMENT_COUNT,
     build_attachment_context_block_v1,
 )
@@ -340,29 +343,12 @@ async def resse_response_query(
     try:
         attachment_context_block = None
         if payload.attachment_ids:
-            await conn.execute("SELECT set_config('app.user_id', $1, false)", str(owner))
-            attachment_rows = await conn.fetch(
-                """
-                SELECT attachment.id,attachment.filename,attachment.media_type,
-                       attachment.content,attachment.content_sha256,attachment.byte_size
-                FROM public.chat_attachments AS attachment
-                JOIN public.chat_log AS message
-                  ON message.id=attachment.message_id
-                 AND message.owner_user_id=attachment.owner_user_id
-                 AND message.thread_id=attachment.thread_id
-                WHERE attachment.owner_user_id=$1
-                  AND attachment.thread_id=$2
-                  AND attachment.message_id=$3
-                  AND attachment.id=ANY($4::uuid[])
-                  AND attachment.status='ready'
-                  AND attachment.deleted_at IS NULL
-                  AND attachment.content IS NOT NULL
-                ORDER BY array_position($4::uuid[], attachment.id)
-                """,
-                owner,
-                payload.thread_id,
-                payload.attachment_message_id,
-                list(payload.attachment_ids),
+            attachment_rows = await fetch_ready_message_attachments(
+                conn,
+                owner_user_id=owner,
+                thread_id=payload.thread_id,
+                message_id=payload.attachment_message_id,
+                attachment_ids=payload.attachment_ids,
             )
             if len(attachment_rows) != len(payload.attachment_ids):
                 raise HTTPException(status_code=404, detail="attachment_not_found")

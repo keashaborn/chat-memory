@@ -7,7 +7,7 @@ from uuid import UUID
 
 from pydantic import ValidationError
 
-from rag_engine.chat_attachment_context_v1 import (
+from seebx.capabilities.conversation.attachments import (
     build_attachment_context_block_v1,
 )
 from rag_engine.openai_chat_provider_v1 import (

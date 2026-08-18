@@ -48,6 +48,17 @@ class ResseResponseRouterTests(unittest.TestCase):
         self.assertNotIn("OPENAI_CHAT_MODEL", source)
         self.assertNotIn("normalize_chat_model", source)
 
+    def test_attachment_sql_is_owned_by_postgres_adapter(self) -> None:
+        source = (ROOT / "rag_engine/resse_response_router.py").read_text()
+        adapter = (
+            ROOT / "seebx/adapters/conversation_attachments.py"
+        ).read_text()
+        self.assertNotIn("public.chat_attachments", source)
+        self.assertNotIn("set_config('app.user_id'", source)
+        self.assertIn("fetch_ready_message_attachments(", source)
+        self.assertIn("public.chat_attachments", adapter)
+        self.assertIn("set_config('app.user_id'", adapter)
+
     def test_public_request_rejects_client_policy_controls(self) -> None:
         with self.assertRaises(ValidationError):
             ResseResponseRequestV1.model_validate(
