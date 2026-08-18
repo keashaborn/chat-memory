@@ -19,11 +19,22 @@ class ZepRuntimeRetirementContractTests(unittest.TestCase):
         ):
             self.assertNotIn(retired_symbol, source)
 
-    def test_health_declares_zep_and_disabled_retired_access(self) -> None:
+    def test_health_declares_zep_without_retired_qdrant_surface(self) -> None:
         source = (ROOT / "app.py").read_text()
         self.assertIn('"provider": "zep"', source)
         self.assertIn('"postgres_access": "disabled"', source)
-        self.assertIn('"qdrant_access": "disabled"', source)
+        for retired_symbol in (
+            "qdrant_client",
+            "make_qdrant_client",
+            "get_qdrant",
+            "QDRANT_URL",
+            "qdrant_url",
+            "qdrant_access",
+            "DEFAULT_COLLECTION",
+            "EMBED_MODEL",
+            "general_rag_declared",
+        ):
+            self.assertNotIn(retired_symbol, source)
 
     def test_chat_and_memory_deletion_contracts_remain_separate(self) -> None:
         source = (ROOT / "app.py").read_text()

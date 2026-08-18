@@ -6,8 +6,6 @@ from datetime import datetime
 from fastapi import FastAPI, Body, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from fastapi.openapi.utils import get_openapi
-from qdrant_client import QdrantClient
-from rag_engine.qdrant_compat import make_qdrant_client
 from openai import OpenAI
 from pydantic import (
     BaseModel,
@@ -483,17 +481,9 @@ async def _require_actor_for_thread(req: Request, thread_id: uuid.UUID):
     return None, str(actor_uuid)
 
 
-# single global qdrant client
-qdrant_client = None
-
 DSN = os.environ["POSTGRES_DSN"]
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
-
-# --- defaults from environment ---
-DEFAULT_COLLECTION = os.environ.get("RETRIEVAL_COLLECTION", "fm_canon_v1")
-EMBED_MODEL       = os.environ.get("EMBED_MODEL", "text-embedding-3-large")
-QDRANT_URL        = os.environ.get("QDRANT_URL", "http://127.0.0.1:6333")
 
 
 def _sha(s: str) -> str:
@@ -502,27 +492,6 @@ def _sha(s: str) -> str:
 @app.get("/openapi.json", include_in_schema=False)
 async def openapi_json():
     return get_openapi(title="Brains API", version="1.0.0", routes=app.routes)
-
-# --- Qdrant lazy client (prevents NameError after restarts) ---
-def get_qdrant():
-    """Return a singleton QdrantClient, creating it on first use."""
-    global qdrant_client
-    if qdrant_client is None:
-        try:
-            qdrant_client = make_qdrant_client(
-                url=QDRANT_URL,
-                timeout=60,
-                prefer_grpc=False,
-                https=False,
-            )
-        except TypeError:
-            qdrant_client = make_qdrant_client(
-                url=QDRANT_URL,
-                timeout=60,
-                prefer_grpc=False,
-                https=False,
-            )
-    return qdrant_client
 
 def _vb_source_normalize(source: Optional[str]) -> str:
     """
@@ -1900,11 +1869,6 @@ async def health():
     return {
         "status": "ok",
         "time": time.time(),
-        "general_rag_declared": {
-            "default_collection": DEFAULT_COLLECTION,
-            "embed_model": EMBED_MODEL,
-            "qdrant_url": QDRANT_URL,
-        },
         "memory": {
             "provider": "zep",
             "prompt_mode": ZEP_PROMPT_SETTINGS.mode,
@@ -1917,7 +1881,6 @@ async def health():
                 "lifecycle_commands": "disabled",
                 "erasure_proxy": "disabled",
                 "postgres_access": "disabled",
-                "qdrant_access": "disabled",
             },
         },
     }
@@ -1972,7 +1935,7 @@ async def export_user_data(user_id: str, req: Request, limit: int = 20000):
 async def readyz():
     """
     Readiness: Postgres connectivity only.
-    Avoids OpenAPI generation (currently broken) and avoids Qdrant dependency.
+    Avoids OpenAPI generation (currently broken).
     """
     try:
         conn = await asyncpg.connect(DSN)
