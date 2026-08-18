@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 from fastapi import Request
 
-from rag_engine.search_plan_v1 import SearchBudgetV1
-from rag_engine.search_runtime_budget_v1 import (
+from seebx.capabilities.search.plan import SearchBudgetV1
+from seebx.capabilities.search.budget import (
     bind_search_budget_v1,
     resolve_search_budget_v1,
 )
@@ -23,6 +24,15 @@ def request() -> Request:
 
 
 class SearchRuntimeBudgetV1Tests(unittest.TestCase):
+    def test_legacy_plan_and_budget_modules_are_retired(self) -> None:
+        repository = Path(__file__).resolve().parents[1]
+        for relative_path in (
+            "rag_engine/search_plan_v1.py",
+            "rag_engine/search_runtime_budget_v1.py",
+        ):
+            with self.subTest(relative_path=relative_path):
+                self.assertFalse((repository / relative_path).exists())
+
     def test_direct_route_uses_server_defaults(self) -> None:
         effective = resolve_search_budget_v1(
             request(),

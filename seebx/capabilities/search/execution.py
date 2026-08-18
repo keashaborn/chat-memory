@@ -14,8 +14,8 @@ from seebx.capabilities.search.current_news import (
     CurrentNewsRequestV1,
     current_news_query,
 )
-from rag_engine.search_plan_v1 import SearchPlanV1, create_search_plan_v1
-from rag_engine.search_runtime_budget_v1 import bind_search_budget_v1
+from seebx.capabilities.search.plan import SearchPlanV1, create_search_plan_v1
+from seebx.capabilities.search.budget import bind_search_budget_v1
 from seebx.capabilities.search.trusted_health import (
     TrustedWebRequestV1,
     trusted_web_query,

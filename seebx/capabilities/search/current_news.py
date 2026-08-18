@@ -37,7 +37,7 @@ from rag_engine.trusted_web_policy_v1 import (
     TrustedWebTopicV1,
     route_trusted_web_query,
 )
-from rag_engine.search_runtime_budget_v1 import resolve_search_budget_v1
+from seebx.capabilities.search.budget import resolve_search_budget_v1
 from rag_engine.trusted_web_provider_v1 import (
     OpenAITrustedWebProviderV1,
     TrustedWebProviderError,

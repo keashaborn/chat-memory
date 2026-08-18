@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from rag_engine.search_plan_v1 import create_search_plan_v1
+from seebx.capabilities.search.plan import create_search_plan_v1
 
 
 class SearchPlanV1Tests(unittest.TestCase):

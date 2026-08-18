@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import Request
 
-from rag_engine.search_plan_v1 import SearchBudgetV1
+from seebx.capabilities.search.plan import SearchBudgetV1
 
 
 _REQUEST_STATE_KEY = "server_search_budget_v1"
