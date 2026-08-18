@@ -27,7 +27,7 @@ from tests.test_response_orchestration_v0_2 import (
     orchestrator,
     trusted_request,
 )
-from tests.test_prompt_assembler_v1 import successor_memory_block
+from tests.test_prompt_assembler_v1 import zep_memory_block
 
 
 async def zep_plan(message: str = "What is my temporary recall phrase?"):
@@ -36,9 +36,8 @@ async def zep_plan(message: str = "What is my temporary recall phrase?"):
             authenticated_actor_user_id=ACTOR,
             request_id="request-123",
             conversation=messages(message),
-            successor_memory_context_block=successor_memory_block(
+            successor_memory_context_block=zep_memory_block(
                 message,
-                block_id="zep_memory_v1",
                 source_contract_version="zep-cloud-context-v1",
             ),
         )

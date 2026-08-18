@@ -128,7 +128,6 @@ class PromptReferenceContextBlockV3(_StrictFrozenModel):
         LIFESWITCH_PROMPT_BLOCK_V3_VERSION
     )
     block_id: Literal[
-        "governed_memory_successor_v1",
         "zep_memory_v1",
         "chat_attachments_v1",
         "lifeswitch_domain_context_v1",
@@ -163,10 +162,7 @@ class PromptReferenceContextBlockV3(_StrictFrozenModel):
     @model_validator(mode="after")
     def exact_block(self) -> "PromptReferenceContextBlockV3":
         expected_ids = {
-            ContextKindV3.MEMORY: {
-                "governed_memory_successor_v1",
-                "zep_memory_v1",
-            },
+            ContextKindV3.MEMORY: "zep_memory_v1",
             ContextKindV3.ATTACHMENT: "chat_attachments_v1",
             ContextKindV3.LIFESWITCH: "lifeswitch_domain_context_v1",
             ContextKindV3.PRIOR_LIFESWITCH_PROVENANCE: "prior_lifeswitch_provenance_v1",
@@ -531,7 +527,6 @@ def assemble_prompt_with_lifeswitch_v2(
         by_id["prior_lifeswitch_provenance_v1"] = _prior_lifeswitch_block(prior)
 
     ordered_ids = (
-        "governed_memory_successor_v1",
         "zep_memory_v1",
         "chat_attachments_v1",
         "lifeswitch_domain_context_v1",

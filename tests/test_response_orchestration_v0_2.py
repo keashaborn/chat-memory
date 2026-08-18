@@ -32,7 +32,7 @@ from seebx.capabilities.conversation.policy import (
     SafetyAssessmentV0_2,
 )
 from rag_engine.response_source_awareness_v1 import MemorySourceStatusV1
-from tests.test_prompt_assembler_v1 import successor_memory_block
+from tests.test_prompt_assembler_v1 import zep_memory_block
 
 
 ACTOR = UUID("1240822d-ac9a-4096-95aa-e2b24d36ef50")
@@ -416,9 +416,9 @@ class TrustedResponseOrchestrationV0_2Tests(unittest.IsolatedAsyncioTestCase):
                 trusted_policy_signals_envelope=stale_envelope,
             )
 
-    def test_successor_memory_must_bind_request_and_current_query(self) -> None:
+    def test_zep_memory_must_bind_request_and_current_query(self) -> None:
         current = "What is the relevant project constraint?"
-        memory_block = successor_memory_block(current)
+        memory_block = zep_memory_block(current)
         valid = trusted_request(
             authenticated_actor_user_id=ACTOR,
             request_id="request-123",
@@ -460,9 +460,8 @@ class TrustedResponseOrchestrationV0_2Tests(unittest.IsolatedAsyncioTestCase):
 
     def test_zep_memory_is_accepted_when_bound_to_request_and_query(self) -> None:
         current = "What is my temporary recall phrase?"
-        memory_block = successor_memory_block(
+        memory_block = zep_memory_block(
             current,
-            block_id="zep_memory_v1",
             source_contract_version="zep-cloud-context-v1",
         )
         valid = trusted_request(

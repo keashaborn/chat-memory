@@ -1,4 +1,4 @@
-name: Governed Memory Successor Guard
+name: SeeBx Zep Runtime Guard
 
 on:
   pull_request:
@@ -8,11 +8,8 @@ on:
 permissions:
   contents: read
 
-env:
-  GOVERNED_MEMORY_EXCLUSIVE_MODE: successor_pilot
-
 jobs:
-  successor-static:
+  current-runtime:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -27,93 +24,54 @@ jobs:
       - name: Install the current test runtime
         run: python -m pip install --disable-pip-version-check -r requirements-ci.txt
 
-      - name: Reject retired response paths
+      - name: Reject retired governed-memory runtime paths
         shell: bash
         run: |
           set -euo pipefail
           retired_paths=(
-            rag_engine/response_composition_root_v0_3.py
-            rag_engine/response_finalization_v2.py
-            rag_engine/response_inspection_v3.py
-            rag_engine/response_persistence_v2.py
-            rag_engine/governed_memory/response_defaults.py
-            tests/test_lifeswitch_response_runtime_v1.py
-            tests/test_response_inspection_v3.py
-            tests/memory/test_response_defaults.py
+            rag_engine/successor_memory_chat_adapter_v1.py
+            rag_engine/zep_memory_provider_v1.py
+            tests/test_successor_memory_chat_adapter_v1.py
+            tests/test_successor_response_integration_v1.py
           )
           for path in "${retired_paths[@]}"; do
             test ! -e "$path"
           done
           if git grep -nE \
-            'response_(composition_root_v0_3|finalization_v2|inspection_v3|persistence_v2)' \
-            -- 'app.py' 'rag_engine/*.py' 'tests/*.py' 'tests/**/*.py'; then
-            exit 1
-          fi
-          if git grep -nE \
-            'governed_memory_v1|MemoryPrompt(AssemblyInput|ApplicationResult)V1|assistant_response_preferences' \
-            -- \
-              seebx/capabilities/conversation/prompt.py \
-              rag_engine/response_composition_root_v0_2.py \
-              seebx/capabilities/conversation/orchestration.py \
-              seebx/adapters/openai_chat.py \
-              rag_engine/lifeswitch_prompt_integration_v2.py \
-              rag_engine/lifeswitch_answer_binding_v1.py \
-              seebx/adapters/lifeswitch_openai_chat.py \
-              rag_engine/usage_ledger_v1.py \
-              rag_engine/response_finalization_v1.py \
-              rag_engine/response_finalization_v3.py \
-              rag_engine/response_inspection_v1.py \
-              rag_engine/response_inspection_v2.py \
-              rag_engine/response_inspection_v4.py \
-              rag_engine/resse_response_router.py; then
+            'rag_engine\.governed_memory|rag_engine\.governed_memory_provider_v1|successor_memory_chat_adapter_v1|governed_memory_successor_v1' \
+            -- app.py 'seebx/**/*.py' rag_engine/lifeswitch_prompt_integration_v2.py; then
             exit 1
           fi
 
-      - name: Validate the current successor contracts
+      - name: Validate current Zep and conversation contracts
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: |
-          python -B -m unittest discover -s tests/memory -p 'test_*.py'
           python -B -m unittest \
-            tests.test_lifeswitch_answer_binding_v1 \
-            tests.test_lifeswitch_answer_provenance_receipt_v1 \
-            tests.test_lifeswitch_coaching_self_shadow_adapter_v2 \
-            tests.test_lifeswitch_coaching_self_shadow_runner_v2 \
-            tests.test_lifeswitch_prompt_integration_v2 \
+            tests.test_zep_cloud \
+            tests.test_zep_full_erasure_v1 \
+            tests.test_zep_prompt_memory_v1 \
+            tests.test_zep_runtime_retirement_v1 \
+            tests.test_zep_sync \
+            tests.test_zep_sync_postgres \
+            tests.test_prompt_assembler_v1 \
+            tests.test_rm_runtime_v0_4 \
             tests.test_openai_chat_provider_v1 \
             tests.test_openai_chat_request_v4 \
-            tests.test_prompt_assembler_v1 \
-            tests.test_response_composition_root_v0_2 \
-            tests.test_response_conversation_snapshot_v1 \
-            tests.test_response_finalization_v1 \
+            tests.test_lifeswitch_prompt_integration_v2 \
             tests.test_response_inspection_v1 \
+            tests.test_response_inspection_v2 \
+            tests.test_response_inspection_v4 \
             tests.test_response_orchestration_v0_2 \
-            tests.test_response_persistence_v1 \
-            tests.test_response_persistence_v3 \
-            tests.test_resse_response_router \
-            tests.test_successor_memory_chat_adapter_v1 \
-            tests.test_successor_response_integration_v1 \
-            tests.test_usage_ledger_v1
-          python -B tools/governed_memory_install/package.py verify-package
-          python -B tools/governed_memory_validation/verify_store_migration_manifest.py
-          python -B tools/governed_memory_validation/verify_migration_manifest.py \
-            governed-memory-migrations
-          python -B tools/governed_memory_release/release_guard.py verify-artifacts
+            tests.test_response_finalization_v1 \
+            tests.test_conversation_composition \
+            tests.test_lifeswitch_conversation_composition
 
       - name: Compile current runtime entry points
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
         run: |
-          python -B -m py_compile \
+          python -B -m compileall -q \
             app.py \
-            rag_engine/chat_integrity.py \
-            rag_engine/governed_memory_erasure_proxy_v1.py \
-            rag_engine/lifeswitch_answer_binding_v1.py \
-            rag_engine/response_composition_root_v0_2.py \
-            rag_engine/response_composition_root_v0_4.py \
-            rag_engine/response_finalization_v1.py \
-            rag_engine/response_finalization_v3.py \
-            rag_engine/response_inspection_v1.py \
-            rag_engine/response_inspection_v4.py \
-            rag_engine/response_persistence_v1.py \
-            rag_engine/response_persistence_v3.py \
-            rag_engine/resse_response_router.py \
-            rag_engine/usage_ledger_v1.py
+            seebx \
+            rag_engine/lifeswitch_prompt_integration_v2.py

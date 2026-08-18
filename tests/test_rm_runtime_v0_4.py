@@ -30,7 +30,7 @@ from rag_engine.rm_selection_envelope_v0_4 import (
     load_runtime_prompt_v0_4,
     select_rm_v0_4,
 )
-from tests.test_prompt_assembler_v1 import successor_memory_block
+from tests.test_prompt_assembler_v1 import zep_memory_block
 
 
 def chain(
@@ -142,10 +142,10 @@ class RMRuntimeV04Test(unittest.TestCase):
                     )
                 )
 
-    def test_rm_and_governed_memory_remain_separate_context_blocks(self) -> None:
+    def test_rm_and_zep_memory_remain_separate_context_blocks(self) -> None:
         message = "Use Relational Monism to explain the relevant project constraint."
         policy_input, safety, signals, decision, selection = chain(message)
-        memory = successor_memory_block(
+        memory = zep_memory_block(
             message,
             request_id="rm-v0-4-focused-test",
         )
@@ -163,7 +163,7 @@ class RMRuntimeV04Test(unittest.TestCase):
         )
         self.assertEqual(
             tuple(block.block_id for block in assembled.context_blocks),
-            ("governed_memory_successor_v1", ACTIVE_PHILOSOPHY_ID),
+            ("zep_memory_v1", ACTIVE_PHILOSOPHY_ID),
         )
         self.assertEqual(assembled.context_blocks[0].content, memory.content)
 

@@ -14,7 +14,7 @@ from seebx.contracts.search import (
     SearchCapabilityManifestV1,
 )
 from tests.test_openai_chat_provider_v1 import FakeClient, provider_response
-from tests.test_prompt_assembler_v1 import successor_memory_block
+from tests.test_prompt_assembler_v1 import zep_memory_block
 from tests.test_response_orchestration_v0_2 import (
     ACTOR,
     NOW,
@@ -33,18 +33,18 @@ class ResponseFinalizationV1Tests(unittest.IsolatedAsyncioTestCase):
         self,
         message: str,
         *,
-        with_successor_memory: bool = False,
+        with_zep_memory: bool = False,
         with_search_capability: bool = False,
     ):
         request = trusted_request(
             authenticated_actor_user_id=ACTOR,
             request_id=(
-                "request-123" if with_successor_memory else "finalization-request"
+                "request-123" if with_zep_memory else "finalization-request"
             ),
             conversation=messages(message),
             successor_memory_context_block=(
-                successor_memory_block(message)
-                if with_successor_memory
+                zep_memory_block(message)
+                if with_zep_memory
                 else None
             ),
             search_capability_manifest=(
@@ -81,9 +81,9 @@ class ResponseFinalizationV1Tests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(finalized.assistant_text, finalized.attestation.model_dump_json())
         self.assertNotIn("memory_binding", finalized.model_dump(mode="json"))
 
-    async def test_successor_memory_context_has_no_legacy_binding(self) -> None:
+    async def test_zep_memory_context_has_no_legacy_binding(self) -> None:
         message = "What is the relevant project constraint?"
-        plan = await self.plan(message, with_successor_memory=True)
+        plan = await self.plan(message, with_zep_memory=True)
         provider = OpenAIChatCompletionsAdapterV1(
             FakeClient(provider_response(content="Use the governed constraint."))
         ).complete(plan)

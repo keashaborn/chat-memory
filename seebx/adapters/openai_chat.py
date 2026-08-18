@@ -219,7 +219,7 @@ class OpenAIChatMessageV1(_StrictFrozenModel):
     def reference_names_are_lower_authority(self) -> "OpenAIChatMessageV1":
         if self.name is not None:
             if self.role != "user" or self.name not in {
-                "governed_memory_successor_v1",
+                "zep_memory_v1",
                 "relational_monism_v0_4",
                 "chat_attachments_v1",
                 "prior_web_provenance_v1",
@@ -229,12 +229,6 @@ class OpenAIChatMessageV1(_StrictFrozenModel):
 
 
 def _reference_message_content(block: PromptReferenceContextBlockV1) -> str:
-    if block.block_id == "governed_memory_successor_v1":
-        # The successor renderer already emits a typed, data-only JSON block.
-        # Keeping it as the exact message content lets the answer-binding
-        # contract prove that its canonical escaped bytes occur once in the
-        # exact provider kwargs payload.
-        return block.content
     payload = {
         "authority": "reference_data",
         "block_id": block.block_id,

@@ -116,7 +116,7 @@ def build_response_inspection_v1(
         (
             block
             for block in plan.assembled_prompt.context_blocks
-            if block.block_id == "governed_memory_successor_v1"
+            if block.block_id == "zep_memory_v1"
         ),
         None,
     )

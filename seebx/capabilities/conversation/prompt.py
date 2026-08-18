@@ -228,7 +228,6 @@ class PromptReferenceFragmentV1(_StrictFrozenModel):
 class PromptReferenceContextBlockV1(_StrictFrozenModel):
     contract_version: Literal[CONTEXT_BLOCK_VERSION] = CONTEXT_BLOCK_VERSION
     block_id: Literal[
-        "governed_memory_successor_v1",
         "zep_memory_v1",
         "chat_attachments_v1",
         "relational_monism_v0_4",
@@ -272,10 +271,7 @@ class PromptReferenceContextBlockV1(_StrictFrozenModel):
             ContextKind.WEB_PROVENANCE: "prior_web_provenance_v1",
         }
         if self.kind is ContextKind.MEMORY:
-            valid_block = self.block_id in {
-                "governed_memory_successor_v1",
-                "zep_memory_v1",
-            }
+            valid_block = self.block_id == "zep_memory_v1"
         else:
             valid_block = self.block_id == expected_blocks[self.kind]
         if not valid_block:
@@ -312,7 +308,6 @@ PromptAssemblyRequestV1.model_rebuild()
 
 class PromptContextManifestEntryV1(_StrictFrozenModel):
     block_id: Literal[
-        "governed_memory_successor_v1",
         "zep_memory_v1",
         "chat_attachments_v1",
         "relational_monism_v0_4",
@@ -868,7 +863,7 @@ def _validate_source_authority_chain(
         if (
             successor_memory_context_block.kind is not ContextKind.MEMORY
             or successor_memory_context_block.block_id
-            not in {"governed_memory_successor_v1", "zep_memory_v1"}
+            != "zep_memory_v1"
             or successor_memory_context_block.request_id_sha256
             != _text_sha256(policy_input.request_id)
             or successor_memory_context_block.query_sha256
@@ -942,19 +937,16 @@ def _validate_context_shape(
     if kinds != expected_order or len(kinds) != len(set(kinds)):
         raise ValueError("context blocks must be unique and canonically ordered")
     has_memory = ContextKind.MEMORY in kinds
-    successor_memory_block = any(
-        item.block_id in {"governed_memory_successor_v1", "zep_memory_v1"}
-        for item in blocks
-    )
+    memory_block_present = any(item.block_id == "zep_memory_v1" for item in blocks)
     has_attachment = ContextKind.ATTACHMENT in kinds
     has_fm = ContextKind.RELATIONAL_MONISM in kinds
     has_web_provenance = ContextKind.WEB_PROVENANCE in kinds
     successor_memory_manifest = (
         manifest.successor_memory_context_manifest_sha256 is not None
     )
-    if successor_memory_block != successor_memory_manifest:
+    if memory_block_present != successor_memory_manifest:
         raise ValueError("successor Memory context and manifest state differ")
-    if has_memory != successor_memory_block:
+    if has_memory != memory_block_present:
         raise ValueError("Memory context identity is invalid")
     if has_attachment != (manifest.attachment_context_manifest_sha256 is not None):
         raise ValueError("Attachment context and manifest state differ")

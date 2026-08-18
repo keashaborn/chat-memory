@@ -137,12 +137,11 @@ def prior_web_provenance(
     )
 
 
-def successor_memory_block(
+def zep_memory_block(
     message: str,
     *,
     request_id: str = "request-123",
-    block_id: str = "governed_memory_successor_v1",
-    source_contract_version: str = "governed-memory-answer-context-v1",
+    source_contract_version: str = "zep_user_context_v1",
 ) -> PromptReferenceContextBlockV1:
     content = '{"claims":[{"predicate":"project_constraint","value":"bounded"}]}'
     raw = content.encode("utf-8")
@@ -154,7 +153,7 @@ def successor_memory_block(
         estimated_tokens=(len(raw) + 3) // 4,
     )
     return PromptReferenceContextBlockV1(
-        block_id=block_id,
+        block_id="zep_memory_v1",
         kind=ContextKind.MEMORY,
         source_contract_version=source_contract_version,
         source_manifest_sha256="a" * 64,
@@ -422,34 +421,9 @@ class TypedPromptAssemblerV1Tests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             PromptAssemblyRequestV1.model_validate(payload)
 
-    def test_successor_memory_is_exact_lower_authority_context(self) -> None:
-        message = "What is the relevant project constraint?"
-        block = successor_memory_block(message)
-        assembled = assemble_prompt(
-            assembly_request(message).model_copy(
-                update={
-                    "successor_memory_context_block": block,
-                    "memory_source_status": MemorySourceStatusV1.SELECTED,
-                }
-            )
-        )
-
-        self.assertEqual(assembled.context_blocks, (block,))
-        self.assertNotIn(block.content, assembled.system_prompt)
-        self.assertEqual(
-            assembled.manifest.successor_memory_context_manifest_sha256,
-            block.source_manifest_sha256,
-        )
-        self.assertNotIn("memory_input", PromptAssemblyRequestV1.model_fields)
-        self.assertNotIn("memory_application", PromptAssemblyRequestV1.model_fields)
-
     def test_zep_memory_is_exact_lower_authority_context(self) -> None:
         message = "What is the relevant project constraint?"
-        block = successor_memory_block(
-            message,
-            block_id="zep_memory_v1",
-            source_contract_version="zep_user_context_v1",
-        )
+        block = zep_memory_block(message)
         assembled = assemble_prompt(
             assembly_request(message).model_copy(
                 update={
@@ -469,6 +443,8 @@ class TypedPromptAssemblerV1Tests(unittest.TestCase):
             assembled.manifest.successor_memory_context_manifest_sha256,
             block.source_manifest_sha256,
         )
+        self.assertNotIn("memory_input", PromptAssemblyRequestV1.model_fields)
+        self.assertNotIn("memory_application", PromptAssemblyRequestV1.model_fields)
 
     def test_selected_memory_status_without_context_is_rejected(self) -> None:
         payload = assembly_request().model_dump(mode="json")
@@ -478,7 +454,7 @@ class TypedPromptAssemblerV1Tests(unittest.TestCase):
             PromptAssemblyRequestV1.model_validate(payload)
 
     def test_legacy_memory_block_identity_is_rejected(self) -> None:
-        payload = successor_memory_block(
+        payload = zep_memory_block(
             "What is the relevant project constraint?"
         ).model_dump(mode="json")
         payload["block_id"] = "governed_memory_v1"

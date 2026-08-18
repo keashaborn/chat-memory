@@ -240,7 +240,7 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
             if (
                 context_block.kind is not ContextKind.MEMORY
                 or context_block.block_id
-                not in {"governed_memory_successor_v1", "zep_memory_v1"}
+                != "zep_memory_v1"
                 or context_block.request_id_sha256 != _text_sha256(self.request_id)
                 or context_block.query_sha256
                 != _text_sha256(self.conversation[-1].content)
