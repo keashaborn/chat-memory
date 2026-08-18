@@ -17,8 +17,8 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from rag_engine.governed_memory.response_provenance import (
-    SuccessorMemoryAnswerProvenanceV1,
+from seebx.capabilities.conversation.memory_contracts import (
+    MemoryAnswerProvenanceV1,
 )
 from rag_engine.openai_chat_provider_v1 import (
     OpenAIChatCompletionsAdapterV1,
@@ -228,7 +228,7 @@ class TrustedResponseExecutionV0_2(_StrictFrozenModel):
     trusted_plan: TrustedResponsePlanV0_2 = Field(repr=False)
     provider_response: OpenAIChatResponseV1 = Field(repr=False)
     finalized: FinalizedTrustedResponseV1 = Field(repr=False)
-    successor_memory_provenance: SuccessorMemoryAnswerProvenanceV1 | None = Field(
+    successor_memory_provenance: MemoryAnswerProvenanceV1 | None = Field(
         default=None,
         repr=False,
         exclude_if=lambda value: value is None,
@@ -281,7 +281,7 @@ class SuccessorMemoryAnswerLifecycleV1(Protocol):
         answer_id: UUID,
         prompt_sha256: str,
         outbound_request_bytes: bytes,
-    ) -> SuccessorMemoryAnswerProvenanceV1: ...
+    ) -> MemoryAnswerProvenanceV1: ...
 
 
 class NoGovernedMemoryAssemblyProviderV1:
@@ -452,7 +452,7 @@ class InactiveResponseCompositionRootV0_2:
         answer_id: UUID,
         prompt_sha256: str,
         outbound_request_bytes: bytes,
-    ) -> SuccessorMemoryAnswerProvenanceV1:
+    ) -> MemoryAnswerProvenanceV1:
         lifecycle = self._successor_memory_lifecycle
         if lifecycle is None:
             raise ResponseCompositionError(
@@ -463,13 +463,18 @@ class InactiveResponseCompositionRootV0_2:
             prompt_sha256=prompt_sha256,
             outbound_request_bytes=outbound_request_bytes,
         )
-        if not isinstance(provenance, SuccessorMemoryAnswerProvenanceV1):
+        if not isinstance(provenance, BaseModel):
             raise ResponseCompositionError(
                 "successor Memory lifecycle returned invalid provenance"
             )
-        return SuccessorMemoryAnswerProvenanceV1.model_validate_json(
-            provenance.model_dump_json()
-        )
+        try:
+            return MemoryAnswerProvenanceV1.model_validate_json(
+                provenance.model_dump_json()
+            )
+        except Exception:
+            raise ResponseCompositionError(
+                "successor Memory lifecycle returned invalid provenance"
+            ) from None
 
     def discard_successor_memory_selection(self) -> None:
         lifecycle = self._successor_memory_lifecycle

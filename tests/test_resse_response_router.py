@@ -12,16 +12,13 @@ from fastapi import HTTPException, Response
 from pydantic import ValidationError
 from starlette.requests import Request
 
-from rag_engine.governed_memory.response_provider import (
-    EXCLUSIVE_MODE_ENV,
-    EXCLUSIVE_MODE_SUCCESSOR,
-    SuccessorResponseConfigurationError,
-)
-from rag_engine.governed_memory.response_provenance import (
-    SuccessorMemoryNotApplicableReason,
-    build_successor_exposed_provenance_v1,
-    build_successor_no_memory_selected_provenance_v1,
-    build_successor_not_applicable_provenance_v1,
+from seebx.capabilities.conversation.memory_contracts import (
+    MEMORY_MODE_ZEP,
+    MemoryNotApplicableReason,
+    MemoryResponseConfigurationError,
+    build_memory_exposed_provenance_v1,
+    build_memory_no_selection_provenance_v1,
+    build_memory_not_applicable_provenance_v1,
 )
 from rag_engine import resse_response_router as response_router
 from seebx.core.identity import ActorContext, TEXT_AUTHORITY
@@ -31,7 +28,7 @@ from rag_engine.resse_response_router import (
     apply_no_store_headers,
     response_memory_provenance_for_mode,
     resse_response_query,
-    successor_not_applicable_reason,
+    memory_not_applicable_reason,
 )
 
 
@@ -156,8 +153,8 @@ class ResseResponseRouterTests(unittest.TestCase):
         self.assertEqual(response.headers["pragma"], "no-cache")
         self.assertEqual(response.headers["expires"], "0")
 
-    def test_router_selects_only_successor_provenance_contract(self) -> None:
-        exposed = build_successor_exposed_provenance_v1(
+    def test_router_selects_only_memory_provenance_contract(self) -> None:
+        exposed = build_memory_exposed_provenance_v1(
             {
                 "dispatch_state": "dispatched",
                 "outcome": "exposed",
@@ -178,42 +175,42 @@ class ResseResponseRouterTests(unittest.TestCase):
                 ),
             }
         )
-        successor = response_memory_provenance_for_mode(
-            mode=EXCLUSIVE_MODE_SUCCESSOR,
-            successor_provenance=exposed,
+        memory = response_memory_provenance_for_mode(
+            mode=MEMORY_MODE_ZEP,
+            memory_provenance=exposed,
         )
         self.assertEqual(
-            successor["contract_version"],
+            memory["contract_version"],
             "governed_memory_successor_answer_provenance_v1",
         )
-        self.assertEqual(successor["binding_outcome"], "exposed")
-        self.assertEqual(successor["binding_manifest_sha256"], "c" * 64)
-        self.assertEqual(len(successor["provenance_sha256"]), 64)
+        self.assertEqual(memory["binding_outcome"], "exposed")
+        self.assertEqual(memory["binding_manifest_sha256"], "c" * 64)
+        self.assertEqual(len(memory["provenance_sha256"]), 64)
         self.assertEqual(
-            successor["references"][0]["claim_id"],
+            memory["references"][0]["claim_id"],
             "ffffffff-ffff-4fff-8fff-ffffffffffff",
         )
 
-        for mode, successor_value in (
+        for mode, memory_value in (
             ("legacy", exposed),
-            (EXCLUSIVE_MODE_SUCCESSOR, None),
+            (MEMORY_MODE_ZEP, None),
         ):
             with self.subTest(mode=mode):
-                with self.assertRaises(SuccessorResponseConfigurationError):
+                with self.assertRaises(MemoryResponseConfigurationError):
                     response_memory_provenance_for_mode(
                         mode=mode,
-                        successor_provenance=successor_value,
+                        memory_provenance=memory_value,
                     )
 
-    def test_router_successor_no_selection_is_not_legacy_no_binding(self) -> None:
-        no_selection = build_successor_no_memory_selected_provenance_v1(
+    def test_router_no_selection_is_not_legacy_no_binding(self) -> None:
+        no_selection = build_memory_no_selection_provenance_v1(
             answer_id=UUID("90000000-0000-4000-8000-000000000001"),
             prompt_sha256="a" * 64,
             outbound_request_bytes=b'{"messages":[]}',
         )
         result = response_memory_provenance_for_mode(
-            mode=EXCLUSIVE_MODE_SUCCESSOR,
-            successor_provenance=no_selection,
+            mode=MEMORY_MODE_ZEP,
+            memory_provenance=no_selection,
         )
         self.assertEqual(result["binding_outcome"], "no_memory_selected")
         self.assertNotEqual(result["binding_outcome"], "no_memory_binding")
@@ -227,7 +224,7 @@ class ResseResponseRouterTests(unittest.TestCase):
                     is_voice=False,
                     has_web_search=False,
                 ),
-                SuccessorMemoryNotApplicableReason.NO_STORE,
+                MemoryNotApplicableReason.NO_STORE,
             ),
             (
                 dict(
@@ -236,7 +233,7 @@ class ResseResponseRouterTests(unittest.TestCase):
                     is_voice=False,
                     has_web_search=False,
                 ),
-                SuccessorMemoryNotApplicableReason.ATTACHMENT,
+                MemoryNotApplicableReason.ATTACHMENT,
             ),
             (
                 dict(
@@ -245,7 +242,7 @@ class ResseResponseRouterTests(unittest.TestCase):
                     is_voice=True,
                     has_web_search=False,
                 ),
-                SuccessorMemoryNotApplicableReason.VOICE,
+                MemoryNotApplicableReason.VOICE,
             ),
             (
                 dict(
@@ -254,16 +251,16 @@ class ResseResponseRouterTests(unittest.TestCase):
                     is_voice=False,
                     has_web_search=True,
                 ),
-                SuccessorMemoryNotApplicableReason.WEB_SEARCH,
+                MemoryNotApplicableReason.WEB_SEARCH,
             ),
         )
         observed = set()
         for flags, expected in cases:
             with self.subTest(reason=expected.value):
-                reason = successor_not_applicable_reason(**flags)
+                reason = memory_not_applicable_reason(**flags)
                 self.assertIs(reason, expected)
                 observed.add(reason)
-                provenance = build_successor_not_applicable_provenance_v1(
+                provenance = build_memory_not_applicable_provenance_v1(
                     reason=expected,
                     answer_id=UUID(
                         "90000000-0000-4000-8000-000000000001"
@@ -272,8 +269,8 @@ class ResseResponseRouterTests(unittest.TestCase):
                     outbound_request_bytes=b'{"messages":[]}',
                 )
                 result = response_memory_provenance_for_mode(
-                    mode=EXCLUSIVE_MODE_SUCCESSOR,
-                    successor_provenance=provenance,
+                    mode=MEMORY_MODE_ZEP,
+                    memory_provenance=provenance,
                 )
                 self.assertEqual(result["binding_outcome"], "not_applicable")
                 self.assertEqual(
@@ -283,18 +280,18 @@ class ResseResponseRouterTests(unittest.TestCase):
                 self.assertEqual(result["references"], [])
         self.assertEqual(
             observed,
-            set(SuccessorMemoryNotApplicableReason)
-            - {SuccessorMemoryNotApplicableReason.RUNTIME_UNAVAILABLE},
+            set(MemoryNotApplicableReason)
+            - {MemoryNotApplicableReason.RUNTIME_UNAVAILABLE},
         )
-        degraded = build_successor_not_applicable_provenance_v1(
-            reason=SuccessorMemoryNotApplicableReason.RUNTIME_UNAVAILABLE,
+        degraded = build_memory_not_applicable_provenance_v1(
+            reason=MemoryNotApplicableReason.RUNTIME_UNAVAILABLE,
             answer_id=UUID("90000000-0000-4000-8000-000000000001"),
             prompt_sha256="a" * 64,
             outbound_request_bytes=b'{"messages":[]}',
         )
         degraded_result = response_memory_provenance_for_mode(
-            mode=EXCLUSIVE_MODE_SUCCESSOR,
-            successor_provenance=degraded,
+            mode=MEMORY_MODE_ZEP,
+            memory_provenance=degraded,
         )
         self.assertEqual(degraded_result["binding_outcome"], "not_applicable")
         self.assertEqual(
@@ -302,16 +299,16 @@ class ResseResponseRouterTests(unittest.TestCase):
             "runtime_unavailable",
         )
         self.assertIs(
-            successor_not_applicable_reason(
+            memory_not_applicable_reason(
                 no_store=True,
                 has_attachments=True,
                 is_voice=True,
                 has_web_search=True,
             ),
-            SuccessorMemoryNotApplicableReason.NO_STORE,
+            MemoryNotApplicableReason.NO_STORE,
         )
         self.assertIsNone(
-            successor_not_applicable_reason(
+            memory_not_applicable_reason(
                 no_store=False,
                 has_attachments=False,
                 is_voice=False,
@@ -336,10 +333,12 @@ class ResseResponseRouterTests(unittest.TestCase):
         source = (ROOT / "rag_engine/resse_response_router.py").read_text()
         self.assertIn(
             """        else:
-            memory_provider = SuccessorMemoryChatAdapterV1(
-                _inactive_successor_response_provider(exclusion_reason)
-            )
-            successor_memory_lifecycle = memory_provider
+            if exclusion_reason is None:
+                raise MemoryResponseConfigurationError(
+                    "memory_response_exclusion_reason_missing"
+                )
+            memory_provider = InactiveMemoryContextProviderV1(exclusion_reason)
+            memory_lifecycle = memory_provider
 """,
             source,
         )
@@ -450,7 +449,6 @@ class ZepResponseRouterAuthenticationTests(unittest.IsolatedAsyncioTestCase):
 
     def test_successor_import_graph_blocks_retired_response_modules(self) -> None:
         environment = dict(os.environ)
-        environment[EXCLUSIVE_MODE_ENV] = EXCLUSIVE_MODE_SUCCESSOR
         environment["POSTGRES_DSN"] = (
             "postgresql://brains_app:synthetic@127.0.0.1:5432/memory"
         )

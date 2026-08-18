@@ -18,8 +18,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from rag_engine.lifeswitch_response_context_provider_v1 import (
     LifeSwitchPreparedContextV1,
 )
-from rag_engine.governed_memory.response_provenance import (
-    SuccessorMemoryAnswerProvenanceV1,
+from seebx.capabilities.conversation.memory_contracts import (
+    MemoryAnswerProvenanceV1,
 )
 from rag_engine.lifeswitch_prior_answer_provenance_runtime_v1 import (
     PriorLifeSwitchPreparedContextV1,
@@ -109,7 +109,7 @@ class IntegratedTrustedLifeSwitchResponseExecutionV2(_StrictFrozenModel):
     trusted_plan: TrustedLifeSwitchResponsePlanV2 = Field(repr=False)
     provider_response: OpenAIChatResponseV3 = Field(repr=False)
     finalized: FinalizedTrustedResponseV3 = Field(repr=False)
-    successor_memory_provenance: SuccessorMemoryAnswerProvenanceV1 | None = Field(
+    successor_memory_provenance: MemoryAnswerProvenanceV1 | None = Field(
         default=None,
         repr=False,
         exclude_if=lambda value: value is None,

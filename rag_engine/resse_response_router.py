@@ -16,14 +16,14 @@ from rag_engine.chat_attachment_context_v1 import (
     MAX_ATTACHMENT_COUNT,
     build_attachment_context_block_v1,
 )
-from rag_engine.governed_memory.response_provider import (
-    EXCLUSIVE_MODE_SUCCESSOR,
-    InactiveSuccessorMemoryProviderV1,
-    SuccessorResponseConfigurationError,
+from seebx.capabilities.conversation.memory_context import (
+    InactiveMemoryContextProviderV1,
 )
-from rag_engine.governed_memory.response_provenance import (
-    SuccessorMemoryAnswerProvenanceV1,
-    SuccessorMemoryNotApplicableReason,
+from seebx.capabilities.conversation.memory_contracts import (
+    MEMORY_MODE_ZEP,
+    MemoryAnswerProvenanceV1,
+    MemoryNotApplicableReason,
+    MemoryResponseConfigurationError,
 )
 from rag_engine.lifeswitch_chat_runtime_v1 import (
     LazyPostgresRestrictedLifeSwitchReadSessionV1,
@@ -48,9 +48,6 @@ from rag_engine.response_composition_root_v0_2 import (
 )
 from rag_engine.response_composition_root_v0_4 import (
     IntegratedLifeSwitchResponseCompositionRootV0_4,
-)
-from rag_engine.successor_memory_chat_adapter_v1 import (
-    SuccessorMemoryChatAdapterV1,
 )
 from rag_engine.response_inspection_v4 import build_response_inspection_v4
 from rag_engine.response_inspection_v2 import build_response_inspection_v2
@@ -102,35 +99,35 @@ ZEP_SHADOW_RUNTIME = ZepShadowRuntimeV1.from_environment(
 ZEP_PROMPT_SETTINGS = ZepPromptSettingsV1.from_environment(os.environ)
 
 
-RESPONSE_MEMORY_MODE = EXCLUSIVE_MODE_SUCCESSOR
+RESPONSE_MEMORY_MODE = MEMORY_MODE_ZEP
 
 
 def response_memory_provenance_for_mode(
     *,
     mode: str,
-    successor_provenance: SuccessorMemoryAnswerProvenanceV1 | None,
+    memory_provenance: MemoryAnswerProvenanceV1 | None,
 ) -> dict[str, object]:
     """Serialize exactly one mode-owned provenance contract; never fall back."""
 
-    if mode == EXCLUSIVE_MODE_SUCCESSOR:
-        if successor_provenance is None:
-            raise SuccessorResponseConfigurationError(
+    if mode == MEMORY_MODE_ZEP:
+        if memory_provenance is None:
+            raise MemoryResponseConfigurationError(
                 "response_memory_provenance_mode_mismatch"
             )
-        value = SuccessorMemoryAnswerProvenanceV1.model_validate_json(
-            successor_provenance.model_dump_json()
+        value = MemoryAnswerProvenanceV1.model_validate_json(
+            memory_provenance.model_dump_json()
         )
         return value.model_dump(mode="json")
-    raise SuccessorResponseConfigurationError("response_memory_mode_invalid")
+    raise MemoryResponseConfigurationError("response_memory_mode_invalid")
 
 
-def successor_not_applicable_reason(
+def memory_not_applicable_reason(
     *,
     no_store: bool,
     has_attachments: bool,
     is_voice: bool,
     has_web_search: bool,
-) -> SuccessorMemoryNotApplicableReason | None:
+) -> MemoryNotApplicableReason | None:
     """Choose one deterministic server-owned exclusion reason."""
 
     if any(type(value) is not bool for value in (
@@ -139,28 +136,18 @@ def successor_not_applicable_reason(
         is_voice,
         has_web_search,
     )):
-        raise SuccessorResponseConfigurationError(
-            "successor_response_exclusion_state_invalid"
+        raise MemoryResponseConfigurationError(
+            "memory_response_exclusion_state_invalid"
         )
     if no_store:
-        return SuccessorMemoryNotApplicableReason.NO_STORE
+        return MemoryNotApplicableReason.NO_STORE
     if has_attachments:
-        return SuccessorMemoryNotApplicableReason.ATTACHMENT
+        return MemoryNotApplicableReason.ATTACHMENT
     if is_voice:
-        return SuccessorMemoryNotApplicableReason.VOICE
+        return MemoryNotApplicableReason.VOICE
     if has_web_search:
-        return SuccessorMemoryNotApplicableReason.WEB_SEARCH
+        return MemoryNotApplicableReason.WEB_SEARCH
     return None
-
-
-def _inactive_successor_response_provider(
-    reason: SuccessorMemoryNotApplicableReason | None,
-) -> InactiveSuccessorMemoryProviderV1:
-    if reason is None:
-        raise SuccessorResponseConfigurationError(
-            "successor_response_exclusion_reason_missing"
-        )
-    return InactiveSuccessorMemoryProviderV1(reason)
 
 
 @router.on_event("shutdown")
@@ -264,7 +251,7 @@ async def resse_response_query(
         raise _no_store_http_exception(503, "response_runtime_unconfigured")
     actor_context: ActorContext | None = None
     voice_turn_id = voice_turn_id_from_request(req)
-    tentative_exclusion_reason = successor_not_applicable_reason(
+    tentative_exclusion_reason = memory_not_applicable_reason(
         no_store=payload.no_store,
         has_attachments=bool(payload.attachment_ids),
         is_voice=voice_turn_id is not None,
@@ -272,9 +259,9 @@ async def resse_response_query(
             (req.headers.get(VOICE_SEARCH_AUTHORIZATION_HEADER) or "").strip()
         ),
     )
-    if response_memory_mode != EXCLUSIVE_MODE_SUCCESSOR:
+    if response_memory_mode != MEMORY_MODE_ZEP:
         raise _no_store_http_exception(503, "response_memory_mode_invalid")
-    tentative_successor_eligible = (
+    tentative_zep_eligible = (
         payload.thread_id is not None
         and tentative_exclusion_reason is None
     )
@@ -344,10 +331,10 @@ async def resse_response_query(
         raise HTTPException(status_code=400, detail="invalid_message_context")
 
     zep_prompt_enabled = (
-        tentative_successor_eligible
+        tentative_zep_eligible
         and ZEP_PROMPT_SETTINGS.enabled_for(owner)
     )
-    if tentative_successor_eligible and not zep_prompt_enabled:
+    if tentative_zep_eligible and not zep_prompt_enabled:
         ZEP_SHADOW_RUNTIME.dispatch_retrieval(
             owner_user_id=owner,
             thread_id=thread_id,
@@ -390,17 +377,17 @@ async def resse_response_query(
             )
         openai_client = get_openai_client()
         generation_config = OpenAIChatGenerationConfigV1()
-        exclusion_reason = successor_not_applicable_reason(
+        exclusion_reason = memory_not_applicable_reason(
             no_store=payload.no_store,
             has_attachments=bool(payload.attachment_ids),
             is_voice=voice_turn_id is not None,
             has_web_search=search_capability_manifest is not None,
         )
-        successor_eligible = (
+        zep_eligible = (
             payload.thread_id is not None and exclusion_reason is None
         )
         zep_memory_provider = None
-        if successor_eligible:
+        if zep_eligible:
             if not zep_prompt_enabled:
                 raise _no_store_http_exception(
                     503,
@@ -411,17 +398,19 @@ async def resse_response_query(
                 logger=logger,
             )
             memory_provider = zep_memory_provider
-            successor_memory_lifecycle = None
+            memory_lifecycle = None
         else:
-            memory_provider = SuccessorMemoryChatAdapterV1(
-                _inactive_successor_response_provider(exclusion_reason)
-            )
-            successor_memory_lifecycle = memory_provider
+            if exclusion_reason is None:
+                raise MemoryResponseConfigurationError(
+                    "memory_response_exclusion_reason_missing"
+                )
+            memory_provider = InactiveMemoryContextProviderV1(exclusion_reason)
+            memory_lifecycle = memory_provider
         base_root = InactiveResponseCompositionRootV0_2(
             openai_client=openai_client,
             classifier_model=os.getenv("RESSE_CLASSIFIER_MODEL", "gpt-5.1"),
             memory_provider=memory_provider,
-            successor_memory_lifecycle=successor_memory_lifecycle,
+            successor_memory_lifecycle=memory_lifecycle,
             generation_config=generation_config,
         )
         command = AuthenticatedResponseCommandV0_2(
@@ -486,7 +475,7 @@ async def resse_response_query(
         else:
             memory_provenance = response_memory_provenance_for_mode(
                 mode=response_memory_mode,
-                successor_provenance=execution.successor_memory_provenance,
+                memory_provenance=execution.successor_memory_provenance,
             )
         persistence_started_ns = time.monotonic_ns()
         if lifeswitch_enabled:
@@ -524,7 +513,7 @@ async def resse_response_query(
         if (
             payload.message_id is not None
             and not payload.no_store
-            and (successor_eligible or voice_turn_id is not None)
+            and (zep_eligible or voice_turn_id is not None)
         ):
             ZEP_SHADOW_RUNTIME.dispatch_turn(
                 owner_user_id=owner,
@@ -609,5 +598,5 @@ __all__ = [
     "response_memory_provenance_for_mode",
     "router",
     "should_coordinate_chat_memory_ingest",
-    "successor_not_applicable_reason",
+    "memory_not_applicable_reason",
 ]

@@ -43,6 +43,16 @@ class ZepRuntimeRetirementContractTests(unittest.TestCase):
         self.assertIn('@app.delete("/memory/chat-and-zep/clear")', source)
         self.assertIn('"memory_retained": False', source)
 
+    def test_live_response_roots_do_not_import_retired_memory_packages(self) -> None:
+        for relative in (
+            "rag_engine/resse_response_router.py",
+            "rag_engine/response_composition_root_v0_2.py",
+            "rag_engine/response_composition_root_v0_4.py",
+        ):
+            source = (ROOT / relative).read_text()
+            self.assertNotIn("rag_engine.governed_memory", source)
+            self.assertNotIn("successor_memory_chat_adapter_v1", source)
+
 
 if __name__ == "__main__":
     unittest.main()

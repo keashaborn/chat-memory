@@ -37,6 +37,9 @@ from rag_engine.response_persistence_v1 import persist_finalized_response_v1
 from rag_engine.successor_memory_chat_adapter_v1 import (
     SuccessorMemoryChatAdapterV1,
 )
+from seebx.capabilities.conversation.memory_contracts import (
+    MemoryNotApplicableReason,
+)
 from tests.test_lifeswitch_answer_provenance_receipt_v1 import off_prior
 from tests.test_response_composition_root_v0_4 import CurrentProvider, PriorProvider
 from tests.test_response_composition_root_v0_2 import (
@@ -320,7 +323,7 @@ class SuccessorProviderPayloadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(provenance.binding_outcome, "not_applicable")
         self.assertIs(
             provenance.not_applicable_reason,
-            SuccessorMemoryNotApplicableReason.NO_STORE,
+            MemoryNotApplicableReason.NO_STORE,
         )
         self.assertEqual(provenance.references, ())
         self.assertIsNone(provenance.binding_manifest_sha256)
