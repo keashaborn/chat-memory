@@ -27,10 +27,10 @@ from seebx.capabilities.search.execution import (
     router as search_execution_router_v1,
 )
 from rag_engine.telemetry_router import router as telemetry_router
-from rag_engine.lifeswitch_meals_router import router as lifeswitch_meals_router
-from rag_engine.lifeswitch_nutrition_log_router import router as lifeswitch_nutrition_log_router
-from rag_engine.lifeswitch_nutrition_router import router as lifeswitch_nutrition_router
-from rag_engine.lifeswitch_nutrition_log_batch_router import router as lifeswitch_nutrition_log_batch_router
+from seebx.capabilities.nutrition.meals import router as lifeswitch_meals_router
+from seebx.capabilities.nutrition.logs import router as lifeswitch_nutrition_log_router
+from seebx.capabilities.nutrition.routes import router as lifeswitch_nutrition_router
+from seebx.capabilities.nutrition.batch import router as lifeswitch_nutrition_log_batch_router
 from rag_engine.lifeswitch_training_router import router as lifeswitch_training_router
 from rag_engine.lifeswitch_measurements_router import router as lifeswitch_measurements_router
 from rag_engine.lifeswitch_plan_router import router as lifeswitch_plan_router

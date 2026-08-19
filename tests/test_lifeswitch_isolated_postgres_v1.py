@@ -11,7 +11,7 @@ from fastapi import HTTPException
 
 from seebx.adapters import lifeswitch_postgres
 from rag_engine import lifeswitch_measurements_router as measurements
-from rag_engine import lifeswitch_nutrition_log_router as nutrition
+from seebx.capabilities.nutrition import logs as nutrition
 from rag_engine import lifeswitch_training_router as training
 
 

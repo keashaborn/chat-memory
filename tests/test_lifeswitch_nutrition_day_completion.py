@@ -10,7 +10,9 @@ from typing import Any
 
 os.environ.setdefault("POSTGRES_DSN", "postgresql://unused")
 
-router_module = importlib.import_module("rag_engine.lifeswitch_nutrition_log_router")
+router_module = importlib.import_module(
+    "seebx.capabilities.nutrition.logs"
+)
 
 
 class FakeConnection:
