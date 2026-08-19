@@ -43,6 +43,36 @@ Persistence occupied 236 KiB. The observed files were an RDB snapshot plus an
 AOF base, incremental file, and manifest. Existing persistence is recovery
 material, not proof of a current consumer.
 
+A second read-only inspection at 273,878 seconds of container uptime returned
+the same 203-key/type/TTL/key-memory totals. Minimum and maximum idle time both
+again equaled the complete uptime. The only command statistics were inspection
+commands; there were no established port-6379 connections after inspection,
+and `brains.service` had logged zero Redis, port-6379, or connection-refused
+errors since the container start.
+
+Exact runtime identity at the refresh:
+
+- container ID:
+  `9e8a36c1aefc2427b23f9f4be3af3b094b91d0506dfee6bb46e923aa36f90219`;
+- image ID:
+  `sha256:b4e53bb4637c329c42395eec0b86851f5314f6ed597ec217b5e4e19f7c102c11`;
+- Compose configuration hash:
+  `3c7eeb9e9a2e6fde8d8aab683232044ebd119ac6e7aafa10180b6ead5796fded`;
+- `docker-compose.yml` SHA-256:
+  `2e956db84101c7eab9b8ddfd26a4bc91db95fd028a35f62681d628b1528f63c7`;
+- `docker-compose.override.yml` SHA-256:
+  `ec3b1cdbb68ad1ca3949574236d8cf8162ae16d0d1bcef978c5133695b8d3c59`.
+
+| Live persistence file | Bytes | SHA-256 |
+|---|---:|---|
+| `dump.rdb` | 14,119 | `fc8a3873b5b5958ff352e5cbaa77aab87856bcae2f6727322db82ba895304595` |
+| `appendonly.aof.1.base.rdb` | 88 | `7a132cc2652c35e84de72fa2c2d394d56c5ed47f463be2521303dd1747eb5340` |
+| `appendonly.aof.1.incr.aof` | 203,802 | `5d810a110e792885a34a8bcfe07d1a72e7d16285cd3f6bbccfefc015e567813a` |
+| `appendonly.aof.manifest` | 88 | `ca465c5845ad4d4c0a2b4cda8853efeb9423cb4242a4eaaa5ecbaa00a4e75492` |
+
+Redis reported no unsaved changes, no active save/rewrite, and successful last
+RDB/AOF persistence. This refresh did not save, copy, stop, or remove anything.
+
 ## Preconditions
 
 Before the stop, an operator must create one timestamped receipt containing:
