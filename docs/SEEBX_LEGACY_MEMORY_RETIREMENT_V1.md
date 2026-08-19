@@ -27,9 +27,10 @@ Evidence was collected read-only on SeeBx and Verbal Sage on 2026-08-18.
 - No Qdrant process, container, unit, or listener is active.
 - The live API has no Redis connection. The Redis container holds 203
   non-expiring legacy keys and is not a Zep dependency.
-- Production still has the daily `eval_all_users.sh` cron targeting the absent
-  Qdrant `memory_raw` collection. The cleanup candidate removes its source;
-  runtime retirement remains a separate rollback-bound production action.
+- The daily `eval_all_users.sh` cron targeting absent Qdrant `memory_raw` was
+  retired on 2026-08-19. The exact before/after crontabs, unchanged evaluator/log
+  hashes, authenticated health proof, and rollback receipt are preserved under
+  `/var/backups/seebx-cleanup/20260819T141946Z-legacy-qdrant-cron-retirement/`.
 - No `memory-v1-*` systemd service or timer is installed.
 - Zep prompt mode is the declared current memory mode.
 - The current integration suite passes 989/989. Production and candidate both
@@ -103,7 +104,7 @@ database, cache, service, security-group, or backup deletion.
 | --- | --- | --- |
 | legacy Qdrant configuration and AWS port 6333 rule | no process/listener/caller | Current source deployed; zero callers reconfirmed |
 | legacy Redis container and AWS port 6379 rule | no live API client; 203 legacy keys | Export key-name/hash manifest, stop, observation window, then delete |
-| Qdrant `eval_all_users.sh` cron | broken against absent `memory_raw` | Disable first; verify API/Zep/chat; remove later |
+| Qdrant `eval_all_users.sh` cron | exact line absent since 2026-08-19; evaluator/log hashes unchanged; rollback crontab retained | COMPLETE; continue observing API/Zep/chat before any schema deletion |
 | `memory_extraction_v2_20260714_test` | 1,380 MB; 117 tables; zero connections/refs | Encrypted snapshot/export manifest, then drop |
 | `memory_v1_pet_core_clone_20260724` | 1,405 MB; 229 tables; zero connections/refs | Encrypted snapshot/export manifest, then drop |
 | `lifeswitch_training_family_stage_20260727` | 15 MB; 29 tables; zero connections/refs | Confirm isolated LifeSwitch parity, then drop |
@@ -154,3 +155,18 @@ This manifest authorizes no deployment, restart, deletion, database mutation,
 credential rotation, AWS security-group change, or backup removal. Each action
 requires an exact generated target list, current lease, recovery evidence, and
 separate user authorization.
+
+
+## Executable recovery-evidence gate
+
+`scripts/prepare_legacy_memory_retirement_recovery.py` is the canonical recovery tool for the two legacy schemas. It is candidate-only and has not been run against production. When separately authorized, it will:
+
+1. require the local `memory` database and `sage` administrative role;
+2. export a repeatable-read PostgreSQL snapshot and exact per-table row-count manifest;
+3. create a custom-format dump containing only `memory` and `memory_ingest_private`;
+4. restore the dump into a uniquely named disposable database;
+5. compare all 167 ordinary tables and every exact row count;
+6. drop and independently prove removal of the disposable database; and
+7. emit content-free SHA-256 bindings for the dump, source manifest, tool, retirement SQL, package, and restore receipt.
+
+The DSN and password never enter a subprocess argument or receipt. A temporary mode-0600 pgpass file is removed in all outcomes. A failure emits only fixed error codes, retains any completed backup artifact, and attempts to remove the disposable database before exiting. Running the tool creates a backup directory and creates/drops a temporary database, so it requires a separate production authorization.
