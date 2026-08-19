@@ -1,0 +1,35 @@
+{
+  "forward": {
+    "path": "forward.pgsql",
+    "sha256": "2aac882673f6166f48ec26a6971f4ec94bad4e77cac1ff6622a5346e41e43afe"
+  },
+  "migration_id": "chat_history_zep_outbox_cutover_0003",
+  "prerequisites": [
+    "conversation_sync_private.zep_turn_outbox",
+    "chat_history_private.clear_history(uuid,text,uuid,integer)",
+    "chat_history_private.clear_message_tail(uuid,uuid)"
+  ],
+  "rollback": {
+    "path": "rollback.pgsql",
+    "requires_legacy_memory_ingest_schema": true,
+    "sha256": "d2a1214ad50f76a018982242a9350fac52ddedba2ddad4e1957ade772ce765df"
+  },
+  "schema_version": "chat-history-migration-package-v1",
+  "scope": {
+    "governed_memory_rows_mutated": false,
+    "legacy_memory_ingest_capture_disabled": true,
+    "structured_lifeswitch_data_mutated": false,
+    "visible_chat_history_only": true,
+    "zep_called": false
+  },
+  "status": "candidate_not_applied",
+  "target": {
+    "database": "memory",
+    "execution_role": "sage",
+    "server": "seebx"
+  },
+  "transaction": {
+    "required": true,
+    "runner_supplies_begin_commit": true
+  }
+}
