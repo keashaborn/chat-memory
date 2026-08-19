@@ -346,6 +346,63 @@ def _freeze_tree(root: Path) -> None:
     os.chmod(root, 0o555)
 
 
+def runtime_install_path(repository_commit: str) -> Path:
+    if not HEX40.fullmatch(repository_commit):
+        raise RuntimeBuildContractError("runtime_install_commit_invalid")
+    return Path("/opt/lifeswitch/runtimes") / repository_commit / "venv"
+
+
+def remove_runtime_bytecode(root: Path) -> int:
+    removed = 0
+    for path in sorted(root.rglob("*"), key=lambda item: len(item.parts), reverse=True):
+        if path.is_symlink():
+            continue
+        if path.is_file() and path.suffix in {".pyc", ".pyo"}:
+            path.unlink()
+            removed += 1
+        elif path.is_dir() and path.name == "__pycache__":
+            if any(path.iterdir()):
+                raise RuntimeBuildExecutionError("runtime_bytecode_directory_not_empty")
+            path.rmdir()
+    return removed
+
+
+def normalize_runtime_prefix(root: Path, install_path: Path) -> int:
+    root = root.resolve(strict=True)
+    expected_parent = Path("/opt/lifeswitch/runtimes")
+    if (
+        not install_path.is_absolute()
+        or install_path.parent.parent != expected_parent
+        or install_path.name != "venv"
+        or not HEX40.fullmatch(install_path.parent.name)
+    ):
+        raise RuntimeBuildExecutionError("runtime_install_path_invalid")
+    source = str(root).encode()
+    replacement = install_path.as_posix().encode()
+    normalized = 0
+    for path in _runtime_paths(root):
+        item = path.lstat()
+        if not stat.S_ISREG(item.st_mode):
+            continue
+        data = path.read_bytes()
+        if source not in data:
+            continue
+        if b"\x00" in data:
+            raise RuntimeBuildExecutionError("runtime_prefix_in_binary_file")
+        try:
+            data.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise RuntimeBuildExecutionError("runtime_prefix_text_invalid") from error
+        mode = stat.S_IMODE(item.st_mode)
+        _atomic_write(path, data.replace(source, replacement), mode=mode)
+        normalized += 1
+    for path in _runtime_paths(root):
+        item = path.lstat()
+        if stat.S_ISREG(item.st_mode) and source in path.read_bytes():
+            raise RuntimeBuildExecutionError("runtime_build_prefix_remains")
+    return normalized
+
+
 def _normalized_link_target(path: PurePosixPath, target: str) -> PurePosixPath:
     if not target or target.startswith("/") or "\\" in target:
         raise RuntimeBuildExecutionError("runtime_symlink_target_invalid")
@@ -389,7 +446,11 @@ def _forbidden_runtime_path(path: PurePosixPath) -> bool:
     )
 
 
-def build_runtime_archive(root: Path, archive_path: Path) -> dict[str, Any]:
+def build_runtime_archive(
+    root: Path,
+    archive_path: Path,
+    install_path: Path,
+) -> dict[str, Any]:
     root = root.resolve(strict=True)
     entries = _runtime_paths(root)
     member_names = {
@@ -400,6 +461,8 @@ def build_runtime_archive(root: Path, archive_path: Path) -> dict[str, Any]:
     directory_count = 0
     symlink_count = 0
     unpacked_bytes = 0
+    normalized_file_count = 0
+    install_path_bytes = install_path.as_posix().encode()
     temporary = archive_path.with_name("." + archive_path.name + ".tmp")
     try:
         with tarfile.open(temporary, mode="w", format=tarfile.PAX_FORMAT) as archive:
@@ -407,6 +470,8 @@ def build_runtime_archive(root: Path, archive_path: Path) -> dict[str, Any]:
                 member_path = PurePosixPath("venv", *path.relative_to(root).parts)
                 if _forbidden_runtime_path(member_path):
                     raise RuntimeBuildExecutionError("runtime_archive_sensitive_path_forbidden")
+                if "__pycache__" in member_path.parts or member_path.suffix in {".pyc", ".pyo"}:
+                    raise RuntimeBuildExecutionError("runtime_archive_bytecode_forbidden")
                 item = path.lstat()
                 info = tarfile.TarInfo(member_path.as_posix())
                 info.uid = 0
@@ -446,6 +511,8 @@ def build_runtime_archive(root: Path, archive_path: Path) -> dict[str, Any]:
                     info.size = item.st_size
                     with path.open("rb") as handle:
                         archive.addfile(info, handle)
+                    if install_path_bytes in path.read_bytes():
+                        normalized_file_count += 1
                     digest = sha256_file(path)
                     file_count += 1
                     unpacked_bytes += item.st_size
@@ -473,6 +540,9 @@ def build_runtime_archive(root: Path, archive_path: Path) -> dict[str, Any]:
         "directory_count": directory_count,
         "symlink_count": symlink_count,
         "unpacked_bytes": unpacked_bytes,
+        "install_path": install_path.as_posix(),
+        "normalized_file_count": normalized_file_count,
+        "bytecode_file_count": 0,
         "tree_manifest_sha256": hashlib.sha256(canonical_bytes(records)).hexdigest(),
     }
 
@@ -547,14 +617,20 @@ def execute(arguments: argparse.Namespace) -> dict[str, Any]:
             raise RuntimeBuildExecutionError("dependency_preflight_contract_failed")
         import_program = ";".join(f"import {name}" for name in IMPORT_MODULES)
         _run(
-            [str(venv / "bin/python"), "-I", "-c", import_program],
+            [str(venv / "bin/python"), "-I", "-B", "-c", import_program],
             label="runtime_import_smoke",
         )
+        removed_bytecode_count = remove_runtime_bytecode(venv)
+        install_path = runtime_install_path(repository_state["commit"])
+        normalized_file_count = normalize_runtime_prefix(venv, install_path)
         _freeze_tree(venv)
         runtime_archive = build_runtime_archive(
             venv,
             staging / "runtime-environment.tar",
+            install_path,
         )
+        if runtime_archive["normalized_file_count"] != normalized_file_count:
+            raise RuntimeBuildExecutionError("runtime_prefix_inventory_mismatch")
         receipt = {
             "schema_version": SCHEMA_VERSION,
             "status": "pass",
@@ -569,6 +645,7 @@ def execute(arguments: argparse.Namespace) -> dict[str, Any]:
                 "dependency_preflight": preflight,
                 "pip_check": pip_check,
                 "import_count": len(IMPORT_MODULES),
+                "removed_bytecode_count": removed_bytecode_count,
             },
             "runtime_archive": runtime_archive,
             "wheelhouse": wheelhouse_state,

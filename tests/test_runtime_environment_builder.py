@@ -14,6 +14,9 @@ from scripts.build_runtime_environment import (
     RuntimeBuildExecutionError,
     build_runtime_archive,
     build_pip_install_command,
+    normalize_runtime_prefix,
+    remove_runtime_bytecode,
+    runtime_install_path,
     validate_repository,
     validate_runtime_output_root,
     validate_wheelhouse,
@@ -117,8 +120,9 @@ class RuntimeEnvironmentBuilderTests(unittest.TestCase):
             (venv / "lib" / "module.py").write_text("VALUE = 1\n", encoding="utf-8")
             (venv / "lib" / "module.py").chmod(0o444)
             (venv / "lib64").symlink_to("lib")
-            first = build_runtime_archive(venv, root / "runtime-one.tar")
-            second = build_runtime_archive(venv, root / "runtime-two.tar")
+            install_path = runtime_install_path("a" * 40)
+            first = build_runtime_archive(venv, root / "runtime-one.tar", install_path)
+            second = build_runtime_archive(venv, root / "runtime-two.tar", install_path)
             self.assertEqual(first["sha256"], second["sha256"])
             self.assertEqual(first["tree_manifest_sha256"], second["tree_manifest_sha256"])
             self.assertEqual(first["file_count"], 3)
@@ -136,7 +140,47 @@ class RuntimeEnvironmentBuilderTests(unittest.TestCase):
                 RuntimeBuildExecutionError,
                 "runtime_symlink_outside_environment",
             ):
-                build_runtime_archive(venv, root / "runtime.tar")
+                build_runtime_archive(
+                    venv,
+                    root / "runtime.tar",
+                    runtime_install_path("a" * 40),
+                )
+
+    def test_prefix_normalization_and_bytecode_removal_make_paths_reproducible(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            install_path = runtime_install_path("b" * 40)
+            archives = []
+            manifests = []
+            for name in ("short", "a-much-longer-build-directory"):
+                venv = root / name / "venv"
+                (venv / "bin").mkdir(parents=True)
+                cache = venv / "lib" / "package" / "__pycache__"
+                cache.mkdir(parents=True)
+                python = venv / "bin" / "python"
+                python.write_bytes(b"python\n")
+                python.chmod(0o755)
+                uvicorn = venv / "bin" / "uvicorn"
+                uvicorn.write_text(
+                    "#!" + venv.as_posix() + "/bin/python\nuvicorn\n",
+                    encoding="utf-8",
+                )
+                uvicorn.chmod(0o755)
+                (venv / "pyvenv.cfg").write_text(
+                    "command = python -m venv " + venv.as_posix() + "\n",
+                    encoding="utf-8",
+                )
+                (cache / "module.cpython-312.pyc").write_bytes(b"bytecode")
+                self.assertEqual(remove_runtime_bytecode(venv), 1)
+                self.assertEqual(normalize_runtime_prefix(venv, install_path), 2)
+                archive = root / (name + ".tar")
+                manifest = build_runtime_archive(venv, archive, install_path)
+                archives.append(manifest["sha256"])
+                manifests.append(manifest["tree_manifest_sha256"])
+                self.assertEqual(manifest["bytecode_file_count"], 0)
+                self.assertEqual(manifest["normalized_file_count"], 2)
+            self.assertEqual(archives[0], archives[1])
+            self.assertEqual(manifests[0], manifests[1])
 
     def test_output_root_is_root_owned_non_writable_and_traversable(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -302,7 +302,7 @@ def _runtime_path_forbidden(path: PurePosixPath) -> bool:
     )
 
 
-def _verify_runtime_archive(archive: Path) -> dict[str, Any]:
+def _verify_runtime_archive(archive: Path, install_path: str) -> dict[str, Any]:
     names: set[PurePosixPath] = set()
     links: list[tuple[PurePosixPath, str]] = []
     records: list[dict[str, Any]] = []
@@ -310,6 +310,9 @@ def _verify_runtime_archive(archive: Path) -> dict[str, Any]:
     directory_count = 0
     symlink_count = 0
     unpacked_bytes = 0
+    normalized_file_count = 0
+    install_path_bytes = install_path.encode()
+    uvicorn_entrypoint: bytes | None = None
     try:
         handle = tarfile.open(archive, mode="r:")
     except (OSError, tarfile.TarError) as error:
@@ -332,7 +335,15 @@ def _verify_runtime_archive(archive: Path) -> dict[str, Any]:
             )
             _expect(path not in names, "runtime_archive_duplicate_path")
             names.add(path)
+            _expect(
+                len(names) <= 100_000,
+                "runtime_archive_resource_limit_exceeded",
+            )
             _expect(not _runtime_path_forbidden(path), "runtime_archive_sensitive_path_forbidden")
+            _expect(
+                "__pycache__" not in path.parts and path.suffix not in {".pyc", ".pyo"},
+                "runtime_archive_bytecode_forbidden",
+            )
             _expect(
                 member.uid == 0
                 and member.gid == 0
@@ -368,13 +379,27 @@ def _verify_runtime_archive(archive: Path) -> dict[str, Any]:
             _expect(extracted is not None, "runtime_archive_file_unreadable")
             digest = hashlib.sha256()
             actual_size = 0
+            contains_install_path = False
+            search_tail = b""
+            entrypoint_head = b""
             while True:
                 block = extracted.read(1024 * 1024)
                 if not block:
                     break
                 digest.update(block)
                 actual_size += len(block)
+                search_window = search_tail + block
+                contains_install_path = (
+                    contains_install_path or install_path_bytes in search_window
+                )
+                search_tail = search_window[-max(len(install_path_bytes) - 1, 0) :]
+                if path == PurePosixPath("venv/bin/uvicorn") and len(entrypoint_head) < 4096:
+                    entrypoint_head += block[: 4096 - len(entrypoint_head)]
             _expect(actual_size == member.size, "runtime_archive_size_mismatch")
+            if contains_install_path:
+                normalized_file_count += 1
+            if path == PurePosixPath("venv/bin/uvicorn"):
+                uvicorn_entrypoint = entrypoint_head
             file_count += 1
             unpacked_bytes += actual_size
             _expect(
@@ -397,6 +422,13 @@ def _verify_runtime_archive(archive: Path) -> dict[str, Any]:
     _expect(PurePosixPath("venv") in names, "runtime_archive_root_missing")
     _expect(PurePosixPath("venv/bin/python") in names, "runtime_archive_python_missing")
     _expect(PurePosixPath("venv/bin/uvicorn") in names, "runtime_archive_uvicorn_missing")
+    _expect(normalized_file_count > 0, "runtime_archive_install_path_unbound")
+    _expect(
+        uvicorn_entrypoint is not None
+        and uvicorn_entrypoint.splitlines()[0]
+        == ("#!" + install_path + "/bin/python").encode(),
+        "runtime_archive_entrypoint_path_mismatch",
+    )
     for path, target in links:
         _expect(
             _normalized_link_target(path, target) in names,
@@ -416,6 +448,9 @@ def _verify_runtime_archive(archive: Path) -> dict[str, Any]:
         "directory_count": directory_count,
         "symlink_count": symlink_count,
         "unpacked_bytes": unpacked_bytes,
+        "install_path": install_path,
+        "normalized_file_count": normalized_file_count,
+        "bytecode_file_count": 0,
         "tree_manifest_sha256": hashlib.sha256(canonical_bytes(records)).hexdigest(),
     }
 
@@ -500,7 +535,6 @@ def verify_release_package(
     )
 
     runtime = _read_json(resolved["runtime_receipt"], "runtime_receipt_invalid")
-    runtime_archive = _verify_runtime_archive(resolved["runtime_archive"])
     runtime_binding = package["runtime_binding"]
     _expect(runtime.get("schema_version") == RUNTIME_SCHEMA, "runtime_receipt_schema_invalid")
     _expect(runtime.get("status") == "pass" and runtime.get("activated") is False, "runtime_receipt_state_invalid")
@@ -509,6 +543,17 @@ def verify_release_package(
     wheelhouse = runtime.get("wheelhouse") or {}
     declared_runtime_archive = runtime.get("runtime_archive") or {}
     backend = sources["backend"]
+    expected_install_path = (
+        "/opt/lifeswitch/runtimes/" + backend["candidate_commit"] + "/venv"
+    )
+    _expect(
+        declared_runtime_archive.get("install_path") == expected_install_path,
+        "runtime_archive_install_path_mismatch",
+    )
+    runtime_archive = _verify_runtime_archive(
+        resolved["runtime_archive"],
+        expected_install_path,
+    )
     _expect(runtime_repository.get("commit") == backend["candidate_commit"], "runtime_backend_commit_mismatch")
     _expect(runtime_repository.get("tree") == backend["candidate_tree"], "runtime_backend_tree_mismatch")
     _expect(runtime_binding["repository_commit"] == backend["candidate_commit"], "declared_runtime_commit_mismatch")

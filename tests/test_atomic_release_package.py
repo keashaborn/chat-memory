@@ -285,17 +285,24 @@ class AtomicReleasePackageTests(unittest.TestCase):
 
     def _runtime_archive(self) -> dict[str, object]:
         runtime = self.root / "runtime-tree"
+        install_path = Path(
+            "/opt/lifeswitch/runtimes"
+        ) / self.backend_candidate / "venv"
         (runtime / "bin").mkdir(parents=True)
         (runtime / "lib").mkdir()
-        for name in ("python", "uvicorn"):
-            path = runtime / "bin" / name
-            path.write_bytes((name + "\n").encode())
-            path.chmod(0o555)
+        python = runtime / "bin" / "python"
+        python.write_bytes(b"python\n")
+        python.chmod(0o555)
+        uvicorn = runtime / "bin" / "uvicorn"
+        uvicorn.write_bytes(
+            ("#!" + install_path.as_posix() + "/bin/python\nuvicorn\n").encode()
+        )
+        uvicorn.chmod(0o555)
         module = runtime / "lib" / "module.py"
         module.write_text("VALUE = 1\n", encoding="utf-8")
         module.chmod(0o444)
         (runtime / "lib64").symlink_to("lib")
-        return build_runtime_archive(runtime, self.runtime_archive)
+        return build_runtime_archive(runtime, self.runtime_archive, install_path)
 
     def _git_bundle(self, name: str) -> tuple[str, str, str, str, Path]:
         repository = self.root / (name + "-repository")
@@ -464,6 +471,19 @@ class AtomicReleasePackageTests(unittest.TestCase):
         ):
             self.verify()
 
+    def test_runtime_archive_install_path_is_bound_to_backend_commit(self) -> None:
+        document = json.loads(self.runtime.read_text(encoding="utf-8"))
+        document["runtime_archive"]["install_path"] = (
+            "/opt/lifeswitch/runtimes/" + "a" * 40 + "/venv"
+        )
+        self.runtime.write_text(json.dumps(document), encoding="utf-8")
+        self.package["artifacts"]["runtime_receipt"]["sha256"] = digest(self.runtime)
+        with self.assertRaisesRegex(
+            ReleasePackageError,
+            "runtime_archive_install_path_mismatch",
+        ):
+            self.verify()
+
     def test_runtime_archive_rejects_environment_files(self) -> None:
         payload = b"SECRET=value\n"
         self.runtime_archive.chmod(0o600)
@@ -505,6 +525,28 @@ class AtomicReleasePackageTests(unittest.TestCase):
         with self.assertRaisesRegex(
             ReleasePackageError,
             "runtime_archive_symlink_escape",
+        ):
+            self.verify()
+
+    def test_runtime_archive_rejects_bytecode(self) -> None:
+        payload = b"compiled-bytecode"
+        self.runtime_archive.chmod(0o600)
+        with tarfile.open(self.runtime_archive, mode="a") as archive:
+            member = tarfile.TarInfo("venv/lib/__pycache__/module.cpython-312.pyc")
+            member.mode = 0o444
+            member.uid = 0
+            member.gid = 0
+            member.uname = ""
+            member.gname = ""
+            member.mtime = 0
+            member.size = len(payload)
+            archive.addfile(member, io.BytesIO(payload))
+        self.package["artifacts"]["runtime_archive"]["sha256"] = digest(
+            self.runtime_archive
+        )
+        with self.assertRaisesRegex(
+            ReleasePackageError,
+            "runtime_archive_bytecode_forbidden",
         ):
             self.verify()
 
