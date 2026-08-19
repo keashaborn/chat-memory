@@ -21,7 +21,10 @@ database dependency.
 | `DELETE` | `/forms/templates/{owner_user_id}/{template_id}` | Delete one actor-owned template and its dependent records |
 
 No second forms router is permitted. The historical `rag_engine/forms_router.py`
-remains unmounted and is a retirement target after migration evidence is sealed.
+is absent from the candidate tree; its original path is retained only in the
+immutable retirement history. `sql/vb_forms_v1.sql` remains temporarily as the
+historical source-schema contract and disposable migration fixture. Retiring
+that SQL artifact requires accepted production migration and retention evidence.
 
 ## Authority chain
 
