@@ -79,6 +79,24 @@ receipt:
    database rollback.
 
 No component is considered deployed because this build gate passes.
+
+## Authorization and activation-plan gate
+
+`scripts/control_atomic_release_activation.py` is the separate, fail-closed
+authorization gate. It re-runs the complete release-package verifier and then
+requires a root-owned `0400` or `0600` authorization receipt that binds the
+exact package hash, package ID, backend and frontend commits, approved
+operations, quiescence decision, authorization ID, and UTC validity window.
+The release package remains permanently self-unapproved.
+
+A valid receipt produces a hash-bound, ordered activation plan and its
+reverse-order rollback plan. The database rollback is gated on proving the Zep
+outbox empty. The controller reports `authorized_not_executed` and
+`production_mutated=false`; it deliberately has no production command adapter.
+Therefore this gate cannot stop services, apply migrations, install artifacts,
+restart services, or change either production server. The production executor
+must be implemented and independently tested before a cutover authorization is
+requested or consumed.
 ## Offline paired release-package gate
 
 `ops/releases/seebx_atomic_release_package_v1.schema.json` and
