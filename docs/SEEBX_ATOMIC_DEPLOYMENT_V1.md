@@ -106,7 +106,9 @@ No component is considered deployed because this build gate passes.
 authorization gate. It re-runs the complete release-package verifier and then
 requires a root-owned `0400` or `0600` authorization receipt that binds the
 exact package hash, package ID, backend and frontend commits, approved
-operations, quiescence decision, authorization ID, and UTC validity window.
+operations, quiescence decision, authorization ID, UTC validity window, and
+the exact AWS account, EC2 instance, and region for both SeeBx and Verbal
+Sage. The activation-plan hash carries those target bindings unchanged.
 The release package remains permanently self-unapproved.
 
 A valid receipt produces a hash-bound, ordered activation plan and its

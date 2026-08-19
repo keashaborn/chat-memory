@@ -53,6 +53,18 @@ def authorization(value: dict) -> dict:
         "frontend_commit": FRONTEND,
         "approved_operations": list(APPROVED_OPERATIONS),
         "quiescence_approved": True,
+        "targets": {
+            "backend": {
+                "aws_account_id": "339712834334",
+                "instance_id": "i-04fcc2707e434e450",
+                "region": "us-east-2",
+            },
+            "frontend": {
+                "aws_account_id": "017820690695",
+                "instance_id": "i-0508bfc4d4df4a63d",
+                "region": "us-east-2",
+            },
+        },
         "issued_at_utc": "2026-08-19T20:00:00Z",
         "expires_at_utc": "2026-08-19T22:00:00Z",
     }
@@ -99,6 +111,10 @@ class AtomicReleaseActivationControlTests(unittest.TestCase):
             plan["bindings"]["authorization_expires_at_utc"],
             "2026-08-19T22:00:00Z",
         )
+        self.assertEqual(
+            plan["bindings"]["targets"],
+            self.authorization["targets"],
+        )
         self.assertEqual(plan["forward"][2]["action"], "stop_frontend_service")
         self.assertEqual(plan["forward"][3]["action"], "stop_backend_service")
         self.assertEqual(
@@ -132,6 +148,16 @@ class AtomicReleaseActivationControlTests(unittest.TestCase):
     def test_expired_authorization_fails_closed(self) -> None:
         self.authorization["expires_at_utc"] = "2026-08-19T20:30:00Z"
         with self.assertRaisesRegex(ActivationControlError, "time_window_invalid"):
+            self.validate()
+
+    def test_invalid_target_instance_fails_closed(self) -> None:
+        self.authorization["targets"]["backend"]["instance_id"] = "i-wrong"
+        with self.assertRaisesRegex(ActivationControlError, "target_instance_invalid"):
+            self.validate()
+
+    def test_missing_target_fails_closed(self) -> None:
+        self.authorization["targets"].pop("frontend")
+        with self.assertRaisesRegex(ActivationControlError, "targets_invalid"):
             self.validate()
 
     def test_extra_authorization_field_fails_closed(self) -> None:

@@ -18,12 +18,14 @@ if __package__:
         FORWARD_STEPS,
         PLAN_SCHEMA,
         ROLLBACK_STEPS,
+        validate_target_bindings,
     )
 else:
     from control_atomic_release_activation import (  # type: ignore[no-redef]
         FORWARD_STEPS,
         PLAN_SCHEMA,
         ROLLBACK_STEPS,
+        validate_target_bindings,
     )
 
 
@@ -117,6 +119,7 @@ def validate_execution_plan(
         "runtime_archive_sha256",
         "database_backup_sha256",
         "migration_package_sha256",
+        "targets",
     }
     if set(bindings) != required_bindings:
         raise ReleaseExecutionError("plan_bindings_invalid")
@@ -131,6 +134,10 @@ def validate_execution_plan(
     for name in ("backend_commit", "frontend_commit"):
         if not isinstance(bindings[name], str) or not HEX40.fullmatch(bindings[name]):
             raise ReleaseExecutionError("plan_binding_commit_invalid")
+    try:
+        validate_target_bindings(bindings["targets"])
+    except Exception as error:
+        raise ReleaseExecutionError("plan_binding_targets_invalid") from error
     current = now or datetime.now(timezone.utc)
     issued = _parse_utc(bindings["authorization_issued_at_utc"])
     expires = _parse_utc(bindings["authorization_expires_at_utc"])

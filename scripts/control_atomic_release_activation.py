@@ -34,6 +34,9 @@ PLAN_SCHEMA = "seebx-atomic-release-activation-plan-v1"
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 AUTHORIZATION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$")
+AWS_ACCOUNT_ID = re.compile(r"^[0-9]{12}$")
+EC2_INSTANCE_ID = re.compile(r"^i-[0-9a-f]{17}$")
+AWS_REGION = re.compile(r"^[a-z]{2}(?:-[a-z0-9]+)+-[0-9]+$")
 
 APPROVED_OPERATIONS = (
     "quiesce_frontend_backend",
@@ -120,6 +123,35 @@ def verify_authorization_file(path: Path) -> None:
         raise ActivationControlError("authorization_mode_invalid")
 
 
+def validate_target_bindings(value: object) -> dict[str, dict[str, str]]:
+    if not isinstance(value, Mapping) or set(value) != {"backend", "frontend"}:
+        raise ActivationControlError("authorization_targets_invalid")
+    normalized: dict[str, dict[str, str]] = {}
+    for name in ("backend", "frontend"):
+        target = value[name]
+        if not isinstance(target, Mapping) or set(target) != {
+            "aws_account_id",
+            "instance_id",
+            "region",
+        }:
+            raise ActivationControlError("authorization_target_fields_invalid")
+        account = target["aws_account_id"]
+        instance = target["instance_id"]
+        region = target["region"]
+        if not isinstance(account, str) or not AWS_ACCOUNT_ID.fullmatch(account):
+            raise ActivationControlError("authorization_target_account_invalid")
+        if not isinstance(instance, str) or not EC2_INSTANCE_ID.fullmatch(instance):
+            raise ActivationControlError("authorization_target_instance_invalid")
+        if not isinstance(region, str) or not AWS_REGION.fullmatch(region):
+            raise ActivationControlError("authorization_target_region_invalid")
+        normalized[name] = {
+            "aws_account_id": account,
+            "instance_id": instance,
+            "region": region,
+        }
+    return normalized
+
+
 def validate_authorization(
     authorization: Mapping[str, Any],
     *,
@@ -137,6 +169,7 @@ def validate_authorization(
         "frontend_commit",
         "approved_operations",
         "quiescence_approved",
+        "targets",
         "issued_at_utc",
         "expires_at_utc",
     }
@@ -170,6 +203,7 @@ def validate_authorization(
         raise ActivationControlError("authorization_operations_invalid")
     if authorization["quiescence_approved"] is not True:
         raise ActivationControlError("authorization_quiescence_missing")
+    validate_target_bindings(authorization["targets"])
     issued = _parse_utc(authorization["issued_at_utc"], "authorization_issued_at_invalid")
     expires = _parse_utc(authorization["expires_at_utc"], "authorization_expires_at_invalid")
     current = now or datetime.now(timezone.utc)
@@ -204,6 +238,7 @@ def build_activation_plan(
         "runtime_archive_sha256": verification["runtime_archive_sha256"],
         "database_backup_sha256": verification["database_backup_sha256"],
         "migration_package_sha256": verification["migration_package_sha256"],
+        "targets": validate_target_bindings(authorization["targets"]),
     }
     forward = [
         {"order": index, "action": action, "server": server, "effect": effect}

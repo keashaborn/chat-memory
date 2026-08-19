@@ -40,6 +40,18 @@ def plan() -> dict[str, Any]:
         "authorization_id": "auth-test-0001",
         "issued_at_utc": "2026-08-19T20:00:00Z",
         "expires_at_utc": "2026-08-19T22:00:00Z",
+        "targets": {
+            "backend": {
+                "aws_account_id": "339712834334",
+                "instance_id": "i-04fcc2707e434e450",
+                "region": "us-east-2",
+            },
+            "frontend": {
+                "aws_account_id": "017820690695",
+                "instance_id": "i-0508bfc4d4df4a63d",
+                "region": "us-east-2",
+            },
+        },
     }
     return build_activation_plan(package, verification, authorization)
 
@@ -129,6 +141,26 @@ class AtomicReleaseExecutorTests(unittest.TestCase):
         with self.assertRaisesRegex(ReleaseExecutionError, "plan_hash_mismatch"):
             execute_authorized_plan(
                 changed, driver, run_id="release-run-0006", now=NOW
+            )
+        self.assertEqual(driver.calls, [])
+
+    def test_invalid_bound_target_is_rejected_before_driver(self) -> None:
+        changed = plan()
+        changed["bindings"]["targets"]["backend"]["instance_id"] = "i-wrong"
+        unsigned = dict(changed)
+        unsigned.pop("plan_sha256")
+        import json
+
+        changed["plan_sha256"] = hashlib.sha256(
+            (json.dumps(unsigned, sort_keys=True, separators=(",", ":")) + "\n").encode()
+        ).hexdigest()
+        driver = FakeDriver()
+        with self.assertRaisesRegex(
+            ReleaseExecutionError,
+            "plan_binding_targets_invalid",
+        ):
+            execute_authorized_plan(
+                changed, driver, run_id="release-run-0008", now=NOW
             )
         self.assertEqual(driver.calls, [])
 
