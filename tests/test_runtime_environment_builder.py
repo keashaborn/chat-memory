@@ -13,6 +13,7 @@ from scripts.build_runtime_environment import (
     RuntimeBuildContractError,
     build_pip_install_command,
     validate_repository,
+    validate_runtime_output_root,
     validate_wheelhouse,
 )
 
@@ -99,6 +100,24 @@ class RuntimeEnvironmentBuilderTests(unittest.TestCase):
         self.assertIn("--only-binary=:all:", command)
         self.assertIn("--require-hashes", command)
         self.assertNotIn("https://pypi.org/simple", command)
+
+    def test_output_root_is_root_owned_non_writable_and_traversable(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            output_root = Path(temporary) / "runtimes"
+            output_root.mkdir(mode=0o755)
+            self.assertEqual(validate_runtime_output_root(output_root), output_root.resolve())
+            output_root.chmod(0o700)
+            with self.assertRaisesRegex(
+                RuntimeBuildContractError,
+                "runtime_output_root_permissions_invalid",
+            ):
+                validate_runtime_output_root(output_root)
+            output_root.chmod(0o775)
+            with self.assertRaisesRegex(
+                RuntimeBuildContractError,
+                "runtime_output_root_permissions_invalid",
+            ):
+                validate_runtime_output_root(output_root)
 
     def test_repository_must_be_clean_fast_forward(self) -> None:
         if subprocess.run(["git", "--version"], capture_output=True).returncode != 0:

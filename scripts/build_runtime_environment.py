@@ -83,6 +83,18 @@ def _secure_private_directory(path: Path) -> Path:
     return path.resolve(strict=True)
 
 
+def validate_runtime_output_root(path: Path) -> Path:
+    try:
+        item = path.lstat()
+    except OSError as error:
+        raise RuntimeBuildContractError("runtime_output_root_unavailable") from error
+    if stat.S_ISLNK(item.st_mode) or not stat.S_ISDIR(item.st_mode):
+        raise RuntimeBuildContractError("runtime_output_root_type_invalid")
+    if item.st_uid != os.geteuid() or stat.S_IMODE(item.st_mode) != 0o755:
+        raise RuntimeBuildContractError("runtime_output_root_permissions_invalid")
+    return path.resolve(strict=True)
+
+
 def _repository_file(repository: Path, relative: str) -> Path:
     root = repository.resolve(strict=True)
     path = _secure_regular_file(root / relative)
@@ -345,7 +357,7 @@ def execute(arguments: argparse.Namespace) -> dict[str, Any]:
         raise RuntimeBuildContractError("builder_platform_invalid")
 
     repository = arguments.repository.resolve(strict=True)
-    output_root = _secure_private_directory(arguments.output_root)
+    output_root = validate_runtime_output_root(arguments.output_root)
     wheelhouse = _secure_private_directory(arguments.wheelhouse)
     if output_root.is_relative_to(repository) or wheelhouse.is_relative_to(repository):
         raise RuntimeBuildContractError("mutable_build_path_inside_repository")

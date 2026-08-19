@@ -27,7 +27,9 @@ the paired Verbal Sage frontend.
   of the named production commit;
 - the committed `requirements-runtime.lock`;
 - the committed wheelhouse manifest; and
-- a private root-owned wheelhouse and output root outside the repository.
+- a private root-owned wheelhouse outside the repository; and
+- a root-owned `0755` output root that the non-root service can traverse but
+  cannot modify.
 
 The builder verifies every wheel filename, byte count, and SHA-256 digest. It
 installs with `--isolated --no-index --only-binary=:all: --require-hashes`,
