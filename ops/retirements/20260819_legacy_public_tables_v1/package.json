@@ -1,0 +1,57 @@
+{
+  "forward": {
+    "path": "forward.pgsql",
+    "sha256": "d66a53c94219c8afc60a8dd0f24d0fbe55f107903184109a63e7249a2c78f37b"
+  },
+  "migration_id": "legacy_public_tables_retirement_v1",
+  "prerequisites": [
+    "zero executable candidate SQL references",
+    "zero mounted production routes",
+    "zero database routine, view, trigger, or external FK dependencies",
+    "exact backup and disposable restore receipt"
+  ],
+  "recovery": {
+    "backup_format": "pg_dump custom",
+    "exact_row_manifest_required": true,
+    "restore_into_disposable_database_required": true,
+    "restore_receipt_sha256_required": true,
+    "rollback_mode": "restore_only",
+    "sql_rollback_available": false
+  },
+  "schema_version": "seebx-retirement-package-v1",
+  "scope": {
+    "drop_tables": [
+      "public.chat_messages",
+      "public.chat_sessions",
+      "public.feedback_signals",
+      "public.vantage_answer_trace",
+      "public.vs_profiles"
+    ],
+    "expected_rows": {
+      "public.chat_messages": 68,
+      "public.chat_sessions": 137,
+      "public.feedback_signals": 5,
+      "public.vantage_answer_trace": 1046,
+      "public.vs_profiles": 4
+    },
+    "forms_tables_mutated": false,
+    "structured_lifeswitch_data_mutated": false,
+    "visible_chat_history_mutated": false,
+    "zep_data_mutated": false
+  },
+  "session_proofs": [
+    "lifeswitch.legacy_public_tables_backup_sha256",
+    "lifeswitch.legacy_public_tables_restore_receipt_sha256"
+  ],
+  "status": "candidate_not_applied",
+  "target": {
+    "database": "memory",
+    "execution_role": "sage",
+    "server": "seebx"
+  },
+  "transaction": {
+    "advisory_lock": "legacy_public_tables_retirement_v1",
+    "all_or_nothing": true,
+    "migration_supplies_begin_commit": true
+  }
+}

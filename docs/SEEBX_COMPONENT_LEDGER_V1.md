@@ -139,6 +139,7 @@ Source commit: `49f9e60cf4321c8e42c359845c1a62a8c987614d`
 | old `memory_ingest_private` | seven tables; two terminal outbox rows; candidate `c840afed` removes all external routine and trigger dependencies | FINAL BACKUP/RESTORE, then retire with exact fail-closed package |
 | old `memory` | 160 ordinary tables; no candidate runtime SQL reference; exact clone retirement preserves every retained schema byte | FINAL BACKUP/RESTORE, then retire with exact fail-closed package |
 | five old Vantage schemas | removed from production after exact dump, temporary restore, count verification, and manifest receipt | RETIRED WITH RECOVERY EVIDENCE |
+| five unmounted legacy public tables | `chat_messages`, `chat_sessions`, `feedback_signals`, `vantage_answer_trace`, and `vs_profiles`; 1,260 total rows; no candidate SQL caller or database dependency | FINAL BACKUP/RESTORE, then retire with exact non-cascading package |
 | isolated `lifeswitch_*` schemas | live canonical domain data | KEEP |
 | isolated `catalog_dev` | live canonical domain catalog candidate | KEEP and become sole catalog |
 
