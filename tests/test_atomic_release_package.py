@@ -10,6 +10,7 @@ import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 
+from scripts.build_runtime_environment import build_runtime_archive
 from scripts.verify_atomic_release_package import ReleasePackageError, main, verify_release_package
 
 
@@ -22,6 +23,7 @@ ARTIFACT_NAMES = (
     "frontend_source_bundle",
     "frontend_build_archive",
     "frontend_build_manifest",
+    "runtime_archive",
     "runtime_receipt",
     "migration_package",
     "migration_receipt",
@@ -111,6 +113,8 @@ class AtomicReleasePackageTests(unittest.TestCase):
             encoding="utf-8",
         )
 
+        self.runtime_archive = self.root / "runtime-environment.tar"
+        runtime_archive = self._runtime_archive()
         self.runtime = self.root / "runtime.json"
         self.runtime.write_text(
             json.dumps(
@@ -129,6 +133,7 @@ class AtomicReleasePackageTests(unittest.TestCase):
                         },
                         "import_count": 12,
                     },
+                    "runtime_archive": runtime_archive,
                     "wheelhouse": {
                         "lock_sha256": "7" * 64,
                         "manifest_sha256": "8" * 64,
@@ -169,6 +174,7 @@ class AtomicReleasePackageTests(unittest.TestCase):
             "frontend_source_bundle": self.frontend_bundle,
             "frontend_build_archive": self.frontend_build_archive,
             "frontend_build_manifest": self.frontend_build_manifest,
+            "runtime_archive": self.runtime_archive,
             "runtime_receipt": self.runtime,
             "migration_package": self.migration_package,
             "migration_receipt": self.migration,
@@ -277,6 +283,20 @@ class AtomicReleasePackageTests(unittest.TestCase):
             "static_asset_count": 1,
         }
 
+    def _runtime_archive(self) -> dict[str, object]:
+        runtime = self.root / "runtime-tree"
+        (runtime / "bin").mkdir(parents=True)
+        (runtime / "lib").mkdir()
+        for name in ("python", "uvicorn"):
+            path = runtime / "bin" / name
+            path.write_bytes((name + "\n").encode())
+            path.chmod(0o555)
+        module = runtime / "lib" / "module.py"
+        module.write_text("VALUE = 1\n", encoding="utf-8")
+        module.chmod(0o444)
+        (runtime / "lib64").symlink_to("lib")
+        return build_runtime_archive(runtime, self.runtime_archive)
+
     def _git_bundle(self, name: str) -> tuple[str, str, str, str, Path]:
         repository = self.root / (name + "-repository")
         subprocess.run(["git", "init", "-q", repository], check=True)
@@ -372,8 +392,9 @@ class AtomicReleasePackageTests(unittest.TestCase):
         result = self.verify()
         self.assertTrue(result["package_integrity_ready"])
         self.assertFalse(result["production_activation_authorized"])
-        self.assertEqual(result["artifact_count"], 13)
+        self.assertEqual(result["artifact_count"], 14)
         self.assertEqual(result["backend_commit"], self.backend_candidate)
+        self.assertEqual(result["runtime_archive_sha256"], digest(self.runtime_archive))
         self.assertNotIn(str(self.root), json.dumps(result))
 
     def test_artifact_hash_drift_fails_closed(self) -> None:
@@ -430,6 +451,61 @@ class AtomicReleasePackageTests(unittest.TestCase):
     def test_runtime_cross_binding_mismatch_fails_closed(self) -> None:
         self.package["runtime_binding"]["repository_commit"] = "a" * 40
         with self.assertRaisesRegex(ReleasePackageError, "declared_runtime_commit_mismatch"):
+            self.verify()
+
+    def test_runtime_archive_receipt_inventory_mismatch_fails_closed(self) -> None:
+        document = json.loads(self.runtime.read_text(encoding="utf-8"))
+        document["runtime_archive"]["file_count"] += 1
+        self.runtime.write_text(json.dumps(document), encoding="utf-8")
+        self.package["artifacts"]["runtime_receipt"]["sha256"] = digest(self.runtime)
+        with self.assertRaisesRegex(
+            ReleasePackageError,
+            "runtime_archive_receipt_binding_mismatch",
+        ):
+            self.verify()
+
+    def test_runtime_archive_rejects_environment_files(self) -> None:
+        payload = b"SECRET=value\n"
+        self.runtime_archive.chmod(0o600)
+        with tarfile.open(self.runtime_archive, mode="a") as archive:
+            member = tarfile.TarInfo("venv/.env.production")
+            member.mode = 0o444
+            member.uid = 0
+            member.gid = 0
+            member.uname = ""
+            member.gname = ""
+            member.mtime = 0
+            member.size = len(payload)
+            archive.addfile(member, io.BytesIO(payload))
+        self.package["artifacts"]["runtime_archive"]["sha256"] = digest(
+            self.runtime_archive
+        )
+        with self.assertRaisesRegex(
+            ReleasePackageError,
+            "runtime_archive_sensitive_path_forbidden",
+        ):
+            self.verify()
+
+    def test_runtime_archive_rejects_symlink_escape(self) -> None:
+        self.runtime_archive.chmod(0o600)
+        with tarfile.open(self.runtime_archive, mode="a") as archive:
+            member = tarfile.TarInfo("venv/lib/escape")
+            member.type = tarfile.SYMTYPE
+            member.mode = 0o777
+            member.uid = 0
+            member.gid = 0
+            member.uname = ""
+            member.gname = ""
+            member.mtime = 0
+            member.linkname = "../../../outside"
+            archive.addfile(member)
+        self.package["artifacts"]["runtime_archive"]["sha256"] = digest(
+            self.runtime_archive
+        )
+        with self.assertRaisesRegex(
+            ReleasePackageError,
+            "runtime_archive_symlink_escape",
+        ):
             self.verify()
 
     def test_unsafe_or_duplicate_artifact_paths_fail_closed(self) -> None:

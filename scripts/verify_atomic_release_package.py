@@ -28,6 +28,7 @@ REQUIRED_ARTIFACTS = (
     "frontend_source_bundle",
     "frontend_build_archive",
     "frontend_build_manifest",
+    "runtime_archive",
     "runtime_receipt",
     "migration_package",
     "migration_receipt",
@@ -50,6 +51,10 @@ def sha256_file(path: Path) -> str:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def canonical_bytes(value: Any) -> bytes:
+    return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
 
 def _read_json(path: Path, reason: str) -> dict[str, Any]:
@@ -272,6 +277,149 @@ def _verify_frontend_archive(archive: Path) -> dict[str, int]:
     }
 
 
+def _normalized_link_target(path: PurePosixPath, target: str) -> PurePosixPath:
+    _expect(bool(target) and not target.startswith("/") and "\\" not in target, "runtime_archive_symlink_target_invalid")
+    parts: list[str] = []
+    for part in (*path.parent.parts, *PurePosixPath(target).parts):
+        if part in {"", "."}:
+            continue
+        if part == "..":
+            _expect(bool(parts), "runtime_archive_symlink_escape")
+            parts.pop()
+            continue
+        parts.append(part)
+    resolved = PurePosixPath(*parts)
+    _expect(bool(resolved.parts) and resolved.parts[0] == "venv", "runtime_archive_symlink_escape")
+    return resolved
+
+
+def _runtime_path_forbidden(path: PurePosixPath) -> bool:
+    return any(
+        part in {".aws", ".ssh", "credentials"}
+        or part == ".env"
+        or part.startswith(".env.")
+        for part in path.parts
+    )
+
+
+def _verify_runtime_archive(archive: Path) -> dict[str, Any]:
+    names: set[PurePosixPath] = set()
+    links: list[tuple[PurePosixPath, str]] = []
+    records: list[dict[str, Any]] = []
+    file_count = 0
+    directory_count = 0
+    symlink_count = 0
+    unpacked_bytes = 0
+    try:
+        handle = tarfile.open(archive, mode="r:")
+    except (OSError, tarfile.TarError) as error:
+        raise ReleasePackageError("runtime_archive_invalid") from error
+    try:
+        for member in handle:
+            raw_name = member.name
+            while raw_name.startswith("./"):
+                raw_name = raw_name[2:]
+            path = PurePosixPath(raw_name)
+            _expect(
+                bool(raw_name)
+                and raw_name != "."
+                and not path.is_absolute()
+                and ".." not in path.parts
+                and "\\" not in raw_name
+                and bool(path.parts)
+                and path.parts[0] == "venv",
+                "runtime_archive_path_invalid",
+            )
+            _expect(path not in names, "runtime_archive_duplicate_path")
+            names.add(path)
+            _expect(not _runtime_path_forbidden(path), "runtime_archive_sensitive_path_forbidden")
+            _expect(
+                member.uid == 0
+                and member.gid == 0
+                and member.uname == ""
+                and member.gname == ""
+                and member.mtime == 0,
+                "runtime_archive_metadata_invalid",
+            )
+            if member.isdir():
+                _expect(member.mode == 0o555, "runtime_archive_mode_invalid")
+                directory_count += 1
+                records.append(
+                    {"mode": "0555", "path": path.as_posix(), "type": "directory"}
+                )
+                continue
+            if member.issym():
+                _expect(member.mode == 0o777, "runtime_archive_mode_invalid")
+                _normalized_link_target(path, member.linkname)
+                links.append((path, member.linkname))
+                symlink_count += 1
+                records.append(
+                    {
+                        "path": path.as_posix(),
+                        "target": member.linkname,
+                        "type": "symlink",
+                    }
+                )
+                continue
+            _expect(member.isfile(), "runtime_archive_entry_type_invalid")
+            _expect(member.mode in {0o444, 0o555}, "runtime_archive_mode_invalid")
+            _expect(member.size >= 0, "runtime_archive_size_invalid")
+            extracted = handle.extractfile(member)
+            _expect(extracted is not None, "runtime_archive_file_unreadable")
+            digest = hashlib.sha256()
+            actual_size = 0
+            while True:
+                block = extracted.read(1024 * 1024)
+                if not block:
+                    break
+                digest.update(block)
+                actual_size += len(block)
+            _expect(actual_size == member.size, "runtime_archive_size_mismatch")
+            file_count += 1
+            unpacked_bytes += actual_size
+            _expect(
+                file_count <= 100_000 and unpacked_bytes <= 2 * 1024**3,
+                "runtime_archive_resource_limit_exceeded",
+            )
+            records.append(
+                {
+                    "bytes": actual_size,
+                    "mode": f"{member.mode:04o}",
+                    "path": path.as_posix(),
+                    "sha256": digest.hexdigest(),
+                    "type": "file",
+                }
+            )
+    except (OSError, tarfile.TarError) as error:
+        raise ReleasePackageError("runtime_archive_invalid") from error
+    finally:
+        handle.close()
+    _expect(PurePosixPath("venv") in names, "runtime_archive_root_missing")
+    _expect(PurePosixPath("venv/bin/python") in names, "runtime_archive_python_missing")
+    _expect(PurePosixPath("venv/bin/uvicorn") in names, "runtime_archive_uvicorn_missing")
+    for path, target in links:
+        _expect(
+            _normalized_link_target(path, target) in names,
+            "runtime_archive_symlink_target_missing",
+        )
+    records.sort(
+        key=lambda record: (
+            len(PurePosixPath(record["path"]).parts),
+            record["path"],
+        )
+    )
+    return {
+        "path": archive.name,
+        "sha256": sha256_file(archive),
+        "bytes": archive.stat().st_size,
+        "file_count": file_count,
+        "directory_count": directory_count,
+        "symlink_count": symlink_count,
+        "unpacked_bytes": unpacked_bytes,
+        "tree_manifest_sha256": hashlib.sha256(canonical_bytes(records)).hexdigest(),
+    }
+
+
 def verify_release_package(
     package: Mapping[str, Any],
     *,
@@ -352,12 +500,14 @@ def verify_release_package(
     )
 
     runtime = _read_json(resolved["runtime_receipt"], "runtime_receipt_invalid")
+    runtime_archive = _verify_runtime_archive(resolved["runtime_archive"])
     runtime_binding = package["runtime_binding"]
     _expect(runtime.get("schema_version") == RUNTIME_SCHEMA, "runtime_receipt_schema_invalid")
     _expect(runtime.get("status") == "pass" and runtime.get("activated") is False, "runtime_receipt_state_invalid")
     runtime_repository = runtime.get("repository") or {}
     runtime_details = runtime.get("runtime") or {}
     wheelhouse = runtime.get("wheelhouse") or {}
+    declared_runtime_archive = runtime.get("runtime_archive") or {}
     backend = sources["backend"]
     _expect(runtime_repository.get("commit") == backend["candidate_commit"], "runtime_backend_commit_mismatch")
     _expect(runtime_repository.get("tree") == backend["candidate_tree"], "runtime_backend_tree_mismatch")
@@ -368,6 +518,10 @@ def verify_release_package(
     dependencies = runtime_details.get("dependency_preflight", {}).get("dependencies", {})
     _expect(dependencies.get("verified_count") == 12 and dependencies.get("expected_count") == 12, "runtime_dependency_count_mismatch")
     _expect(runtime_details.get("import_count") == 12, "runtime_import_count_mismatch")
+    _expect(
+        declared_runtime_archive == runtime_archive,
+        "runtime_archive_receipt_binding_mismatch",
+    )
 
     migration_package = _read_json(
         resolved["migration_package"],
@@ -427,6 +581,7 @@ def verify_release_package(
         "frontend_build_archive_sha256": actual_hashes["frontend_build_archive"],
         "frontend_build_manifest_sha256": actual_hashes["frontend_build_manifest"],
         "runtime_receipt_sha256": actual_hashes["runtime_receipt"],
+        "runtime_archive_sha256": actual_hashes["runtime_archive"],
         "migration_receipt_sha256": actual_hashes["migration_receipt"],
         "migration_package_sha256": actual_hashes["migration_package"],
         "recovery_receipt_sha256": actual_hashes["recovery_receipt"],

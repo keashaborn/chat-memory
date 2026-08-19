@@ -246,6 +246,26 @@
           ],
           "type": "object"
         },
+        "runtime_archive": {
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "maxLength": 240,
+              "minLength": 1,
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$",
+              "type": "string"
+            },
+            "sha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "sha256"
+          ],
+          "type": "object"
+        },
         "runtime_receipt": {
           "additionalProperties": false,
           "properties": {
@@ -272,6 +292,7 @@
         "frontend_source_bundle",
         "frontend_build_archive",
         "frontend_build_manifest",
+        "runtime_archive",
         "runtime_receipt",
         "migration_package",
         "migration_receipt",

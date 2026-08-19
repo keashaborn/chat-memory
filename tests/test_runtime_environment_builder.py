@@ -11,6 +11,8 @@ from pathlib import Path
 
 from scripts.build_runtime_environment import (
     RuntimeBuildContractError,
+    RuntimeBuildExecutionError,
+    build_runtime_archive,
     build_pip_install_command,
     validate_repository,
     validate_runtime_output_root,
@@ -100,6 +102,40 @@ class RuntimeEnvironmentBuilderTests(unittest.TestCase):
         self.assertIn("--only-binary=:all:", command)
         self.assertIn("--require-hashes", command)
         self.assertNotIn("https://pypi.org/simple", command)
+
+    def test_runtime_archive_is_deterministic_and_binds_internal_symlinks(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            venv = root / "venv"
+            (venv / "bin").mkdir(parents=True)
+            (venv / "lib").mkdir()
+            for name in ("python", "uvicorn"):
+                path = venv / "bin" / name
+                path.write_bytes((name + "\n").encode())
+                path.chmod(0o555)
+            (venv / "lib" / "module.py").write_text("VALUE = 1\n", encoding="utf-8")
+            (venv / "lib" / "module.py").chmod(0o444)
+            (venv / "lib64").symlink_to("lib")
+            first = build_runtime_archive(venv, root / "runtime-one.tar")
+            second = build_runtime_archive(venv, root / "runtime-two.tar")
+            self.assertEqual(first["sha256"], second["sha256"])
+            self.assertEqual(first["tree_manifest_sha256"], second["tree_manifest_sha256"])
+            self.assertEqual(first["file_count"], 3)
+            self.assertEqual(first["directory_count"], 3)
+            self.assertEqual(first["symlink_count"], 1)
+
+    def test_runtime_archive_rejects_symlink_escape(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            venv = root / "venv"
+            (venv / "bin").mkdir(parents=True)
+            (venv / "bin" / "python").write_bytes(b"python")
+            (venv / "escape").symlink_to("../../outside")
+            with self.assertRaisesRegex(
+                RuntimeBuildExecutionError,
+                "runtime_symlink_outside_environment",
+            ):
+                build_runtime_archive(venv, root / "runtime.tar")
 
     def test_output_root_is_root_owned_non_writable_and_traversable(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

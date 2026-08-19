@@ -13,8 +13,9 @@ import shutil
 import stat
 import subprocess
 import sys
+import tarfile
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Sequence
 
 SCHEMA_VERSION = "seebx-runtime-environment-receipt-v1"
@@ -344,6 +345,137 @@ def _freeze_tree(root: Path) -> None:
     os.chmod(root, 0o555)
 
 
+def _normalized_link_target(path: PurePosixPath, target: str) -> PurePosixPath:
+    if not target or target.startswith("/") or "\\" in target:
+        raise RuntimeBuildExecutionError("runtime_symlink_target_invalid")
+    parts: list[str] = []
+    for part in (*path.parent.parts, *PurePosixPath(target).parts):
+        if part in {"", "."}:
+            continue
+        if part == "..":
+            if not parts:
+                raise RuntimeBuildExecutionError("runtime_symlink_outside_environment")
+            parts.pop()
+            continue
+        parts.append(part)
+    resolved = PurePosixPath(*parts)
+    if not resolved.parts or resolved.parts[0] != "venv":
+        raise RuntimeBuildExecutionError("runtime_symlink_outside_environment")
+    return resolved
+
+
+def _runtime_paths(root: Path) -> list[Path]:
+    paths = [root]
+    for directory, names, filenames in os.walk(root, topdown=True, followlinks=False):
+        base = Path(directory)
+        names.sort()
+        filenames.sort()
+        for name in list(names):
+            path = base / name
+            paths.append(path)
+            if path.is_symlink():
+                names.remove(name)
+        paths.extend(base / name for name in filenames)
+    return sorted(paths, key=lambda path: (len(path.relative_to(root).parts), path.as_posix()))
+
+
+def _forbidden_runtime_path(path: PurePosixPath) -> bool:
+    return any(
+        part in {".aws", ".ssh", "credentials"}
+        or part == ".env"
+        or part.startswith(".env.")
+        for part in path.parts
+    )
+
+
+def build_runtime_archive(root: Path, archive_path: Path) -> dict[str, Any]:
+    root = root.resolve(strict=True)
+    entries = _runtime_paths(root)
+    member_names = {
+        PurePosixPath("venv", *path.relative_to(root).parts) for path in entries
+    }
+    records: list[dict[str, Any]] = []
+    file_count = 0
+    directory_count = 0
+    symlink_count = 0
+    unpacked_bytes = 0
+    temporary = archive_path.with_name("." + archive_path.name + ".tmp")
+    try:
+        with tarfile.open(temporary, mode="w", format=tarfile.PAX_FORMAT) as archive:
+            for path in entries:
+                member_path = PurePosixPath("venv", *path.relative_to(root).parts)
+                if _forbidden_runtime_path(member_path):
+                    raise RuntimeBuildExecutionError("runtime_archive_sensitive_path_forbidden")
+                item = path.lstat()
+                info = tarfile.TarInfo(member_path.as_posix())
+                info.uid = 0
+                info.gid = 0
+                info.uname = ""
+                info.gname = ""
+                info.mtime = 0
+                if stat.S_ISDIR(item.st_mode):
+                    info.type = tarfile.DIRTYPE
+                    info.mode = 0o555
+                    archive.addfile(info)
+                    directory_count += 1
+                    records.append(
+                        {"mode": "0555", "path": info.name, "type": "directory"}
+                    )
+                elif stat.S_ISLNK(item.st_mode):
+                    target = os.readlink(path)
+                    resolved_target = _normalized_link_target(member_path, target)
+                    if resolved_target not in member_names:
+                        raise RuntimeBuildExecutionError("runtime_symlink_target_missing")
+                    info.type = tarfile.SYMTYPE
+                    info.mode = 0o777
+                    info.linkname = target
+                    archive.addfile(info)
+                    symlink_count += 1
+                    records.append(
+                        {
+                            "path": info.name,
+                            "target": target,
+                            "type": "symlink",
+                        }
+                    )
+                elif stat.S_ISREG(item.st_mode):
+                    mode = 0o555 if item.st_mode & 0o111 else 0o444
+                    info.type = tarfile.REGTYPE
+                    info.mode = mode
+                    info.size = item.st_size
+                    with path.open("rb") as handle:
+                        archive.addfile(info, handle)
+                    digest = sha256_file(path)
+                    file_count += 1
+                    unpacked_bytes += item.st_size
+                    records.append(
+                        {
+                            "bytes": item.st_size,
+                            "mode": f"{mode:04o}",
+                            "path": info.name,
+                            "sha256": digest,
+                            "type": "file",
+                        }
+                    )
+                else:
+                    raise RuntimeBuildExecutionError("runtime_archive_entry_type_invalid")
+        os.chmod(temporary, 0o444)
+        os.replace(temporary, archive_path)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
+    return {
+        "path": archive_path.name,
+        "sha256": sha256_file(archive_path),
+        "bytes": archive_path.stat().st_size,
+        "file_count": file_count,
+        "directory_count": directory_count,
+        "symlink_count": symlink_count,
+        "unpacked_bytes": unpacked_bytes,
+        "tree_manifest_sha256": hashlib.sha256(canonical_bytes(records)).hexdigest(),
+    }
+
+
 def execute(arguments: argparse.Namespace) -> dict[str, Any]:
     if os.geteuid() != 0:
         raise RuntimeBuildContractError("root_execution_required")
@@ -417,6 +549,11 @@ def execute(arguments: argparse.Namespace) -> dict[str, Any]:
             [str(venv / "bin/python"), "-I", "-c", import_program],
             label="runtime_import_smoke",
         )
+        _freeze_tree(venv)
+        runtime_archive = build_runtime_archive(
+            venv,
+            staging / "runtime-environment.tar",
+        )
         receipt = {
             "schema_version": SCHEMA_VERSION,
             "status": "pass",
@@ -432,6 +569,7 @@ def execute(arguments: argparse.Namespace) -> dict[str, Any]:
                 "pip_check": pip_check,
                 "import_count": len(IMPORT_MODULES),
             },
+            "runtime_archive": runtime_archive,
             "wheelhouse": wheelhouse_state,
             "bindings": {
                 "builder_sha256": sha256_file(Path(__file__).resolve()),
@@ -444,7 +582,6 @@ def execute(arguments: argparse.Namespace) -> dict[str, Any]:
         }
         receipt_bytes = canonical_bytes(receipt)
         _atomic_write(staging / "runtime-environment-receipt.json", receipt_bytes)
-        _freeze_tree(venv)
         os.chmod(staging, 0o555)
         os.replace(staging, target)
         published = True
@@ -459,6 +596,7 @@ def execute(arguments: argparse.Namespace) -> dict[str, Any]:
             "activated": False,
             "runtime_path": str(target),
             "receipt_sha256": hashlib.sha256(receipt_bytes).hexdigest(),
+            "runtime_archive_sha256": runtime_archive["sha256"],
             "repository_commit": repository_state["commit"],
             "runtime_lock_sha256": wheelhouse_state["lock_sha256"],
         }
