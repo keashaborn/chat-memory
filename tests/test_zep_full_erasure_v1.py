@@ -143,8 +143,12 @@ class ConversationErasureServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(repository.calls, 2)
 
     def test_route_cannot_reach_protected_lifeswitch_postgres(self) -> None:
-        source = (ROOT / "app.py").read_text()
-        route = source.index('@app.delete("/memory/chat-and-zep/clear")')
+        source = (
+            ROOT / "seebx/capabilities/conversation/erasure_routes.py"
+        ).read_text()
+        route = source.index(
+            '@router.delete("/memory/chat-and-zep/clear")'
+        )
         block = source[route : route + 3_500]
         self.assertIn("_require_verified_deletion_actor", block)
         helper_start = source.index(

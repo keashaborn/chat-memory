@@ -48,6 +48,9 @@ class ThreadHttpIdentityTests(unittest.IsolatedAsyncioTestCase):
             cls.thread_routes = importlib.import_module(
                 "seebx.capabilities.conversation.thread_routes"
             )
+            cls.erasure_routes = importlib.import_module(
+                "seebx.capabilities.conversation.erasure_routes"
+            )
 
     def test_canonical_router_owns_exact_thread_lifecycle_surface(self) -> None:
         application = FastAPI()
@@ -223,7 +226,36 @@ class ThreadHttpIdentityTests(unittest.IsolatedAsyncioTestCase):
             "invalid_supabase_access_token",
         )
 
-    async def test_history_clear_identity_failure_prevents_erasure(self) -> None:
+    def test_canonical_router_owns_exact_erasure_surface(self) -> None:
+        application = FastAPI()
+        application.include_router(
+            self.erasure_routes.create_conversation_erasure_router(
+                self.backend.CONVERSATION_ERASURE
+            )
+        )
+        actual = {
+            (route.path, tuple(sorted(route.methods or ())))
+            for route in application.routes
+            if route.path.startswith(("/chat-history", "/memory", "/user"))
+            or route.path in {
+                "/threads/{thread_id}",
+                "/threads/{thread_id}/messages/{message_id}/truncate",
+            }
+        }
+        expected = {
+            ("/chat-history/clear", ("POST",)),
+            ("/memory/chat-and-zep/clear", ("DELETE",)),
+            (
+                "/threads/{thread_id}/messages/{message_id}/truncate",
+                ("DELETE",),
+            ),
+            ("/threads/{thread_id}", ("DELETE",)),
+            ("/user/{user_id}/data", ("DELETE",)),
+            ("/user/{user_id}/recent", ("DELETE",)),
+        }
+        self.assertEqual(actual, expected)
+
+    def test_history_clear_identity_failure_prevents_erasure(self) -> None:
         authority = AsyncMock(
             side_effect=HTTPException(
                 status_code=401,
@@ -231,13 +263,15 @@ class ThreadHttpIdentityTests(unittest.IsolatedAsyncioTestCase):
             )
         )
         erasure = AsyncMock()
-        body = self.backend.ChatHistoryClearReq(
-            scope="all",
-            confirmation="CLEAR CHAT HISTORY",
+        application = FastAPI()
+        application.include_router(
+            self.erasure_routes.create_conversation_erasure_router(
+                self.backend.CONVERSATION_ERASURE
+            )
         )
         with (
             patch.object(
-                self.backend,
+                self.erasure_routes,
                 "require_verified_supabase_request_identity",
                 new=authority,
             ),
@@ -247,15 +281,22 @@ class ThreadHttpIdentityTests(unittest.IsolatedAsyncioTestCase):
                 new=erasure,
             ),
         ):
-            denied = await self.backend.chat_history_clear(body, request())
-        self.assertEqual(denied.status_code, 401)
+            response = TestClient(application).post(
+                "/chat-history/clear",
+                headers={"x-vs-actor-user-id": OWNER},
+                json={
+                    "scope": "all",
+                    "confirmation": "CLEAR CHAT HISTORY",
+                },
+            )
+        self.assertEqual(response.status_code, 401)
         self.assertEqual(
-            json.loads(denied.body)["detail"],
+            response.json()["detail"],
             "invalid_supabase_access_token",
         )
         erasure.assert_not_awaited()
 
-    async def test_full_erasure_uses_verified_supabase_owner(self) -> None:
+    def test_full_erasure_uses_verified_supabase_owner(self) -> None:
         authority = AsyncMock(
             return_value=SimpleNamespace(actor_user_id=OWNER)
         )
@@ -267,9 +308,15 @@ class ThreadHttpIdentityTests(unittest.IsolatedAsyncioTestCase):
             receipt_sha256="a" * 64,
             completed_at="2026-08-18T00:00:00Z",
         ))
+        application = FastAPI()
+        application.include_router(
+            self.erasure_routes.create_conversation_erasure_router(
+                self.backend.CONVERSATION_ERASURE
+            )
+        )
         with (
             patch.object(
-                self.backend,
+                self.erasure_routes,
                 "require_verified_supabase_request_identity",
                 new=authority,
             ),
@@ -279,8 +326,15 @@ class ThreadHttpIdentityTests(unittest.IsolatedAsyncioTestCase):
                 new=erasure,
             ),
         ):
-            response = await self.backend.chat_and_zep_full_clear(request())
-        self.assertEqual(response["status"], "completed")
+            response = TestClient(application).delete(
+                "/memory/chat-and-zep/clear",
+                headers={
+                    "authorization": "Bearer synthetic",
+                    "x-vs-actor-user-id": OWNER,
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "completed")
         authority.assert_awaited_once()
         erasure.assert_awaited_once()
         self.assertEqual(

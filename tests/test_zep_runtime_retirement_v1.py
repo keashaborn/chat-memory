@@ -53,9 +53,13 @@ class ZepRuntimeRetirementContractTests(unittest.TestCase):
             self.assertNotIn(retired_symbol, source)
 
     def test_chat_and_memory_deletion_contracts_remain_separate(self) -> None:
-        source = (ROOT / "app.py").read_text()
-        self.assertIn('@app.post("/chat-history/clear")', source)
-        self.assertIn('@app.delete("/memory/chat-and-zep/clear")', source)
+        source = (
+            ROOT / "seebx/capabilities/conversation/erasure_routes.py"
+        ).read_text()
+        self.assertIn('@router.post("/chat-history/clear")', source)
+        self.assertIn(
+            '@router.delete("/memory/chat-and-zep/clear")', source
+        )
         self.assertIn('"memory_retained": False', source)
 
     def test_live_response_roots_do_not_import_retired_memory_packages(self) -> None:
