@@ -60,7 +60,7 @@ def authorization(value: dict) -> dict:
                 "region": "us-east-2",
             },
             "frontend": {
-                "aws_account_id": "017820690695",
+                "aws_account_id": "339712834334",
                 "instance_id": "i-0508bfc4d4df4a63d",
                 "region": "us-east-2",
             },
