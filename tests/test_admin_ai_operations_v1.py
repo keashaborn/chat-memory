@@ -2,19 +2,27 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 import unittest
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from seebx.capabilities.operations.ai_operations import (
     AiOperationsError,
     acknowledge_admin_ai_operations_incident_v1,
     list_admin_ai_operations_incidents_v1,
     resolve_admin_ai_operations_incident_v1,
 )
+from seebx.capabilities.operations.ai_operations_routes import (
+    create_ai_operations_router,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "app.py"
+ROUTES = ROOT / "seebx/capabilities/operations/ai_operations_routes.py"
 ACTOR = str(uuid4())
 INCIDENT = str(uuid4())
 
@@ -237,14 +245,12 @@ class AdminAiOperationsV1Tests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(ctx.exception.code, "ai_operations_contract_invalid")
 
-    def test_routes_are_server_authoritative_and_body_has_no_actor(self):
-        source = APP.read_text(encoding="utf-8")
-        start = source.index("# ---------- AI Operations ----------")
-        end = source.index("# ---------- persistent chat memory ----------")
-        routes = source[start:end]
+    def test_routes_have_one_capability_owner_and_no_root_wrappers(self):
+        app_source = APP.read_text(encoding="utf-8")
+        routes = ROUTES.read_text(encoding="utf-8")
 
         self.assertIn(
-            '@app.get("/admin/ai-operations/incidents")',
+            '@router.get("/admin/ai-operations/incidents")',
             routes,
         )
         self.assertIn(
@@ -255,21 +261,90 @@ class AdminAiOperationsV1Tests(unittest.IsolatedAsyncioTestCase):
             '"/admin/ai-operations/incidents/{incident_id}/resolve"',
             routes,
         )
+        self.assertIn("require_verified_supabase_request_identity", routes)
         self.assertIn(
-            'AI_OPERATIONS_INSPECTION_CAPABILITY = "inspector.view"',
-            routes,
-        )
-        self.assertIn(
-            'AI_OPERATIONS_MANAGEMENT_CAPABILITY = "incident.manage"',
-            routes,
-        )
-        self.assertIn("_actor_user_id(req)", routes)
-        self.assertIn(
-            'req.headers.get("x-vs-authorized-capability")',
+            'request.headers.get("x-vs-authorized-capability")',
             routes,
         )
         self.assertNotIn("BaseModel", routes)
         self.assertNotIn("actor_user_id:", routes)
+        self.assertIn("create_ai_operations_router", app_source)
+        self.assertNotIn('@app.get("/admin/ai-operations/incidents")', app_source)
+        self.assertNotIn("_require_ai_operations_actor", app_source)
+
+
+class AdminAiOperationsRouteTests(unittest.TestCase):
+    def setUp(self) -> None:
+        app = FastAPI()
+        app.include_router(create_ai_operations_router("postgresql://private"))
+        self.client = TestClient(app)
+
+    def test_missing_verified_bearer_is_rejected(self) -> None:
+        response = self.client.get(
+            "/admin/ai-operations/incidents",
+            headers={
+                "x-vs-actor-user-id": ACTOR,
+                "x-vs-authorized-capability": "inspector.view",
+            },
+        )
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(
+            response.json()["error"],
+            "missing_or_invalid_supabase_bearer",
+        )
+        self.assertEqual(
+            response.headers["cache-control"].split(",")[0],
+            "private",
+        )
+
+    def test_verified_actor_and_capability_reach_operation(self) -> None:
+        expected = {"ok": True, "items": []}
+        with (
+            patch(
+                "seebx.capabilities.operations.ai_operations_routes."
+                "require_verified_supabase_request_identity",
+                new=AsyncMock(
+                    return_value=SimpleNamespace(actor_user_id=ACTOR)
+                ),
+            ),
+            patch(
+                "seebx.capabilities.operations.ai_operations_routes."
+                "list_admin_ai_operations_incidents_v1",
+                new=AsyncMock(return_value=expected),
+            ) as operation,
+        ):
+            response = self.client.get(
+                "/admin/ai-operations/incidents?state=open&limit=25",
+                headers={
+                    "authorization": "Bearer synthetic-test-token",
+                    "x-vs-actor-user-id": ACTOR,
+                    "x-vs-authorized-capability": "inspector.view",
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), expected)
+        operation.assert_awaited_once_with(
+            dsn="postgresql://private",
+            actor_user_id=ACTOR,
+            state="open",
+            limit=25,
+        )
+
+    def test_verified_actor_without_capability_is_rejected(self) -> None:
+        with patch(
+            "seebx.capabilities.operations.ai_operations_routes."
+            "require_verified_supabase_request_identity",
+            new=AsyncMock(return_value=SimpleNamespace(actor_user_id=ACTOR)),
+        ):
+            response = self.client.get(
+                "/admin/ai-operations/incidents",
+                headers={
+                    "authorization": "Bearer synthetic-test-token",
+                    "x-vs-actor-user-id": ACTOR,
+                },
+            )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["error"], "capability_required")
 
 
 if __name__ == "__main__":
