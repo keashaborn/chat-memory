@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import unittest
 
-from rag_engine.trusted_web_monitoring_v1 import (
+from seebx.capabilities.search.monitoring import (
     TrustedWebMonitoringSummaryV1,
     evaluate_trusted_web_monitoring_thresholds_v1,
     load_trusted_web_monitoring_summary_v1,

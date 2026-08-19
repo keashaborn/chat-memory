@@ -26,19 +26,19 @@ from seebx.capabilities.search.current_news import router as current_news_router
 from seebx.capabilities.search.execution import (
     router as search_execution_router_v1,
 )
-from rag_engine.telemetry_router import router as telemetry_router
+from seebx.capabilities.observability.telemetry import router as telemetry_router
 from seebx.capabilities.nutrition.meals import router as lifeswitch_meals_router
 from seebx.capabilities.nutrition.logs import router as lifeswitch_nutrition_log_router
 from seebx.capabilities.nutrition.routes import router as lifeswitch_nutrition_router
 from seebx.capabilities.nutrition.batch import router as lifeswitch_nutrition_log_batch_router
 from seebx.capabilities.training.routes import router as lifeswitch_training_router
-from rag_engine.lifeswitch_measurements_router import router as lifeswitch_measurements_router
+from seebx.capabilities.measurements.routes import router as lifeswitch_measurements_router
 from rag_engine.lifeswitch_plan_router import router as lifeswitch_plan_router
-from rag_engine.lifeswitch_account_timezone_router_v1 import (
+from seebx.capabilities.preferences.timezone import (
     router as lifeswitch_account_timezone_router_v1,
 )
-from rag_engine.catalog_router import router as catalog_router
-from rag_engine.vb_tagging import infer_vb_tags
+from seebx.capabilities.catalog.routes import router as catalog_router
+from seebx.capabilities.conversation.tagging import infer_vb_tags
 from seebx.capabilities.conversation.attachment_routes import (
     router as conversation_attachment_router,
 )
@@ -157,12 +157,12 @@ from seebx.capabilities.conversation.erasure import (
     ChatHistoryClearError,
     ConversationErasureService,
 )
-from rag_engine.thread_title_v1 import (
+from seebx.capabilities.conversation.thread_title import (
     generate_semantic_title,
     select_first_meaningful_exchange,
 )
 from seebx.contracts.conversation import WEB_ASSISTANT_SOURCE
-from rag_engine.admin_ai_operations_v1 import (
+from seebx.capabilities.operations.ai_operations import (
     AiOperationsError,
     acknowledge_admin_ai_operations_incident_v1,
     list_admin_ai_operations_incidents_v1,
@@ -498,7 +498,7 @@ async def openapi_json():
 
 def _vb_source_normalize(source: Optional[str]) -> str:
     """
-    Normalize upstream 'source' strings to the canonical labels expected by vb_tagging.py.
+    Normalize upstream 'source' strings to the canonical labels expected by seebx.capabilities.conversation.tagging.
     Only used when VB_TAG_SOURCE_NORMALIZE=1.
     """
     s = (source or "").lower()

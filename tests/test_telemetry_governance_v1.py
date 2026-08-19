@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 os.environ.setdefault("POSTGRES_DSN", "postgresql://test-only")
 
-from rag_engine import telemetry_router as telemetry
+from seebx.capabilities.observability import telemetry
 
 
 ACTOR = "1240822d-ac9a-4096-95aa-e2b24d36ef50"

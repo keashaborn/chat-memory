@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from rag_engine.lifeswitch_account_timezone_router_v1 import (
+from seebx.capabilities.preferences.timezone import (
     TimezoneUpdateV1,
     _actor,
     _request_hash,
@@ -84,7 +84,7 @@ class LifeSwitchAccountTimezoneV1Tests(unittest.TestCase):
 
     def test_router_does_not_accept_owner_from_query_or_body(self) -> None:
         source = (
-            ROOT / "rag_engine/lifeswitch_account_timezone_router_v1.py"
+            ROOT / "seebx/capabilities/preferences/timezone.py"
         ).read_text()
         self.assertNotIn("owner_user_id: str", source)
         self.assertIn('req.headers.get("x-vs-actor-user-id")', source)

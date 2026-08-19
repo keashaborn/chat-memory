@@ -18,7 +18,7 @@ ROLLBACK = (
     / "sql"
     / "20260727_lifeswitch_training_exercise_family_v1_rollback.sql"
 )
-ROUTER = ROOT / "rag_engine" / "catalog_router.py"
+ROUTER = ROOT / "seebx" / "capabilities" / "catalog" / "routes.py"
 
 
 class TrainingExerciseFamilyCatalogContractTest(unittest.TestCase):

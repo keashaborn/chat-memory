@@ -5,7 +5,7 @@ from pathlib import Path
 import unittest
 from uuid import uuid4
 
-from rag_engine.admin_ai_operations_v1 import (
+from seebx.capabilities.operations.ai_operations import (
     AiOperationsError,
     acknowledge_admin_ai_operations_incident_v1,
     list_admin_ai_operations_incidents_v1,

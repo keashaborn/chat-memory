@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from rag_engine.thread_title_v1 import (
+from seebx.capabilities.conversation.thread_title import (
     generate_semantic_title,
     is_meaningful_user_turn,
     normalize_generated_title,

@@ -76,7 +76,7 @@ Source commit: `49f9e60cf4321c8e42c359845c1a62a8c987614d`
 | Current-news search profile | Candidate expresses current news through the same provider, registry, evidence, admission, audit, and runtime boundaries | search capability policy profile | KEEP | Preserve freshness/source policy and exact public contract; do not recreate a separate engine |
 | Legacy search-owned `rag_engine` modules | Candidate removes or moves 15 router, authorization, plan, budget, evidence, audit, provider, policy, registry, contract, NCBI, and ODS modules; `bed831f5` removes the final shared manifest path and no candidate caller imports it | none | RETIRE CANDIDATE COMPLETE | Keep Git rollback; verify deployment import graph, routes, authenticated behavior, ODS timer, and stored audit records before production retirement is accepted |
 | Legacy RAG/vector modules | Mostly dormant with Qdrant/Vantage dependencies | none or offline evaluation | ARCHIVE then RETIRE | Generated import graph and no runtime settings/services |
-| `catalog_router.py` | Live against old platform `catalog_dev` | catalog capability in LifeSwitch database | MIGRATE + CONSOLIDATE | Repoint after row/function parity; do not keep two writable catalogs |
+| `seebx/capabilities/catalog/routes.py` | Live against old platform `catalog_dev` | catalog capability in LifeSwitch database | MIGRATE + CONSOLIDATE | Repoint after row/function parity; do not keep two writable catalogs |
 | LifeSwitch nutrition catalog access | Live against isolated database `catalog_dev` | same catalog capability | KEEP | Becomes sole catalog after callers cut over |
 
 ## LifeSwitch domain capabilities

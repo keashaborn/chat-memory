@@ -1,0 +1,1 @@
+"""LifeSwitch catalog capability."""

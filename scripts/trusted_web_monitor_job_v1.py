@@ -15,7 +15,7 @@ from typing import Any, Awaitable, Callable, Sequence
 import asyncpg
 import httpx
 
-from rag_engine.trusted_web_monitoring_v1 import (
+from seebx.capabilities.search.monitoring import (
     MAX_MONITOR_HOURS,
     MIN_MONITOR_HOURS,
     evaluate_trusted_web_monitoring_thresholds_v1,

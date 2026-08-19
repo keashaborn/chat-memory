@@ -10,7 +10,7 @@ os.environ.setdefault("LIFESWITCH_POSTGRES_DSN", "postgresql://isolated.invalid/
 from fastapi import HTTPException
 
 from seebx.adapters import lifeswitch_postgres
-from rag_engine import lifeswitch_measurements_router as measurements
+from seebx.capabilities.measurements import routes as measurements
 from seebx.capabilities.nutrition import logs as nutrition
 from seebx.capabilities.training import routes as training
 

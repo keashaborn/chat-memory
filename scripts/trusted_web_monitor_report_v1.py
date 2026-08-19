@@ -12,7 +12,7 @@ from typing import Sequence
 
 import asyncpg
 
-from rag_engine.trusted_web_monitoring_v1 import (
+from seebx.capabilities.search.monitoring import (
     evaluate_trusted_web_monitoring_thresholds_v1,
     load_trusted_web_monitoring_summary_v1,
 )
