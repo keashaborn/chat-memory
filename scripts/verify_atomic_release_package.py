@@ -9,8 +9,9 @@ import json
 import re
 import stat
 import subprocess
+import tarfile
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
 from jsonschema import Draft202012Validator
@@ -195,6 +196,82 @@ def _validate_source(source: Mapping[str, Any], server: str) -> None:
     _expect(isinstance(source.get("ahead_count"), int) and source["ahead_count"] > 0, server + "_ahead_count_invalid")
 
 
+def _verify_frontend_archive(archive: Path) -> dict[str, int]:
+    normalized_names: set[str] = set()
+    file_count = 0
+    unpacked_bytes = 0
+    route_artifact_count = 0
+    static_asset_count = 0
+    has_entrypoint = False
+    has_public_asset = False
+    try:
+        handle = tarfile.open(archive, mode="r:*")
+    except (OSError, tarfile.TarError) as error:
+        raise ReleasePackageError("frontend_archive_invalid") from error
+    try:
+        for member in handle:
+            raw_name = member.name
+            while raw_name.startswith("./"):
+                raw_name = raw_name[2:]
+            if not raw_name or raw_name == ".":
+                _expect(member.isdir(), "frontend_archive_path_invalid")
+                continue
+            path = PurePosixPath(raw_name)
+            _expect(
+                not path.is_absolute()
+                and ".." not in path.parts
+                and "\\" not in raw_name,
+                "frontend_archive_path_invalid",
+            )
+            normalized = path.as_posix()
+            _expect(
+                normalized not in normalized_names,
+                "frontend_archive_duplicate_path",
+            )
+            normalized_names.add(normalized)
+            _expect(
+                member.isfile() or member.isdir(),
+                "frontend_archive_entry_type_invalid",
+            )
+            _expect(
+                all(part != ".env" and not part.startswith(".env.") for part in path.parts),
+                "frontend_archive_environment_file_forbidden",
+            )
+            if member.isdir():
+                continue
+            _expect(member.size >= 0, "frontend_archive_size_invalid")
+            file_count += 1
+            unpacked_bytes += member.size
+            _expect(
+                file_count <= 200_000 and unpacked_bytes <= 2 * 1024**3,
+                "frontend_archive_resource_limit_exceeded",
+            )
+            has_entrypoint = has_entrypoint or normalized == "server.js"
+            has_public_asset = has_public_asset or normalized.startswith("public/")
+            if normalized.startswith(".next/static/"):
+                static_asset_count += 1
+            if normalized.startswith(".next/server/") and path.suffix in {
+                ".body",
+                ".html",
+                ".rsc",
+            }:
+                route_artifact_count += 1
+    except (OSError, tarfile.TarError) as error:
+        raise ReleasePackageError("frontend_archive_invalid") from error
+    finally:
+        handle.close()
+    _expect(has_entrypoint, "frontend_archive_entrypoint_missing")
+    _expect(has_public_asset, "frontend_archive_public_assets_missing")
+    _expect(static_asset_count > 0, "frontend_archive_static_assets_missing")
+    _expect(route_artifact_count > 0, "frontend_archive_route_artifacts_missing")
+    return {
+        "file_count": file_count,
+        "unpacked_bytes": unpacked_bytes,
+        "route_artifact_count": route_artifact_count,
+        "static_asset_count": static_asset_count,
+    }
+
+
 def verify_release_package(
     package: Mapping[str, Any],
     *,
@@ -240,6 +317,7 @@ def verify_release_package(
         "frontend_build_manifest_invalid",
     )
     frontend = sources["frontend"]
+    frontend_archive = _verify_frontend_archive(resolved["frontend_build_archive"])
     _expect(
         frontend_build.get("schema_version")
         == "verbalsage-build-artifact-manifest-v1"
@@ -259,8 +337,17 @@ def verify_release_package(
     _expect(
         frontend_build.get("production_environment_preflight") == "pass"
         and frontend_build.get("artifact_preflight") == "pass"
-        and isinstance(frontend_build.get("static_page_count"), int)
-        and frontend_build["static_page_count"] > 0,
+        and frontend_build.get("archive_format") == "tar"
+        and frontend_build.get("entrypoint") == "server.js"
+        and frontend_build.get("contains_environment_files") is False
+        and frontend_build.get("runtime_environment_required") is True
+        and frontend_build.get("file_count") == frontend_archive["file_count"]
+        and frontend_build.get("archive_unpacked_bytes")
+        == frontend_archive["unpacked_bytes"]
+        and frontend_build.get("static_page_count")
+        == frontend_archive["route_artifact_count"]
+        and frontend_build.get("static_asset_count")
+        == frontend_archive["static_asset_count"],
         "frontend_build_verification_incomplete",
     )
 

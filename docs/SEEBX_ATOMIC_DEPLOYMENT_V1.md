@@ -77,9 +77,13 @@ between preparation and a later production controller. The package must bind:
 Every artifact is a unique canonical relative path with an exact SHA-256 hash.
 The verifier reconstructs both Git bundles in disposable bare repositories and
 proves the production-to-candidate ancestry, tree hashes, branch heads, and
-ahead counts. It cross-checks the frontend build manifest and runtime receipt
-against their source commits/trees, then cross-checks the migration and recovery
-receipts against the same database backup. The package cannot authorize itself:
+ahead counts. It opens the frontend archive without extracting it, rejects
+traversal, duplicate paths, links, devices, pipes, and every `.env` path, and
+requires the standalone server entrypoint plus public, static, and rendered
+route artifacts. It cross-checks those observed counts and bytes against the
+frontend build manifest and binds the manifest and runtime receipt to their
+source commits/trees, then cross-checks the migration and recovery receipts
+against the same database backup. The package cannot authorize itself:
 its schema requires
 `production_activation_authorized=false`, `authorization_id=null`, and
 `approved=false` for quiescence. A passing result means package integrity is

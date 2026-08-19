@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import subprocess
+import tarfile
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -138,7 +139,7 @@ class AtomicReleasePackageTests(unittest.TestCase):
         )
 
         self.frontend_build_archive = self.root / "frontend-build.tar"
-        self.frontend_build_archive.write_bytes(b"frontend-build")
+        frontend_archive = self._frontend_archive()
         self.frontend_build_manifest = self.root / "frontend-build-manifest.json"
         self.frontend_build_manifest.write_text(
             json.dumps(
@@ -150,7 +151,14 @@ class AtomicReleasePackageTests(unittest.TestCase):
                     "archive_sha256": digest(self.frontend_build_archive),
                     "production_environment_preflight": "pass",
                     "artifact_preflight": "pass",
-                    "static_page_count": 70,
+                    "archive_format": "tar",
+                    "entrypoint": "server.js",
+                    "contains_environment_files": False,
+                    "runtime_environment_required": True,
+                    "file_count": frontend_archive["file_count"],
+                    "archive_unpacked_bytes": frontend_archive["unpacked_bytes"],
+                    "static_page_count": frontend_archive["route_artifact_count"],
+                    "static_asset_count": frontend_archive["static_asset_count"],
                 }
             ),
             encoding="utf-8",
@@ -247,6 +255,28 @@ class AtomicReleasePackageTests(unittest.TestCase):
         }
         self.schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
 
+    def _frontend_archive(self) -> dict[str, int]:
+        release = self.root / "frontend-release"
+        files = {
+            "server.js": b"server\n",
+            ".next/server/app/page.html": b"<html></html>\n",
+            ".next/static/chunks/app.js": b"static\n",
+            "public/health.txt": b"ok\n",
+        }
+        for relative, content in files.items():
+            path = release / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(content)
+        with tarfile.open(self.frontend_build_archive, mode="w") as archive:
+            for path in sorted(release.rglob("*")):
+                archive.add(path, arcname=path.relative_to(release), recursive=False)
+        return {
+            "file_count": len(files),
+            "unpacked_bytes": sum(len(content) for content in files.values()),
+            "route_artifact_count": 1,
+            "static_asset_count": 1,
+        }
+
     def _git_bundle(self, name: str) -> tuple[str, str, str, str, Path]:
         repository = self.root / (name + "-repository")
         subprocess.run(["git", "init", "-q", repository], check=True)
@@ -328,6 +358,16 @@ class AtomicReleasePackageTests(unittest.TestCase):
     def verify(self) -> dict[str, object]:
         return verify_release_package(self.package, artifact_root=self.root, schema=self.schema)
 
+    def rebind_frontend_archive(self) -> None:
+        archive_sha = digest(self.frontend_build_archive)
+        manifest = json.loads(self.frontend_build_manifest.read_text(encoding="utf-8"))
+        manifest["archive_sha256"] = archive_sha
+        self.frontend_build_manifest.write_text(json.dumps(manifest), encoding="utf-8")
+        self.package["artifacts"]["frontend_build_archive"]["sha256"] = archive_sha
+        self.package["artifacts"]["frontend_build_manifest"]["sha256"] = digest(
+            self.frontend_build_manifest
+        )
+
     def test_exact_package_passes_without_granting_activation(self) -> None:
         result = self.verify()
         self.assertTrue(result["package_integrity_ready"])
@@ -359,6 +399,31 @@ class AtomicReleasePackageTests(unittest.TestCase):
         with self.assertRaisesRegex(
             ReleasePackageError,
             "frontend_build_source_binding_mismatch",
+        ):
+            self.verify()
+
+    def test_frontend_archive_cannot_contain_environment_files(self) -> None:
+        forbidden = self.root / ".env.production"
+        forbidden.write_text("SECRET=value\n", encoding="utf-8")
+        with tarfile.open(self.frontend_build_archive, mode="a") as archive:
+            archive.add(forbidden, arcname=".env.production")
+        self.rebind_frontend_archive()
+        with self.assertRaisesRegex(
+            ReleasePackageError,
+            "frontend_archive_environment_file_forbidden",
+        ):
+            self.verify()
+
+    def test_frontend_archive_rejects_path_traversal(self) -> None:
+        payload = b"escape"
+        with tarfile.open(self.frontend_build_archive, mode="w") as archive:
+            member = tarfile.TarInfo("../escape")
+            member.size = len(payload)
+            archive.addfile(member, io.BytesIO(payload))
+        self.rebind_frontend_archive()
+        with self.assertRaisesRegex(
+            ReleasePackageError,
+            "frontend_archive_path_invalid",
         ):
             self.verify()
 
