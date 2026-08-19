@@ -187,10 +187,13 @@ def execute_authorized_plan(
     failed_action: str | None = None
     try:
         for action in plan["forward"]:
-            event = _run_action(driver, phase="forward", action=action)
-            forward_events.append(event)
+            # A write may reach the target before the driver loses its response.
+            # Enter rollback-required state before dispatch so an unknown outcome
+            # cannot be misclassified as a read-only preflight failure.
             if action["effect"] == "write":
                 production_mutated = True
+            event = _run_action(driver, phase="forward", action=action)
+            forward_events.append(event)
     except ReleaseExecutionError as error:
         failed_action = str(error).split(":", 1)[-1]
         if production_mutated:

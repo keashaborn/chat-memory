@@ -93,6 +93,20 @@ class AtomicReleaseExecutorTests(unittest.TestCase):
         self.assertFalse(receipt["production_mutated"])
         self.assertEqual(driver.calls, [("forward", "verify_live_baseline")])
 
+    def test_first_write_unknown_outcome_runs_complete_rollback(self) -> None:
+        driver = FakeDriver({("forward", "stop_frontend_service")})
+        with self.assertRaises(ReleaseExecutionFailed) as caught:
+            execute_authorized_plan(
+                plan(), driver, run_id="release-run-0009", now=NOW
+            )
+        receipt = caught.exception.receipt
+        self.assertEqual(receipt["status"], "rolled_back")
+        self.assertTrue(receipt["production_mutated"])
+        self.assertEqual(receipt["failed_action"], "stop_frontend_service")
+        self.assertEqual(
+            len([call for call in driver.calls if call[0] == "rollback"]), 9
+        )
+
     def test_post_quiescence_failure_runs_complete_rollback(self) -> None:
         driver = FakeDriver({("forward", "apply_bound_forward_migrations")})
         with self.assertRaises(ReleaseExecutionFailed) as caught:
