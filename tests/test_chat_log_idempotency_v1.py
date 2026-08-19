@@ -120,6 +120,15 @@ class ChatLogSubmissionIdempotencyTests(unittest.IsolatedAsyncioTestCase):
             clear=False,
         ):
             cls.backend = importlib.import_module("app")
+            cls.transcript_routes = importlib.import_module(
+                "seebx.capabilities.conversation.transcript_routes"
+            )
+            router = cls.transcript_routes.create_transcript_ingest_router(
+                cls.backend.POSTGRES
+            )
+            cls.log_chat = staticmethod(next(
+                route.endpoint for route in router.routes if route.path == "/log"
+            ))
 
     def body(self, text: str = "Tell me about my animals.") -> dict[str, object]:
         return {
@@ -134,7 +143,7 @@ class ChatLogSubmissionIdempotencyTests(unittest.IsolatedAsyncioTestCase):
     async def call(self, connection: FakeConnection, body: Mapping[str, object]):
         with (
             patch.object(
-                self.backend,
+                self.transcript_routes,
                 "require_actor",
                 new=AsyncMock(return_value=str(OWNER)),
             ),
@@ -144,7 +153,7 @@ class ChatLogSubmissionIdempotencyTests(unittest.IsolatedAsyncioTestCase):
                 new=AsyncMock(return_value=connection),
             ),
         ):
-            return await self.backend.log_chat(request(body))
+            return await self.log_chat(request(body))
 
     async def test_failed_response_retry_replays_one_user_message(self) -> None:
         connection = FakeConnection()

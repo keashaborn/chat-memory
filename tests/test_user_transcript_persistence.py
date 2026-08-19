@@ -233,10 +233,9 @@ class UserTranscriptPersistenceTests(unittest.IsolatedAsyncioTestCase):
 
     def test_log_route_contains_no_sql_or_transaction_ownership(self) -> None:
         root = Path(__file__).resolve().parents[1]
-        source = (root / "app.py").read_text(encoding="utf-8")
-        route = source.split('@app.post("/log")', 1)[1].split(
-            'app.include_router(', 1
-        )[0]
+        route = (
+            root / "seebx/capabilities/conversation/transcript_routes.py"
+        ).read_text(encoding="utf-8")
 
         self.assertIn("persist_user_transcript(", route)
         self.assertNotIn("conn.fetchrow(", route)
