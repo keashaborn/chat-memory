@@ -82,6 +82,17 @@ Two entry rows use non-UUID owner identifiers. The production migration must:
    evidence are approved.
 
 The candidate does not perform or authorize this production migration.
+`scripts/migrate_lifeswitch_forms_v1.py` implements the migration gate. Its
+default mode is read-only and returns only counts and hashes. Apply mode
+requires the exact source, eligible, and quarantine hashes from a prior plan,
+a separate approval identifier, encrypted-artifact evidence, and a new output
+directory. It transfers eligible rows insert-only inside one serializable
+destination transaction through a non-superuser, non-`BYPASSRLS` login that
+inherits the `lifeswitch_app` application role. The gate rejects owner-role
+membership and elevated role attributes (`CREATEROLE`, `CREATEDB`, and
+`REPLICATION`), rejects identical source/destination fingerprints, verifies
+the exact destination bundle, and preserves invalid rows in a mode-`0600`
+quarantine artifact.
 
 ## Activation gate
 
