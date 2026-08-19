@@ -5,7 +5,7 @@ import unittest
 
 from pydantic import ValidationError
 
-from rag_engine.response_policy_prompt_v0_2 import (
+from seebx.capabilities.conversation.policy_instructions import (
     ResponsePolicyPromptError,
     ResponsePolicyPromptV0_2,
     render_response_policy_prompt_v0_2,
@@ -24,7 +24,7 @@ from seebx.capabilities.conversation.policy import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PROMPT_MODULE = ROOT / "rag_engine" / "response_policy_prompt_v0_2.py"
+PROMPT_MODULE = ROOT / "seebx" / "capabilities" / "conversation" / "policy_instructions.py"
 
 
 def decision(message: str, **signals):

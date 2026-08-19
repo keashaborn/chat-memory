@@ -89,7 +89,7 @@ class SearchCapabilityManifestV1Tests(unittest.TestCase):
         for relative in (
             "seebx/capabilities/conversation/prompt.py",
             "seebx/capabilities/conversation/orchestration.py",
-            "rag_engine/search_capability_output_validator_v1.py",
+            "seebx/capabilities/search/output_validation.py",
             "seebx/capabilities/conversation/composition.py",
             "seebx/capabilities/conversation/router.py",
         ):

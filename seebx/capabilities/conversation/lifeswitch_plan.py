@@ -25,7 +25,7 @@ from rag_engine.lifeswitch_prior_answer_provenance_runtime_v1 import (
     PriorLifeSwitchPreparedContextV1,
 )
 from seebx.capabilities.conversation.orchestration import TrustedResponsePlanV0_2
-from rag_engine.response_source_awareness_v1 import (
+from seebx.capabilities.conversation.source_awareness import (
     lifeswitch_source_status_v1,
 )
 

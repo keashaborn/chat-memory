@@ -16,13 +16,13 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from rag_engine.rm_selection_envelope_v0_4 import (
+from seebx.capabilities.conversation.relational_monism import (
     RMSelectionEnvelopeV04,
     RMSelectionRequestV04,
     select_rm_v0_4,
 )
-from rag_engine.prior_web_provenance_v1 import PriorWebProvenanceEnvelopeV1
-from rag_engine.response_policy_prompt_v0_2 import (
+from seebx.capabilities.conversation.prior_web_provenance import PriorWebProvenanceEnvelopeV1
+from seebx.capabilities.conversation.policy_instructions import (
     ResponsePolicyPromptV0_2,
     render_response_policy_prompt_v0_2,
 )
@@ -36,7 +36,7 @@ from seebx.capabilities.conversation.policy import (
     SafetyAssessmentV0_2,
     decide_response_policy_v0_2,
 )
-from rag_engine.response_source_awareness_v1 import (
+from seebx.capabilities.conversation.source_awareness import (
     MemorySourceStatusV1,
     WebSourceStatusV1,
     render_base_source_awareness_v1,

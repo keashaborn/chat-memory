@@ -9,7 +9,7 @@ from seebx.capabilities.conversation.orchestration import (
     TRUSTED_PLAN_VERSION,
     TRUSTED_POLICY_SIGNALS_ENVELOPE_VERSION,
 )
-from rag_engine.response_policy_prompt_v0_2 import (
+from seebx.capabilities.conversation.policy_instructions import (
     RESPONSE_INTERACTION_VERSION,
     RESPONSE_POLICY_PROMPT_VERSION,
     render_response_policy_prompt_v0_2,

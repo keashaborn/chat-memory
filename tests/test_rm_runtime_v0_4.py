@@ -8,7 +8,7 @@ from seebx.capabilities.conversation.prompt import (
     PromptAssemblyRequestV1,
     assemble_prompt,
 )
-from rag_engine.response_policy_prompt_v0_2 import render_response_policy_prompt_v0_2
+from seebx.capabilities.conversation.policy_instructions import render_response_policy_prompt_v0_2
 from seebx.capabilities.conversation.policy import (
     ConversationRole,
     FMLevel,
@@ -20,8 +20,8 @@ from seebx.capabilities.conversation.policy import (
     SafetyAssessmentV0_2,
     decide_response_policy_v0_2,
 )
-from rag_engine.response_source_awareness_v1 import MemorySourceStatusV1
-from rag_engine.rm_selection_envelope_v0_4 import (
+from seebx.capabilities.conversation.source_awareness import MemorySourceStatusV1
+from seebx.capabilities.conversation.relational_monism import (
     ACTIVE_PHILOSOPHY_ID,
     CANONICAL_MANIFEST_SHA256,
     DEFAULT_PROMPT_PATH,

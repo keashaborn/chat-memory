@@ -30,7 +30,7 @@ from seebx.adapters.lifeswitch_openai_chat import (
 from seebx.capabilities.conversation.lifeswitch_plan import (
     TrustedLifeSwitchResponsePlanV2,
 )
-from rag_engine.search_capability_output_validator_v1 import (
+from seebx.capabilities.search.output_validation import (
     validate_search_capability_output_v1,
 )
 

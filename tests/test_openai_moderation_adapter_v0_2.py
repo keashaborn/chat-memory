@@ -5,7 +5,7 @@ import unittest
 from types import SimpleNamespace
 from typing import Any
 
-from rag_engine.openai_moderation_adapter_v0_2 import (
+from seebx.adapters.openai_moderation import (
     DEFAULT_MODERATION_MODEL,
     MAX_MODERATION_INPUT_BYTES,
     MAX_MODERATION_TOTAL_INPUT_BYTES,

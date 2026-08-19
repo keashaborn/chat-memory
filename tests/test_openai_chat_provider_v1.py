@@ -22,7 +22,7 @@ from seebx.adapters.openai_chat import (
     OpenAIChatResponseV1,
     safety_identifier_v1,
 )
-from rag_engine.prior_web_provenance_v1 import (
+from seebx.capabilities.conversation.prior_web_provenance import (
     PriorWebProvenanceEnvelopeV1,
     PriorWebResponseV1,
     PriorWebSourceV1,

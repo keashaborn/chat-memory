@@ -19,7 +19,7 @@ from seebx.capabilities.conversation.policy import (
     SafetyAssessmentV0_2,
     decide_response_policy_v0_2,
 )
-from rag_engine.server_response_signal_classifier_v0_2 import (
+from seebx.capabilities.conversation.signal_classifier import (
     ClassificationOutcome,
     DomainRiskCategory,
     OpenAIServerResponseSignalClassifierV0_2,

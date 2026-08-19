@@ -7,7 +7,7 @@ from seebx.contracts.search import (
     VOICE_SEARCH_AUTHORIZATION_BASIS,
     SearchCapabilityManifestV1,
 )
-from rag_engine.search_capability_output_validator_v1 import (
+from seebx.capabilities.search.output_validation import (
     SearchCapabilityOutputValidationError,
     validate_search_capability_output_v1,
 )

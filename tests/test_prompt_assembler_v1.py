@@ -9,7 +9,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from rag_engine.rm_selection_envelope_v0_4 import (
+from seebx.capabilities.conversation.relational_monism import (
     ACTIVE_PHILOSOPHY_ID,
     RMSelectionRequestV04,
     select_rm_v0_4,
@@ -24,12 +24,12 @@ from seebx.capabilities.conversation.prompt import (
     PromptReferenceFragmentV1,
     assemble_prompt,
 )
-from rag_engine.prior_web_provenance_v1 import (
+from seebx.capabilities.conversation.prior_web_provenance import (
     PriorWebProvenanceEnvelopeV1,
     PriorWebResponseV1,
     PriorWebSourceV1,
 )
-from rag_engine.response_policy_prompt_v0_2 import (
+from seebx.capabilities.conversation.policy_instructions import (
     render_response_policy_prompt_v0_2,
 )
 from seebx.capabilities.conversation.policy import (
@@ -45,7 +45,7 @@ from seebx.capabilities.conversation.policy import (
     SafetyAssessmentV0_2,
     decide_response_policy_v0_2,
 )
-from rag_engine.response_source_awareness_v1 import MemorySourceStatusV1
+from seebx.capabilities.conversation.source_awareness import MemorySourceStatusV1
 from seebx.contracts.search import (
     TEXT_SEARCH_AUTHORIZATION_BASIS,
     SearchCapabilityManifestV1,

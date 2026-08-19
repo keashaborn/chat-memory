@@ -21,8 +21,8 @@ from seebx.adapters.openai_chat import (
     OpenAIChatResponseV1,
     safety_identifier_v1,
 )
-from rag_engine.openai_moderation_adapter_v0_2 import OpenAIModerationAdapterV0_2
-from rag_engine.prior_web_provenance_v1 import (
+from seebx.adapters.openai_moderation import OpenAIModerationAdapterV0_2
+from seebx.capabilities.conversation.prior_web_provenance import (
     PriorWebProvenanceError,
     load_prior_web_provenance_v1,
 )
@@ -48,8 +48,8 @@ from seebx.capabilities.conversation.policy import (
     ResponsePolicyInputV0_2,
     ResponsePolicySignalsV0_2,
 )
-from rag_engine.response_source_awareness_v1 import MemorySourceStatusV1
-from rag_engine.server_response_signal_classifier_v0_2 import (
+from seebx.capabilities.conversation.source_awareness import MemorySourceStatusV1
+from seebx.capabilities.conversation.signal_classifier import (
     OpenAIServerResponseSignalClassifierV0_2,
 )
 from seebx.contracts.search import SearchCapabilityManifestV1

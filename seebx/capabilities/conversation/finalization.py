@@ -29,7 +29,7 @@ from seebx.adapters.openai_chat import (
     OpenAIChatResponseV1,
 )
 from seebx.capabilities.conversation.orchestration import TrustedResponsePlanV0_2
-from rag_engine.search_capability_output_validator_v1 import (
+from seebx.capabilities.search.output_validation import (
     validate_search_capability_output_v1,
 )
 

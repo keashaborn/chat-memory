@@ -31,7 +31,7 @@ from seebx.capabilities.conversation.policy import (
     ResponsePolicySignalsV0_2,
     SafetyAssessmentV0_2,
 )
-from rag_engine.response_source_awareness_v1 import MemorySourceStatusV1
+from seebx.capabilities.conversation.source_awareness import MemorySourceStatusV1
 from tests.test_prompt_assembler_v1 import zep_memory_block
 
 

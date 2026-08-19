@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from rag_engine.response_source_awareness_v1 import (
+from seebx.capabilities.conversation.source_awareness import (
     LifeSwitchSourceStatusV1,
     MemorySourceStatusV1,
     WebSourceStatusV1,

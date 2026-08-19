@@ -20,7 +20,7 @@ from seebx.capabilities.conversation.prompt import (
 from seebx.capabilities.conversation.composition import GovernedMemoryAssemblyV1
 from seebx.capabilities.conversation.snapshot import ConversationSnapshotV1
 from seebx.capabilities.conversation.policy import ResponsePolicySignalsV0_2
-from rag_engine.response_source_awareness_v1 import MemorySourceStatusV1
+from seebx.capabilities.conversation.source_awareness import MemorySourceStatusV1
 
 
 ZEP_PROMPT_MODE_ENV = "ZEP_PROMPT_MODE"

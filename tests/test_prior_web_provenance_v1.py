@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
-from rag_engine.prior_web_provenance_v1 import (
+from seebx.capabilities.conversation.prior_web_provenance import (
     MAX_CITED_SOURCES_PER_RESPONSE,
     MAX_PROVENANCE_RESPONSES,
     PriorWebProvenanceEnvelopeV1,

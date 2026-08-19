@@ -40,7 +40,7 @@ from seebx.capabilities.conversation.prompt import (
     AssembledPromptV1,
     ConversationMessageV1,
 )
-from rag_engine.response_source_awareness_v1 import (
+from seebx.capabilities.conversation.source_awareness import (
     LifeSwitchSourceStatusV1,
     append_lifeswitch_source_awareness_v1,
 )

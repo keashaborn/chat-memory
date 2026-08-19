@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from rag_engine.response_policy_prompt_v0_2 import (
+from seebx.capabilities.conversation.policy_instructions import (
     render_response_policy_prompt_v0_2,
 )
 from seebx.capabilities.conversation.policy import (
