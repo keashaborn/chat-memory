@@ -1,0 +1,7 @@
+\set ON_ERROR_STOP on
+
+BEGIN;
+SET ROLE lifeswitch_owner;
+DROP SCHEMA IF EXISTS lifeswitch_forms CASCADE;
+RESET ROLE;
+COMMIT;

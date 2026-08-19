@@ -38,6 +38,10 @@ from seebx.capabilities.preferences.timezone import (
     router as lifeswitch_account_timezone_router_v1,
 )
 from seebx.capabilities.catalog.routes import router as catalog_router
+from seebx.capabilities.forms.routes import (
+    forms_enabled,
+    router as forms_router,
+)
 from seebx.capabilities.conversation.tagging import infer_vb_tags
 from seebx.capabilities.conversation.attachment_routes import (
     router as conversation_attachment_router,
@@ -193,6 +197,8 @@ app.include_router(
     lifeswitch_account_timezone_router_v1,
     prefix="/lifeswitch/account",
 )
+if forms_enabled():
+    app.include_router(forms_router, prefix="/forms")
 app.include_router(voice_tts_router)
 app.include_router(voice_transcription_router)
 app.include_router(voice_realtime_preview_router)

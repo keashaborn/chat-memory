@@ -97,8 +97,8 @@ Source commit: `49f9e60cf4321c8e42c359845c1a62a8c987614d`
 |---|---|---|---|---|
 | Assistant response preferences | Backend router is owner-aware but unmounted; frontend calls it | preferences capability | RESTORE through refactor or RETIRE | Determine intended product behavior; do not remount implicitly |
 | `user_settings` schema | Two empty tables in old database | platform preferences | MIGRATE/REBUILD if retained | Current authenticated API and schema contract |
-| Forms router | Unmounted; trusts request-provided owner ID | forms capability | REBUILD or RETIRE | Never remount current implementation; require verified identity/RLS |
-| Frontend forms surfaces | Active callers exist | forms capability | DECIDE | Product decision plus migration/removal UX |
+| Forms capability | Candidate rebuild uses `seebx.capabilities.forms`, independently verified Supabase/voice identity, the isolated LifeSwitch adapter, forced-RLS `lifeswitch_forms` tables, composite owner foreign keys, and a default-off feature flag; the insecure unmounted legacy router remains absent | forms capability | REBUILT; PAIRED FRONTEND AUTH FORWARDING AND PRODUCTION MOVE PENDING | Apply and verify schema, migrate only valid UUID-owned legacy rows, quarantine invalid-owner rows, forward the original bearer through the authenticated BFF, then separately approve activation |
+| Frontend forms surfaces | Six authenticated BFF routes and active Forms Builder, Capture, and SSLG callers retain the existing wire contract | forms capability | KEEP | Enable only after owner-bound data migration and authenticated end-to-end verification |
 | Telemetry router | Live and large/custom | observability capability | CONSOLIDATE behind OpenTelemetry contract | Define redacted trace/request/job correlation; select storage/alert backend separately |
 | AI operations incidents | Live routes; four empty tables | operations | KEEP or REPLACE | Confirm consumer and alert delivery; product comparison |
 | Admin memory workbench/health routes | Mounted retirement responses | none | RETIRE | Remove frontend/admin callers and historical tests first |
