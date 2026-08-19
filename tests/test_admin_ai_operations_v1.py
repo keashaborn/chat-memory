@@ -240,7 +240,7 @@ class AdminAiOperationsV1Tests(unittest.IsolatedAsyncioTestCase):
     def test_routes_are_server_authoritative_and_body_has_no_actor(self):
         source = APP.read_text(encoding="utf-8")
         start = source.index("# ---------- AI Operations ----------")
-        end = source.index("# ---------- admin usage ----------")
+        end = source.index("# ---------- persistent chat memory ----------")
         routes = source[start:end]
 
         self.assertIn(
