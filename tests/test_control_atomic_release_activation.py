@@ -95,6 +95,10 @@ class AtomicReleaseActivationControlTests(unittest.TestCase):
         )
         self.assertEqual(plan["status"], "authorized_not_executed")
         self.assertFalse(plan["production_mutated"])
+        self.assertEqual(
+            plan["bindings"]["authorization_expires_at_utc"],
+            "2026-08-19T22:00:00Z",
+        )
         self.assertEqual(plan["forward"][2]["action"], "stop_frontend_service")
         self.assertEqual(plan["forward"][3]["action"], "stop_backend_service")
         self.assertEqual(

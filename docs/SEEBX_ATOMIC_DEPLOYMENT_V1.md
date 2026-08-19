@@ -117,6 +117,21 @@ Therefore this gate cannot stop services, apply migrations, install artifacts,
 restart services, or change either production server. The production executor
 must be implemented and independently tested before a cutover authorization is
 requested or consumed.
+
+`scripts/execute_atomic_release_plan.py` implements the deterministic
+transaction state machine without a shell or network adapter. Before calling a
+driver it rechecks the plan hash, exact forward and rollback sequences, all
+commit and artifact bindings, the Zep-outbox database rollback gate, and the
+authorization expiry. A read-only preflight failure performs no rollback. Any
+failure after the first successful write traverses all nine rollback actions;
+later rollback actions are still attempted if one rollback action fails.
+
+The state machine accepts only content-free SHA-256 evidence for each action
+and emits a hash-bound activation, preflight-failure, rolled-back, or
+rollback-failed receipt. It still cannot alter production by itself. A concrete
+two-server driver for SSH, systemd, immutable artifact installation, Postgres
+migration, health verification, and evidence persistence remains required
+before authorization can be consumed.
 ## Offline paired release-package gate
 
 `ops/releases/seebx_atomic_release_package_v1.schema.json` and

@@ -197,6 +197,8 @@ def build_activation_plan(
         "package_id": package["package_id"],
         "package_sha256": verification["package_sha256"],
         "authorization_id": authorization["authorization_id"],
+        "authorization_issued_at_utc": authorization["issued_at_utc"],
+        "authorization_expires_at_utc": authorization["expires_at_utc"],
         "backend_commit": verification["backend_commit"],
         "frontend_commit": verification["frontend_commit"],
         "runtime_archive_sha256": verification["runtime_archive_sha256"],
