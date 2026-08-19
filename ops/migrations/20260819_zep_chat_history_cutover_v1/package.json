@@ -8,6 +8,10 @@
     "execution_role": "sage"
   },
   "inputs": {
+    "telemetry_forward": {
+      "path": "ops/sql/20260819_telemetry_retention_owner_move_v1.sql",
+      "sha256": "ba3fac9fe11eb8a0d082487ede709813738ac55e8f351ff55b57d09652f1c149"
+    },
     "zep_outbox_forward": {
       "path": "ops/sql/20260818_conversation_zep_sync_outbox_v1.sql",
       "sha256": "e34d541e218ce22333c29e239784798603baea9f78f8a638b932984d7801f01a"
@@ -23,11 +27,15 @@
     "zep_outbox_rollback": {
       "path": "ops/sql/20260818_conversation_zep_sync_outbox_v1_rollback.sql",
       "sha256": "145d8ae6bbf5bc0b3e5fb27dcd9d78a65c89b1016325c467b7078d222a4aeca0"
+    },
+    "telemetry_rollback": {
+      "path": "ops/sql/20260819_telemetry_retention_owner_move_v1_rollback.sql",
+      "sha256": "b64f23e8f272a2af2f8c034400f4056792ff5cdfc607201fafdec70f8c917fc5"
     }
   },
   "tool": {
     "path": "scripts/verify_zep_chat_history_migration.py",
-    "sha256": "f2478f1de26cb9b8145b1facc37108a4d935636e8b27133fdc5d4e7aaed49e9b"
+    "sha256": "cdede1d6a51f002e968df3edf4730e1660f0a5cf402ed5ddab4238f4061d5722"
   },
   "execution": {
     "source": "verified_full_database_backup",
@@ -35,6 +43,7 @@
     "forward_and_rollback_required": true,
     "exact_baseline_restoration_required": true,
     "production_database_mutated": false,
-    "zep_called": false
+    "zep_called": false,
+    "telemetry_retention_executed": false
   }
 }

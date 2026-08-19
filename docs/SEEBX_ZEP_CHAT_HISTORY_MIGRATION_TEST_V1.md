@@ -12,16 +12,19 @@ chat-clear function definitions, and the four legacy erasure triggers.
 
 It then:
 
-1. applies the hash-bound Zep outbox migration;
-2. applies the hash-bound chat-history cutover in one transaction;
-3. proves the outbox is empty, both clear functions use only the Zep outbox,
+1. moves the telemetry-retention function to its canonical owner without
+   executing retention or deleting telemetry rows;
+2. applies the hash-bound Zep outbox migration;
+3. applies the hash-bound chat-history cutover in one transaction;
+4. proves the outbox is empty, both clear functions use only the Zep outbox,
    the four legacy triggers are absent, and no pre-existing table row count
    changed;
-4. rolls back the chat-history cutover and then the empty Zep outbox;
-5. proves the exact baseline function hashes, trigger definitions, table
-   inventory, and row counts were restored;
-6. drops and independently proves removal of the disposable database; and
-7. writes a content-free hash-bound receipt.
+5. rolls back the chat-history cutover, the empty Zep outbox, and the
+   telemetry owner move in reverse order;
+6. proves the exact baseline function hashes, trigger definitions, telemetry
+   owner, grants, table inventory, and row counts were restored;
+7. drops and independently proves removal of the disposable database; and
+8. writes a content-free hash-bound receipt.
 
 The verifier never calls Zep and never reads message content into its receipt.
 The password is held only in a temporary mode-0600 pgpass file and never enters

@@ -165,10 +165,12 @@ def verify_package(repository_root: Path) -> tuple[dict[str, Any], dict[str, Pat
         raise MigrationContractError("migration_package_target_invalid")
     inputs = package.get("inputs")
     if not isinstance(inputs, dict) or set(inputs) != {
+        "telemetry_forward",
         "zep_outbox_forward",
         "chat_history_forward",
         "chat_history_rollback",
         "zep_outbox_rollback",
+        "telemetry_rollback",
     }:
         raise MigrationContractError("migration_package_inputs_invalid")
     resolved: dict[str, Path] = {}
@@ -279,6 +281,40 @@ async def collect_table_manifest(connection: Any) -> list[dict[str, Any]]:
     return result
 
 
+async def _function_record(connection: Any, signature: str) -> dict[str, Any] | None:
+    oid = await connection.fetchval("SELECT to_regprocedure($1::text)", signature)
+    if oid is None:
+        return None
+    row = await connection.fetchrow(
+        """
+        SELECT p.proowner::regrole::text AS owner,
+               pg_get_functiondef(p.oid) AS definition,
+               p.prosrc AS body,
+               p.proconfig AS config,
+               has_function_privilege('brains_app',p.oid,'EXECUTE') AS brains_execute,
+               NOT EXISTS (
+                 SELECT 1
+                 FROM aclexplode(COALESCE(p.proacl,acldefault('f',p.proowner))) AS acl
+                 WHERE acl.grantee=0 AND acl.privilege_type='EXECUTE'
+               ) AS public_execute_revoked
+        FROM pg_proc AS p
+        WHERE p.oid=$1::oid
+        """,
+        oid,
+    )
+    if row is None:
+        raise MigrationExecutionError("function_identity_disappeared")
+    definition = str(row["definition"])
+    return {
+        "owner": str(row["owner"]),
+        "definition_sha256": sha256_bytes(definition.encode()),
+        "body_sha256": sha256_bytes(str(row["body"]).encode()),
+        "config": list(row["config"] or []),
+        "brains_execute": bool(row["brains_execute"]),
+        "public_execute_revoked": bool(row["public_execute_revoked"]),
+    }
+
+
 async def collect_database_state(connection: Any) -> dict[str, Any]:
     history_oid = await connection.fetchval(
         "SELECT to_regprocedure($1::text)", HISTORY_SIGNATURE
@@ -310,6 +346,14 @@ async def collect_database_state(connection: Any) -> dict[str, Any]:
         "tail_definition_sha256": sha256_bytes(tail_definition.encode()),
         "history_definition": history_definition.lower(),
         "tail_definition": tail_definition.lower(),
+        "legacy_telemetry": await _function_record(
+            connection,
+            "memory.enforce_telemetry_retention_v1()",
+        ),
+        "canonical_telemetry": await _function_record(
+            connection,
+            "ai_operations.enforce_telemetry_retention_v1()",
+        ),
         "legacy_triggers": [
             {"name": str(row["tgname"]), "definition": str(row["definition"])}
             for row in triggers
@@ -323,8 +367,12 @@ def validate_forward_state(
     baseline: Mapping[str, Any],
     forward: Mapping[str, Any],
 ) -> dict[str, Any]:
-    if baseline.get("outbox_present") is not False:
-        raise MigrationExecutionError("baseline_outbox_already_present")
+    if (
+        baseline.get("outbox_present") is not False
+        or baseline.get("legacy_telemetry") is None
+        or baseline.get("canonical_telemetry") is not None
+    ):
+        raise MigrationExecutionError("baseline_state_invalid")
     expected_tables = list(baseline["table_manifest"])
     expected_tables.append(
         {"schema": "conversation_sync_private", "table": "zep_turn_outbox", "rows": 0}
@@ -339,6 +387,15 @@ def validate_forward_state(
         or OUTBOX not in tail
         or "memory_ingest_private" in history
         or "memory_ingest_private" in tail
+        or forward.get("legacy_telemetry") is not None
+        or forward.get("canonical_telemetry") is None
+        or forward["canonical_telemetry"].get("owner") != "sage"
+        or forward["canonical_telemetry"].get("body_sha256")
+        != baseline["legacy_telemetry"].get("body_sha256")
+        or forward["canonical_telemetry"].get("config")
+        != ["search_path=pg_catalog, public"]
+        or forward["canonical_telemetry"].get("brains_execute") is not True
+        or forward["canonical_telemetry"].get("public_execute_revoked") is not True
         or forward.get("table_manifest") != expected_tables
     ):
         raise MigrationExecutionError("forward_state_mismatch")
@@ -346,6 +403,7 @@ def validate_forward_state(
         "outbox_present": True,
         "outbox_rows": 0,
         "legacy_trigger_count": 0,
+        "canonical_telemetry_present": True,
         "table_manifest_sha256": forward["table_manifest_sha256"],
     }
 
@@ -358,6 +416,8 @@ def validate_rollback_state(
         "outbox_present",
         "history_definition_sha256",
         "tail_definition_sha256",
+        "legacy_telemetry",
+        "canonical_telemetry",
         "legacy_triggers",
         "table_manifest",
         "table_manifest_sha256",
@@ -442,6 +502,18 @@ async def execute(arguments: argparse.Namespace) -> dict[str, Any]:
             build_psql_command(
                 settings,
                 temporary_database,
+                migration_paths["telemetry_forward"],
+                single_transaction=False,
+            ),
+            environment,
+            label="telemetry_forward",
+            timeout=arguments.timeout,
+        )
+        await asyncio.to_thread(
+            run_checked,
+            build_psql_command(
+                settings,
+                temporary_database,
                 migration_paths["zep_outbox_forward"],
                 single_transaction=False,
             ),
@@ -491,6 +563,19 @@ async def execute(arguments: argparse.Namespace) -> dict[str, Any]:
             ),
             environment,
             label="zep_outbox_rollback",
+            timeout=arguments.timeout,
+        )
+
+        await asyncio.to_thread(
+            run_checked,
+            build_psql_command(
+                settings,
+                temporary_database,
+                migration_paths["telemetry_rollback"],
+                single_transaction=False,
+            ),
+            environment,
+            label="telemetry_rollback",
             timeout=arguments.timeout,
         )
 

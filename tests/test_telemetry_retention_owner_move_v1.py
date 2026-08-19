@@ -30,18 +30,18 @@ class TelemetryRetentionOwnerMoveV1Tests(unittest.TestCase):
         )
         self.assertIn("to brains_app", self.migration)
 
-    def test_forward_migration_removes_legacy_function_last(self) -> None:
+    def test_forward_migration_moves_owner_without_executing_retention(self) -> None:
         create_at = self.migration.index(
             "create or replace function ai_operations.enforce_telemetry_retention_v1()"
-        )
-        call_at = self.migration.index(
-            "select ai_operations.enforce_telemetry_retention_v1()"
         )
         drop_at = self.migration.index(
             "drop function memory.enforce_telemetry_retention_v1()"
         )
-        self.assertLess(create_at, call_at)
-        self.assertLess(call_at, drop_at)
+        self.assertLess(create_at, drop_at)
+        self.assertNotIn(
+            "select ai_operations.enforce_telemetry_retention_v1()",
+            self.migration,
+        )
 
     def test_worker_has_no_legacy_schema_dependency(self) -> None:
         self.assertIn(

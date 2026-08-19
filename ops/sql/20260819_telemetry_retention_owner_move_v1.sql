@@ -75,8 +75,6 @@ TO brains_app;
 COMMENT ON FUNCTION ai_operations.enforce_telemetry_retention_v1() IS
   'Fixed-scope telemetry retention: purge unowned rows, voice rows after 30 days, and other rows after 90 days.';
 
-SELECT ai_operations.enforce_telemetry_retention_v1();
-
 REVOKE ALL ON FUNCTION memory.enforce_telemetry_retention_v1()
 FROM brains_app;
 DROP FUNCTION memory.enforce_telemetry_retention_v1();

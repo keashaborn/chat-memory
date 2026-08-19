@@ -33,6 +33,15 @@ def baseline_state() -> dict[str, object]:
         "tail_definition_sha256": "b" * 64,
         "history_definition": "memory_ingest_private.memory_ingest_outbox",
         "tail_definition": "memory_ingest_private.memory_ingest_outbox",
+        "legacy_telemetry": {
+            "owner": "sage",
+            "definition_sha256": "f" * 64,
+            "body_sha256": "1" * 64,
+            "config": ["search_path=pg_catalog, public, memory"],
+            "brains_execute": True,
+            "public_execute_revoked": True,
+        },
+        "canonical_telemetry": None,
         "legacy_triggers": [{"name": "legacy", "definition": "trigger"}],
         "table_manifest": tables,
         "table_manifest_sha256": "c" * 64,
@@ -115,6 +124,15 @@ class ZepChatHistoryMigrationToolTests(unittest.TestCase):
             "conversation_sync_private.zep_turn_outbox"
         )
         forward["tail_definition"] = "conversation_sync_private.zep_turn_outbox"
+        forward["legacy_telemetry"] = None
+        forward["canonical_telemetry"] = {
+            "owner": "sage",
+            "definition_sha256": "0" * 64,
+            "body_sha256": "1" * 64,
+            "config": ["search_path=pg_catalog, public"],
+            "brains_execute": True,
+            "public_execute_revoked": True,
+        }
         forward["legacy_triggers"] = []
         forward["table_manifest"] = [
             {
