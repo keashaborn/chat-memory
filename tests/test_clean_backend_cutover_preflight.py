@@ -3,16 +3,25 @@ from __future__ import annotations
 import io
 import json
 import os
+import subprocess
 import unittest
 from contextlib import redirect_stdout
 from unittest.mock import AsyncMock, patch
 
-from scripts.verify_clean_backend_cutover import collect_database_state, evaluate_readiness, main
+from scripts.verify_clean_backend_cutover import (
+    PreflightOperationalError,
+    collect_database_state,
+    collect_database_state_read_only,
+    evaluate_readiness,
+    main,
+    read_crontab,
+)
 
 
 def ready_database() -> dict[str, object]:
     canonical = "conversation_sync_private.zep_turn_outbox"
     return {
+        "transaction_read_only": True,
         "zep_turn_outbox_present": True,
         "clear_history_present": True,
         "clear_message_tail_present": True,
@@ -103,12 +112,22 @@ class CleanBackendCutoverPreflightTests(unittest.TestCase):
 
 
 class FakeConnection:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[object, ...]]] = []
+
     async def fetchval(self, sql: str, *args: object) -> object:
+        self.calls.append((sql, args))
+        if sql == "SHOW transaction_read_only":
+            return "on"
         if "conversation_sync_private.zep_turn_outbox" in sql:
             return True
-        if "clear_history(uuid,text,uuid,integer)" in sql:
+        if "to_regprocedure($1::text)::oid" in sql and args == (
+            "chat_history_private.clear_history(uuid,text,uuid,integer)",
+        ):
             return 101
-        if "clear_message_tail(uuid,uuid)" in sql:
+        if "to_regprocedure($1::text)::oid" in sql and args == (
+            "chat_history_private.clear_message_tail(uuid,uuid)",
+        ):
             return 102
         if "pg_get_functiondef" in sql and args:
             return "conversation_sync_private.zep_turn_outbox"
@@ -136,15 +155,89 @@ class FakeConnection:
             return 0
         raise AssertionError(f"unexpected query: {sql}")
 
+    def transaction(self, **options: object) -> "FakeTransaction":
+        self.calls.append(("transaction", tuple(sorted(options.items()))))
+        return FakeTransaction()
+
+
+class FakeTransaction:
+    async def __aenter__(self) -> None:
+        return None
+
+    async def __aexit__(
+        self,
+        exception_type: object,
+        exception: object,
+        traceback: object,
+    ) -> None:
+        return None
+
 
 class CleanBackendDatabaseCollectionTests(unittest.IsolatedAsyncioTestCase):
     async def test_database_collection_uses_only_metadata_and_counts(self) -> None:
-        result = await collect_database_state(FakeConnection())
+        connection = FakeConnection()
+        result = await collect_database_state(connection)
         self.assertTrue(result["zep_turn_outbox_present"])
         self.assertEqual(result["memory_table_count"], 160)
         self.assertEqual(result["memory_ingest_table_count"], 7)
         self.assertEqual(result["nonterminal_ingest"], 0)
         self.assertEqual(result["nonterminal_erasure"], 0)
+        oid_calls = [
+            (sql, args)
+            for sql, args in connection.calls
+            if "to_regprocedure($1::text)::oid" in sql
+        ]
+        self.assertEqual(
+            oid_calls,
+            [
+                (
+                    "SELECT to_regprocedure($1::text)::oid",
+                    ("chat_history_private.clear_history(uuid,text,uuid,integer)",),
+                ),
+                (
+                    "SELECT to_regprocedure($1::text)::oid",
+                    ("chat_history_private.clear_message_tail(uuid,uuid)",),
+                ),
+            ],
+        )
+
+    async def test_live_collection_is_wrapped_in_serializable_read_only_transaction(self) -> None:
+        connection = FakeConnection()
+        result = await collect_database_state_read_only(connection)
+        self.assertTrue(result["transaction_read_only"])
+        self.assertIn(
+            (
+                "transaction",
+                (("isolation", "serializable"), ("readonly", True)),
+            ),
+            connection.calls,
+        )
+
+
+class CleanBackendCrontabTests(unittest.TestCase):
+    def test_root_audit_can_name_the_ubuntu_crontab(self) -> None:
+        completed = subprocess.CompletedProcess(
+            ["crontab", "-u", "ubuntu", "-l"],
+            0,
+            stdout="15 2 * * * /usr/local/bin/other-job\n",
+            stderr="",
+        )
+        with patch(
+            "scripts.verify_clean_backend_cutover.subprocess.run",
+            return_value=completed,
+        ) as run:
+            self.assertEqual(read_crontab("ubuntu"), completed.stdout)
+        run.assert_called_once_with(
+            ["crontab", "-u", "ubuntu", "-l"],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=10,
+        )
+
+    def test_crontab_user_is_strict(self) -> None:
+        with self.assertRaisesRegex(PreflightOperationalError, "crontab_user_invalid"):
+            read_crontab("ubuntu;cat /etc/shadow")
 
 
 class CleanBackendCliRedactionTests(unittest.TestCase):

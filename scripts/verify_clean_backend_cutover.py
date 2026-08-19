@@ -32,7 +32,10 @@ LEGACY_TRIGGER_NAMES = (
     "threads_serialize_source_erasure",
     "response_transcript_serialize_source_erasure",
 )
+HISTORY_SIGNATURE = "chat_history_private.clear_history(uuid,text,uuid,integer)"
+TAIL_SIGNATURE = "chat_history_private.clear_message_tail(uuid,uuid)"
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
+SYSTEM_USER = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
 
 
 class PreflightOperationalError(RuntimeError):
@@ -65,6 +68,7 @@ def evaluate_readiness(
 
     deployment_checks = [
         _check("runtime_dependencies", dependencies.get("status") == "pass", dependencies.get("status"), "pass"),
+        _check("database_transaction_read_only", database.get("transaction_read_only") is True, database.get("transaction_read_only"), True),
         _check("legacy_memory_cron_absent", not legacy_cron_present, legacy_cron_present, False),
         _check("zep_turn_outbox_present", bool(database.get("zep_turn_outbox_present")), bool(database.get("zep_turn_outbox_present")), True),
         _check("clear_history_present", bool(database.get("clear_history_present")), bool(database.get("clear_history_present")), True),
@@ -118,8 +122,14 @@ async def collect_database_state(connection: Any) -> dict[str, Any]:
         return await connection.fetchval(sql, *args)
 
     outbox = await scalar("SELECT to_regclass('conversation_sync_private.zep_turn_outbox') IS NOT NULL")
-    history_oid = await scalar("SELECT to_regprocedure('chat_history_private.clear_history(uuid,text,uuid,integer)')")
-    tail_oid = await scalar("SELECT to_regprocedure('chat_history_private.clear_message_tail(uuid,uuid)')")
+    history_oid = await scalar(
+        "SELECT to_regprocedure($1::text)::oid",
+        HISTORY_SIGNATURE,
+    )
+    tail_oid = await scalar(
+        "SELECT to_regprocedure($1::text)::oid",
+        TAIL_SIGNATURE,
+    )
     memory_schema = await scalar("SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'memory')")
     ingest_schema = await scalar("SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'memory_ingest_private')")
     ingest_outbox = await scalar("SELECT to_regclass('memory_ingest_private.memory_ingest_outbox') IS NOT NULL")
@@ -148,8 +158,24 @@ async def collect_database_state(connection: Any) -> dict[str, Any]:
     return state
 
 
-def read_crontab() -> str:
-    process = subprocess.run(["crontab", "-l"], text=True, capture_output=True, check=False, timeout=10)
+async def collect_database_state_read_only(connection: Any) -> dict[str, Any]:
+    async with connection.transaction(isolation="serializable", readonly=True):
+        transaction_read_only = await connection.fetchval("SHOW transaction_read_only")
+        if transaction_read_only != "on":
+            raise PreflightOperationalError("database_transaction_not_read_only")
+        state = await collect_database_state(connection)
+        state["transaction_read_only"] = True
+        return state
+
+
+def read_crontab(user: str | None = None) -> str:
+    if user is not None and not SYSTEM_USER.fullmatch(user):
+        raise PreflightOperationalError("crontab_user_invalid")
+    command = ["crontab"]
+    if user is not None:
+        command.extend(["-u", user])
+    command.append("-l")
+    process = subprocess.run(command, text=True, capture_output=True, check=False, timeout=10)
     if process.returncode == 0:
         return process.stdout
     if process.returncode == 1 and "no crontab" in process.stderr.lower():
@@ -165,12 +191,12 @@ async def run(arguments: argparse.Namespace) -> dict[str, Any]:
     dependencies = verify_contract(python_version, pins)
     connection = await asyncpg.connect(dsn, command_timeout=20)
     try:
-        database = await collect_database_state(connection)
+        database = await collect_database_state_read_only(connection)
     finally:
         await connection.close()
     return evaluate_readiness(
         database,
-        crontab_text=read_crontab(),
+        crontab_text=read_crontab(arguments.crontab_user),
         dependencies=dependencies,
         backup_sha256=arguments.backup_sha256,
         restore_receipt_sha256=arguments.restore_receipt_sha256,
@@ -180,6 +206,7 @@ async def run(arguments: argparse.Namespace) -> dict[str, Any]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dsn-env", default="POSTGRES_DSN")
+    parser.add_argument("--crontab-user")
     parser.add_argument("--pyproject", type=Path, default=Path(__file__).resolve().parents[1] / "pyproject.toml")
     parser.add_argument("--backup-sha256")
     parser.add_argument("--restore-receipt-sha256")
