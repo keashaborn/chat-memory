@@ -1,10 +1,11 @@
 # SeeBx target architecture v1
 
-Status: controlling cleanup target; implementation not yet complete
+Status: controlling cleanup target; isolated candidate in progress; production unchanged
 
-Evidence date: 2026-08-17 America/Chicago (2026-08-18 UTC)
+Evidence date: 2026-08-19 America/Chicago
 
-Authority source: SeeBx backend commit `49f9e60cf4321c8e42c359845c1a62a8c987614d`
+Production authority: SeeBx backend commit `49f9e60cf4321c8e42c359845c1a62a8c987614d`
+Candidate evidence: SeeBx commit `acec9d109f5f4cc8d5912a32cd134109cd23a57d`
 
 ## Purpose
 
@@ -20,23 +21,32 @@ The plane ownership, allowed dependency direction, cleanup waves, file/object
 classification fields, and product decision register are controlled by
 `docs/SEEBX_STRUCTURAL_DESIGN_MAP_V1.md`.
 
-## Verified starting point
+## Verified current transition state
 
-- Production `app.py` is 1,985 lines and owns 36 routes directly; the isolated cleanup candidate is now 1,467 lines with 32 direct routes after moving attachment CRUD/binding/history, thread metadata SQL, the complete `/log` user-transcript transaction, and all 16 application PostgreSQL connection lifetimes behind adapters, then requiring independently verified Supabase or active voice-session authority for every active app-owned thread route.
-- Eighteen additional routers are mounted.
-- `rag_engine` contains 232 Python files and 113,531 lines.
-- The live service/import roots reach 107 `rag_engine` files and 49,851 lines.
-- The remaining 125 `rag_engine` files and 63,680 lines are dormant from the
-  verified service, Git-sync, and voice-canary roots.
-- The mounted response router reaches 72 internal modules and 33,999 lines for
-  one route.
-- The frontend contains 143 API route files, including callers for unmounted or
-  retired backend capabilities.
+- Production remains at commit `49f9e60c`; its `app.py` is 1,985 lines and owns
+  36 routes directly.
+- Candidate `acec9d10` reduces `app.py` to 1,437 lines and 24 direct routes,
+  with 19 capability routers mounted. The latest intentional route reduction
+  removes four admin-memory and four cards/Vantage conflict-only stubs.
+- The candidate tracks zero files under `rag_engine`. The former 232-file,
+  113,531-line tree remains recoverable through Git history, not in the active
+  candidate package.
+- The candidate worktree still contains 232 ignored `.pyc` files under
+  `rag_engine/__pycache__`. They are not source or Git state, but a production
+  deployment must remove them through an exact, receipt-bound cache purge only
+  after reconfirming that `git ls-files rag_engine` is empty.
+- Paired Verbal Sage candidate `e26d296b` removes the redundant login-time
+  `/api/identity` bridge and leaves 142 tracked frontend API route files.
+  Supabase user metadata remains the account identity authority.
 - The live backend connects to two PostgreSQL instances: the older platform
   database on loopback port 5432 and the isolated LifeSwitch database on
   loopback port 55433.
 - The live process still receives `QDRANT_URL`, but no live Python caller uses
   the Qdrant client and no Qdrant service or container is running.
+
+The ignored-cache purge, candidate deployment, service restart, and production
+route retirement each require their own explicit authorization and rollback
+receipt.
 
 ## Architectural invariants
 

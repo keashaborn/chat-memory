@@ -65,7 +65,7 @@ Evidence was collected read-only on SeeBx and Verbal Sage on 2026-08-18.
 | accepted block ID `governed_memory_successor_v1` | Remove after proving no current provider emits it; Zep keeps `zep_memory_v1` | Static producer/consumer closure and prompt/provenance tests |
 | provenance name `governed_memory.response_provenance.v1` | Replace with a provider-neutral or Zep-specific current contract; version explicitly if bytes change | Hash/version migration tests; no silent approval transfer |
 | `vantage_id` request and PostgreSQL column | Remove or rename through a paired frontend/backend migration; do not silently repurpose | Frontend caller audit, API contract version, DB migration and rollback |
-| Verbal Sage `/api/identity` call to `/cards/{user_id}` | Replace with current Supabase/profile authority or remove the redundant write | Login, identity, owner isolation, and no-retired-route tests |
+| Verbal Sage `/api/identity` call to `/cards/{user_id}` | Removed in paired candidates `e26d296b` and `acec9d10`; Supabase metadata remains account identity authority | Ten frontend tests and ten backend retirement/erasure tests pass; production move remains separately gated |
 | Verbal Sage inspector Vantage cookies and `vantage_id` | Remove from the inspector request after confirming the replacement personalization controls | Inspector parity and permission tests |
 
 The old `rag_engine/governed_memory/runtime/zep_deletion.py` is not an active
