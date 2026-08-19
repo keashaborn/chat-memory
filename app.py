@@ -752,31 +752,6 @@ async def admin_ai_operations_resolve(
         return _ai_operations_error_response(req, exc)
 
 
-# ---------- admin usage ----------
-# ---------- admin memory health ----------
-@app.get("/admin/memory/health")
-async def admin_memory_health(req: Request):
-    return _legacy_memory_retired("admin_memory_health")
-
-
-@app.get("/admin/memory/workbench")
-async def admin_memory_workbench(req: Request):
-    return _legacy_memory_retired("admin_memory_workbench")
-
-
-@app.post("/admin/memory/workbench/feedback")
-async def admin_memory_workbench_feedback(
-    req: Request,
-):
-    return _legacy_memory_retired("admin_memory_workbench_feedback")
-
-
-# ---------- legacy admin memory review ----------
-@app.get("/admin/memory/review-plan")
-async def admin_memory_review_plan(req: Request):
-    return _legacy_memory_retired("admin_memory_review_plan")
-
-
 # ---------- persistent chat memory ----------
 app.include_router(conversation_attachment_router)
 
@@ -1425,30 +1400,6 @@ async def health():
             },
         },
     }
-
-# ---------- retired legacy Memory compatibility routes ----------
-@app.get("/cards/{user_id}")
-async def cards_list(user_id: str, req: Request, limit: int = 50, kinds: Optional[str] = None, vantage_id: str = "default"):
-    return _legacy_memory_retired("cards_list")
-
-@app.get("/vantage-cards/{user_id}")
-async def vantage_cards_list(
-    user_id: str,
-    req: Request,
-    vantage_id: str = "default",
-    kinds: Optional[str] = None,
-    limit: int = 100,
-):
-    return _legacy_memory_retired("vantage_cards_list")
-
-
-@app.post("/cards/{user_id}")
-async def cards_upsert(user_id: str, request: Request, vantage_id: str = "default"):
-    return _legacy_memory_retired("cards_upsert")
-
-@app.delete("/cards/{user_id}/{card_id}")
-async def cards_delete(user_id: str, card_id: str, req: Request, vantage_id: str = "default"):
-    return _legacy_memory_retired("cards_delete")
 
 # ---------- security/privacy: delete all user data ----------
 @app.delete("/user/{user_id}/data")

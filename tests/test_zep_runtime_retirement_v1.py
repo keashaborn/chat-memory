@@ -20,6 +20,20 @@ class ZepRuntimeRetirementContractTests(unittest.TestCase):
         ):
             self.assertNotIn(retired_symbol, source)
 
+    def test_retired_admin_memory_cards_and_vantage_routes_are_absent(self) -> None:
+        source = (ROOT / "app.py").read_text()
+        for retired_route in (
+            '/admin/memory/health',
+            '/admin/memory/workbench',
+            '/admin/memory/workbench/feedback',
+            '/admin/memory/review-plan',
+            '/cards/{user_id}',
+            '/cards/{user_id}/{card_id}',
+            '/vantage-cards/{user_id}',
+        ):
+            self.assertNotIn(retired_route, source)
+        self.assertIn('/user/{user_id}/export', source)
+
     def test_health_declares_zep_without_retired_qdrant_surface(self) -> None:
         source = (ROOT / "app.py").read_text()
         self.assertIn('"provider": "zep"', source)
