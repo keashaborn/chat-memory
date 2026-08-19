@@ -37,7 +37,7 @@ class RuntimeDependencyPreflightTests(unittest.TestCase):
         self.assertEqual(python_version, (3, 12))
         self.assertEqual(len(pins), 12)
         self.assertEqual(pins["jsonschema"], "4.25.1")
-        self.assertEqual(pins["requests"], "2.32.3")
+        self.assertEqual(pins["requests"], "2.32.5")
         self.assertEqual(pins["zep-cloud"], "3.25.0")
 
     def test_exact_contract_passes_only_when_every_version_matches(self) -> None:
