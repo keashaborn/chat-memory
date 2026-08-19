@@ -182,13 +182,17 @@ class RuntimeEnvironmentBuilderTests(unittest.TestCase):
                 record = dist_info / "RECORD"
                 record.write_text(
                     "../../../bin/uvicorn,sha256=path-dependent,1\n"
+                    "example/__pycache__/module.cpython-312.pyc,sha256=removed,1\n"
                     "example-1.0.dist-info/RECORD,,\n",
                     encoding="utf-8",
                 )
                 (cache / "module.cpython-312.pyc").write_bytes(b"bytecode")
                 self.assertEqual(remove_runtime_bytecode(venv), 1)
                 self.assertEqual(normalize_runtime_prefix(venv, install_path), 2)
-                self.assertEqual(rebuild_wheel_records(venv), 1)
+                self.assertEqual(
+                    rebuild_wheel_records(venv),
+                    {"record_count": 1, "removed_bytecode_entry_count": 1},
+                )
                 archive = root / (name + ".tar")
                 manifest = build_runtime_archive(venv, archive, install_path)
                 archives.append(manifest["sha256"])

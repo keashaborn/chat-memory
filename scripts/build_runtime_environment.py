@@ -406,7 +406,7 @@ def normalize_runtime_prefix(root: Path, install_path: Path) -> int:
     return normalized
 
 
-def rebuild_wheel_records(root: Path) -> int:
+def rebuild_wheel_records(root: Path) -> dict[str, int]:
     root = root.resolve(strict=True)
     record_paths = [
         path
@@ -419,6 +419,7 @@ def rebuild_wheel_records(root: Path) -> int:
         raise RuntimeBuildExecutionError("runtime_wheel_record_missing")
 
     rebuilt = 0
+    removed_bytecode_entries = 0
     for record in record_paths:
         site_packages = record.parent.parent
         try:
@@ -442,12 +443,21 @@ def rebuild_wheel_records(root: Path) -> int:
             ):
                 raise RuntimeBuildExecutionError("runtime_wheel_record_path_invalid")
             seen_paths.add(raw_path)
-            try:
-                target = site_packages.joinpath(*member.parts).resolve(strict=True)
-            except OSError as error:
-                raise RuntimeBuildExecutionError("runtime_wheel_record_target_missing") from error
+            target = site_packages.joinpath(*member.parts).resolve(strict=False)
             if not target.is_relative_to(root):
                 raise RuntimeBuildExecutionError("runtime_wheel_record_target_outside_environment")
+            is_bytecode = (
+                "__pycache__" in member.parts
+                and member.suffix in {".pyc", ".pyo"}
+            )
+            if not target.exists():
+                if is_bytecode:
+                    removed_bytecode_entries += 1
+                    continue
+                raise RuntimeBuildExecutionError("runtime_wheel_record_target_missing")
+            if is_bytecode:
+                raise RuntimeBuildExecutionError("runtime_wheel_record_bytecode_present")
+            target = target.resolve(strict=True)
             item = target.lstat()
             if not stat.S_ISREG(item.st_mode):
                 raise RuntimeBuildExecutionError("runtime_wheel_record_target_type_invalid")
@@ -475,7 +485,10 @@ def rebuild_wheel_records(root: Path) -> int:
             mode=stat.S_IMODE(record.lstat().st_mode),
         )
         rebuilt += 1
-    return rebuilt
+    return {
+        "record_count": rebuilt,
+        "removed_bytecode_entry_count": removed_bytecode_entries,
+    }
 
 
 def _normalized_link_target(path: PurePosixPath, target: str) -> PurePosixPath:
@@ -698,7 +711,7 @@ def execute(arguments: argparse.Namespace) -> dict[str, Any]:
         removed_bytecode_count = remove_runtime_bytecode(venv)
         install_path = runtime_install_path(repository_state["commit"])
         normalized_file_count = normalize_runtime_prefix(venv, install_path)
-        rebuilt_record_count = rebuild_wheel_records(venv)
+        record_rebuild = rebuild_wheel_records(venv)
         _freeze_tree(venv)
         runtime_archive = build_runtime_archive(
             venv,
@@ -722,7 +735,10 @@ def execute(arguments: argparse.Namespace) -> dict[str, Any]:
                 "pip_check": pip_check,
                 "import_count": len(IMPORT_MODULES),
                 "removed_bytecode_count": removed_bytecode_count,
-                "rebuilt_record_count": rebuilt_record_count,
+                "rebuilt_record_count": record_rebuild["record_count"],
+                "removed_record_bytecode_entry_count": record_rebuild[
+                    "removed_bytecode_entry_count"
+                ],
             },
             "runtime_archive": runtime_archive,
             "wheelhouse": wheelhouse_state,
