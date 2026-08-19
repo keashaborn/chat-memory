@@ -1,0 +1,9 @@
+# Render with scripts/render_release_unit.py and install as
+# /etc/systemd/system/brains.service.d/zz-immutable-release.conf.
+[Service]
+WorkingDirectory=/opt/lifeswitch/releases/@COMMIT@
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=
+ExecStart=/opt/lifeswitch/runtimes/@COMMIT@/venv/bin/uvicorn app:app --host 0.0.0.0 --port 8088 --app-dir /opt/lifeswitch/releases/@COMMIT@
+ExecStartPre=
+ExecStartPre=/opt/lifeswitch/runtimes/@COMMIT@/venv/bin/python /opt/lifeswitch/releases/@COMMIT@/scripts/verify_runtime_dependencies.py --pyproject /opt/lifeswitch/releases/@COMMIT@/pyproject.toml
