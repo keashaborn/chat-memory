@@ -36,7 +36,9 @@ class ZepRuntimeRetirementContractTests(unittest.TestCase):
         self.assertIn('create_conversation_export_router', source)
 
     def test_health_declares_zep_without_retired_qdrant_surface(self) -> None:
-        source = (ROOT / "app.py").read_text()
+        source = (
+            ROOT / "seebx/capabilities/operations/health_routes.py"
+        ).read_text()
         self.assertIn('"provider": "zep"', source)
         self.assertIn('"postgres_access": "disabled"', source)
         for retired_symbol in (
