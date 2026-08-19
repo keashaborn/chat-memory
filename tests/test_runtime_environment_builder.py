@@ -15,6 +15,7 @@ from scripts.build_runtime_environment import (
     build_runtime_archive,
     build_pip_install_command,
     normalize_runtime_prefix,
+    rebuild_wheel_records,
     remove_runtime_bytecode,
     runtime_install_path,
     validate_repository,
@@ -170,9 +171,24 @@ class RuntimeEnvironmentBuilderTests(unittest.TestCase):
                     "command = python -m venv " + venv.as_posix() + "\n",
                     encoding="utf-8",
                 )
+                dist_info = (
+                    venv
+                    / "lib"
+                    / "python3.12"
+                    / "site-packages"
+                    / "example-1.0.dist-info"
+                )
+                dist_info.mkdir(parents=True)
+                record = dist_info / "RECORD"
+                record.write_text(
+                    "../../../bin/uvicorn,sha256=path-dependent,1\n"
+                    "example-1.0.dist-info/RECORD,,\n",
+                    encoding="utf-8",
+                )
                 (cache / "module.cpython-312.pyc").write_bytes(b"bytecode")
                 self.assertEqual(remove_runtime_bytecode(venv), 1)
                 self.assertEqual(normalize_runtime_prefix(venv, install_path), 2)
+                self.assertEqual(rebuild_wheel_records(venv), 1)
                 archive = root / (name + ".tar")
                 manifest = build_runtime_archive(venv, archive, install_path)
                 archives.append(manifest["sha256"])

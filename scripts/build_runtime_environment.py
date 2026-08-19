@@ -4,7 +4,10 @@ from __future__ import annotations
 """Build a hash-bound SeeBx runtime without activating it."""
 
 import argparse
+import base64
+import csv
 import hashlib
+import io
 import json
 import os
 import platform
@@ -403,6 +406,78 @@ def normalize_runtime_prefix(root: Path, install_path: Path) -> int:
     return normalized
 
 
+def rebuild_wheel_records(root: Path) -> int:
+    root = root.resolve(strict=True)
+    record_paths = [
+        path
+        for path in _runtime_paths(root)
+        if path.name == "RECORD"
+        and path.parent.name.endswith(".dist-info")
+        and stat.S_ISREG(path.lstat().st_mode)
+    ]
+    if not record_paths:
+        raise RuntimeBuildExecutionError("runtime_wheel_record_missing")
+
+    rebuilt = 0
+    for record in record_paths:
+        site_packages = record.parent.parent
+        try:
+            rows = list(csv.reader(io.StringIO(record.read_text(encoding="utf-8"))))
+        except (OSError, UnicodeError, csv.Error) as error:
+            raise RuntimeBuildExecutionError("runtime_wheel_record_invalid") from error
+        normalized_rows: list[list[str]] = []
+        seen_paths: set[str] = set()
+        self_rows = 0
+        for row in rows:
+            if len(row) != 3:
+                raise RuntimeBuildExecutionError("runtime_wheel_record_invalid")
+            raw_path = row[0]
+            member = PurePosixPath(raw_path)
+            if (
+                not raw_path
+                or raw_path == "."
+                or member.is_absolute()
+                or "\\" in raw_path
+                or raw_path in seen_paths
+            ):
+                raise RuntimeBuildExecutionError("runtime_wheel_record_path_invalid")
+            seen_paths.add(raw_path)
+            try:
+                target = site_packages.joinpath(*member.parts).resolve(strict=True)
+            except OSError as error:
+                raise RuntimeBuildExecutionError("runtime_wheel_record_target_missing") from error
+            if not target.is_relative_to(root):
+                raise RuntimeBuildExecutionError("runtime_wheel_record_target_outside_environment")
+            item = target.lstat()
+            if not stat.S_ISREG(item.st_mode):
+                raise RuntimeBuildExecutionError("runtime_wheel_record_target_type_invalid")
+            if target == record:
+                if row[1] or row[2]:
+                    raise RuntimeBuildExecutionError("runtime_wheel_record_self_hash_present")
+                self_rows += 1
+                normalized_rows.append([raw_path, "", ""])
+                continue
+            digest = base64.urlsafe_b64encode(
+                bytes.fromhex(sha256_file(target))
+            ).rstrip(b"=").decode("ascii")
+            normalized_rows.append(
+                [raw_path, "sha256=" + digest, str(item.st_size)]
+            )
+        if self_rows != 1:
+            raise RuntimeBuildExecutionError("runtime_wheel_record_self_row_invalid")
+        normalized_rows.sort(key=lambda row: row[0])
+        output = io.StringIO(newline="")
+        writer = csv.writer(output, lineterminator="\n")
+        writer.writerows(normalized_rows)
+        _atomic_write(
+            record,
+            output.getvalue().encode("utf-8"),
+            mode=stat.S_IMODE(record.lstat().st_mode),
+        )
+        rebuilt += 1
+    return rebuilt
+
+
 def _normalized_link_target(path: PurePosixPath, target: str) -> PurePosixPath:
     if not target or target.startswith("/") or "\\" in target:
         raise RuntimeBuildExecutionError("runtime_symlink_target_invalid")
@@ -623,6 +698,7 @@ def execute(arguments: argparse.Namespace) -> dict[str, Any]:
         removed_bytecode_count = remove_runtime_bytecode(venv)
         install_path = runtime_install_path(repository_state["commit"])
         normalized_file_count = normalize_runtime_prefix(venv, install_path)
+        rebuilt_record_count = rebuild_wheel_records(venv)
         _freeze_tree(venv)
         runtime_archive = build_runtime_archive(
             venv,
@@ -646,6 +722,7 @@ def execute(arguments: argparse.Namespace) -> dict[str, Any]:
                 "pip_check": pip_check,
                 "import_count": len(IMPORT_MODULES),
                 "removed_bytecode_count": removed_bytecode_count,
+                "rebuilt_record_count": rebuilt_record_count,
             },
             "runtime_archive": runtime_archive,
             "wheelhouse": wheelhouse_state,
