@@ -62,12 +62,14 @@ class ConversationHistoryAdapterTests(unittest.IsolatedAsyncioTestCase):
 
     def test_app_route_is_sql_free_and_delegates_history_read(self) -> None:
         root = Path(__file__).resolve().parents[1]
-        source = (root / "app.py").read_text(encoding="utf-8")
+        source = (
+            root / "seebx/capabilities/conversation/thread_routes.py"
+        ).read_text(encoding="utf-8")
         route = source.split(
-            '@app.get("/threads/{thread_id}/messages")',
+            '@router.get("/threads/{thread_id}/messages")',
             1,
         )[1].split(
-            '@app.delete("/threads/{thread_id}/messages/{message_id}/truncate")',
+            '@router.post("/threads/{thread_id}/rename")',
             1,
         )[0]
 

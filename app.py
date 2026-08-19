@@ -46,11 +46,13 @@ from seebx.capabilities.conversation.tagging import infer_vb_tags
 from seebx.capabilities.conversation.attachment_routes import (
     router as conversation_attachment_router,
 )
+from seebx.capabilities.conversation.thread_routes import (
+    create_thread_lifecycle_router,
+)
 from seebx.capabilities.conversation.attachments import (
     MAX_ATTACHMENT_COUNT,
 )
 from seebx.contracts.identifiers import CanonicalJsonUUID
-from seebx.adapters.conversation_history import fetch_thread_message_rows
 from seebx.adapters.conversation_erasure import (
     PostgresConversationErasureRepository,
 )
@@ -68,30 +70,6 @@ from seebx.adapters.conversation_persistence import (
     UserTranscriptPersistenceError,
     persist_user_transcript,
 )
-from seebx.adapters.conversation_threads import (
-    archive_thread,
-    create_thread,
-    fetch_thread_title_state,
-    fetch_thread_title_transcript,
-    list_visible_threads,
-    rename_thread_manual,
-    set_thread_pinned,
-    thread_belongs_to_owner,
-    update_thread_automatic_title,
-)
-
-
-class NewThreadReq(BaseModel):
-    user_id: str
-    title: Optional[str] = None
-    vantage_id: Optional[str] = "default"
-
-class PinThreadReq(BaseModel):
-    pinned: bool
-
-class ActiveThreadReq(BaseModel):
-    user_id: str
-    thread_id: str
 
 
 class ChatHistoryClearReq(BaseModel):
@@ -157,24 +135,12 @@ from seebx.core.voice_observability import voice_turn_id_from_request
 from seebx.core.ownership import require_actor_matches_owner
 from seebx.core.identity import (
     require_actor,
-    require_request_actor,
     require_verified_supabase_request_identity,
-)
-from seebx.adapters.thread_selection import (
-    ActiveThreadSelectionV1Error,
-    clear_active_thread_v1,
-    get_active_thread_v1,
-    select_active_thread_v1,
 )
 from seebx.capabilities.conversation.erasure import (
     ChatHistoryClearError,
     ConversationErasureService,
 )
-from seebx.capabilities.conversation.thread_title import (
-    generate_semantic_title,
-    select_first_meaningful_exchange,
-)
-from seebx.contracts.conversation import WEB_ASSISTANT_SOURCE
 from seebx.capabilities.operations.ai_operations_routes import (
     create_ai_operations_router,
 )
@@ -357,27 +323,6 @@ def parse_uuid(s: str) -> Optional[uuid.UUID]:
 
 
 # ---------- actor / owner enforcement ----------
-def _actor_user_id(req: Request) -> Optional[str]:
-    raw = (req.headers.get("x-vs-actor-user-id") or "").strip()
-    if not raw or len(raw) > 128:
-        return None
-    return raw
-
-
-def _actor_missing_response() -> JSONResponse:
-    return JSONResponse(
-        {"status": "unauthorized", "detail": "missing_actor_user_id"},
-        status_code=401,
-    )
-
-
-def _owner_mismatch_response() -> JSONResponse:
-    return JSONResponse(
-        {"status": "forbidden", "detail": "actor_owner_mismatch"},
-        status_code=403,
-    )
-
-
 def _identity_error_response(exc: HTTPException) -> JSONResponse:
     status = {
         400: "bad_request",
@@ -392,79 +337,6 @@ def _identity_error_response(exc: HTTPException) -> JSONResponse:
         },
         status_code=exc.status_code,
     )
-
-
-async def _require_actor_for_user(req: Request, requested_user_id: str, vantage_id: str = "default"):
-    """
-    The service token proves trusted infrastructure; it is not user authority.
-    Supabase or an active voice-session lease proves the asserted actor, and
-    the requested owner must be that exact UUID. Legacy Vantage aliases are
-    not owners and are never resolved here.
-    """
-    actor = _actor_user_id(req)
-    if not actor:
-        return _actor_missing_response(), None
-
-    actor_uuid = parse_uuid(actor)
-    requested_uuid = parse_uuid(requested_user_id)
-    if actor_uuid is None:
-        return JSONResponse(
-            {"status": "bad_request", "detail": "invalid_actor_user_id"},
-            status_code=400,
-        ), None
-    if requested_uuid is None:
-        return JSONResponse(
-            {"status": "bad_request", "detail": "invalid_owner_user_id"},
-            status_code=400,
-        ), None
-    if actor_uuid != requested_uuid:
-        return _owner_mismatch_response(), str(requested_uuid)
-
-    try:
-        verified_actor = await require_actor(req, str(requested_uuid))
-    except HTTPException as exc:
-        return _identity_error_response(exc), None
-    return None, verified_actor
-
-
-async def _require_actor_for_thread(req: Request, thread_id: uuid.UUID):
-    """
-    Require the requested thread row to belong to x-vs-actor-user-id.
-    Returns (response_or_none, actor_user_id).
-    """
-    actor = _actor_user_id(req)
-    if not actor:
-        return _actor_missing_response(), None
-
-    actor_uuid = parse_uuid(actor)
-    if actor_uuid is None:
-        return JSONResponse(
-            {"status": "bad_request", "detail": "invalid_actor_user_id"},
-            status_code=400,
-        ), None
-
-    try:
-        verified_actor = await require_request_actor(req)
-    except HTTPException as exc:
-        return _identity_error_response(exc), None
-    verified_actor_uuid = parse_uuid(verified_actor)
-    if verified_actor_uuid != actor_uuid:
-        return _owner_mismatch_response(), None
-
-    async with POSTGRES.owner_connection(actor_uuid) as conn:
-        found = await thread_belongs_to_owner(
-            conn,
-            owner_user_id=actor_uuid,
-            thread_id=thread_id,
-        )
-
-    if not found:
-        return JSONResponse(
-            {"status": "not_found", "detail": "thread_not_found"},
-            status_code=404,
-        ), None
-
-    return None, str(actor_uuid)
 
 
 async def _require_verified_deletion_actor(req: Request):
@@ -773,117 +645,9 @@ async def log_chat(req: Request):
         response_payload["replayed"] = True
     return response_payload
 
-@app.post("/threads/new")
-async def threads_new(body: NewThreadReq, req: Request):
-    user_id_alias = (body.user_id or "").strip() or "anon"
-    title = (body.title or "New chat").strip() or "New chat"
-    vantage_id = (getattr(body, "vantage_id", None) or "default").strip() or "default"
-
-    actor_err, user_id = await _require_actor_for_user(req, user_id_alias, vantage_id)
-    if actor_err:
-        return actor_err
-
-    async with POSTGRES.owner_connection(user_id) as conn:
-        async with conn.transaction():
-            row = await create_thread(
-                conn,
-                owner_user_id=user_id,
-                title=title,
-            )
-            await select_active_thread_v1(
-                conn, owner_user_id=user_id, thread_id=row["id"]
-            )
-        return {"thread_id": str(row["id"]), "title": row["title"], "updated_at": row["updated_at"].isoformat()}
-
-@app.get("/threads/list/{user_id}")
-async def threads_list(user_id: str, req: Request, vantage_id: str = "default"):
-    user_id_alias = (user_id or "").strip() or "anon"
-
-    actor_err, user_id = await _require_actor_for_user(req, user_id_alias, vantage_id)
-    if actor_err:
-        return actor_err
-    async with POSTGRES.owner_connection(user_id) as conn:
-        rows = await list_visible_threads(
-            conn,
-            owner_user_id=user_id,
-        )
-        return [
-            {
-                "thread_id": str(r["id"]),
-                "title": r["title"],
-                "updated_at": r["updated_at"].isoformat(),
-                "pinned": bool(r["pinned"]),
-                "pinned_at": r["pinned_at"].isoformat() if r["pinned_at"] else None,
-            }
-            for r in rows
-        ]
-
-@app.get("/threads/active/{user_id}")
-async def threads_active_get(user_id: str, req: Request, vantage_id: str = "default"):
-    user_id_alias = (user_id or "").strip() or "anon"
-    actor_err, owner_user_id = await _require_actor_for_user(
-        req, user_id_alias, vantage_id
-    )
-    if actor_err:
-        return actor_err
-
-    async with POSTGRES.owner_connection(owner_user_id) as conn:
-        selected = await get_active_thread_v1(
-            conn,
-            owner_user_id=owner_user_id,
-        )
-        return selected or {"thread_id": None}
-
-
-@app.post("/threads/active")
-async def threads_active_select(body: ActiveThreadReq, req: Request):
-    user_id_alias = (body.user_id or "").strip() or "anon"
-    actor_err, owner_user_id = await _require_actor_for_user(
-        req, user_id_alias
-    )
-    if actor_err:
-        return actor_err
-
-    thread_id = parse_uuid(body.thread_id)
-    if thread_id is None:
-        return JSONResponse(
-            {"status": "bad_request", "detail": "invalid_thread_id"},
-            status_code=400,
-        )
-
-    async with POSTGRES.owner_connection(owner_user_id) as conn:
-        try:
-            return await select_active_thread_v1(
-                conn,
-                owner_user_id=owner_user_id,
-                thread_id=thread_id,
-            )
-        except ActiveThreadSelectionV1Error as exc:
-            return JSONResponse(
-                {"status": "not_found", "detail": exc.code},
-                status_code=404,
-            )
-
-
-@app.delete("/threads/active/{user_id}")
-async def threads_active_clear(
-    user_id: str,
-    req: Request,
-    vantage_id: str = "default",
-):
-    user_id_alias = (user_id or "").strip() or "anon"
-    actor_err, owner_user_id = await _require_actor_for_user(
-        req, user_id_alias, vantage_id
-    )
-    if actor_err:
-        return actor_err
-
-    async with POSTGRES.owner_connection(owner_user_id) as conn:
-        await clear_active_thread_v1(
-            conn,
-            owner_user_id=owner_user_id,
-        )
-        return {"status": "ok", "thread_id": None}
+app.include_router(
+    create_thread_lifecycle_router(POSTGRES, title_client=client)
+)
 
 
 @app.post("/chat-history/clear")
@@ -964,52 +728,6 @@ async def chat_and_zep_full_clear(req: Request):
     }
 
 
-@app.get("/threads/{thread_id}/messages")
-async def threads_messages(thread_id: str, req: Request, limit: int = 200):
-    tid = parse_uuid(thread_id)
-    if not tid:
-        return JSONResponse({"status":"bad_request","detail":"invalid thread_id"}, status_code=400)
-
-    actor_err, _actor_uid = await _require_actor_for_thread(req, tid)
-    if actor_err:
-        return actor_err
-
-    async with POSTGRES.owner_connection(_actor_uid) as conn:
-        rows = await fetch_thread_message_rows(
-            conn,
-            owner_user_id=_actor_uid,
-            thread_id=tid,
-            limit=limit,
-        )
-        out = []
-        for r in rows:
-            src = (r["source"] or "")
-            role = "assistant" if "assistant" in src else "user"
-            message = {
-                "id": str(r["id"]),
-                "role": role,
-                "content": r["text"],
-                "created_at": r["created_at"].isoformat(),
-                "attachments": r["attachments"] or [],
-            }
-            if src == WEB_ASSISTANT_SOURCE:
-                cited = r["cited_sources"] or []
-                admitted = r["admitted_sources"] or []
-                if isinstance(cited, str):
-                    cited = json.loads(cited)
-                if isinstance(admitted, str):
-                    admitted = json.loads(admitted)
-                message.update(
-                    {
-                        "web_search": True,
-                        "trusted_web_sources": cited,
-                        "trusted_web_admitted_sources": admitted,
-                    }
-                )
-            out.append(message)
-        return out
-
-
 @app.delete("/threads/{thread_id}/messages/{message_id}/truncate")
 async def threads_truncate_from_message(thread_id: str, message_id: str, req: Request):
     return _conversation_erasure_required(
@@ -1018,234 +736,6 @@ async def threads_truncate_from_message(thread_id: str, message_id: str, req: Re
     )
 
 
-
-
-class RenameThreadReq(BaseModel):
-    title: str
-    title_source: Literal["automatic", "manual"] = "manual"
-
-@app.post("/threads/{thread_id}/rename")
-async def threads_rename(thread_id: str, body: RenameThreadReq, req: Request):
-    tid = parse_uuid(thread_id)
-    if not tid:
-        return JSONResponse({"status":"bad_request","detail":"invalid thread_id"}, status_code=400)
-
-    actor_err, _actor_uid = await _require_actor_for_thread(req, tid)
-    if actor_err:
-        return actor_err
-
-    title = (body.title or "").strip() or "New chat"
-
-    async with POSTGRES.owner_connection(_actor_uid) as conn:
-        if body.title_source == "automatic":
-            return JSONResponse(
-                {
-                    "status": "conflict",
-                    "detail": "automatic_title_is_backend_owned",
-                },
-                status_code=409,
-            )
-
-        updated = await rename_thread_manual(
-            conn,
-            owner_user_id=_actor_uid,
-            thread_id=tid,
-            title=title,
-        )
-        if not updated:
-            return JSONResponse(
-                {"status": "not_found", "detail": "thread not found"},
-                status_code=404,
-            )
-        return {
-            "status": "ok",
-            "thread_id": str(tid),
-            "title": updated["title"],
-            "title_source": updated["title_source"],
-            "updated": True,
-        }
-
-
-@app.post("/threads/{thread_id}/pin")
-async def threads_pin(thread_id: str, body: PinThreadReq, req: Request):
-    tid = parse_uuid(thread_id)
-    if not tid:
-        return JSONResponse(
-            {"status": "bad_request", "detail": "invalid_thread_id"},
-            status_code=400,
-        )
-
-    actor_err, actor_uid = await _require_actor_for_thread(req, tid)
-    if actor_err:
-        return actor_err
-
-    async with POSTGRES.owner_connection(actor_uid) as conn:
-        updated = await set_thread_pinned(
-            conn,
-            owner_user_id=actor_uid,
-            thread_id=tid,
-            pinned=body.pinned,
-        )
-        if not updated:
-            return JSONResponse(
-                {"status": "not_found", "detail": "thread_not_found"},
-                status_code=404,
-            )
-
-        pinned_at = updated["pinned_at"]
-        return {
-            "status": "ok",
-            "thread_id": str(tid),
-            "pinned": pinned_at is not None,
-            "pinned_at": pinned_at.isoformat() if pinned_at else None,
-        }
-
-
-@app.post("/threads/{thread_id}/auto-title")
-async def threads_auto_title(thread_id: str, req: Request):
-    tid = parse_uuid(thread_id)
-    if not tid:
-        return JSONResponse(
-            {"status": "bad_request", "detail": "invalid_thread_id"},
-            status_code=400,
-        )
-
-    actor_err, actor_uid = await _require_actor_for_thread(req, tid)
-    if actor_err:
-        return actor_err
-
-    async with POSTGRES.owner_connection(actor_uid) as conn:
-        current = await fetch_thread_title_state(
-            conn,
-            owner_user_id=actor_uid,
-            thread_id=tid,
-        )
-        if not current:
-            return JSONResponse(
-                {"status": "not_found", "detail": "thread_not_found"},
-                status_code=404,
-            )
-        if current["title_source"] != "placeholder":
-            return {
-                "status": "ok",
-                "thread_id": str(tid),
-                "title": current["title"],
-                "title_source": current["title_source"],
-                "updated": False,
-                "skipped": f"{current['title_source']}_title_preserved",
-            }
-
-        transcript = await fetch_thread_title_transcript(
-            conn,
-            owner_user_id=actor_uid,
-            thread_id=tid,
-        )
-
-    exchange = select_first_meaningful_exchange(transcript)
-    if exchange is None:
-        return {
-            "status": "ok",
-            "thread_id": str(tid),
-            "title": current["title"],
-            "title_source": "placeholder",
-            "updated": False,
-            "skipped": "no_meaningful_exchange",
-        }
-
-    if client is None:
-        return JSONResponse(
-            {"status": "unavailable", "detail": "title_generation_unavailable"},
-            status_code=503,
-        )
-
-    title_model = (
-        os.getenv("THREAD_TITLE_MODEL")
-        or "gpt-4.1-mini"
-    ).strip()
-    try:
-        title = await asyncio.wait_for(
-            asyncio.to_thread(
-                generate_semantic_title,
-                client,
-                title_model,
-                exchange[0],
-                exchange[1],
-            ),
-            timeout=12.0,
-        )
-    except Exception:
-        print(
-            "[threads_auto_title] generation unavailable",
-            str(getattr(req.state, "request_id", "")),
-        )
-        return JSONResponse(
-            {"status": "unavailable", "detail": "title_generation_unavailable"},
-            status_code=503,
-        )
-
-    if not title:
-        return {
-            "status": "ok",
-            "thread_id": str(tid),
-            "title": current["title"],
-            "title_source": "placeholder",
-            "updated": False,
-            "skipped": "no_meaningful_exchange",
-        }
-
-    async with POSTGRES.owner_connection(actor_uid) as conn:
-        updated = await update_thread_automatic_title(
-            conn,
-            owner_user_id=actor_uid,
-            thread_id=tid,
-            title=title,
-        )
-        if updated:
-            return {
-                "status": "ok",
-                "thread_id": str(tid),
-                "title": updated["title"],
-                "title_source": updated["title_source"],
-                "updated": True,
-            }
-
-        current = await fetch_thread_title_state(
-            conn,
-            owner_user_id=actor_uid,
-            thread_id=tid,
-        )
-        if not current:
-            return JSONResponse(
-                {"status": "not_found", "detail": "thread_not_found"},
-                status_code=404,
-            )
-        return {
-            "status": "ok",
-            "thread_id": str(tid),
-            "title": current["title"],
-            "title_source": current["title_source"],
-            "updated": False,
-            "skipped": f"{current['title_source']}_title_preserved",
-        }
-
-
-@app.post("/threads/{thread_id}/archive")
-async def threads_archive(thread_id: str, req: Request):
-    tid = parse_uuid(thread_id)
-    if not tid:
-        return JSONResponse({"status":"bad_request","detail":"invalid thread_id"}, status_code=400)
-
-    actor_err, _actor_uid = await _require_actor_for_thread(req, tid)
-    if actor_err:
-        return actor_err
-
-    async with POSTGRES.owner_connection(_actor_uid) as conn:
-        await archive_thread(
-            conn,
-            owner_user_id=_actor_uid,
-            thread_id=tid,
-        )
-        return {"status": "ok", "thread_id": str(tid), "archived": True}
 
 
 @app.delete("/threads/{thread_id}")

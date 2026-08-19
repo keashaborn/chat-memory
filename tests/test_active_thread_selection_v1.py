@@ -140,7 +140,9 @@ class ActiveThreadSelectionV1Tests(unittest.IsolatedAsyncioTestCase):
 
 
 ROOT = Path(__file__).resolve().parents[1]
-APP_SOURCE = (ROOT / "app.py").read_text(encoding="utf-8")
+THREAD_ROUTES_SOURCE = (
+    ROOT / "seebx/capabilities/conversation/thread_routes.py"
+).read_text(encoding="utf-8")
 MIGRATION = (
     ROOT / "ops/sql/20260726_active_thread_selection_v1.sql"
 ).read_text(encoding="utf-8")
@@ -148,22 +150,22 @@ MIGRATION = (
 
 class ActiveThreadSelectionContractTests(unittest.TestCase):
     def test_api_requires_actor_owner_verification(self) -> None:
-        self.assertIn('@app.get("/threads/active/{user_id}")', APP_SOURCE)
-        self.assertIn('@app.post("/threads/active")', APP_SOURCE)
-        self.assertIn('@app.delete("/threads/active/{user_id}")', APP_SOURCE)
-        active_handlers = APP_SOURCE.split(
-            '@app.get("/threads/active/{user_id}")',
+        self.assertIn('@router.get("/threads/active/{user_id}")', THREAD_ROUTES_SOURCE)
+        self.assertIn('@router.post("/threads/active")', THREAD_ROUTES_SOURCE)
+        self.assertIn('@router.delete("/threads/active/{user_id}")', THREAD_ROUTES_SOURCE)
+        active_handlers = THREAD_ROUTES_SOURCE.split(
+            '@router.get("/threads/active/{user_id}")',
             1,
-        )[1].split('@app.get("/threads/{thread_id}/messages")', 1)[0]
+        )[1].split('@router.get("/threads/{thread_id}/messages")', 1)[0]
         self.assertEqual(
             active_handlers.count("_require_actor_for_user("),
             3,
         )
-        self.assertIn('"/threads/active"', APP_SOURCE)
+        self.assertIn('"/threads/active"', THREAD_ROUTES_SOURCE)
 
     def test_new_thread_selects_itself_in_same_transaction(self) -> None:
-        handler = APP_SOURCE.split('@app.post("/threads/new")', 1)[1]
-        handler = handler.split('@app.get("/threads/list/{user_id}")', 1)[0]
+        handler = THREAD_ROUTES_SOURCE.split('@router.post("/threads/new")', 1)[1]
+        handler = handler.split('@router.get("/threads/list/{user_id}")', 1)[0]
         self.assertIn("async with conn.transaction():", handler)
         self.assertIn("select_active_thread_v1(", handler)
 

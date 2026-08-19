@@ -117,7 +117,7 @@ class ConversationAttachmentAdapterTests(unittest.IsolatedAsyncioTestCase):
         root = Path(__file__).resolve().parents[1]
         source = (root / "app.py").read_text(encoding="utf-8")
         log_route = source.split('@app.post("/log")', 1)[1].split(
-            '@app.post("/threads/new")', 1
+            'app.include_router(', 1
         )[0]
 
         adapter_source = (

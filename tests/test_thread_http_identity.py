@@ -9,7 +9,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 
@@ -44,11 +45,72 @@ class ThreadHttpIdentityTests(unittest.IsolatedAsyncioTestCase):
             clear=False,
         ):
             cls.backend = importlib.import_module("app")
+            cls.thread_routes = importlib.import_module(
+                "seebx.capabilities.conversation.thread_routes"
+            )
+
+    def test_canonical_router_owns_exact_thread_lifecycle_surface(self) -> None:
+        application = FastAPI()
+        application.include_router(
+            self.thread_routes.create_thread_lifecycle_router(
+                self.backend.POSTGRES,
+                title_client=None,
+            )
+        )
+        actual = {
+            (route.path, tuple(sorted(route.methods or ())))
+            for route in application.routes
+            if route.path.startswith("/threads")
+        }
+        expected = {
+            ("/threads/new", ("POST",)),
+            ("/threads/list/{user_id}", ("GET",)),
+            ("/threads/active/{user_id}", ("GET",)),
+            ("/threads/active", ("POST",)),
+            ("/threads/active/{user_id}", ("DELETE",)),
+            ("/threads/{thread_id}/messages", ("GET",)),
+            ("/threads/{thread_id}/rename", ("POST",)),
+            ("/threads/{thread_id}/pin", ("POST",)),
+            ("/threads/{thread_id}/auto-title", ("POST",)),
+            ("/threads/{thread_id}/archive", ("POST",)),
+        }
+        self.assertEqual(actual, expected)
+
+    def test_missing_bearer_fails_before_thread_database_access(self) -> None:
+        application = FastAPI()
+        application.include_router(
+            self.thread_routes.create_thread_lifecycle_router(
+                self.backend.POSTGRES,
+                title_client=None,
+            )
+        )
+
+        def database_bomb(*args, **kwargs):
+            raise AssertionError("database reached before actor authority")
+
+        with patch.object(
+            self.backend.POSTGRES,
+            "owner_connection",
+            new=database_bomb,
+        ):
+            response = TestClient(application).post(
+                "/threads/new",
+                headers={"x-vs-actor-user-id": OWNER},
+                json={"user_id": OWNER, "title": "Synthetic thread"},
+            )
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(
+            response.json(),
+            {
+                "status": "unauthorized",
+                "detail": "missing_or_invalid_supabase_bearer",
+            },
+        )
 
     async def test_requested_owner_requires_canonical_actor_authority(self) -> None:
         authority = AsyncMock(return_value=OWNER)
-        with patch.object(self.backend, "require_actor", new=authority):
-            denied, actor = await self.backend._require_actor_for_user(
+        with patch.object(self.thread_routes, "require_actor", new=authority):
+            denied, actor = await self.thread_routes._require_actor_for_user(
                 request(),
                 OWNER,
             )
@@ -65,8 +127,8 @@ class ThreadHttpIdentityTests(unittest.IsolatedAsyncioTestCase):
                 detail="missing_or_invalid_supabase_bearer",
             )
         )
-        with patch.object(self.backend, "require_actor", new=authority):
-            denied, actor = await self.backend._require_actor_for_user(
+        with patch.object(self.thread_routes, "require_actor", new=authority):
+            denied, actor = await self.thread_routes._require_actor_for_user(
                 request(),
                 OWNER,
             )
@@ -94,7 +156,7 @@ class ThreadHttpIdentityTests(unittest.IsolatedAsyncioTestCase):
         lookup = AsyncMock(return_value=True)
         with (
             patch.object(
-                self.backend,
+                self.thread_routes,
                 "require_request_actor",
                 new=authority,
             ),
@@ -104,14 +166,15 @@ class ThreadHttpIdentityTests(unittest.IsolatedAsyncioTestCase):
                 new=owner_connection,
             ),
             patch.object(
-                self.backend,
+                self.thread_routes,
                 "thread_belongs_to_owner",
                 new=lookup,
             ),
         ):
-            denied, actor = await self.backend._require_actor_for_thread(
+            denied, actor = await self.thread_routes._require_actor_for_thread(
                 request(),
                 THREAD,
+                self.backend.POSTGRES,
             )
 
         self.assertIsNone(denied)
@@ -137,7 +200,7 @@ class ThreadHttpIdentityTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch.object(
-                self.backend,
+                self.thread_routes,
                 "require_request_actor",
                 new=authority,
             ),
@@ -147,9 +210,10 @@ class ThreadHttpIdentityTests(unittest.IsolatedAsyncioTestCase):
                 new=database_bomb,
             ),
         ):
-            denied, actor = await self.backend._require_actor_for_thread(
+            denied, actor = await self.thread_routes._require_actor_for_thread(
                 request(),
                 THREAD,
+                self.backend.POSTGRES,
             )
 
         self.assertIsNone(actor)
