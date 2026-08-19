@@ -21,21 +21,27 @@ Historical code must not remain in the active checkout merely as a backup.
 Evidence was collected read-only on SeeBx and Verbal Sage on 2026-08-18.
 
 - Production SeeBx remains at `49f9e60cf4321c8e42c359845c1a62a8c987614d`.
-- The cleanup candidate began this manifest at
-  `bc617e4d06fc6212b2d6251c2dc705e57eb90da3`.
+- The cleanup integration candidate is verified through `c840afed`: it moves
+  telemetry retention to `ai_operations`, moves chat-history erasure to the
+  canonical Zep outbox, and retains exact 149-route/OpenAPI parity.
 - No Qdrant process, container, unit, or listener is active.
 - The live API has no Redis connection. The Redis container holds 203
   non-expiring legacy keys and is not a Zep dependency.
-- The hourly `eval_all_users.sh` cron still targets the absent Qdrant
-  `memory_raw` collection and is a broken legacy scheduler.
+- Production still has the daily `eval_all_users.sh` cron targeting the absent
+  Qdrant `memory_raw` collection. The cleanup candidate removes its source;
+  runtime retirement remains a separate rollback-bound production action.
 - No `memory-v1-*` systemd service or timer is installed.
 - Zep prompt mode is the declared current memory mode.
-- Current Zep tests pass 45/45. Current conversation tests pass 171/171.
-  Identity/thread, search, voice, and LifeSwitch-domain groups pass 425/425.
-- The broad historical governed-memory suite has 88 failures reproduced on
-  production. The candidate adds one expected path-inventory failure because
-  historical evidence still names a pre-refactor path. It is not deployment
-  authority and must not be refreshed to make the retired design look current.
+- The current integration suite passes 989/989. Production and candidate both
+  expose exactly 149 routes with route SHA-256
+  `7688d82f198fc539db6fb4d2d1c6b4433e9fe9bb84c78da29d786548df671276`
+  and OpenAPI SHA-256
+  `efc724706c24741b734680767ea8350b57555f59c34b01919bdd844411694362`.
+- The exact retirement package refuses to run without hash-bound backup,
+  restore-test, and cron-retirement evidence. In a disposable clone it
+  preserved both schemas when evidence was absent, then removed only
+  `memory` and `memory_ingest_private` while all retained schema bytes,
+  telemetry retention, and chat-history clearing remained unchanged.
 - The GitHub workflow still invokes the obsolete governed-memory release guard
   and moved file/test paths. It must be replaced by a current SeeBx/Zep lane.
 

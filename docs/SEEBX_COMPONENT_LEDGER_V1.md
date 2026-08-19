@@ -32,7 +32,7 @@ Source commit: `49f9e60cf4321c8e42c359845c1a62a8c987614d`
 | OpenAI SDK client and chat adapters | Candidate `0a1a4ba2` moves the OpenAI-only SDK client, model allowlist, embeddings, and compatibility helpers to `seebx.adapters.openai`; candidate `7f68089f` moves the generic and current LifeSwitch request/response/Chat Completions contracts from `rag_engine` to `seebx.adapters.openai_chat` and `seebx.adapters.lifeswitch_openai_chat` with no wrappers; live runtime has no `VANTAGE_MODEL` setting | provider adapters | CANONICAL PLACEMENT COMPLETE; PRODUCTION MOVE PENDING | Key fingerprinting permits in-process credential rotation without plaintext cache keys; all changed Python compiles; the 754-test conversation/voice/usage set retains only two failures reproduced at pre-move `fb133121`; all 53 Zep tests and exact 149-route/OpenAPI parity pass; historical manifests retain the former paths unchanged |
 | `requirements-ci.txt` and `pyproject.toml` | CI dependencies include retired systems; package metadata describes governed-memory successor | SeeBx application package | REBUILD | Inventory real runtime/test dependency sets before replacement |
 | Git daily sync | Active timer/service root | operations | KEEP | Verify remote/branch policy and avoid competing writer paths |
-| Legacy `eval_all_users.sh` cron | Runs daily at 03:00; reads absent Qdrant `memory_raw`; recent runs do no useful work | none | RETIRE CANDIDATE | Back up the exact crontab and logs, remove only the one line, then prove no replacement scheduler depends on it |
+| Legacy `eval_all_users.sh` cron | Production runs daily at 03:00 against absent Qdrant `memory_raw`; candidate source is removed and guarded against reintroduction | none | SOURCE RETIRED IN CANDIDATE; RUNTIME RETIREMENT PENDING | Back up the exact crontab and logs, remove only the one production line, then prove no replacement scheduler depends on it |
 | Voice synthetic canary | Active hourly but failed because its request used a field intentionally rejected by the live TTS route | voice operations | KEEP + REPAIR | Candidate `e7005538` aligns it with server-owned `conversation_style`; deploy and run one bounded canary before clearing historical failure state |
 
 ## Conversation and memory
@@ -136,9 +136,9 @@ Source commit: `49f9e60cf4321c8e42c359845c1a62a8c987614d`
 | old `ai_operations` | live admin code; no estimated rows | DECIDE/possibly migrate |
 | old `catalog_dev` | live catalog router; duplicate of isolated catalog | CONSOLIDATE into isolated catalog |
 | old `user_settings` | router unmounted; empty | REBUILD/MIGRATE only if preferences retained |
-| old `memory_ingest_private` | two terminal outbox rows; indirect deletion-function dependency | DECOUPLE, archive evidence, retire |
-| old `memory` | 160 tables; no verified live SQL reference | ARCHIVE then RETIRE after zero-dependency proof |
-| five old Vantage schemas | no verified live Python reference; historical data present | ARCHIVE then RETIRE after exact backup/approval |
+| old `memory_ingest_private` | seven tables; two terminal outbox rows; candidate `c840afed` removes all external routine and trigger dependencies | FINAL BACKUP/RESTORE, then retire with exact fail-closed package |
+| old `memory` | 160 ordinary tables; no candidate runtime SQL reference; exact clone retirement preserves every retained schema byte | FINAL BACKUP/RESTORE, then retire with exact fail-closed package |
+| five old Vantage schemas | removed from production after exact dump, temporary restore, count verification, and manifest receipt | RETIRED WITH RECOVERY EVIDENCE |
 | isolated `lifeswitch_*` schemas | live canonical domain data | KEEP |
 | isolated `catalog_dev` | live canonical domain catalog candidate | KEEP and become sole catalog |
 

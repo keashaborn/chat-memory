@@ -72,11 +72,12 @@ The `ubuntu` crontab contains one active legacy memory job:
 running. Recent scheduled runs add start records but perform no useful memory
 work; older runs also failed when the cron environment lacked the provider key.
 
-Disposition: **RETIRE CANDIDATE**. The removal batch must save the exact
-crontab, hash the script and relevant log, remove only this line, wait past one
-scheduled window or run an equivalent verification, and prove Zep/chat behavior
-is unchanged. It must not delete the script or historical log in the same
-batch.
+Disposition: **SOURCE RETIRED IN CANDIDATE; RUNTIME RETIREMENT PENDING**. The
+candidate deletes `bin/eval_all_users.sh` and tests that no active copy returns.
+Production still has the crontab line and historical logs. The runtime batch
+must save and hash the exact crontab and log, remove only this line, run an
+equivalent no-invocation verification, and prove Zep/chat behavior is
+unchanged. Historical logs remain recovery evidence.
 
 ## Containers and storage
 
@@ -155,13 +156,13 @@ timers, cron, and frontend callers all show zero dependency.
 2. Deploy only after route/OpenAPI/data/identity/Zep/voice/search/domain parity,
    rollback, and frontend bearer-forwarding evidence; then run one explicit
    synthetic voice canary and verify the timer returns healthy.
-3. Retire only the legacy `eval_all_users.sh` crontab line with a crontab
-   rollback file and post-window verification.
+3. Retire only the legacy production crontab line with a hashed rollback copy;
+   candidate source deletion is already covered by a no-reintroduction test.
 4. Preserve a hashed Redis data/config manifest and stop Redis reversibly; wait
    through an observation window before removing its container or data.
-5. Produce an exact PostgreSQL object/caller/row/ACL ledger for the three clone
-   databases and retired schemas. Database drops remain later, separately
-   authorized actions.
+5. At promotion time, produce and restore-test the final two-schema PostgreSQL
+   dump, bind both receipt hashes, and run the exact fail-closed retirement
+   package only after the Zep and telemetry migrations are live.
 6. Rotate/externalize static Docker credentials without combining the change
    with a database drop or application deployment.
 7. Preserve the exact frontend-only AWS 8088 rule, narrow UFW 8088 from the

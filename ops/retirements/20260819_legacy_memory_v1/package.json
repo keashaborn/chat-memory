@@ -1,0 +1,64 @@
+{
+  "forward": {
+    "path": "forward.pgsql",
+    "sha256": "b3ecbab30974882d3c91fb85cf44d2598267d6a2a00c59a8b48f503493f190d7"
+  },
+  "migration_id": "legacy_memory_schema_retirement_v1",
+  "prerequisites": [
+    "conversation_sync_private.zep_turn_outbox",
+    "ai_operations.enforce_telemetry_retention_v1()",
+    "chat_history_private.clear_history bound to Zep outbox",
+    "zero legacy source-erasure triggers",
+    "zero nonterminal legacy ingest or erasure jobs"
+  ],
+  "recovery": {
+    "backup_format": "pg_dump custom",
+    "backup_scope": [
+      "memory",
+      "memory_ingest_private"
+    ],
+    "exact_row_manifest_required": true,
+    "restore_into_disposable_database_required": true,
+    "restore_receipt_sha256_required": true,
+    "rollback_mode": "restore_only",
+    "sql_rollback_available": false
+  },
+  "runtime_retirement": {
+    "cron_line": "0 3 * * * cd /opt/chat-memory && ./eval_all_users.sh >> /opt/chat-memory/logs/cron_eval_all.log 2>&1",
+    "cron_rollback_copy_required": true,
+    "cron_must_be_absent_before_forward": true,
+    "source_path": "bin/eval_all_users.sh",
+    "source_retired_in_candidate": true
+  },
+  "schema_version": "seebx-retirement-package-v1",
+  "scope": {
+    "drop_schemas": [
+      "memory_ingest_private",
+      "memory"
+    ],
+    "expected_ordinary_tables": {
+      "memory": 160,
+      "memory_ingest_private": 7
+    },
+    "governed_memory_rows_archived_before_drop": true,
+    "structured_lifeswitch_data_mutated": false,
+    "visible_chat_history_mutated": false,
+    "zep_data_mutated": false
+  },
+  "session_proofs": [
+    "lifeswitch.legacy_memory_backup_sha256",
+    "lifeswitch.legacy_memory_restore_receipt_sha256",
+    "lifeswitch.legacy_memory_cron_retired"
+  ],
+  "status": "candidate_not_applied",
+  "target": {
+    "database": "memory",
+    "execution_role": "sage",
+    "server": "seebx"
+  },
+  "transaction": {
+    "advisory_lock": "legacy_memory_schema_retirement_v1",
+    "all_or_nothing": true,
+    "migration_supplies_begin_commit": true
+  }
+}
