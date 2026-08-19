@@ -68,13 +68,36 @@ The read-only legacy inventory found:
 | Versions | 13 | 2 |
 | Entries | 313 | 2 |
 
-Two entry rows use non-UUID owner identifiers. The production migration must:
+The hash-bound planner was run twice against the production source on
+2026-08-19. Both repeatable-read runs returned the same disposition and hashes:
+
+| Object | Source | Eligible | Quarantine |
+|---|---:|---:|---:|
+| Templates | 12 | 8 | 4 |
+| Versions | 13 | 9 | 4 |
+| Entries | 313 | 311 | 2 |
+
+Four templates have non-UUID owner identifiers. Their four dependent versions
+are therefore ineligible. Two entries have non-UUID owners and also depend on
+ineligible versions. The exact quarantine contains 10 rows; cascading reason
+codes do not represent additional rows.
+
+- source bundle SHA-256:
+  `397d4205359df2723ebfa3d8eae57fceb48c244952680a1dc6dcad284488b9dd`;
+- eligible bundle SHA-256:
+  `de1e805193453dd069a36d859db64369feed5f6c2c1c4a6286c4308178cd62ae`;
+- quarantine SHA-256:
+  `8a696d35401f8fee761528628a822da9eae1d0931836a5ac7e55b6b5fda420c5`.
+
+Both plan outputs reported `production_writes: 0`. These hashes describe the
+current source state only; any source change requires a new read-only plan and
+new authorization. The production migration must:
 
 1. freeze a repeatable-read export and record source database, table counts,
    primary-key sets, and SHA-256 hashes;
 2. import only rows whose owner is a valid UUID and whose complete owner-bound
    foreign-key chain is valid;
-3. preserve the two invalid-owner rows in an encrypted, access-controlled,
+3. preserve all 10 ineligible rows in an encrypted, access-controlled,
    hash-bound quarantine artifact without activating them;
 4. compare source-eligible and destination primary-key sets exactly;
 5. prove cross-owner reads and writes fail through both the API and PostgreSQL;
