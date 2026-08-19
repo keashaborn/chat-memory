@@ -282,7 +282,9 @@ async def collect_table_manifest(connection: Any) -> list[dict[str, Any]]:
 
 
 async def _function_record(connection: Any, signature: str) -> dict[str, Any] | None:
-    oid = await connection.fetchval("SELECT to_regprocedure($1::text)", signature)
+    oid = await connection.fetchval(
+        "SELECT to_regprocedure($1::text)::oid", signature
+    )
     if oid is None:
         return None
     row = await connection.fetchrow(
@@ -317,9 +319,11 @@ async def _function_record(connection: Any, signature: str) -> dict[str, Any] | 
 
 async def collect_database_state(connection: Any) -> dict[str, Any]:
     history_oid = await connection.fetchval(
-        "SELECT to_regprocedure($1::text)", HISTORY_SIGNATURE
+        "SELECT to_regprocedure($1::text)::oid", HISTORY_SIGNATURE
     )
-    tail_oid = await connection.fetchval("SELECT to_regprocedure($1::text)", TAIL_SIGNATURE)
+    tail_oid = await connection.fetchval(
+        "SELECT to_regprocedure($1::text)::oid", TAIL_SIGNATURE
+    )
     if history_oid is None or tail_oid is None:
         raise MigrationExecutionError("chat_history_functions_missing")
     history_definition = str(

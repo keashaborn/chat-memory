@@ -35,7 +35,7 @@
   },
   "tool": {
     "path": "scripts/verify_zep_chat_history_migration.py",
-    "sha256": "cdede1d6a51f002e968df3edf4730e1660f0a5cf402ed5ddab4238f4061d5722"
+    "sha256": "01893d200ccb89918731b8a627c6edbe76688f939cbc47f23c059a97dff310e2"
   },
   "execution": {
     "source": "verified_full_database_backup",

@@ -157,6 +157,17 @@ class ZepChatHistoryMigrationToolTests(unittest.TestCase):
         with self.assertRaisesRegex(MigrationExecutionError, "rollback_state_mismatch"):
             validate_rollback_state(baseline, drift)
 
+    def test_function_lookups_cast_regprocedure_to_numeric_oid(self) -> None:
+        source = TOOL.read_text(encoding="utf-8")
+        self.assertEqual(
+            source.count("SELECT to_regprocedure($1::text)::oid"),
+            3,
+        )
+        self.assertNotIn(
+            '"SELECT to_regprocedure($1::text)"',
+            source,
+        )
+
     def test_main_returns_zero_after_success(self) -> None:
         with (
             patch(
