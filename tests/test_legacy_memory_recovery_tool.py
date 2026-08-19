@@ -6,6 +6,7 @@ import stat
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 from scripts.prepare_legacy_memory_retirement_recovery import (
     CREATEDB,
@@ -20,6 +21,7 @@ from scripts.prepare_legacy_memory_retirement_recovery import (
     RecoveryExecutionError,
     build_dump_command,
     canonical_bytes,
+    main,
     compare_restored_manifest,
     connection_arguments,
     parse_postgres_dsn,
@@ -137,7 +139,7 @@ class LegacyMemoryRecoveryToolTests(unittest.TestCase):
             "postgresql://sage:secret@127.0.0.1:5432/ls_mem_restore_20260819?sslmode=disable",
         )
 
-    def test_dump_command_is_exactly_scoped_and_snapshot_bound(self) -> None:
+    def test_dump_command_captures_full_database_and_is_snapshot_bound(self) -> None:
         settings = parse_postgres_dsn(
             "postgresql://sage:secret@127.0.0.1:5432/memory"
         )
@@ -146,9 +148,9 @@ class LegacyMemoryRecoveryToolTests(unittest.TestCase):
             snapshot_id="00000003-0000001B-1",
             output_path=Path("/secure/legacy.dump.partial"),
         )
-        self.assertEqual(command.count("--schema"), 2)
+        self.assertNotIn("--schema", command)
+        self.assertIn("--dbname", command)
         self.assertIn("memory", command)
-        self.assertIn("memory_ingest_private", command)
         self.assertIn("--snapshot", command)
         self.assertIn("00000003-0000001B-1", command)
         self.assertIn("--format=custom", command)
@@ -176,6 +178,25 @@ class LegacyMemoryRecoveryToolTests(unittest.TestCase):
             "legacy_schema_table_shape_mismatch",
         ):
             validate_source_manifest(document)
+
+    def test_main_returns_zero_after_success(self) -> None:
+        with (
+            patch(
+                "scripts.prepare_legacy_memory_retirement_recovery.execute",
+                new=AsyncMock(return_value={"status": "pass"}),
+            ),
+            patch("builtins.print") as print_result,
+        ):
+            exit_code = main(
+                [
+                    "--output-root",
+                    "/secure/recovery",
+                    "--run-id",
+                    "run-20260819",
+                ]
+            )
+        self.assertEqual(exit_code, 0)
+        print_result.assert_called_once()
 
     def test_canonical_receipt_bytes_are_stable(self) -> None:
         self.assertEqual(canonical_bytes({"b": 2, "a": 1}), b'{"a":1,"b":2}')

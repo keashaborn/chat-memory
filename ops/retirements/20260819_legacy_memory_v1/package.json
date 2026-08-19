@@ -13,10 +13,7 @@
   ],
   "recovery": {
     "backup_format": "pg_dump custom",
-    "backup_scope": [
-      "memory",
-      "memory_ingest_private"
-    ],
+    "backup_scope": "full_database",
     "exact_row_manifest_required": true,
     "restore_into_disposable_database_required": true,
     "restore_receipt_sha256_required": true,
@@ -24,7 +21,7 @@
     "sql_rollback_available": false,
     "tool": {
       "path": "scripts/prepare_legacy_memory_retirement_recovery.py",
-      "sha256": "ddf9f276f7e064878761dd7565406156439a6b882255a2aa2051abd005880b9a"
+      "sha256": "6bd40b5efe6935ff9d8b46f078733a0adabf8a665642a99cfcaee5808c7cc467"
     },
     "receipt_schema_version": "seebx-legacy-memory-recovery-receipt-v1"
   },

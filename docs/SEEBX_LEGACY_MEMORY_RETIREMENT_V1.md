@@ -159,12 +159,12 @@ separate user authorization.
 
 ## Executable recovery-evidence gate
 
-`scripts/prepare_legacy_memory_retirement_recovery.py` is the canonical recovery tool for the two legacy schemas. It is candidate-only and has not been run against production. When separately authorized, it will:
+`scripts/prepare_legacy_memory_retirement_recovery.py` is the canonical recovery tool for the database containing the two legacy schemas. It is candidate-only and has not been run against production. When separately authorized, it will:
 
 1. require the local `memory` database and `sage` administrative role;
 2. export a repeatable-read PostgreSQL snapshot and exact per-table row-count manifest;
-3. create a custom-format dump containing only `memory` and `memory_ingest_private`;
-4. restore the dump into a uniquely named disposable database;
+3. create a full custom-format database dump so extensions and retained-schema dependencies are recoverable;
+4. restore the full dump into a uniquely named empty disposable database;
 5. compare all 167 ordinary tables and every exact row count;
 6. drop and independently prove removal of the disposable database; and
 7. emit content-free SHA-256 bindings for the dump, source manifest, tool, retirement SQL, package, and restore receipt.

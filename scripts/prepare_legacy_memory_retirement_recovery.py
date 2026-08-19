@@ -173,8 +173,6 @@ def build_dump_command(
         "--format=custom",
         "--compress=6",
         "--snapshot", snapshot_id,
-        "--schema", "memory",
-        "--schema", "memory_ingest_private",
         "--file", str(output_path),
     ]
 
@@ -520,6 +518,7 @@ async def execute(arguments: argparse.Namespace) -> dict[str, Any]:
             "backup": {
                 "path": archive.name,
                 "format": "pg_dump custom",
+                "scope": "full_database",
                 "bytes": archive.stat().st_size,
                 "sha256": sha256_file(archive),
             },
@@ -576,6 +575,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--timeout", type=int, default=3600)
     arguments = parser.parse_args(argv)
+    exit_code = 0
     try:
         result = asyncio.run(execute(arguments))
     except RecoveryContractError as error:
