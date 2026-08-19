@@ -57,3 +57,31 @@ receipt:
    database rollback.
 
 No component is considered deployed because this build gate passes.
+## Offline paired release-package gate
+
+`ops/releases/seebx_atomic_release_package_v1.schema.json` and
+`scripts/verify_atomic_release_package.py` define the content-addressed handoff
+between preparation and a later production controller. The package must bind:
+
+- clean, remote-matched backend and frontend candidate commits and trees;
+- independently verified full Git bundles for both source histories, a
+  source/tree-bound frontend build manifest and archive, and the runtime
+  receipt;
+- the successful disposable migration package and receipt, the recovery
+  receipt, and the exact database backup;
+- systemd snapshots and content-free environment manifests from both servers;
+- service/timer baselines, a reverse-order rollback, and an empty Zep outbox
+  before any database rollback; and
+- an explicit service-stop quiescence plan.
+
+Every artifact is a unique canonical relative path with an exact SHA-256 hash.
+The verifier reconstructs both Git bundles in disposable bare repositories and
+proves the production-to-candidate ancestry, tree hashes, branch heads, and
+ahead counts. It cross-checks the frontend build manifest and runtime receipt
+against their source commits/trees, then cross-checks the migration and recovery
+receipts against the same database backup. The package cannot authorize itself:
+its schema requires
+`production_activation_authorized=false`, `authorization_id=null`, and
+`approved=false` for quiescence. A passing result means package integrity is
+ready for a separate authorization decision; it does not mean deployment is
+ready or approved.

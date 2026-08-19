@@ -1,0 +1,632 @@
+{
+  "$id": "https://seebx.internal/contracts/seebx-atomic-release-package-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "artifacts": {
+      "additionalProperties": false,
+      "properties": {
+        "backend_environment_manifest": {
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "maxLength": 240,
+              "minLength": 1,
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$",
+              "type": "string"
+            },
+            "sha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "sha256"
+          ],
+          "type": "object"
+        },
+        "backend_source_bundle": {
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "maxLength": 240,
+              "minLength": 1,
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$",
+              "type": "string"
+            },
+            "sha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "sha256"
+          ],
+          "type": "object"
+        },
+        "backend_systemd_snapshot": {
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "maxLength": 240,
+              "minLength": 1,
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$",
+              "type": "string"
+            },
+            "sha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "sha256"
+          ],
+          "type": "object"
+        },
+        "database_backup": {
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "maxLength": 240,
+              "minLength": 1,
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$",
+              "type": "string"
+            },
+            "sha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "sha256"
+          ],
+          "type": "object"
+        },
+        "frontend_build_archive": {
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "maxLength": 240,
+              "minLength": 1,
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$",
+              "type": "string"
+            },
+            "sha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "sha256"
+          ],
+          "type": "object"
+        },
+        "frontend_build_manifest": {
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "maxLength": 240,
+              "minLength": 1,
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$",
+              "type": "string"
+            },
+            "sha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "sha256"
+          ],
+          "type": "object"
+        },
+        "frontend_environment_manifest": {
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "maxLength": 240,
+              "minLength": 1,
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$",
+              "type": "string"
+            },
+            "sha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "sha256"
+          ],
+          "type": "object"
+        },
+        "frontend_source_bundle": {
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "maxLength": 240,
+              "minLength": 1,
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$",
+              "type": "string"
+            },
+            "sha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "sha256"
+          ],
+          "type": "object"
+        },
+        "frontend_systemd_snapshot": {
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "maxLength": 240,
+              "minLength": 1,
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$",
+              "type": "string"
+            },
+            "sha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "sha256"
+          ],
+          "type": "object"
+        },
+        "migration_package": {
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "maxLength": 240,
+              "minLength": 1,
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$",
+              "type": "string"
+            },
+            "sha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "sha256"
+          ],
+          "type": "object"
+        },
+        "migration_receipt": {
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "maxLength": 240,
+              "minLength": 1,
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$",
+              "type": "string"
+            },
+            "sha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "sha256"
+          ],
+          "type": "object"
+        },
+        "recovery_receipt": {
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "maxLength": 240,
+              "minLength": 1,
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$",
+              "type": "string"
+            },
+            "sha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "sha256"
+          ],
+          "type": "object"
+        },
+        "runtime_receipt": {
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "maxLength": 240,
+              "minLength": 1,
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$",
+              "type": "string"
+            },
+            "sha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "sha256"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "backend_source_bundle",
+        "frontend_source_bundle",
+        "frontend_build_archive",
+        "frontend_build_manifest",
+        "runtime_receipt",
+        "migration_package",
+        "migration_receipt",
+        "recovery_receipt",
+        "database_backup",
+        "backend_systemd_snapshot",
+        "backend_environment_manifest",
+        "frontend_systemd_snapshot",
+        "frontend_environment_manifest"
+      ],
+      "type": "object"
+    },
+    "authority": {
+      "additionalProperties": false,
+      "properties": {
+        "authorization_id": {
+          "type": "null"
+        },
+        "production_activation_authorized": {
+          "const": false
+        }
+      },
+      "required": [
+        "production_activation_authorized",
+        "authorization_id"
+      ],
+      "type": "object"
+    },
+    "migration_binding": {
+      "additionalProperties": false,
+      "properties": {
+        "backup_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "exact_baseline_restored": {
+          "const": true
+        },
+        "forward_outbox_rows": {
+          "const": 0
+        },
+        "production_database_mutated": {
+          "const": false
+        },
+        "recovery_receipt_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "status": {
+          "const": "pass"
+        },
+        "temporary_database_dropped": {
+          "const": true
+        },
+        "zep_called": {
+          "const": false
+        }
+      },
+      "required": [
+        "status",
+        "production_database_mutated",
+        "zep_called",
+        "temporary_database_dropped",
+        "exact_baseline_restored",
+        "forward_outbox_rows",
+        "backup_sha256",
+        "recovery_receipt_sha256"
+      ],
+      "type": "object"
+    },
+    "package_id": {
+      "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$",
+      "type": "string"
+    },
+    "quiescence": {
+      "additionalProperties": false,
+      "properties": {
+        "approved": {
+          "const": false
+        },
+        "backend_write_boundary": {
+          "const": "stop_service"
+        },
+        "frontend_write_boundary": {
+          "const": "stop_service"
+        },
+        "required": {
+          "const": true
+        }
+      },
+      "required": [
+        "required",
+        "backend_write_boundary",
+        "frontend_write_boundary",
+        "approved"
+      ],
+      "type": "object"
+    },
+    "recovery_binding": {
+      "additionalProperties": false,
+      "properties": {
+        "backup_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "restore_verified": {
+          "const": true
+        },
+        "status": {
+          "const": "pass"
+        },
+        "temporary_database_dropped": {
+          "const": true
+        }
+      },
+      "required": [
+        "status",
+        "restore_verified",
+        "temporary_database_dropped",
+        "backup_sha256"
+      ],
+      "type": "object"
+    },
+    "rollback": {
+      "additionalProperties": false,
+      "properties": {
+        "backend_source_bound": {
+          "const": true
+        },
+        "database_backup_bound": {
+          "const": true
+        },
+        "empty_outbox_before_database_rollback": {
+          "const": true
+        },
+        "environment_manifests_bound": {
+          "const": true
+        },
+        "frontend_build_bound": {
+          "const": true
+        },
+        "frontend_source_bound": {
+          "const": true
+        },
+        "reverse_order_defined": {
+          "const": true
+        },
+        "service_health_baseline_bound": {
+          "const": true
+        },
+        "systemd_bound": {
+          "const": true
+        },
+        "timer_state_bound": {
+          "const": true
+        }
+      },
+      "required": [
+        "backend_source_bound",
+        "frontend_source_bound",
+        "frontend_build_bound",
+        "systemd_bound",
+        "environment_manifests_bound",
+        "database_backup_bound",
+        "service_health_baseline_bound",
+        "timer_state_bound",
+        "reverse_order_defined",
+        "empty_outbox_before_database_rollback"
+      ],
+      "type": "object"
+    },
+    "runtime_binding": {
+      "additionalProperties": false,
+      "properties": {
+        "activated": {
+          "const": false
+        },
+        "dependency_count": {
+          "const": 12
+        },
+        "import_count": {
+          "const": 12
+        },
+        "repository_commit": {
+          "pattern": "^[0-9a-f]{40}$",
+          "type": "string"
+        },
+        "repository_tree": {
+          "pattern": "^[0-9a-f]{40}$",
+          "type": "string"
+        },
+        "runtime_lock_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "status": {
+          "const": "pass"
+        },
+        "wheelhouse_manifest_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "activated",
+        "repository_commit",
+        "repository_tree",
+        "runtime_lock_sha256",
+        "wheelhouse_manifest_sha256",
+        "dependency_count",
+        "import_count"
+      ],
+      "type": "object"
+    },
+    "schema_version": {
+      "const": "seebx-atomic-release-package-v1"
+    },
+    "sources": {
+      "additionalProperties": false,
+      "properties": {
+        "backend": {
+          "additionalProperties": false,
+          "properties": {
+            "ahead_count": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "branch_ref": {
+              "pattern": "^refs/heads/[A-Za-z0-9._/-]+$",
+              "type": "string"
+            },
+            "candidate_commit": {
+              "pattern": "^[0-9a-f]{40}$",
+              "type": "string"
+            },
+            "candidate_tree": {
+              "pattern": "^[0-9a-f]{40}$",
+              "type": "string"
+            },
+            "clean": {
+              "const": true
+            },
+            "production_commit": {
+              "pattern": "^[0-9a-f]{40}$",
+              "type": "string"
+            },
+            "production_tree": {
+              "pattern": "^[0-9a-f]{40}$",
+              "type": "string"
+            },
+            "remote_commit": {
+              "pattern": "^[0-9a-f]{40}$",
+              "type": "string"
+            },
+            "server": {
+              "enum": [
+                "seebx",
+                "verbalsage"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "server",
+            "production_commit",
+            "production_tree",
+            "candidate_commit",
+            "candidate_tree",
+            "remote_commit",
+            "branch_ref",
+            "ahead_count",
+            "clean"
+          ],
+          "type": "object"
+        },
+        "frontend": {
+          "additionalProperties": false,
+          "properties": {
+            "ahead_count": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "branch_ref": {
+              "pattern": "^refs/heads/[A-Za-z0-9._/-]+$",
+              "type": "string"
+            },
+            "candidate_commit": {
+              "pattern": "^[0-9a-f]{40}$",
+              "type": "string"
+            },
+            "candidate_tree": {
+              "pattern": "^[0-9a-f]{40}$",
+              "type": "string"
+            },
+            "clean": {
+              "const": true
+            },
+            "production_commit": {
+              "pattern": "^[0-9a-f]{40}$",
+              "type": "string"
+            },
+            "production_tree": {
+              "pattern": "^[0-9a-f]{40}$",
+              "type": "string"
+            },
+            "remote_commit": {
+              "pattern": "^[0-9a-f]{40}$",
+              "type": "string"
+            },
+            "server": {
+              "enum": [
+                "seebx",
+                "verbalsage"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "server",
+            "production_commit",
+            "production_tree",
+            "candidate_commit",
+            "candidate_tree",
+            "remote_commit",
+            "branch_ref",
+            "ahead_count",
+            "clean"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "backend",
+        "frontend"
+      ],
+      "type": "object"
+    },
+    "status": {
+      "const": "candidate_not_activated"
+    }
+  },
+  "required": [
+    "schema_version",
+    "package_id",
+    "status",
+    "authority",
+    "sources",
+    "artifacts",
+    "runtime_binding",
+    "migration_binding",
+    "recovery_binding",
+    "rollback",
+    "quiescence"
+  ],
+  "title": "SeeBx atomic paired release package v1",
+  "type": "object"
+}
