@@ -1,0 +1,85 @@
+{
+  "schema_version": "seebx-retirement-manifest-v1",
+  "retirement_id": "dormant-duplicate-modules-20260818",
+  "classification": "candidate_only_recoverable",
+  "production_unchanged": true,
+  "source_commit": "163f08e1601ede4920a52a4f1b63fa4a46726dba",
+  "totals": {
+    "files": 4,
+    "lines": 762,
+    "bytes": 26542
+  },
+  "retired_files": [
+    {
+      "path": "rag_engine/lifeswitch_answer_binding_store_v1.py",
+      "sha256": "33a8bf420885d9b7d8853fe06334c06fd949ca2c806b96211126526e06e174a9",
+      "lines": 117,
+      "bytes": 3606,
+      "last_commit": "6f1272a1ce8476dd0621e2b8d263b490dcaf3af7",
+      "reason": "No source, test, script, service, or scheduled caller; current conversation persistence explicitly does not write this retired record."
+    },
+    {
+      "path": "rag_engine/lifeswitch_nutrition_overrides_router.py",
+      "sha256": "671d13f6268ec698641a8622212e26c223c3184f780dfad0cdca0fc467f08e3d",
+      "lines": 112,
+      "bytes": 3351,
+      "last_commit": "15d28c5665641f20a25a558f2727ca799771a070",
+      "reason": "Unmounted duplicate; the mounted nutrition router owns list, upsert, and delete override endpoints."
+    },
+    {
+      "path": "rag_engine/response_orchestration_shadow_runtime_v0_2.py",
+      "sha256": "cc8a97bef3d9af014226614764a9d539c322e4433523e8dc7b8a27332e10eb4d",
+      "lines": 277,
+      "bytes": 9813,
+      "last_commit": "6f6ef721576631f4b9a9cfeb7e0814da14d2e540",
+      "reason": "Default-off RESSE shadow predecessor with no source caller and no deployed environment flag or allowlist."
+    },
+    {
+      "path": "tests/test_response_orchestration_shadow_runtime_v0_2.py",
+      "sha256": "f6e99273d6cffe51043572051de3268b9d7db74655300ecf73b22832c62903e3",
+      "lines": 256,
+      "bytes": 9772,
+      "last_commit": "e89018de62928295e0b487d21b870674fb41d54e",
+      "reason": "Test-only consumer of the retired shadow predecessor."
+    }
+  ],
+  "replacement_files": [
+    {
+      "path": "rag_engine/lifeswitch_nutrition_router.py",
+      "sha256": "9282f308b1032d1250b96a4d46e53b4eea9ac201af304bf477fa396148e5c3cd",
+      "replaces": "duplicate nutrition override routes"
+    },
+    {
+      "path": "seebx/capabilities/conversation/orchestration.py",
+      "sha256": "4526d4eb0d3d0ec926d49db66dcaa62ef567059ad554ed303e5d19c509ac004c",
+      "replaces": "default-off RESSE shadow orchestration"
+    },
+    {
+      "path": "seebx/capabilities/conversation/lifeswitch_finalization.py",
+      "sha256": "4d55801e3a187cb81cc73531329d16e6296adcedfd0b22fdd7a804db89bdaccf",
+      "replaces": "answer binding construction and validation"
+    },
+    {
+      "path": "tests/test_response_orchestration_v0_2.py",
+      "sha256": "fc20db07b78ab180548d0080e89fd39124057fb953fef77ee6964b32bb157b42",
+      "replaces": "active orchestration tests"
+    },
+    {
+      "path": "tests/test_conversation_persistence_lifeswitch.py",
+      "sha256": "96effd75da00f58a5bae22ac896f2eb685c592334d0daa852f268bbb6d421652",
+      "replaces": "current LifeSwitch persistence disposition tests"
+    }
+  ],
+  "runtime_proof": {
+    "retired_source_importers": [],
+    "retired_scheduled_importers": [],
+    "shadow_environment_settings_present": false,
+    "nutrition_replacement_mounted": true,
+    "production_changed": false
+  },
+  "recovery": {
+    "method": "restore the exact paths from source_commit with Git",
+    "content_authority": "source_commit and per-file sha256",
+    "production_rollback_required": false
+  }
+}
