@@ -1,0 +1,40 @@
+{
+  "schema_version": "seebx-zep-chat-history-migration-package-v1",
+  "migration_id": "zep_chat_history_cutover_v1",
+  "status": "candidate_not_applied",
+  "target": {
+    "server": "seebx",
+    "database": "memory",
+    "execution_role": "sage"
+  },
+  "inputs": {
+    "zep_outbox_forward": {
+      "path": "ops/sql/20260818_conversation_zep_sync_outbox_v1.sql",
+      "sha256": "e34d541e218ce22333c29e239784798603baea9f78f8a638b932984d7801f01a"
+    },
+    "chat_history_forward": {
+      "path": "chat-history-migrations/0003_zep_outbox_cutover/forward.pgsql",
+      "sha256": "2aac882673f6166f48ec26a6971f4ec94bad4e77cac1ff6622a5346e41e43afe"
+    },
+    "chat_history_rollback": {
+      "path": "chat-history-migrations/0003_zep_outbox_cutover/rollback.pgsql",
+      "sha256": "d2a1214ad50f76a018982242a9350fac52ddedba2ddad4e1957ade772ce765df"
+    },
+    "zep_outbox_rollback": {
+      "path": "ops/sql/20260818_conversation_zep_sync_outbox_v1_rollback.sql",
+      "sha256": "145d8ae6bbf5bc0b3e5fb27dcd9d78a65c89b1016325c467b7078d222a4aeca0"
+    }
+  },
+  "tool": {
+    "path": "scripts/verify_zep_chat_history_migration.py",
+    "sha256": "f2478f1de26cb9b8145b1facc37108a4d935636e8b27133fdc5d4e7aaed49e9b"
+  },
+  "execution": {
+    "source": "verified_full_database_backup",
+    "temporary_database_required": true,
+    "forward_and_rollback_required": true,
+    "exact_baseline_restoration_required": true,
+    "production_database_mutated": false,
+    "zep_called": false
+  }
+}
