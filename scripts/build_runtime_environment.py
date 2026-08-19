@@ -268,6 +268,7 @@ def build_pip_install_command(venv: Path, wheelhouse: Path, lock_path: Path) -> 
         "--isolated",
         "--disable-pip-version-check",
         "--no-cache-dir",
+        "--no-compile",
         "--no-index",
         f"--find-links={wheelhouse}",
         "--only-binary=:all:",

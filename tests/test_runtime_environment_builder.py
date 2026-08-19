@@ -99,6 +99,7 @@ class RuntimeEnvironmentBuilderTests(unittest.TestCase):
         self.assertIn("--isolated", command)
         self.assertIn("--no-index", command)
         self.assertIn("--no-cache-dir", command)
+        self.assertIn("--no-compile", command)
         self.assertIn("--only-binary=:all:", command)
         self.assertIn("--require-hashes", command)
         self.assertNotIn("https://pypi.org/simple", command)
