@@ -16,10 +16,10 @@ The live `brains.service` process was inspected without exposing credentials.
 | `LIFESWITCH_POSTGRES_DSN` | PostgreSQL `127.0.0.1:55433/lifeswitch` | isolated LifeSwitch domain data |
 | `QDRANT_URL` | HTTP `127.0.0.1:6333` | configured but no verified live caller or running service |
 
-`rag_engine/lifeswitch_db.py` currently falls back from
-`LIFESWITCH_POSTGRES_DSN` to `POSTGRES_DSN`. The final boundary prohibits this
-fallback because a missing domain credential must fail closed rather than
-silently crossing stores.
+The cleanup candidate uses `seebx/adapters/lifeswitch_postgres.py` and requires
+`LIFESWITCH_POSTGRES_DSN` for every new connection. It does not fall back to
+`POSTGRES_DSN`; a missing domain credential fails closed rather than silently
+crossing stores.
 
 ## Current database inventory
 

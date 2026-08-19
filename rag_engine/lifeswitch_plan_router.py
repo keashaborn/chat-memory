@@ -7,7 +7,7 @@ import decimal
 import datetime as _dt
 from fastapi import APIRouter, HTTPException, Query, Body, Request
 from seebx.core.ownership import require_actor_matches_owner
-from rag_engine.lifeswitch_db import connect_lifeswitch
+from seebx.adapters.lifeswitch_postgres import connect_lifeswitch
 from fastapi.responses import JSONResponse
 
 router = APIRouter()

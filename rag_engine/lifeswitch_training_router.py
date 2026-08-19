@@ -11,7 +11,7 @@ import math
 import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Body, Header, Request
 from seebx.core.ownership import require_actor_matches_owner
-from rag_engine.lifeswitch_db import connect_lifeswitch
+from seebx.adapters.lifeswitch_postgres import connect_lifeswitch
 from rag_engine.lifeswitch_training_log_service import (
     correct_conditioning_session as write_conditioning_correction,
     correct_training_session as write_training_correction,

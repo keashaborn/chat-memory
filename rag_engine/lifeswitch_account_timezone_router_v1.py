@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import os
 from datetime import datetime
 from typing import Literal
 from uuid import UUID
@@ -11,7 +10,7 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from rag_engine.lifeswitch_db import DSN
+from seebx.adapters.lifeswitch_postgres import connect_lifeswitch
 
 
 router = APIRouter()
@@ -97,9 +96,10 @@ def _response(row: asyncpg.Record | None, *, changed: bool = False) -> AccountTi
 @router.get("/timezone", response_model=AccountTimezoneV1)
 async def get_account_timezone(req: Request) -> AccountTimezoneV1:
     actor = _actor(req)
-    if not DSN:
-        raise HTTPException(status_code=503, detail="timezone_service_unavailable")
-    conn = await asyncpg.connect(DSN)
+    try:
+        conn = await connect_lifeswitch(req)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail="timezone_service_unavailable") from exc
     try:
         async with conn.transaction(readonly=True):
             await _set_owner(conn, actor)
@@ -124,9 +124,10 @@ async def put_account_timezone(
     actor = _actor(req)
     timezone_name = _timezone(payload.timezone_name)
     request_hash = _request_hash(req)
-    if not DSN:
-        raise HTTPException(status_code=503, detail="timezone_service_unavailable")
-    conn = await asyncpg.connect(DSN)
+    try:
+        conn = await connect_lifeswitch(req)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail="timezone_service_unavailable") from exc
     try:
         async with conn.transaction():
             await _set_owner(conn, actor)

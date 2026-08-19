@@ -24,7 +24,7 @@ class LifeSwitchPlanRestoreTests(unittest.TestCase):
 
     def test_router_uses_isolated_owner_bound_connection(self):
         source = (ROOT / "rag_engine" / "lifeswitch_plan_router.py").read_text()
-        self.assertIn("from rag_engine.lifeswitch_db import connect_lifeswitch", source)
+        self.assertIn("from seebx.adapters.lifeswitch_postgres import connect_lifeswitch", source)
         self.assertNotIn('os.getenv("POSTGRES_DSN")', source)
         self.assertNotIn("lifeswitch_people", source)
         self.assertIn('detail="owner-only Plan access required"', source)

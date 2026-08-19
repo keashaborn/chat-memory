@@ -7,7 +7,7 @@ import datetime as _dt
 import asyncpg
 from fastapi import APIRouter, HTTPException, Request
 from seebx.core.ownership import require_actor_matches_owner
-from rag_engine.lifeswitch_db import connect_lifeswitch
+from seebx.adapters.lifeswitch_postgres import connect_lifeswitch
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional

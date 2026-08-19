@@ -5,11 +5,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-os.environ.setdefault("POSTGRES_DSN", "postgresql://legacy.invalid/lifeswitch")
+os.environ.setdefault("LIFESWITCH_POSTGRES_DSN", "postgresql://isolated.invalid/lifeswitch")
 
 from fastapi import HTTPException
 
-from rag_engine import lifeswitch_db
+from seebx.adapters import lifeswitch_postgres
 from rag_engine import lifeswitch_measurements_router as measurements
 from rag_engine import lifeswitch_nutrition_log_router as nutrition
 from rag_engine import lifeswitch_training_router as training
@@ -52,11 +52,11 @@ class IsolatedPostgresV1Tests(unittest.IsolatedAsyncioTestCase):
     async def test_connection_binds_authenticated_actor_for_rls(self):
         conn = FakeConnection()
         with patch.object(
-            lifeswitch_db.asyncpg,
+            lifeswitch_postgres.asyncpg,
             "connect",
             AsyncMock(return_value=conn),
         ):
-            actual = await lifeswitch_db.connect_lifeswitch(FakeRequest())
+            actual = await lifeswitch_postgres.connect_lifeswitch(FakeRequest())
 
         self.assertIs(actual, conn)
         self.assertEqual(len(conn.execute_calls), 1)
@@ -64,6 +64,39 @@ class IsolatedPostgresV1Tests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("set_config('app.user_id',$1,false)", query)
         self.assertIn("set_config('app.lifeswitch_owner_id',$1,false)", query)
         self.assertEqual(args, (OWNER,))
+
+    async def test_connection_resolves_isolated_dsn_at_call_time(self):
+        conn = FakeConnection()
+        connect = AsyncMock(return_value=conn)
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "LIFESWITCH_POSTGRES_DSN": (
+                        "postgresql://current.invalid/lifeswitch"
+                    )
+                },
+                clear=False,
+            ),
+            patch.object(lifeswitch_postgres.asyncpg, "connect", connect),
+        ):
+            await lifeswitch_postgres.connect_lifeswitch(FakeRequest())
+
+        connect.assert_awaited_once_with(
+            "postgresql://current.invalid/lifeswitch"
+        )
+
+    async def test_platform_dsn_is_never_a_lifeswitch_fallback(self):
+        with patch.dict(
+            os.environ,
+            {"POSTGRES_DSN": "postgresql://platform.invalid/memory"},
+            clear=True,
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "LIFESWITCH_POSTGRES_DSN missing",
+            ):
+                await lifeswitch_postgres.connect_lifeswitch(FakeRequest())
 
     async def test_delegated_reads_are_disabled_without_people_database(self):
         os.environ.pop("LIFESWITCH_DELEGATED_READS_ENABLED", None)

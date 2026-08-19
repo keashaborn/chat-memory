@@ -8,18 +8,18 @@ from fastapi import Request
 from seebx.core.ownership import require_authenticated_actor
 
 
-DSN = (
-    os.getenv("LIFESWITCH_POSTGRES_DSN")
-    or os.getenv("POSTGRES_DSN")
-    or ""
-).strip()
+def resolve_lifeswitch_postgres_dsn() -> str:
+    """Resolve the isolated LifeSwitch DSN at connection time."""
+    dsn = (os.getenv("LIFESWITCH_POSTGRES_DSN") or "").strip()
+    if not dsn:
+        raise RuntimeError("LIFESWITCH_POSTGRES_DSN missing")
+    return dsn
+
 
 async def connect_lifeswitch(req: Request) -> asyncpg.Connection:
     """Open one owner-bound LifeSwitch connection for the request."""
-    if not DSN:
-        raise RuntimeError("LIFESWITCH_POSTGRES_DSN or POSTGRES_DSN missing")
     actor = require_authenticated_actor(req)
-    conn = await asyncpg.connect(DSN)
+    conn = await asyncpg.connect(resolve_lifeswitch_postgres_dsn())
     try:
         # This connection is request-scoped and always closed by the router.
         # Session scope is deliberate: many existing handlers use implicit
@@ -36,4 +36,7 @@ async def connect_lifeswitch(req: Request) -> asyncpg.Connection:
         raise
 
 
-__all__ = ["DSN", "connect_lifeswitch"]
+__all__ = [
+    "connect_lifeswitch",
+    "resolve_lifeswitch_postgres_dsn",
+]
