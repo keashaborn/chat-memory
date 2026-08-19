@@ -15,7 +15,7 @@ async def enforce_telemetry_retention_v1(
     conn: Any,
 ) -> dict[str, Any]:
     result = await conn.fetchval(
-        "SELECT memory.enforce_telemetry_retention_v1()"
+        "SELECT ai_operations.enforce_telemetry_retention_v1()"
     )
     if not isinstance(result, dict):
         result = json.loads(str(result))
