@@ -1,0 +1,89 @@
+{
+  "schema_version": "seebx-retirement-manifest-v1",
+  "retirement_id": "fm-v0-2-runtime-20260818",
+  "classification": "candidate_only_recoverable",
+  "production_unchanged": true,
+  "source_commit": "15d28c5665641f20a25a558f2727ca799771a070",
+  "superseded_by_commit": "6ee6d01999b20dc08797253039d4160da9fa0c00",
+  "reason": "Fractal Monism v0.2 was replaced by the active hash-pinned Relational Monism v0.4 runtime and has no application caller.",
+  "totals": {
+    "files": 6,
+    "lines": 8755,
+    "bytes": 545138
+  },
+  "retired_files": [
+    {
+      "path": "rag_engine/data/fm_v0_2_runtime_bundle.json",
+      "sha256": "9fc2615bb1d4cce5fc70b19832ac67a52005cccf5d974b5a3a4ef0e322cbd2f8",
+      "lines": 5724,
+      "bytes": 427342,
+      "last_commit": "c9bfb32827bf57ce63a04dc177d271f48ca62801"
+    },
+    {
+      "path": "rag_engine/fm_runtime_bundle_v0_2.py",
+      "sha256": "d795568dddbf47a8c52655b6bd47f8d6646437002201b01123a4b50f3519b69b",
+      "lines": 530,
+      "bytes": 19981,
+      "last_commit": "c9bfb32827bf57ce63a04dc177d271f48ca62801"
+    },
+    {
+      "path": "rag_engine/fm_selection_envelope_v0_2.py",
+      "sha256": "906f07036c60511cae39513f468497181ae522692b73954b6bd20b730ca3e02f",
+      "lines": 1115,
+      "bytes": 40169,
+      "last_commit": "f7a5f7e2f08623ebbbda3a8621ad1e4ac460d8f8"
+    },
+    {
+      "path": "scripts/compile_fm_runtime_bundle_v0_2.py",
+      "sha256": "7f78c64d3a6f951cfc27c1158860906252f95dc5b19006b1d7157cfd03e32016",
+      "lines": 786,
+      "bytes": 33067,
+      "last_commit": "c9bfb32827bf57ce63a04dc177d271f48ca62801"
+    },
+    {
+      "path": "tests/test_fm_runtime_bundle_v0_2.py",
+      "sha256": "46388aa1f14c22f870bc69d7af7a2a37d332bc54400daa4bce2b38171a2ea6b2",
+      "lines": 192,
+      "bytes": 8020,
+      "last_commit": "c9bfb32827bf57ce63a04dc177d271f48ca62801"
+    },
+    {
+      "path": "tests/test_fm_selection_envelope_v0_2.py",
+      "sha256": "25280ff0e0eb22cf3d900741cd1173d656dbf44bdcd70ac3c63d1ef325e51d37",
+      "lines": 408,
+      "bytes": 16559,
+      "last_commit": "f7a5f7e2f08623ebbbda3a8621ad1e4ac460d8f8"
+    }
+  ],
+  "replacement_files": [
+    {
+      "path": "rag_engine/data/rm_v0_4_controlling_manifest.json",
+      "sha256": "29412aeeed3b98ffdeac6436d7ca1d1b2b27aa573bf23a85c99546f6a5c5f28a"
+    },
+    {
+      "path": "rag_engine/data/rm_v0_4_runtime_prompt.md",
+      "sha256": "d41d8a7428406f3a4570d293d1436cf31c99df1c4bc8f4e7a01c1c0f05885ecf"
+    },
+    {
+      "path": "rag_engine/rm_selection_envelope_v0_4.py",
+      "sha256": "29bf81624295a3f086afafa784553170d7ad6487cf066ab99f22ff400cb4b9b2"
+    },
+    {
+      "path": "tests/test_rm_runtime_v0_4.py",
+      "sha256": "04a47179ab7fd13df07a5f3cd0cd59c71d6db0623dd8e0107691eabc6a147ccc"
+    }
+  ],
+  "runtime_proof": {
+    "retired_app_importers": [],
+    "replacement_importers": [
+      "seebx/capabilities/conversation/orchestration.py",
+      "seebx/capabilities/conversation/prompt.py"
+    ],
+    "replacement_contract": "rm_selection_envelope_v0_4"
+  },
+  "recovery": {
+    "method": "restore the exact paths from source_commit with Git",
+    "content_authority": "source_commit and per-file sha256",
+    "production_rollback_required": false
+  }
+}

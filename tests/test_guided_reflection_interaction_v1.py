@@ -475,7 +475,7 @@ class GuidedReflectionInteractionV1Tests(unittest.TestCase):
             request(
                 (
                     ConversationRole.USER,
-                    "Use Fractal Monism to help me reflect on this pattern, but do "
+                    "Use Relational Monism to help me reflect on this pattern, but do "
                     "not turn it into a change plan.",
                 )
             )
@@ -485,7 +485,7 @@ class GuidedReflectionInteractionV1Tests(unittest.TestCase):
         self.assertEqual(result.response_mode, ResponseMode.FM_EXPLICIT)
         self.assertEqual(result.interaction, Interaction.GUIDED_REFLECTION)
         self.assertFalse(result.fm_ir_020_eligible)
-        self.assertIn("canonical Fractal Monism", prompt.content)
+        self.assertIn("canonical Relational Monism", prompt.content)
         self.assertNotIn("observation window", prompt.content)
 
     def test_prompt_carries_content_free_interaction_bindings(self) -> None:
@@ -571,12 +571,12 @@ class GuidedReflectionInteractionV1Tests(unittest.TestCase):
         )
         self.assertEqual(
             RESPONSE_POLICY_PROMPT_VERSION,
-            "response_policy_prompt_v0_6",
+            "response_policy_prompt_v0_7",
         )
         self.assertEqual(RESPONSE_INTERACTION_VERSION, "response_interaction_v3")
         self.assertEqual(
             prompt.contract_version,
-            "response_policy_prompt_v0_6",
+            "response_policy_prompt_v0_7",
         )
         self.assertEqual(prompt.interaction_version, "response_interaction_v3")
         self.assertEqual(

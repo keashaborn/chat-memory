@@ -7,9 +7,10 @@ Evidence date: 2026-08-18 UTC
 
 Production source: `49f9e60cf4321c8e42c359845c1a62a8c987614d`
 
-Cleanup integration candidate: `ada67aeebaa3a530d939914fbc074210c5310d3c`
-on `codex/seebx-cleanup-integration-20260818`; 96 commits ahead of
-production, clean, unpushed, and undeployed. The bounded voice-canary repair is
+Cleanup integration pre-retirement evidence commit:
+`15d28c5665641f20a25a558f2727ca799771a070` on
+`codex/seebx-cleanup-integration-20260818`; 107 commits ahead of production,
+clean, unpushed, and undeployed. The bounded voice-canary repair is
 commit `e7005538` within this integration line.
 
 ## Purpose
@@ -53,9 +54,10 @@ requires one final source-owner check, then removal and a logical group rename.
 The canary failure is internal contract drift. The route intentionally rejects
 caller-supplied TTS instructions, while the canary still sent them. The OpenAI
 model, voice, and speech endpoint remain compatible. Fifteen focused tests pass
-for the isolated repair. The wider voice suite has one separate pre-existing
-stale assertion expecting `Fractal Monism v0.2` instead of the current
-`Relational Monism v0.4` transcription vocabulary.
+for the isolated repair. The superseded Fractal Monism v0.2 compiler, runtime,
+selector, data bundle, and tests are isolated by the separately hash-bound
+retirement manifest; Relational Monism v0.4 is the sole active philosophy
+runtime in the cleanup candidate.
 
 ## Cron
 
