@@ -54,6 +54,15 @@ from seebx.adapters.conversation_history import fetch_thread_message_rows
 from seebx.adapters.conversation_erasure import (
     PostgresConversationErasureRepository,
 )
+from seebx.adapters.conversation_export import (
+    PostgresConversationExportRepository,
+)
+from seebx.capabilities.conversation.export import (
+    ConversationExportService,
+)
+from seebx.capabilities.conversation.export_routes import (
+    create_conversation_export_router,
+)
 from seebx.adapters.postgres import PostgresConnectionProvider
 from seebx.adapters.conversation_persistence import (
     UserTranscriptPersistenceError,
@@ -205,17 +214,6 @@ app.include_router(voice_realtime_preview_router)
 app.include_router(voice_session_router)
 
 
-def _legacy_memory_retired(operation: str) -> JSONResponse:
-    return JSONResponse(
-        {
-            "status": "conflict",
-            "detail": "legacy_memory_surface_retired",
-            "operation": operation,
-        },
-        status_code=409,
-    )
-
-
 def _conversation_erasure_required(
     operation: str,
     selector_kind: str,
@@ -335,6 +333,7 @@ SENSITIVE_NO_STORE_PREFIXES = (
     "/attachments",
     "/memory/",
     "/chat-history/",
+    "/conversation/",
 )
 SENSITIVE_NO_STORE_HEADERS = {
     "cache-control": "private, no-store, max-age=0, must-revalidate",
@@ -490,6 +489,13 @@ POSTGRES = PostgresConnectionProvider(DSN)
 CONVERSATION_ERASURE = ConversationErasureService(
     repository=PostgresConversationErasureRepository(POSTGRES),
     zep_runtime=ZEP_MEMORY_RUNTIME,
+)
+CONVERSATION_EXPORT = ConversationExportService(
+    repository=PostgresConversationExportRepository(POSTGRES),
+    memory_runtime=ZEP_MEMORY_RUNTIME,
+)
+app.include_router(
+    create_conversation_export_router(CONVERSATION_EXPORT)
 )
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
@@ -1418,16 +1424,11 @@ async def delete_recent_user_data(user_id: str, req: Request, minutes: int = 60)
     )
 
 
-@app.get("/user/{user_id}/export")
-async def export_user_data(user_id: str, req: Request, limit: int = 20000):
-    return _legacy_memory_retired("export_user_data")
-
-
 @app.get("/readyz", include_in_schema=False)
 async def readyz():
     """
     Readiness: Postgres connectivity only.
-    Avoids OpenAPI generation (currently broken).
+    Avoids OpenAPI generation.
     """
     try:
         if await POSTGRES.readiness_value() != 1:

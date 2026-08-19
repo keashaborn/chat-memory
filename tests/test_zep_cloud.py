@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import deque
 import unittest
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -255,6 +256,125 @@ class ZepCloudTransportTests(unittest.IsolatedAsyncioTestCase):
         await transport.delete_owner(user_id=zep_user_id(OWNER))
         user.delete.assert_awaited_once_with(user_id=zep_user_id(OWNER))
 
+    async def test_owner_export_enumerates_messages_and_graph(self) -> None:
+        provider_user_id = zep_user_id(OWNER)
+        provider_thread_id = zep_thread_id(THREAD)
+
+        class RawEndpoint:
+            def __init__(self, pages: list[list[object]]) -> None:
+                self.pages = deque(pages)
+                self.with_raw_response = self
+                self.cursors: list[object] = []
+
+            async def get_by_user_id(self, **kwargs: object):
+                page = self.pages.popleft()
+                self.cursors.append(kwargs.get("cursor"))
+                headers = (
+                    {"Zep-Next-Cursor": "next-page"}
+                    if self.pages
+                    else {}
+                )
+                return SimpleNamespace(data=page, headers=headers)
+
+        node = SimpleNamespace(uuid_="node-1", name="Owner")
+        node_2 = SimpleNamespace(uuid_="node-2", name="Project")
+        edge = SimpleNamespace(uuid_="edge-1", fact="likes tea")
+        observation = SimpleNamespace(uuid_="observation-1", content="pattern")
+        summary = SimpleNamespace(uuid_="summary-1", summary="summary")
+        user = SimpleNamespace(
+            user_id=provider_user_id,
+            model_dump=lambda **_: {"user_id": provider_user_id},
+        )
+        thread = SimpleNamespace(
+            user_id=provider_user_id,
+            thread_id=provider_thread_id,
+            model_dump=lambda **_: {
+                "user_id": provider_user_id,
+                "thread_id": provider_thread_id,
+            },
+        )
+        message = SimpleNamespace(
+            uuid_=str(USER_MESSAGE),
+            model_dump=lambda **_: {
+                "uuid": str(USER_MESSAGE),
+                "content": "hello",
+            }
+        )
+        message_2 = SimpleNamespace(
+            uuid_=str(ASSISTANT_MESSAGE),
+            model_dump=lambda **_: {
+                "uuid": str(ASSISTANT_MESSAGE),
+                "content": "response",
+            }
+        )
+        message_pages = deque(
+            (
+                SimpleNamespace(
+                    user_id=provider_user_id,
+                    total_count=2,
+                    messages=[message],
+                ),
+                SimpleNamespace(
+                    user_id=provider_user_id,
+                    total_count=2,
+                    messages=[message_2],
+                ),
+            )
+        )
+        client = SimpleNamespace(
+            user=SimpleNamespace(
+                get=AsyncMock(return_value=user),
+                get_threads=AsyncMock(return_value=[thread]),
+            ),
+            thread=SimpleNamespace(
+                get=AsyncMock(side_effect=lambda **_: message_pages.popleft())
+            ),
+            graph=SimpleNamespace(
+                node=RawEndpoint([[node], [node_2]]),
+                edge=RawEndpoint([[edge]]),
+                observation=RawEndpoint([[observation]]),
+                thread_summary=RawEndpoint([[summary]]),
+            ),
+        )
+        transport = object.__new__(ZepCloudTransport)
+        transport._client = client
+        result = await transport.export_owner(user_id=provider_user_id)
+        self.assertEqual(result["status"], "complete")
+        self.assertEqual(
+            result["threads"][0]["messages"][0]["content"],
+            "hello",
+        )
+        self.assertEqual(
+            result["threads"][0]["messages"][1]["content"],
+            "response",
+        )
+        self.assertEqual(result["graph"]["nodes"][0]["name"], "Owner")
+        self.assertEqual(result["graph"]["nodes"][1]["name"], "Project")
+        self.assertEqual(result["graph"]["edges"][0]["fact"], "likes tea")
+        self.assertEqual(result["raw_episode_basis"], "thread_messages")
+        self.assertEqual(
+            result["provider_limitations"],
+            ["non_thread_graph_episodes_not_enumerated"],
+        )
+        self.assertEqual(
+            result["counts"],
+            {
+                "threads": 1, "messages": 2, "nodes": 2, "edges": 1,
+                "observations": 1, "thread_summaries": 1,
+            },
+        )
+        self.assertEqual(client.graph.node.cursors, [None, "next-page"])
+        self.assertEqual([call.kwargs["cursor"] for call in client.thread.get.await_args_list], [0, 1])
+
+    async def test_absent_owner_exports_explicit_absence(self) -> None:
+        transport = object.__new__(ZepCloudTransport)
+        transport._client = SimpleNamespace(
+            user=SimpleNamespace(get=AsyncMock(side_effect=NotFoundError()))
+        )
+        result = await transport.export_owner(user_id=zep_user_id(OWNER))
+        self.assertEqual(result["status"], "absent")
+        self.assertEqual(result["threads"], [])
+
 
 class FakeTransport:
     def __init__(self) -> None:
@@ -263,6 +383,7 @@ class FakeTransport:
         self.deleted: list[str] = []
         self.context = "prompt context"
         self.closed = False
+        self.export = {"status": "complete", "provider": "zep"}
 
     async def ensure_user_and_thread(self, *, user_id: str, thread_id: str):
         self.provisioned.append((user_id, thread_id))
@@ -277,6 +398,10 @@ class FakeTransport:
 
     async def delete_owner(self, *, user_id: str) -> None:
         self.deleted.append(user_id)
+
+    async def export_owner(self, *, user_id: str):
+        self.exported_user = user_id
+        return self.export
 
     async def close(self) -> None:
         self.closed = True
@@ -403,6 +528,22 @@ class ZepRuntimeTests(unittest.IsolatedAsyncioTestCase):
         await sync
         await erase_task
         self.assertTrue(barrier_entered.is_set())
+        await runtime.close()
+
+    async def test_export_is_owner_scoped_and_content_free_in_logs(self) -> None:
+        transport = FakeTransport()
+        logger = logging.getLogger("test.zep.export")
+        runtime = ZepRuntime(
+            settings=canary_settings(),
+            api_key="test-key",
+            transport_factory=lambda _: transport,
+            logger=logger,
+        )
+        with self.assertLogs(logger, level="INFO") as captured:
+            result = await runtime.export_owner_memory(OWNER)
+        self.assertEqual(result["status"], "complete")
+        self.assertEqual(transport.exported_user, zep_user_id(OWNER))
+        self.assertNotIn(str(OWNER), "\n".join(captured.output))
         await runtime.close()
 
 

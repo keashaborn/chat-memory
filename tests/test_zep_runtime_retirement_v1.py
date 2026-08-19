@@ -32,7 +32,8 @@ class ZepRuntimeRetirementContractTests(unittest.TestCase):
             '/vantage-cards/{user_id}',
         ):
             self.assertNotIn(retired_route, source)
-        self.assertIn('/user/{user_id}/export', source)
+        self.assertNotIn('/user/{user_id}/export', source)
+        self.assertIn('create_conversation_export_router', source)
 
     def test_health_declares_zep_without_retired_qdrant_surface(self) -> None:
         source = (ROOT / "app.py").read_text()

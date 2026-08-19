@@ -10,7 +10,7 @@ import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import AsyncIterator, Awaitable, Callable, Mapping, Protocol
+from typing import Any, AsyncIterator, Awaitable, Callable, Mapping, Protocol
 from uuid import UUID
 
 
@@ -31,6 +31,10 @@ _MAX_CONTEXT_BYTES = 1_048_576
 _MAX_GRAPH_SEARCH_QUERY_CHARACTERS = 400
 _GRAPH_SEARCH_CONTEXT_CHARACTERS = 8_000
 _MAX_MESSAGE_CHARACTERS = 4_096
+_EXPORT_PAGE_SIZE = 100
+_MAX_EXPORT_THREADS = 10_000
+_MAX_EXPORT_MESSAGES = 100_000
+_MAX_EXPORT_GRAPH_ITEMS = 100_000
 
 
 class ZepConfigurationError(ValueError):
@@ -73,6 +77,8 @@ class ZepTransport(Protocol):
     ) -> str: ...
 
     async def delete_owner(self, *, user_id: str) -> None: ...
+
+    async def export_owner(self, *, user_id: str) -> Mapping[str, Any]: ...
 
     async def close(self) -> None: ...
 
@@ -161,6 +167,28 @@ class ZepSettings:
             self.mode == ZEP_SYNC_MODE_CANARY
             and owner_user_id in self.owner_user_ids
         )
+
+
+def _export_value(value: Any) -> Any:
+    if hasattr(value, "model_dump"):
+        return value.model_dump(mode="json", by_alias=True)
+    if isinstance(value, Mapping):
+        return {str(key): _export_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_export_value(item) for item in value]
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    if hasattr(value, "__dict__"):
+        return {
+            key: _export_value(item)
+            for key, item in vars(value).items()
+            if not key.startswith("_")
+        }
+    return value
 
 
 class ZepCloudTransport:
@@ -347,6 +375,197 @@ class ZepCloudTransport:
                 return
             raise
         raise ZepConfigurationError("zep_owner_delete_unverified")
+
+    @staticmethod
+    def _export_artifact_id(value: Any) -> str:
+        artifact_id = str(
+            getattr(value, "uuid_", None)
+            or getattr(value, "uuid", None)
+            or ""
+        )
+        if not artifact_id:
+            raise ZepConfigurationError("zep_export_artifact_id_missing")
+        return artifact_id
+
+    async def _export_graph_list(
+        self,
+        endpoint: Any,
+        *,
+        user_id: str,
+    ) -> list[Any]:
+        values: list[Any] = []
+        seen_artifact_ids: set[str] = set()
+        cursor: str | None = None
+        while True:
+            response = await endpoint.with_raw_response.get_by_user_id(
+                user_id=user_id,
+                order_by="uuid",
+                direction="asc",
+                limit=_EXPORT_PAGE_SIZE,
+                cursor=cursor,
+            )
+            page = list(getattr(response, "data", None) or ())
+            if len(page) > _EXPORT_PAGE_SIZE:
+                raise ZepConfigurationError("zep_export_page_invalid")
+            page_ids = [self._export_artifact_id(item) for item in page]
+            if (
+                len(set(page_ids)) != len(page_ids)
+                or seen_artifact_ids.intersection(page_ids)
+            ):
+                raise ZepConfigurationError("zep_export_artifact_duplicated")
+            seen_artifact_ids.update(page_ids)
+            values.extend(page)
+            if len(values) > _MAX_EXPORT_GRAPH_ITEMS:
+                raise ZepConfigurationError("zep_export_size_limit_exceeded")
+            headers = getattr(response, "headers", None)
+            next_cursor = (
+                headers.get("Zep-Next-Cursor")
+                if headers is not None
+                else None
+            )
+            if not next_cursor:
+                return values
+            if next_cursor == cursor or not page:
+                raise ZepConfigurationError("zep_export_cursor_invalid")
+            cursor = str(next_cursor)
+
+    async def export_owner(self, *, user_id: str) -> Mapping[str, Any]:
+        try:
+            user = await self._client.user.get(user_id=user_id)
+        except Exception as error:
+            if _status_code(error) == 404:
+                return {
+                    "status": "absent",
+                    "provider": "zep",
+                    "user": None,
+                    "threads": [],
+                    "graph": {
+                        "nodes": [],
+                        "edges": [],
+                        "observations": [],
+                        "thread_summaries": [],
+                    },
+                    "raw_episode_basis": "thread_messages",
+                    "provider_limitations": [
+                        "non_thread_graph_episodes_not_enumerated"
+                    ],
+                    "counts": {
+                        "threads": 0,
+                        "messages": 0,
+                        "nodes": 0,
+                        "edges": 0,
+                        "observations": 0,
+                        "thread_summaries": 0,
+                    },
+                }
+            raise
+        if str(getattr(user, "user_id", "")) != user_id:
+            raise ZepOwnershipError("zep_user_identity_mismatch")
+
+        raw_threads = sorted(
+            await self._client.user.get_threads(user_id=user_id),
+            key=lambda value: str(getattr(value, "thread_id", "")),
+        )
+        if len(raw_threads) > _MAX_EXPORT_THREADS:
+            raise ZepConfigurationError("zep_export_size_limit_exceeded")
+        threads: list[dict[str, Any]] = []
+        seen_thread_ids: set[str] = set()
+        seen_message_ids: set[str] = set()
+        message_count = 0
+        for raw_thread in raw_threads:
+            if str(getattr(raw_thread, "user_id", "")) != user_id:
+                raise ZepOwnershipError("zep_thread_owner_mismatch")
+            thread_id = str(getattr(raw_thread, "thread_id", ""))
+            if not thread_id:
+                raise ZepConfigurationError("zep_export_thread_invalid")
+            if thread_id in seen_thread_ids:
+                raise ZepConfigurationError("zep_export_thread_duplicated")
+            seen_thread_ids.add(thread_id)
+            messages: list[Any] = []
+            cursor = 0
+            expected_total: int | None = None
+            while True:
+                page = await self._client.thread.get(
+                    thread_id=thread_id,
+                    limit=_EXPORT_PAGE_SIZE,
+                    cursor=cursor,
+                )
+                page_user = getattr(page, "user_id", None)
+                if page_user is not None and str(page_user) != user_id:
+                    raise ZepOwnershipError("zep_thread_owner_mismatch")
+                page_messages = list(getattr(page, "messages", None) or ())
+                total = getattr(page, "total_count", len(page_messages))
+                if type(total) is not int or total < 0:
+                    raise ZepConfigurationError("zep_export_message_count_invalid")
+                if expected_total is None:
+                    expected_total = total
+                elif total != expected_total:
+                    raise ZepConfigurationError("zep_export_message_count_drifted")
+                page_message_ids = [
+                    self._export_artifact_id(item) for item in page_messages
+                ]
+                if (
+                    len(set(page_message_ids)) != len(page_message_ids)
+                    or seen_message_ids.intersection(page_message_ids)
+                ):
+                    raise ZepConfigurationError("zep_export_message_duplicated")
+                seen_message_ids.update(page_message_ids)
+                messages.extend(page_messages)
+                message_count += len(page_messages)
+                if message_count > _MAX_EXPORT_MESSAGES:
+                    raise ZepConfigurationError("zep_export_size_limit_exceeded")
+                if len(messages) >= expected_total:
+                    if len(messages) != expected_total:
+                        raise ZepConfigurationError(
+                            "zep_export_message_count_mismatch"
+                        )
+                    break
+                if not page_messages:
+                    raise ZepConfigurationError("zep_export_message_cursor_invalid")
+                cursor += len(page_messages)
+            threads.append(
+                {
+                    "thread": _export_value(raw_thread),
+                    "messages": _export_value(messages),
+                }
+            )
+
+        nodes, edges, observations, summaries = await asyncio.gather(
+            self._export_graph_list(self._client.graph.node, user_id=user_id),
+            self._export_graph_list(self._client.graph.edge, user_id=user_id),
+            self._export_graph_list(
+                self._client.graph.observation,
+                user_id=user_id,
+            ),
+            self._export_graph_list(
+                self._client.graph.thread_summary,
+                user_id=user_id,
+            ),
+        )
+        return {
+            "status": "complete",
+            "provider": "zep",
+            "user": _export_value(user),
+            "threads": threads,
+            "graph": {
+                "nodes": _export_value(nodes),
+                "edges": _export_value(edges),
+                "observations": _export_value(observations),
+                "thread_summaries": _export_value(summaries),
+            },
+            "raw_episode_basis": "thread_messages",
+            "provider_limitations": [
+                "non_thread_graph_episodes_not_enumerated"
+            ],
+            "counts": {
+                "threads": len(threads),
+                "messages": message_count,
+                "nodes": len(nodes),
+                "edges": len(edges),
+                "observations": len(observations),
+                "thread_summaries": len(summaries),
+            },
+        }
 
     async def close(self) -> None:
         close = getattr(self._client, "close", None)
@@ -599,6 +818,43 @@ class ZepRuntime:
             "[zep_sync] owner_delete_succeeded owner_sha256=%s",
             _sha256_identifier(owner_user_id),
         )
+
+    async def export_owner_memory(
+        self,
+        owner_user_id: UUID,
+    ) -> Mapping[str, Any]:
+        if not isinstance(owner_user_id, UUID):
+            raise ZepConfigurationError("invalid_zep_export_owner")
+        owner_hash = _sha256_identifier(owner_user_id)
+        started_ns = time.monotonic_ns()
+        try:
+            async with self._owner_io(owner_user_id):
+                transport = await self._transport_client()
+                result = await asyncio.wait_for(
+                    transport.export_owner(user_id=zep_user_id(owner_user_id)),
+                    timeout=_MAX_TIMEOUT_SECONDS,
+                )
+            if result.get("status") not in {"complete", "absent"}:
+                raise ZepConfigurationError("zep_export_incomplete")
+            self._logger.info(
+                "[zep_export] owner_export_succeeded owner_sha256=%s "
+                "status=%s latency_ms=%s",
+                owner_hash,
+                result["status"],
+                max(
+                    0,
+                    round((time.monotonic_ns() - started_ns) / 1_000_000),
+                ),
+            )
+            return result
+        except Exception as error:
+            self._logger.error(
+                "[zep_export] owner_export_failed owner_sha256=%s "
+                "error_type=%s",
+                owner_hash,
+                type(error).__name__,
+            )
+            raise
 
     async def close(self) -> None:
         if self._transport is not None:
