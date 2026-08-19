@@ -1,0 +1,145 @@
+{
+  "schema_version": "seebx-retirement-manifest-v1",
+  "retirement_id": "lifeswitch-query-temporal-v2-experiment-20260819",
+  "classification": "candidate_only_recoverable",
+  "production_unchanged": true,
+  "source_commit": "ecb1e18830a4ccdbce371df4688cebbdc61ef465",
+  "totals": {
+    "files": 12,
+    "lines": 3050,
+    "bytes": 117696
+  },
+  "retired_files": [
+    {
+      "path": "rag_engine/lifeswitch_data_plan_v2.py",
+      "sha256": "2f9975a9dc94f6a99b3f92d6e6c10a1061c1235456498efe2297a75dc35d3f98",
+      "lines": 398,
+      "bytes": 16646,
+      "last_commit": "f10637bf2a64bd0aaf749517e172c4a872214a89",
+      "reason": "Experiment-only planner with no active runtime, application, adapter, or scheduled consumer."
+    },
+    {
+      "path": "rag_engine/lifeswitch_query_signals_v2.py",
+      "sha256": "72ad85d544e07d07600587100e3efe00b84113c8faebcd9518e0bf4fddfac7eb",
+      "lines": 378,
+      "bytes": 16643,
+      "last_commit": "f10637bf2a64bd0aaf749517e172c4a872214a89",
+      "reason": "Internal dependency of the unactivated V2 planner and otherwise test-only."
+    },
+    {
+      "path": "rag_engine/lifeswitch_temporal_semantics_v1.py",
+      "sha256": "c37557e6d4d8577f9ab707439e6ce2fc0eb7b5e7f5c3fd92415221443d681ea5",
+      "lines": 550,
+      "bytes": 24169,
+      "last_commit": "d530ed68524f32e94a6d9a58d11e17e6ac77f004",
+      "reason": "Internal dependency of the unactivated V2 planner and otherwise test-only."
+    },
+    {
+      "path": "specs/lifeswitch/data_plan_v2.schema.json",
+      "sha256": "e693d706ec369f787b10a878917372af8fda002d0d02e5b527373971c3eacb15",
+      "lines": 423,
+      "bytes": 10787,
+      "last_commit": "f10637bf2a64bd0aaf749517e172c4a872214a89",
+      "reason": "Schema owned only by the retired V2 experiment."
+    },
+    {
+      "path": "specs/lifeswitch/query_signals_v2.schema.json",
+      "sha256": "67aa2e26abe1d12056356a5c2ccf6b782eb78e6bfcdc48b67877d376410d39bd",
+      "lines": 289,
+      "bytes": 7040,
+      "last_commit": "f10637bf2a64bd0aaf749517e172c4a872214a89",
+      "reason": "Schema owned only by the retired V2 experiment."
+    },
+    {
+      "path": "specs/lifeswitch/temporal_window_v1.schema.json",
+      "sha256": "0275200a3548a76a357e046d6734d770e4c590526bf79ddfe50343afd1ac3acb",
+      "lines": 165,
+      "bytes": 4184,
+      "last_commit": "f10637bf2a64bd0aaf749517e172c4a872214a89",
+      "reason": "Schema owned only by the retired V2 experiment."
+    },
+    {
+      "path": "specs/lifeswitch/query_temporal_v2_contract_manifest.json",
+      "sha256": "18e50c968b1d8f0f318a1837e4750580af304e8b4f1f095df8c741eef62909ce",
+      "lines": 17,
+      "bytes": 1448,
+      "last_commit": "d530ed68524f32e94a6d9a58d11e17e6ac77f004",
+      "reason": "Experiment manifest explicitly declares runtime_authority none."
+    },
+    {
+      "path": "tests/fixtures/lifeswitch_query_temporal_v2_cases.json",
+      "sha256": "e4372d2d28e06966928851f991a6f400b97f3c1d21dbcac194e4478e66935c46",
+      "lines": 115,
+      "bytes": 3244,
+      "last_commit": "835282de0fe28ee328a70205e60fad77b069f624",
+      "reason": "Fixture consumed only by tests for the retired V2 experiment."
+    },
+    {
+      "path": "tests/test_lifeswitch_data_plan_v2.py",
+      "sha256": "22b3f9a74292ca00da4b1b0a95ee0d770bcbd11c9becf0e5e84fa45c19bc9be9",
+      "lines": 168,
+      "bytes": 7725,
+      "last_commit": "d530ed68524f32e94a6d9a58d11e17e6ac77f004",
+      "reason": "Test-only consumer of the retired V2 experiment."
+    },
+    {
+      "path": "tests/test_lifeswitch_data_plan_v2_compatibility.py",
+      "sha256": "4a0ffb2acf58a8b46ae840484be9546245c66b9feb3331b0f4c8c7fee1df8719",
+      "lines": 103,
+      "bytes": 4950,
+      "last_commit": "f10637bf2a64bd0aaf749517e172c4a872214a89",
+      "reason": "Compatibility test binding only the retired V2 experiment and its schemas."
+    },
+    {
+      "path": "tests/test_lifeswitch_query_signals_v2.py",
+      "sha256": "571173b086006827ba4b59a66cf3c7a0d23d97fcf6b1f08ab2365e841bc7b57f",
+      "lines": 233,
+      "bytes": 10700,
+      "last_commit": "d530ed68524f32e94a6d9a58d11e17e6ac77f004",
+      "reason": "Test-only consumer of the retired V2 experiment."
+    },
+    {
+      "path": "tests/test_lifeswitch_temporal_semantics_v1.py",
+      "sha256": "6b6147c1ed25aec327d2864f55cadb0d3c78af0d1285fa3c78bbfffceba18c7e",
+      "lines": 211,
+      "bytes": 10160,
+      "last_commit": "d530ed68524f32e94a6d9a58d11e17e6ac77f004",
+      "reason": "Test-only consumer of the retired V2 experiment."
+    }
+  ],
+  "retained_runtime": [
+    {
+      "path": "rag_engine/lifeswitch_data_plan_v1.py",
+      "sha256": "d7fd71a6e4a10564b0f5d5931e0c99c56b4e6f050695ddd9dbcaa819f640f92b",
+      "role": "active LifeSwitch data-plan contract"
+    },
+    {
+      "path": "rag_engine/lifeswitch_domain_context_v1.py",
+      "sha256": "2bdc3f22ccc29c1db9577770c964eef69881a9c5701c9cc59035712e29550e83",
+      "role": "active domain-context contract"
+    },
+    {
+      "path": "seebx/adapters/lifeswitch_context_postgres.py",
+      "sha256": "f43840bf1556a9c4e969ac82ee46f0804f97c3f8c7680a2db8a538e244796fb4",
+      "role": "active isolated-Postgres context adapter"
+    },
+    {
+      "path": "seebx/capabilities/conversation/lifeswitch_context.py",
+      "sha256": "90d2dacb81dd955bd6ca90433aabfd9441e593cc5013771d6ee7a2d1285ad719",
+      "role": "active conversation-context integration"
+    }
+  ],
+  "runtime_proof": {
+    "contract_runtime_authority": "none",
+    "active_source_importers": [],
+    "scheduled_importers": [],
+    "application_routes_removed": 0,
+    "production_changed": false
+  },
+  "recovery": {
+    "method": "restore the exact retired paths from source_commit with Git",
+    "command": "git restore --source=ecb1e18830a4ccdbce371df4688cebbdc61ef465 -- <retired paths>",
+    "content_authority": "source_commit and per-file sha256",
+    "production_rollback_required": false
+  }
+}
