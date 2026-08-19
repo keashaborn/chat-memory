@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ROUTER = ROOT / "rag_engine" / "lifeswitch_training_router.py"
+ROUTER = ROOT / "seebx" / "capabilities" / "training" / "routes.py"
 
 
 class TrainingProgressionQueryContractTest(unittest.TestCase):

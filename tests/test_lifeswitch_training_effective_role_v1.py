@@ -19,7 +19,7 @@ CHAT_ROLLBACK = (
     / "20260731_lifeswitch_training_effective_role_v1_chat_followup_rollback.sql"
 )
 PLAN_CONTEXT = ROOT / "lifeswitch_agentic" / "plan_observation_context.py"
-TRAINING_ROUTER = ROOT / "rag_engine" / "lifeswitch_training_router.py"
+TRAINING_ROUTER = ROOT / "seebx" / "capabilities" / "training" / "routes.py"
 
 
 class TrainingEffectiveRoleV1ContractTests(unittest.TestCase):

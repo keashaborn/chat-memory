@@ -6,8 +6,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ROUTER = ROOT / "rag_engine" / "lifeswitch_training_router.py"
-SERVICE = ROOT / "rag_engine" / "lifeswitch_training_log_service.py"
+ROUTER = ROOT / "seebx" / "capabilities" / "training" / "routes.py"
+SERVICE = ROOT / "seebx" / "capabilities" / "training" / "logs.py"
 
 
 class TrainingImmutableRoutingTest(unittest.TestCase):

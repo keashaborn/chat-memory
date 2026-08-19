@@ -58,7 +58,7 @@ def require(condition: bool, message: str) -> None:
 
 async def main() -> None:
     os.environ["POSTGRES_DSN"] = os.environ["LIFESWITCH_GATEWAY_TEST_DSN"]
-    from rag_engine.lifeswitch_training_router import list_training_session_sets
+    from seebx.capabilities.training.routes import list_training_session_sets
 
     response = await list_training_session_sets(
         str(OWNER_A_SESSION), request_for(OWNER_A), str(OWNER_A), 0, ""

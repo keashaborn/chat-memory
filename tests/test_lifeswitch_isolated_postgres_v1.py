@@ -12,7 +12,7 @@ from fastapi import HTTPException
 from seebx.adapters import lifeswitch_postgres
 from rag_engine import lifeswitch_measurements_router as measurements
 from seebx.capabilities.nutrition import logs as nutrition
-from rag_engine import lifeswitch_training_router as training
+from seebx.capabilities.training import routes as training
 
 
 OWNER = "11111111-1111-1111-1111-111111111111"

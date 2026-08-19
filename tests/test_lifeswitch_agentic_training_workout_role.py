@@ -7,7 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "ops" / "sql" / "20260726_lifeswitch_training_workout_role.sql"
 WRITER = ROOT / "ops" / "sql" / "20260723_lifeswitch_training_writer_api.sql"
-ROUTER = ROOT / "rag_engine" / "lifeswitch_training_router.py"
+ROUTER = ROOT / "seebx" / "capabilities" / "training" / "routes.py"
 
 
 class TrainingWorkoutRoleContractTest(unittest.TestCase):

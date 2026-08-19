@@ -32,7 +32,7 @@ except ModuleNotFoundError:
     fastapi_stub.HTTPException = HTTPException
     sys.modules["fastapi"] = fastapi_stub
 
-from rag_engine import lifeswitch_training_log_service as service
+from seebx.capabilities.training import logs as service
 
 
 class FakeConnection:
