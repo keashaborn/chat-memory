@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from rag_engine.lifeswitch_domain_context_v1 import (
+from seebx.capabilities.plans.domain_context import (
     LifeSwitchContextSectionV1,
     LifeSwitchDomainContextEnvelopeV1,
     TrustedLifeSwitchContextRequestV1,

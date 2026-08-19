@@ -4,7 +4,7 @@ import unittest
 
 from fastapi import HTTPException
 
-from rag_engine.lifeswitch_plan_router import _resolve_plan_target
+from seebx.capabilities.plans.routes import _resolve_plan_target
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,15 +23,15 @@ class LifeSwitchPlanRestoreTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 403)
 
     def test_router_uses_isolated_owner_bound_connection(self):
-        source = (ROOT / "rag_engine" / "lifeswitch_plan_router.py").read_text()
+        source = (ROOT / "seebx" / "capabilities" / "plans" / "routes.py").read_text()
         self.assertIn("from seebx.adapters.lifeswitch_postgres import connect_lifeswitch", source)
         self.assertNotIn('os.getenv("POSTGRES_DSN")', source)
         self.assertNotIn("lifeswitch_people", source)
         self.assertIn('detail="owner-only Plan access required"', source)
 
-    def test_app_registers_only_legacy_owner_plan_router(self):
+    def test_app_registers_only_canonical_owner_plan_router(self):
         source = (ROOT / "app.py").read_text()
-        self.assertIn("from rag_engine.lifeswitch_plan_router import", source)
+        self.assertIn("from seebx.capabilities.plans.routes import", source)
         self.assertIn(
             'app.include_router(lifeswitch_plan_router, prefix="/lifeswitch/plan")',
             source,

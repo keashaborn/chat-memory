@@ -6,8 +6,8 @@ import unittest
 import uuid
 from unittest.mock import AsyncMock, patch
 
-from rag_engine.lifeswitch_data_plan_v1 import create_lifeswitch_data_plan_v1
-from rag_engine.lifeswitch_domain_context_v1 import (
+from seebx.capabilities.plans.data_plan import create_lifeswitch_data_plan_v1
+from seebx.capabilities.plans.domain_context import (
     LifeSwitchContextSectionV1,
     TrustedLifeSwitchContextRequestV1,
     create_lifeswitch_context_envelope_v1,

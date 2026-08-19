@@ -9,11 +9,11 @@ from typing import Any, Callable, Literal, Protocol
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from rag_engine.lifeswitch_data_plan_v1 import (
+from seebx.capabilities.plans.data_plan import (
     LifeSwitchDataPlanV1,
     create_lifeswitch_data_plan_v1,
 )
-from rag_engine.lifeswitch_domain_context_v1 import (
+from seebx.capabilities.plans.domain_context import (
     LifeSwitchDomainContextEnvelopeV1,
     LifeSwitchRenderedContextV1,
     render_lifeswitch_context_v1,

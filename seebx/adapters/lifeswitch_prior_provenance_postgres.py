@@ -10,7 +10,7 @@ from uuid import UUID
 import asyncpg
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from rag_engine.prior_lifeswitch_provenance_v1 import (
+from seebx.capabilities.conversation.prior_lifeswitch_provenance import (
     PriorLifeSwitchProvenanceEnvelopeV1,
     prior_lifeswitch_provenance_requested_v1,
     select_prior_lifeswitch_provenance_v1,

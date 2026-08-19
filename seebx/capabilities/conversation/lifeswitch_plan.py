@@ -10,7 +10,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from rag_engine.lifeswitch_prompt_integration_v2 import (
+from seebx.capabilities.conversation.lifeswitch_prompt import (
     AssembledPromptV3,
     LifeSwitchPromptAugmentationRequestV2,
     assemble_prompt_with_lifeswitch_v2,
@@ -18,10 +18,10 @@ from rag_engine.lifeswitch_prompt_integration_v2 import (
 from seebx.capabilities.conversation.lifeswitch_context import (
     LifeSwitchPreparedContextV1,
 )
-from rag_engine.prior_lifeswitch_provenance_v1 import (
+from seebx.capabilities.conversation.prior_lifeswitch_provenance import (
     PriorLifeSwitchProvenanceEnvelopeV1,
 )
-from rag_engine.lifeswitch_prior_answer_provenance_runtime_v1 import (
+from seebx.adapters.lifeswitch_prior_provenance_postgres import (
     PriorLifeSwitchPreparedContextV1,
 )
 from seebx.capabilities.conversation.orchestration import TrustedResponsePlanV0_2

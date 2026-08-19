@@ -7,7 +7,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from rag_engine.lifeswitch_coaching_contracts_v2 import (
+from seebx.capabilities.coaching.contracts import (
     AuthorizationBindingV2,
     AuthorizationBudgetV2,
     AuthorizationRechecksV2,

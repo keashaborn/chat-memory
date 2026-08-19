@@ -9,10 +9,10 @@ from zoneinfo import ZoneInfo
 
 import asyncpg
 
-from rag_engine.lifeswitch_data_plan_v1 import create_lifeswitch_data_plan_v1
-from rag_engine.lifeswitch_domain_context_v1 import TrustedLifeSwitchContextRequestV1
-from rag_engine.lifeswitch_domain_provider_v1 import LifeSwitchDomainContextProviderV1
-from rag_engine.lifeswitch_postgres_domain_reader_v1 import (
+from seebx.capabilities.plans.data_plan import create_lifeswitch_data_plan_v1
+from seebx.capabilities.plans.domain_context import TrustedLifeSwitchContextRequestV1
+from seebx.capabilities.plans.domain_provider import LifeSwitchDomainContextProviderV1
+from seebx.adapters.lifeswitch_domain_postgres import (
     PostgresLifeSwitchDomainReaderV1,
 )
 

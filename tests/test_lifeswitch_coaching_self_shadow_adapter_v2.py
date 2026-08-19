@@ -8,7 +8,7 @@ from uuid import UUID
 
 from pydantic import ValidationError
 
-from rag_engine.lifeswitch_coaching_contracts_v2 import (
+from seebx.capabilities.coaching.contracts import (
     AuthorizationBindingV2,
     AuthorizationBudgetV2,
     AuthorizationRechecksV2,
@@ -17,17 +17,17 @@ from rag_engine.lifeswitch_coaching_contracts_v2 import (
     ProjectionEnvelopeV1,
     canonical_sha256,
 )
-from rag_engine.lifeswitch_coaching_self_shadow_adapter_v2 import (
+from seebx.capabilities.coaching.shadow_adapter import (
     LifeSwitchSelfShadowAdapterError,
     SELF_S1_SHADOW_ADAPTER_MAP_V1,
     SELF_S1_SHADOW_FIELD_POLICY,
     adapt_lifeswitch_v1_envelope_to_self_shadow_projection_v2,
 )
-from rag_engine.lifeswitch_data_plan_v1 import (
+from seebx.capabilities.plans.data_plan import (
     LifeSwitchDataWindowV1,
     create_lifeswitch_data_plan_v1,
 )
-from rag_engine.lifeswitch_domain_context_v1 import (
+from seebx.capabilities.plans.domain_context import (
     LifeSwitchContextSectionV1,
     TrustedLifeSwitchContextRequestV1,
     create_lifeswitch_context_envelope_v1,
@@ -656,7 +656,7 @@ class SelfShadowAdapterTests(unittest.TestCase):
 
     def test_adapter_is_not_imported_by_live_response_modules(self):
         root = Path(__file__).resolve().parents[1]
-        needle = "lifeswitch_coaching_self_shadow_adapter_v2"
+        needle = "seebx.capabilities.coaching.shadow_adapter"
         live_paths = (
             root / "seebx" / "capabilities/conversation/router.py",
             root / "seebx" / "capabilities/conversation/composition.py",

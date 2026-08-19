@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import unittest
 
-from rag_engine.lifeswitch_data_plan_v1 import create_lifeswitch_data_plan_v1
+from seebx.capabilities.plans.data_plan import create_lifeswitch_data_plan_v1
 
 
 TODAY = dt.date(2026, 7, 29)  # Wednesday

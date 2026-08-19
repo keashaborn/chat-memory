@@ -14,7 +14,7 @@ from typing import Any, Literal, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from rag_engine.lifeswitch_coaching_contracts_v2 import (
+from seebx.capabilities.coaching.contracts import (
     AuthorizationSnapshotV2,
     CoachingCapabilitiesV2,
     ProjectionAbsoluteWindowV1,
@@ -28,7 +28,7 @@ from rag_engine.lifeswitch_coaching_contracts_v2 import (
     canonical_json_bytes,
     canonical_sha256,
 )
-from rag_engine.lifeswitch_domain_context_v1 import (
+from seebx.capabilities.plans.domain_context import (
     LIFESWITCH_CONTEXT_ENVELOPE_CONTRACT,
     LifeSwitchContextSectionV1,
     LifeSwitchDomainContextEnvelopeV1,

@@ -33,7 +33,7 @@ from seebx.capabilities.nutrition.routes import router as lifeswitch_nutrition_r
 from seebx.capabilities.nutrition.batch import router as lifeswitch_nutrition_log_batch_router
 from seebx.capabilities.training.routes import router as lifeswitch_training_router
 from seebx.capabilities.measurements.routes import router as lifeswitch_measurements_router
-from rag_engine.lifeswitch_plan_router import router as lifeswitch_plan_router
+from seebx.capabilities.plans.routes import router as lifeswitch_plan_router
 from seebx.capabilities.preferences.timezone import (
     router as lifeswitch_account_timezone_router_v1,
 )

@@ -6,12 +6,12 @@ import datetime as dt
 from typing import Protocol
 from uuid import UUID
 
-from rag_engine.lifeswitch_coaching_self_shadow_runner_v2 import (
+from seebx.capabilities.coaching.shadow_runner import (
     SelfShadowExecutionAuthorityV1,
     SelfShadowInspectionV1,
     run_lifeswitch_self_s1_shadow_v2,
 )
-from rag_engine.lifeswitch_domain_context_v1 import (
+from seebx.capabilities.plans.domain_context import (
     LifeSwitchDomainContextEnvelopeV1,
     TrustedLifeSwitchContextRequestV1,
 )

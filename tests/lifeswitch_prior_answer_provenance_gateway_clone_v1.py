@@ -21,7 +21,7 @@ from seebx.capabilities.conversation.lifeswitch_provenance import (
     LifeSwitchProvenanceSourceRefV1,
     _sha256 as receipt_sha256,
 )
-from rag_engine.lifeswitch_prior_answer_provenance_runtime_v1 import (
+from seebx.adapters.lifeswitch_prior_provenance_postgres import (
     PostgresPriorLifeSwitchRestrictedReadSessionV1,
     PriorLifeSwitchProvenanceProviderV1,
 )

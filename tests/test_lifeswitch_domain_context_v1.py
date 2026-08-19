@@ -6,12 +6,12 @@ import uuid
 
 from pydantic import ValidationError
 
-from rag_engine.lifeswitch_data_plan_v1 import create_lifeswitch_data_plan_v1
-from rag_engine.lifeswitch_domain_context_v1 import (
+from seebx.capabilities.plans.data_plan import create_lifeswitch_data_plan_v1
+from seebx.capabilities.plans.domain_context import (
     TrustedLifeSwitchContextRequestV1,
     render_lifeswitch_context_v1,
 )
-from rag_engine.lifeswitch_domain_provider_v1 import (
+from seebx.capabilities.plans.domain_provider import (
     LifeSwitchDomainContextProviderV1,
     LifeSwitchReadResultV1,
 )

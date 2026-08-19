@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from rag_engine.lifeswitch_data_plan_v1 import (
+from seebx.capabilities.plans.data_plan import (
     LifeSwitchDataPlanV1,
     LifeSwitchDataWindowV1,
 )

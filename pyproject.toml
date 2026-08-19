@@ -22,5 +22,5 @@ dependencies = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["rag_engine", "rag_engine.*", "seebx", "seebx.*"]
+include = ["seebx", "seebx.*", "lifeswitch_agentic", "lifeswitch_agentic.*"]
 namespaces = false

@@ -19,12 +19,12 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from rag_engine.lifeswitch_domain_context_v1 import (
+from seebx.capabilities.plans.domain_context import (
     LifeSwitchDomainContextEnvelopeV1,
     LifeSwitchRenderedContextV1,
     render_lifeswitch_context_v1,
 )
-from rag_engine.prior_lifeswitch_provenance_v1 import (
+from seebx.capabilities.conversation.prior_lifeswitch_provenance import (
     MAX_PROVENANCE_CONTENT_BYTES,
     MAX_PROVENANCE_CONTENT_TOKENS,
     PriorLifeSwitchProvenanceEnvelopeV1,

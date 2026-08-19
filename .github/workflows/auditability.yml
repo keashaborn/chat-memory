@@ -43,7 +43,7 @@ jobs:
           done
           if git grep -nE \
             'rag_engine\.governed_memory|rag_engine\.governed_memory_provider_v1|rag_engine\.memory_v1|successor_memory_chat_adapter_v1|governed_memory_successor_v1' \
-            -- app.py 'seebx/**/*.py' rag_engine/lifeswitch_prompt_integration_v2.py; then
+            -- app.py 'seebx/**/*.py' seebx/capabilities/conversation/lifeswitch_prompt.py; then
             exit 1
           fi
 
@@ -78,4 +78,4 @@ jobs:
           python -B -m compileall -q \
             app.py \
             seebx \
-            rag_engine/lifeswitch_prompt_integration_v2.py
+            seebx/capabilities/conversation/lifeswitch_prompt.py

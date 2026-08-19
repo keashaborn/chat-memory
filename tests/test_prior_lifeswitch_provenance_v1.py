@@ -11,7 +11,7 @@ from seebx.capabilities.conversation.lifeswitch_provenance import (
     _sha256 as receipt_sha256,
 )
 from seebx.adapters.lifeswitch_openai_chat import OpenAIChatCompletionsAdapterV3
-from rag_engine.prior_lifeswitch_provenance_v1 import (
+from seebx.capabilities.conversation.prior_lifeswitch_provenance import (
     prior_lifeswitch_provenance_requested_v1,
     select_prior_lifeswitch_provenance_v1,
 )

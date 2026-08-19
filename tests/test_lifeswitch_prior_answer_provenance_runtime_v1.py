@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
-from rag_engine.lifeswitch_prior_answer_provenance_runtime_v1 import (
+from seebx.adapters.lifeswitch_prior_provenance_postgres import (
     PostgresPriorLifeSwitchRestrictedReadSessionV1,
     PriorLifeSwitchPreparedContextV1,
     PriorLifeSwitchProvenanceProviderV1,
@@ -128,7 +128,7 @@ class PriorLifeSwitchRuntimeV1Tests(unittest.IsolatedAsyncioTestCase):
         session = PostgresPriorLifeSwitchRestrictedReadSessionV1(Pool(connection))
         bound_snapshot = snapshot("Where did you get those earlier protein numbers?")
         with patch(
-            "rag_engine.lifeswitch_prior_answer_provenance_runtime_v1."
+            "seebx.adapters.lifeswitch_prior_provenance_postgres."
             "select_prior_lifeswitch_provenance_v1",
             new=AsyncMock(return_value=None),
         ) as selector:

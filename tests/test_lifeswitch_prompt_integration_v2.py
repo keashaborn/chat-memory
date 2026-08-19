@@ -4,8 +4,8 @@ import unittest
 
 from pydantic import ValidationError
 
-from rag_engine.lifeswitch_data_plan_v1 import create_lifeswitch_data_plan_v1
-from rag_engine.lifeswitch_prompt_integration_v2 import (
+from seebx.capabilities.plans.data_plan import create_lifeswitch_data_plan_v1
+from seebx.capabilities.conversation.lifeswitch_prompt import (
     ContextKindV3,
     PromptReferenceContextBlockV3,
 )

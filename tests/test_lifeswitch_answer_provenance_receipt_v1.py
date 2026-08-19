@@ -8,8 +8,8 @@ import uuid
 from pydantic import ValidationError
 
 from seebx.capabilities.conversation.lifeswitch_answer_binding import FinalAnswerLifeSwitchBindingV1
-from rag_engine.lifeswitch_data_plan_v1 import create_lifeswitch_data_plan_v1
-from rag_engine.lifeswitch_domain_context_v1 import (
+from seebx.capabilities.plans.data_plan import create_lifeswitch_data_plan_v1
+from seebx.capabilities.plans.domain_context import (
     LifeSwitchContextSectionV1,
     TrustedLifeSwitchContextRequestV1,
     create_lifeswitch_context_envelope_v1,
@@ -19,10 +19,10 @@ from seebx.capabilities.conversation.lifeswitch_provenance import (
     FinalAnswerLifeSwitchProvenanceReceiptV1,
     LifeSwitchProvenanceSourceRefV1,
 )
-from rag_engine.lifeswitch_prior_answer_provenance_runtime_v1 import (
+from seebx.adapters.lifeswitch_prior_provenance_postgres import (
     PriorLifeSwitchPreparedContextV1,
 )
-from rag_engine.prior_lifeswitch_provenance_v1 import (
+from seebx.capabilities.conversation.prior_lifeswitch_provenance import (
     PriorLifeSwitchProvenanceEnvelopeV1,
     PriorLifeSwitchResponseV1,
 )

@@ -7,7 +7,7 @@ import uuid
 from seebx.capabilities.conversation.lifeswitch_answer_binding import (
     FinalAnswerLifeSwitchBindingV1,
 )
-from rag_engine.lifeswitch_data_plan_v1 import create_lifeswitch_data_plan_v1
+from seebx.capabilities.plans.data_plan import create_lifeswitch_data_plan_v1
 from seebx.capabilities.conversation.lifeswitch_context import (
     LifeSwitchPreparedContextV1,
 )

@@ -13,7 +13,7 @@ from lifeswitch_agentic.plan_observation_context import (
     CanonicalPlanObservationContextRepository,
     ObservationPermissions,
 )
-from rag_engine.lifeswitch_domain_provider_v1 import LifeSwitchReadResultV1
+from seebx.capabilities.plans.domain_provider import LifeSwitchReadResultV1
 
 
 PLAN_AGENTIC_SOURCES = (

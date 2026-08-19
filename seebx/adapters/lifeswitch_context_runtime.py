@@ -12,11 +12,11 @@ from uuid import UUID
 import asyncpg
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from rag_engine.lifeswitch_coaching_self_shadow_observer_v2 import (
+from seebx.capabilities.coaching.shadow_observer import (
     LifeSwitchSelfShadowInspectionSinkV1,
     LifeSwitchSelfShadowObserverV2,
 )
-from rag_engine.lifeswitch_coaching_self_shadow_runner_v2 import (
+from seebx.capabilities.coaching.shadow_runner import (
     SelfShadowInspectionV1,
 )
 from seebx.adapters.lifeswitch_context_postgres import (

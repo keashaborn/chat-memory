@@ -12,7 +12,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 if TYPE_CHECKING:
-    from rag_engine.lifeswitch_prompt_integration_v2 import AssembledPromptV3
+    from seebx.capabilities.conversation.lifeswitch_prompt import AssembledPromptV3
 
 
 LIFESWITCH_ANSWER_RECORD_REF_VERSION = "lifeswitch_answer_record_ref_v1"

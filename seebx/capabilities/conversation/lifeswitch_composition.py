@@ -20,7 +20,7 @@ from seebx.capabilities.conversation.lifeswitch_context import (
 from seebx.capabilities.conversation.memory_contracts import (
     MemoryAnswerProvenanceV1,
 )
-from rag_engine.lifeswitch_prior_answer_provenance_runtime_v1 import (
+from seebx.adapters.lifeswitch_prior_provenance_postgres import (
     PriorLifeSwitchPreparedContextV1,
 )
 from seebx.adapters.openai_chat import OpenAIChatGenerationConfigV1

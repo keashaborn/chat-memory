@@ -8,19 +8,19 @@ from uuid import UUID
 
 from pydantic import ValidationError
 
-from rag_engine.lifeswitch_coaching_contracts_v2 import canonical_sha256
-from rag_engine.lifeswitch_coaching_self_shadow_runner_v2 import (
+from seebx.capabilities.coaching.contracts import canonical_sha256
+from seebx.capabilities.coaching.shadow_runner import (
     LifeSwitchSelfShadowRunV1,
     LifeSwitchSelfShadowRunnerError,
     SELF_S1_SHADOW_RUNNER_CONTRACT,
     SelfShadowExecutionAuthorityV1,
     run_lifeswitch_self_s1_shadow_v2,
 )
-from rag_engine.lifeswitch_data_plan_v1 import (
+from seebx.capabilities.plans.data_plan import (
     LifeSwitchDataWindowV1,
     create_lifeswitch_data_plan_v1,
 )
-from rag_engine.lifeswitch_domain_context_v1 import (
+from seebx.capabilities.plans.domain_context import (
     LifeSwitchContextSectionV1,
     TrustedLifeSwitchContextRequestV1,
     create_lifeswitch_context_envelope_v1,
@@ -279,7 +279,7 @@ class LifeSwitchSelfShadowRunnerV2Tests(unittest.TestCase):
 
     def test_runner_is_not_imported_by_live_response_modules(self):
         root = Path(__file__).resolve().parents[1]
-        needle = "lifeswitch_coaching_self_shadow_runner_v2"
+        needle = "seebx.capabilities.coaching.shadow_runner"
         live_paths = (
             root / "seebx" / "capabilities/conversation/router.py",
             root / "seebx" / "capabilities/conversation/lifeswitch_composition.py",
@@ -294,8 +294,10 @@ class LifeSwitchSelfShadowRunnerV2Tests(unittest.TestCase):
     def test_runner_has_no_io_or_provider_imports(self):
         path = (
             Path(__file__).resolve().parents[1]
-            / "rag_engine"
-            / "lifeswitch_coaching_self_shadow_runner_v2.py"
+            / "seebx"
+            / "capabilities"
+            / "coaching"
+            / "shadow_runner.py"
         )
         source = path.read_text(encoding="utf-8")
         for forbidden in (

@@ -13,10 +13,10 @@ from seebx.adapters.lifeswitch_context_runtime import (
     LifeSwitchChatRuntimeSettingsV1,
     LoggingLifeSwitchSelfShadowInspectionSinkV1,
 )
-from rag_engine.lifeswitch_coaching_self_shadow_observer_v2 import (
+from seebx.capabilities.coaching.shadow_observer import (
     LifeSwitchSelfShadowObserverV2,
 )
-from rag_engine.lifeswitch_coaching_self_shadow_runner_v2 import (
+from seebx.capabilities.coaching.shadow_runner import (
     SelfShadowInspectionV1,
 )
 from seebx.capabilities.conversation.snapshot import (

@@ -6,13 +6,13 @@ import unittest
 from pathlib import Path
 from uuid import UUID
 
-from rag_engine.lifeswitch_coaching_self_shadow_observer_v2 import (
+from seebx.capabilities.coaching.shadow_observer import (
     LifeSwitchSelfShadowObserverV2,
     SELF_S1_SHADOW_AUTHORIZATION_EPOCH,
     SELF_S1_SHADOW_OBSERVER_CONTRACT,
 )
-from rag_engine.lifeswitch_data_plan_v1 import create_lifeswitch_data_plan_v1
-from rag_engine.lifeswitch_domain_context_v1 import (
+from seebx.capabilities.plans.data_plan import create_lifeswitch_data_plan_v1
+from seebx.capabilities.plans.domain_context import (
     LifeSwitchContextSectionV1,
     TrustedLifeSwitchContextRequestV1,
     create_lifeswitch_context_envelope_v1,
@@ -138,8 +138,10 @@ class LifeSwitchSelfShadowObserverV2Tests(unittest.IsolatedAsyncioTestCase):
     def test_observer_has_no_database_network_or_prompt_imports(self):
         path = (
             Path(__file__).resolve().parents[1]
-            / "rag_engine"
-            / "lifeswitch_coaching_self_shadow_observer_v2.py"
+            / "seebx"
+            / "capabilities"
+            / "coaching"
+            / "shadow_observer.py"
         )
         source = path.read_text(encoding="utf-8")
         for forbidden in (

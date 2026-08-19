@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from rag_engine.lifeswitch_prior_answer_provenance_runtime_v1 import (
+from seebx.adapters.lifeswitch_prior_provenance_postgres import (
     PriorLifeSwitchPreparedContextV1,
 )
 from seebx.capabilities.conversation.lifeswitch_composition import (
