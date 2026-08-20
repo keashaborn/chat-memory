@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Trusted OpenAI moderation adapter for the RESSE response-policy boundary.
+"""Trusted OpenAI moderation adapter for the conversation-policy boundary.
 
 The adapter has no credential, environment, logging, database, or routing
 responsibilities.  A live server adapter must inject an authenticated OpenAI

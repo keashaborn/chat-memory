@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-"""Typed, provider-neutral prompt assembly for RESSE.
+"""Typed, provider-neutral prompt assembly for SeeBx conversations.
 
-Assembly accepts only the outputs of the response-policy, governed-Memory
-successor, and canonical RM v0.4 boundaries. It has no provider, database,
+Assembly accepts only the outputs of the response-policy, Zep memory-context,
+and canonical RM v0.4 boundaries. It has no provider, database,
 retrieval, environment, or network dependencies.
 """
 
