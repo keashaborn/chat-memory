@@ -137,7 +137,7 @@ class AuthenticatedResponseCommandV0_2(_StrictFrozenModel):
         return self
 
 
-class GovernedMemoryAssemblyV1(_StrictFrozenModel):
+class ZepMemoryAssemblyV1(_StrictFrozenModel):
     source_status: MemorySourceStatusV1 = MemorySourceStatusV1.NOT_APPLICABLE
     successor_memory_context_block: PromptReferenceContextBlockV1 | None = Field(
         default=None,
@@ -146,7 +146,7 @@ class GovernedMemoryAssemblyV1(_StrictFrozenModel):
     )
 
     @model_validator(mode="after")
-    def successor_context_only(self) -> "GovernedMemoryAssemblyV1":
+    def zep_context_only(self) -> "ZepMemoryAssemblyV1":
         if (
             self.source_status is MemorySourceStatusV1.SELECTED
         ) != (self.successor_memory_context_block is not None):
@@ -250,8 +250,8 @@ def _elapsed_ms(start_ns: int) -> int:
     return max(0, round((time.monotonic_ns() - start_ns) / 1_000_000))
 
 
-class GovernedMemoryAssemblyProviderV1(Protocol):
-    """Independent governed-Memory successor context boundary."""
+class ZepMemoryAssemblyProviderV1(Protocol):
+    """Independent Zep Memory context boundary."""
 
     def prepare(
         self,
@@ -259,11 +259,11 @@ class GovernedMemoryAssemblyProviderV1(Protocol):
         authenticated_actor_user_id: UUID,
         conversation_snapshot: ConversationSnapshotV1,
         trusted_policy_signals: ResponsePolicySignalsV0_2,
-    ) -> GovernedMemoryAssemblyV1 | Awaitable[GovernedMemoryAssemblyV1]: ...
+    ) -> ZepMemoryAssemblyV1 | Awaitable[ZepMemoryAssemblyV1]: ...
 
 
-class SuccessorMemoryAnswerLifecycleV1(Protocol):
-    """Post-generation binding hook for the exact selected successor claims."""
+class ZepMemoryAnswerLifecycleV1(Protocol):
+    """Post-generation binding hook for the exact selected Zep claims."""
 
     @property
     def has_selected_claims(self) -> bool: ...
@@ -279,29 +279,29 @@ class SuccessorMemoryAnswerLifecycleV1(Protocol):
     ) -> MemoryAnswerProvenanceV1: ...
 
 
-class NoGovernedMemoryAssemblyProviderV1:
+class NoZepMemoryAssemblyProviderV1:
     def prepare(
         self,
         *,
         authenticated_actor_user_id: UUID,
         conversation_snapshot: ConversationSnapshotV1,
         trusted_policy_signals: ResponsePolicySignalsV0_2,
-    ) -> GovernedMemoryAssemblyV1:
+    ) -> ZepMemoryAssemblyV1:
         del authenticated_actor_user_id, conversation_snapshot, trusted_policy_signals
-        return GovernedMemoryAssemblyV1()
+        return ZepMemoryAssemblyV1()
 
 
 async def _await_memory(
-    value: GovernedMemoryAssemblyV1 | Awaitable[GovernedMemoryAssemblyV1],
-) -> GovernedMemoryAssemblyV1:
+    value: ZepMemoryAssemblyV1 | Awaitable[ZepMemoryAssemblyV1],
+) -> ZepMemoryAssemblyV1:
     if hasattr(value, "__await__"):
         value = await value  # type: ignore[misc]
-    if not isinstance(value, GovernedMemoryAssemblyV1):
+    if not isinstance(value, ZepMemoryAssemblyV1):
         raise ResponseCompositionError(
-            "Memory provider must return GovernedMemoryAssemblyV1"
+            "Memory provider must return ZepMemoryAssemblyV1"
         )
     try:
-        return GovernedMemoryAssemblyV1.model_validate_json(value.model_dump_json())
+        return ZepMemoryAssemblyV1.model_validate_json(value.model_dump_json())
     except Exception:
         raise ResponseCompositionError("Memory provider result is invalid") from None
 
@@ -314,8 +314,8 @@ class ConversationResponseComposer:
         *,
         openai_client: Any,
         classifier_model: str,
-        memory_provider: GovernedMemoryAssemblyProviderV1 | None = None,
-        successor_memory_lifecycle: SuccessorMemoryAnswerLifecycleV1 | None = None,
+        memory_provider: ZepMemoryAssemblyProviderV1 | None = None,
+        zep_memory_lifecycle: ZepMemoryAnswerLifecycleV1 | None = None,
         generation_config: OpenAIChatGenerationConfigV1 | None = None,
         clock: Callable[[], datetime] | None = None,
         answer_id_factory: Callable[[], UUID] | None = None,
@@ -325,15 +325,15 @@ class ConversationResponseComposer:
             raise ResponseCompositionError("an injected OpenAI client is required")
         self._openai_client = openai_client
         self._classifier_model = classifier_model
-        self._memory_provider = memory_provider or NoGovernedMemoryAssemblyProviderV1()
+        self._memory_provider = memory_provider or NoZepMemoryAssemblyProviderV1()
         if (
-            successor_memory_lifecycle is not None
-            and successor_memory_lifecycle is not self._memory_provider
+            zep_memory_lifecycle is not None
+            and zep_memory_lifecycle is not self._memory_provider
         ):
             raise ResponseCompositionError(
-                "successor Memory provider and lifecycle must be identical"
+                "Zep Memory provider and lifecycle must be identical"
             )
-        self._successor_memory_lifecycle = successor_memory_lifecycle
+        self._zep_memory_lifecycle = zep_memory_lifecycle
         self._generation_config = generation_config or OpenAIChatGenerationConfigV1()
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._answer_id_factory = answer_id_factory or uuid4
@@ -383,11 +383,11 @@ class ConversationResponseComposer:
                     stage="answer_generation",
                 )
             stage_timings["answer_generation_ms"] = _elapsed_ms(stage_started_ns)
-            successor_memory_provenance = None
-            if self.has_successor_memory_lifecycle:
+            zep_memory_provenance = None
+            if self.has_zep_memory_lifecycle:
                 stage = "successor_memory_answer_binding"
-                successor_memory_provenance = (
-                    await self.persist_successor_memory_answer_binding(
+                zep_memory_provenance = (
+                    await self.persist_zep_memory_answer_binding(
                         answer_id=answer_id,
                         prompt_sha256=(
                             plan.assembled_prompt.manifest.assembly_sha256
@@ -412,46 +412,46 @@ class ConversationResponseComposer:
                 trusted_plan=plan,
                 provider_response=response,
                 finalized=finalized,
-                successor_memory_provenance=successor_memory_provenance,
+                successor_memory_provenance=zep_memory_provenance,
                 stage_timings=ResponseStageTimingsV1(
                     **stage_timings,
                     pipeline_total_ms=_elapsed_ms(pipeline_started_ns),
                 ),
             )
         except ResponseCompositionError as exc:
-            self.discard_successor_memory_selection()
+            self.discard_zep_memory_selection()
             if exc.stage == "not_applicable":
                 raise ResponseCompositionError(str(exc), stage=stage) from None
             raise
         except Exception:
-            self.discard_successor_memory_selection()
+            self.discard_zep_memory_selection()
             raise ResponseCompositionError(
                 "conversation response composition failed",
                 stage=stage,
             ) from None
 
     @property
-    def has_selected_successor_memory(self) -> bool:
+    def has_selected_zep_memory(self) -> bool:
         return bool(
-            self._successor_memory_lifecycle is not None
-            and self._successor_memory_lifecycle.has_selected_claims
+            self._zep_memory_lifecycle is not None
+            and self._zep_memory_lifecycle.has_selected_claims
         )
 
     @property
-    def has_successor_memory_lifecycle(self) -> bool:
-        return self._successor_memory_lifecycle is not None
+    def has_zep_memory_lifecycle(self) -> bool:
+        return self._zep_memory_lifecycle is not None
 
-    async def persist_successor_memory_answer_binding(
+    async def persist_zep_memory_answer_binding(
         self,
         *,
         answer_id: UUID,
         prompt_sha256: str,
         outbound_request_bytes: bytes,
     ) -> MemoryAnswerProvenanceV1:
-        lifecycle = self._successor_memory_lifecycle
+        lifecycle = self._zep_memory_lifecycle
         if lifecycle is None:
             raise ResponseCompositionError(
-                "successor Memory lifecycle is unavailable"
+                "Zep Memory lifecycle is unavailable"
             )
         provenance = await lifecycle.persist_dispatched_answer_binding(
             answer_id=answer_id,
@@ -460,7 +460,7 @@ class ConversationResponseComposer:
         )
         if not isinstance(provenance, BaseModel):
             raise ResponseCompositionError(
-                "successor Memory lifecycle returned invalid provenance"
+                "Zep Memory lifecycle returned invalid provenance"
             )
         try:
             return MemoryAnswerProvenanceV1.model_validate_json(
@@ -468,11 +468,11 @@ class ConversationResponseComposer:
             )
         except Exception:
             raise ResponseCompositionError(
-                "successor Memory lifecycle returned invalid provenance"
+                "Zep Memory lifecycle returned invalid provenance"
             ) from None
 
-    def discard_successor_memory_selection(self) -> None:
-        lifecycle = self._successor_memory_lifecycle
+    def discard_zep_memory_selection(self) -> None:
+        lifecycle = self._zep_memory_lifecycle
         if lifecycle is not None:
             lifecycle.discard_selected_state()
 
@@ -611,14 +611,14 @@ class ConversationResponseComposer:
 
 __all__ = [
     "AuthenticatedResponseCommandV0_2",
-    "GovernedMemoryAssemblyProviderV1",
-    "GovernedMemoryAssemblyV1",
+    "ZepMemoryAssemblyProviderV1",
+    "ZepMemoryAssemblyV1",
     "ConversationResponseComposer",
-    "NoGovernedMemoryAssemblyProviderV1",
+    "NoZepMemoryAssemblyProviderV1",
     "ResponseCompositionError",
     "ResponsePreparationTimingsV1",
     "ResponseStageTimingsV1",
-    "SuccessorMemoryAnswerLifecycleV1",
+    "ZepMemoryAnswerLifecycleV1",
     "TrustedResponseExecutionV0_2",
     "TrustedResponsePreparationV0_2",
 ]

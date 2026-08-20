@@ -315,13 +315,13 @@ class LifeSwitchConversationComposer:
     ) -> IntegratedTrustedLifeSwitchResponseExecutionV2:
         pipeline_started_ns = time.monotonic_ns()
         prepared = await self._base_composer.prepare_detailed(conn, command)
-        successor_memory_provenance = None
+        zep_memory_provenance = None
         try:
             downstream = await self._lifeswitch_stage.execute(
                 base_response_plan=prepared.trusted_plan,
                 conversation_snapshot=prepared.conversation_snapshot,
             )
-            if self._base_composer.has_successor_memory_lifecycle:
+            if self._base_composer.has_zep_memory_lifecycle:
                 exact_request = OpenAIChatRequestV4.create(
                     source_plan=downstream.trusted_plan,
                     generation_config=self._generation_config,
@@ -333,8 +333,8 @@ class LifeSwitchConversationComposer:
                     raise LifeSwitchCompositionError(
                         "successor_memory_answer_binding"
                     )
-                successor_memory_provenance = (
-                    await self._base_composer.persist_successor_memory_answer_binding(
+                zep_memory_provenance = (
+                    await self._base_composer.persist_zep_memory_answer_binding(
                         answer_id=downstream.finalized.answer_id,
                         prompt_sha256=(
                             downstream.trusted_plan.assembled_prompt.manifest.assembly_sha256
@@ -345,7 +345,7 @@ class LifeSwitchConversationComposer:
                     )
                 )
         except Exception:
-            self._base_composer.discard_successor_memory_selection()
+            self._base_composer.discard_zep_memory_selection()
             raise
         base = prepared.stage_timings
         life = downstream.stage_timings
@@ -353,7 +353,7 @@ class LifeSwitchConversationComposer:
             trusted_plan=downstream.trusted_plan,
             provider_response=downstream.provider_response,
             finalized=downstream.finalized,
-            successor_memory_provenance=successor_memory_provenance,
+            successor_memory_provenance=zep_memory_provenance,
             stage_timings=IntegratedLifeSwitchResponseStageTimingsV2(
                 command_validation_ms=base.command_validation_ms,
                 conversation_snapshot_ms=base.conversation_snapshot_ms,

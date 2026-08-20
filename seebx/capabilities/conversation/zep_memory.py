@@ -17,7 +17,7 @@ from seebx.capabilities.conversation.prompt import (
     PromptReferenceContextBlockV1,
     PromptReferenceFragmentV1,
 )
-from seebx.capabilities.conversation.composition import GovernedMemoryAssemblyV1
+from seebx.capabilities.conversation.composition import ZepMemoryAssemblyV1
 from seebx.capabilities.conversation.snapshot import ConversationSnapshotV1
 from seebx.capabilities.conversation.policy import ResponsePolicySignalsV0_2
 from seebx.capabilities.conversation.source_awareness import MemorySourceStatusV1
@@ -195,7 +195,7 @@ class ZepMemoryChatProviderV1:
         authenticated_actor_user_id: UUID,
         conversation_snapshot: ConversationSnapshotV1,
         trusted_policy_signals: ResponsePolicySignalsV0_2,
-    ) -> GovernedMemoryAssemblyV1:
+    ) -> ZepMemoryAssemblyV1:
         del trusted_policy_signals
         if self._prepared:
             raise ZepPromptConfigurationError("zep_prompt_provider_reused")
@@ -214,18 +214,18 @@ class ZepMemoryChatProviderV1:
             )
         except Exception:
             self._outcome = "unavailable"
-            return GovernedMemoryAssemblyV1(
+            return ZepMemoryAssemblyV1(
                 source_status=MemorySourceStatusV1.UNAVAILABLE
             )
         if not isinstance(context, str):
             self._outcome = "unavailable"
-            return GovernedMemoryAssemblyV1(
+            return ZepMemoryAssemblyV1(
                 source_status=MemorySourceStatusV1.UNAVAILABLE
             )
         raw = context.strip()
         if not raw:
             self._outcome = "checked_empty"
-            return GovernedMemoryAssemblyV1(
+            return ZepMemoryAssemblyV1(
                 source_status=MemorySourceStatusV1.CHECKED_EMPTY
             )
         raw_bytes = raw.encode("utf-8")
@@ -237,7 +237,7 @@ class ZepMemoryChatProviderV1:
                 "[zep_prompt] context_rejected code=context_too_large bytes=%s",
                 len(content_bytes),
             )
-            return GovernedMemoryAssemblyV1(
+            return ZepMemoryAssemblyV1(
                 source_status=MemorySourceStatusV1.UNAVAILABLE
             )
         context_sha256 = hashlib.sha256(content_bytes).hexdigest()
@@ -270,7 +270,7 @@ class ZepMemoryChatProviderV1:
         self._source_manifest_sha256 = source_manifest_sha256
         self._context_sha256 = context_sha256
         self._context_bytes = len(content_bytes)
-        return GovernedMemoryAssemblyV1(
+        return ZepMemoryAssemblyV1(
             source_status=MemorySourceStatusV1.SELECTED,
             successor_memory_context_block=block,
         )

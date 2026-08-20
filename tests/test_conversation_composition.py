@@ -12,7 +12,7 @@ from pydantic import ValidationError
 
 from seebx.capabilities.conversation.composition import (
     AuthenticatedResponseCommandV0_2,
-    GovernedMemoryAssemblyV1,
+    ZepMemoryAssemblyV1,
     ConversationResponseComposer,
     ResponseCompositionError,
 )
@@ -236,13 +236,13 @@ class CapturingMemoryProvider:
         authenticated_actor_user_id: UUID,
         conversation_snapshot: Any,
         trusted_policy_signals: ResponsePolicySignalsV0_2,
-    ) -> GovernedMemoryAssemblyV1:
+    ) -> ZepMemoryAssemblyV1:
         self.signals.append(trusted_policy_signals)
-        return GovernedMemoryAssemblyV1()
+        return ZepMemoryAssemblyV1()
 
 
 class FailingMemoryProvider:
-    def prepare(self, **kwargs: Any) -> GovernedMemoryAssemblyV1:
+    def prepare(self, **kwargs: Any) -> ZepMemoryAssemblyV1:
         del kwargs
         raise RuntimeError("private provider detail")
 
@@ -263,6 +263,16 @@ class ConversationCompositionTests(unittest.IsolatedAsyncioTestCase):
         payload["assistant_response_preferences"] = None
         with self.assertRaises(ValidationError):
             AuthenticatedResponseCommandV0_2.model_validate(payload)
+
+    def test_zep_assembly_retains_versioned_wire_contract(self) -> None:
+        assembly = ZepMemoryAssemblyV1()
+        self.assertEqual(
+            set(ZepMemoryAssemblyV1.model_fields),
+            {"source_status", "successor_memory_context_block"},
+        )
+        self.assertEqual(
+            assembly.model_dump_json(), '{"source_status":"NOT_APPLICABLE"}'
+        )
 
     async def test_source_followup_uses_prior_provenance_without_new_search(self) -> None:
         client = CombinedOpenAIClient()

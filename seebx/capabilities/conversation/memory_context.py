@@ -8,7 +8,7 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-from seebx.capabilities.conversation.composition import GovernedMemoryAssemblyV1
+from seebx.capabilities.conversation.composition import ZepMemoryAssemblyV1
 from seebx.capabilities.conversation.snapshot import ConversationSnapshotV1
 from seebx.capabilities.conversation.policy import ResponsePolicySignalsV0_2
 from seebx.capabilities.conversation.source_awareness import MemorySourceStatusV1
@@ -74,7 +74,7 @@ class InactiveMemoryContextProviderV1:
         authenticated_actor_user_id: UUID,
         conversation_snapshot: ConversationSnapshotV1,
         trusted_policy_signals: ResponsePolicySignalsV0_2,
-    ) -> GovernedMemoryAssemblyV1:
+    ) -> ZepMemoryAssemblyV1:
         if not isinstance(authenticated_actor_user_id, UUID):
             raise MemoryContextError("invalid_memory_authenticated_actor")
         snapshot = _wire_revalidate(
@@ -92,7 +92,7 @@ class InactiveMemoryContextProviderV1:
         if self._prepared:
             raise MemoryContextError("memory_context_provider_reused")
         self._prepared = True
-        return GovernedMemoryAssemblyV1(
+        return ZepMemoryAssemblyV1(
             source_status=MemorySourceStatusV1.NOT_APPLICABLE
         )
 

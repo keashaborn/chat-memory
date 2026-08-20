@@ -19,7 +19,7 @@ from seebx.contracts.identifiers import CanonicalJsonUUID
 from seebx.core.identity import require_verified_supabase_request_identity
 
 
-SUCCESSOR_MEMORY_REFUSAL_HEADERS = {
+ZEP_MEMORY_REFUSAL_HEADERS = {
     "cache-control": "private, no-store, max-age=0, must-revalidate",
     "pragma": "no-cache",
     "expires": "0",
@@ -129,7 +129,7 @@ def _conversation_erasure_required(
             ),
         },
         status_code=410,
-        headers=SUCCESSOR_MEMORY_REFUSAL_HEADERS,
+        headers=ZEP_MEMORY_REFUSAL_HEADERS,
     )
 
 
@@ -166,7 +166,7 @@ def create_conversation_erasure_router(
             return JSONResponse(
                 {"status": "error", "detail": error.code},
                 status_code=error.status_code,
-                headers=SUCCESSOR_MEMORY_REFUSAL_HEADERS,
+                headers=ZEP_MEMORY_REFUSAL_HEADERS,
             )
         return result.as_dict()
 
@@ -188,19 +188,19 @@ def create_conversation_erasure_router(
             return JSONResponse(
                 {"status": "error", "detail": error.code},
                 status_code=error.status_code,
-                headers=SUCCESSOR_MEMORY_REFUSAL_HEADERS,
+                headers=ZEP_MEMORY_REFUSAL_HEADERS,
             )
         except (ZepConfigurationError, asyncio.TimeoutError):
             return JSONResponse(
                 {"status": "error", "detail": "zep_memory_deletion_unavailable"},
                 status_code=503,
-                headers=SUCCESSOR_MEMORY_REFUSAL_HEADERS,
+                headers=ZEP_MEMORY_REFUSAL_HEADERS,
             )
         except Exception:
             return JSONResponse(
                 {"status": "error", "detail": "full_ai_data_deletion_unavailable"},
                 status_code=503,
-                headers=SUCCESSOR_MEMORY_REFUSAL_HEADERS,
+                headers=ZEP_MEMORY_REFUSAL_HEADERS,
             )
 
         return {
@@ -255,6 +255,6 @@ def create_conversation_erasure_router(
 
 __all__ = [
     "ChatHistoryClearReq",
-    "SUCCESSOR_MEMORY_REFUSAL_HEADERS",
+    "ZEP_MEMORY_REFUSAL_HEADERS",
     "create_conversation_erasure_router",
 ]

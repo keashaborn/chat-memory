@@ -389,7 +389,7 @@ async def resse_response_query(
             openai_client=openai_client,
             classifier_model=os.getenv("RESSE_CLASSIFIER_MODEL", "gpt-5.1"),
             memory_provider=memory_provider,
-            successor_memory_lifecycle=memory_lifecycle,
+            zep_memory_lifecycle=memory_lifecycle,
             generation_config=generation_config,
         )
         command = AuthenticatedResponseCommandV0_2(
