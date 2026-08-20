@@ -11,8 +11,12 @@ from uuid import UUID
 from pydantic import ValidationError
 
 from seebx.contracts.transcript_integrity import (
+    ATTESTED_ASSISTANT_SOURCES,
     AssistantOutputKind,
     AssistantTranscriptAttestationV1,
+)
+from seebx.contracts.conversation_provenance import (
+    LEGACY_ASSISTANT_TRANSCRIPT_SOURCE_V1,
 )
 from seebx.adapters.conversation_snapshot import (
     load_conversation_snapshot_v1,
@@ -152,7 +156,7 @@ def prior_row(
         "request_id": request_id or f"prior-{number}",
         "created_at": NOW - timedelta(minutes=number),
     }
-    if source == ATTESTED_ASSISTANT_SOURCE:
+    if source in ATTESTED_ASSISTANT_SOURCES:
         attestation = AssistantTranscriptAttestationV1.create(
             authenticated_actor_user_id=ACTOR,
             thread_id=THREAD,
@@ -347,7 +351,7 @@ class ConversationSnapshotTests(unittest.IsolatedAsyncioTestCase):
             args[3],
             [USER_SOURCE, VOICE_REALTIME_USER_SOURCE],
         )
-        self.assertEqual(args[4], ATTESTED_ASSISTANT_SOURCE)
+        self.assertEqual(args[4], sorted(ATTESTED_ASSISTANT_SOURCES))
         self.assertEqual(args[7], NOW)
         self.assertEqual(args[8], CURRENT_ID)
 
@@ -370,6 +374,29 @@ class ConversationSnapshotTests(unittest.IsolatedAsyncioTestCase):
             current_message="Current message",
         )
         self.assertEqual(snapshot.messages[0].role, ConversationRole.ASSISTANT)
+
+    async def test_legacy_attested_backend_history_remains_readable(self) -> None:
+        conn = FakeConnection(
+            current_rows=[current_row()],
+            prior_rows=[
+                prior_row(
+                    number=1,
+                    source=LEGACY_ASSISTANT_TRANSCRIPT_SOURCE_V1,
+                    text="historical server answer",
+                )
+            ],
+        )
+        snapshot = await load_conversation_snapshot_v1(
+            conn,
+            authenticated_actor_user_id=ACTOR,
+            thread_id=THREAD,
+            current_request_id=REQUEST_ID,
+            current_message="Current message",
+        )
+        self.assertEqual(
+            snapshot.messages[0].role,
+            ConversationRole.ASSISTANT,
+        )
 
     async def test_assistant_history_rejects_incomplete_manifest_tampering(self) -> None:
         assistant = prior_row(

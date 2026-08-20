@@ -18,6 +18,10 @@ from typing import Any
 
 import httpx
 
+from seebx.contracts.conversation_provenance import (
+    CANONICAL_CONVERSATION_RESPONSE_RUNTIME_V1,
+)
+
 
 CONTRACT_VERSION = "voice_synthetic_canary_v1_4"
 TRACE_CONTRACT_VERSION = "voice_turn_trace_v1"
@@ -408,7 +412,10 @@ async def run_canary(
             metrics["response_ms"] = _elapsed_ms(response_started)
             _require_success(governed, "response")
             governed_body = governed.json()
-            if governed_body.get("runtime") != "resse_response_v0_2":
+            if (
+                governed_body.get("runtime")
+                != CANONICAL_CONVERSATION_RESPONSE_RUNTIME_V1
+            ):
                 raise CanaryFailure("response", "unexpected_response_runtime")
             answer = _bounded_tts_text(governed_body.get("answer"))
 

@@ -59,7 +59,7 @@ class ConversationPersistenceTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             generic_chat_call[1][5],
-            ["assistant", "chat", "server_attested", "resse_v0_2"],
+            ["assistant", "chat", "server_attested", "conversation_response_v1"],
         )
 
         lifeswitch_conn = Conn()

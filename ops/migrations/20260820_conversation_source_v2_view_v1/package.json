@@ -1,0 +1,41 @@
+{
+  "schema_version": "seebx-conversation-source-migration-package-v1",
+  "migration_id": "conversation_source_v2_view_v1",
+  "status": "candidate_not_applied",
+  "target": {
+    "server": "seebx",
+    "database": "memory",
+    "execution_role": "sage"
+  },
+  "inputs": {
+    "forward": {
+      "path": "ops/migrations/20260820_conversation_source_v2_view_v1/forward.pgsql",
+      "sha256": "85648b88205947df4c2bae571ddc2848616e24705891fefeeb2e0f9e1f953c48"
+    },
+    "rollback": {
+      "path": "ops/migrations/20260820_conversation_source_v2_view_v1/rollback.pgsql",
+      "sha256": "7284d2775e0c66fa613c35a13defe7f92c7cdc252d44d8ea8070a80d8efcff26"
+    }
+  },
+  "contract": {
+    "canonical_source": "backend/seebx:assistant:v2",
+    "historical_source": "backend/resse:assistant:v1",
+    "canonical_registry": "seebx/contracts/conversation_provenance.py",
+    "view": "lifeswitch_chat.read_prior_answer_lifeswitch_provenance_v1"
+  },
+  "execution": {
+    "apply_order": "before_canonical_backend_writer_activation",
+    "temporary_database_verification_required": true,
+    "forward_and_rollback_required": true,
+    "rollback_requires_zero_canonical_rows": true,
+    "production_database_mutated": false,
+    "service_restart_authorized": false,
+    "deployment_authorized": false
+  },
+  "policy": {
+    "data_operations_allowed": false,
+    "destructive_forward_allowed": false,
+    "grant_widening_allowed": false,
+    "owner_scope_preserved": true
+  }
+}

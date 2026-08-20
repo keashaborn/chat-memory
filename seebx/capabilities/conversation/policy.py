@@ -18,8 +18,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from seebx.contracts.conversation_provenance import (
-    LEGACY_CONVERSATION_SAFETY_ASSESSOR_V0_2,
-    LEGACY_DEFAULT_ASSISTANT_PROFILE_V0_2,
+    CANONICAL_CONVERSATION_SAFETY_ASSESSOR_V1,
+    CANONICAL_DEFAULT_RESPONSE_PROFILE_V1,
 )
 
 POLICY_VERSION = "response_policy_v0_2"
@@ -27,9 +27,9 @@ POLICY_DECISION_VERSION = "response_policy_decision_v0_4"
 POLICY_INPUT_VERSION = "response_policy_input_v0_2"
 POLICY_SIGNALS_VERSION = "response_policy_signals_v0_3"
 SAFETY_ASSESSMENT_VERSION = "safety_assessment_v0_2"
-SAFETY_ASSESSOR_VERSION = LEGACY_CONVERSATION_SAFETY_ASSESSOR_V0_2
+SAFETY_ASSESSOR_VERSION = CANONICAL_CONVERSATION_SAFETY_ASSESSOR_V1
 DEFAULT_SAFETY_COMPONENT = "server_safety_assessment_v0_2"
-ASSISTANT_PROFILE_ID = LEGACY_DEFAULT_ASSISTANT_PROFILE_V0_2
+ASSISTANT_PROFILE_ID = CANONICAL_DEFAULT_RESPONSE_PROFILE_V1
 DOMAIN_CLASSIFIER_UNAVAILABLE_REASON = "domain_classifier_unavailable"
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -1388,7 +1388,10 @@ def decide_response_policy_v0_2(
 
     reasons = list(mode_reasons)
     requested_profile = (request.requested_assistant_profile_id or "").strip()
-    if requested_profile and requested_profile.upper() != ASSISTANT_PROFILE_ID:
+    if (
+        requested_profile
+        and requested_profile.casefold() != ASSISTANT_PROFILE_ID.casefold()
+    ):
         reasons.append("requested_assistant_profile_rejected")
 
     ignored = tuple(

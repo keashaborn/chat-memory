@@ -20,11 +20,10 @@ from seebx.capabilities.conversation.lifeswitch_provenance import (
     LifeSwitchProvenanceSourceRefV1,
 )
 from seebx.capabilities.conversation.snapshot import (
-    ATTESTED_ASSISTANT_SOURCE,
     ConversationSnapshotOutcome,
     ConversationSnapshotV1,
 )
-
+from seebx.contracts.transcript_integrity import ATTESTED_ASSISTANT_SOURCES
 
 PRIOR_LIFESWITCH_PROVENANCE_V1 = "prior_lifeswitch_provenance_v1"
 MAX_PROVENANCE_CANDIDATES = 9
@@ -414,7 +413,7 @@ def _response_from_row(
             return None
         if UUID(str(row["chat_log_id"])) != answer_id:
             return None
-        if str(row["chat_source"]) != ATTESTED_ASSISTANT_SOURCE:
+        if str(row["chat_source"]) not in ATTESTED_ASSISTANT_SOURCES:
             return None
         answer_sha256 = str(row["attestation_assistant_text_sha256"])
         attestation_sha256 = str(row["attestation_sha256"])

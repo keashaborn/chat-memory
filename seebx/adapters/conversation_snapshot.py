@@ -9,6 +9,7 @@ from uuid import UUID
 
 from seebx.contracts.transcript_integrity import (
     ATTESTED_ASSISTANT_SOURCE,
+    ATTESTED_ASSISTANT_SOURCES,
     validate_assistant_transcript_attestation_row_v1,
 )
 from seebx.capabilities.conversation.policy import (
@@ -35,7 +36,9 @@ from seebx.contracts.conversation import WEB_ASSISTANT_SOURCE, WEB_USER_SOURCE
 SOURCE_ROLE = {
     USER_SOURCE: ConversationRole.USER,
     VOICE_REALTIME_USER_SOURCE: ConversationRole.USER,
-    ATTESTED_ASSISTANT_SOURCE: ConversationRole.ASSISTANT,
+    **{
+        source: ConversationRole.ASSISTANT for source in ATTESTED_ASSISTANT_SOURCES
+    },
     WEB_USER_SOURCE: ConversationRole.USER,
     WEB_ASSISTANT_SOURCE: ConversationRole.ASSISTANT,
 }
@@ -193,7 +196,7 @@ async def load_conversation_snapshot_v1(
                       AND (
                         log.source=ANY($4::text[])
                         OR (
-                          log.source=$5
+                          log.source=ANY($5::text[])
                           AND attestation.answer_id IS NOT NULL
                         )
                         OR (
@@ -209,7 +212,7 @@ async def load_conversation_snapshot_v1(
                     thread_id,
                     current_request_id,
                     [USER_SOURCE, VOICE_REALTIME_USER_SOURCE],
-                    ATTESTED_ASSISTANT_SOURCE,
+                    sorted(ATTESTED_ASSISTANT_SOURCES),
                     WEB_USER_SOURCE,
                     WEB_ASSISTANT_SOURCE,
                     cutoff,
@@ -273,7 +276,7 @@ async def load_conversation_snapshot_v1(
         text = row.get("text")
         if not isinstance(text, str) or not text:
             raise ConversationSnapshotError("prior transcript text is empty")
-        if source == ATTESTED_ASSISTANT_SOURCE:
+        if source in ATTESTED_ASSISTANT_SOURCES:
             try:
                 validate_assistant_transcript_attestation_row_v1(
                     row,

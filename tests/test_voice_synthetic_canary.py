@@ -150,7 +150,7 @@ class VoiceSyntheticCanaryTests(unittest.IsolatedAsyncioTestCase):
                         "answer": "Governed voice canary operational.",
                         "answer_id": str(uuid.uuid4()),
                         "output_kind": "answer",
-                        "runtime": "resse_response_v0_2",
+                        "runtime": "conversation_response_v1",
                     },
                 )
             if request.url.path == "/telemetry/event":
@@ -352,7 +352,7 @@ class VoiceSyntheticCanaryTests(unittest.IsolatedAsyncioTestCase):
                     headers=no_store_headers(),
                     json={
                         "answer": "Operational.",
-                        "runtime": "resse_response_v0_2",
+                        "runtime": "conversation_response_v1",
                     },
                 )
             if request.url.path == "/telemetry/event":

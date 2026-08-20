@@ -585,7 +585,7 @@ class GuidedReflectionInteractionV1Tests(unittest.TestCase):
         )
         self.assertEqual(
             SHADOW_TRACE_VERSION,
-            "resse_response_shadow_trace_v0_6",
+            "conversation_response_shadow_trace_v1",
         )
         self.assertEqual(
             TRUSTED_PLAN_VERSION,

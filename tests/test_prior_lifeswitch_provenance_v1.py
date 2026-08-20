@@ -21,6 +21,9 @@ from seebx.capabilities.conversation.snapshot import (
     create_current_only_conversation_snapshot_v1,
     create_conversation_snapshot_v1,
 )
+from seebx.contracts.conversation_provenance import (
+    LEGACY_ASSISTANT_TRANSCRIPT_SOURCE_V1,
+)
 from seebx.capabilities.conversation.lifeswitch_finalization import finalize_trusted_response_v3
 from seebx.capabilities.conversation.policy import (
     ConversationRole,
@@ -251,6 +254,19 @@ class PriorLifeSwitchProvenanceV1Tests(unittest.IsolatedAsyncioTestCase):
             "historical_binding_only",
         )
         self.assertFalse(historical.responses[0].source_refs[0].window_exact)
+        legacy_row = dict(row)
+        legacy_row["chat_source"] = LEGACY_ASSISTANT_TRANSCRIPT_SOURCE_V1
+        legacy = await select_prior_lifeswitch_provenance_v1(
+            RowsConn([legacy_row]),
+            context_id=THREAD,
+            authenticated_actor_user_id=ACTOR,
+            conversation_snapshot=bound_snapshot(),
+        )
+        assert legacy is not None
+        self.assertEqual(
+            legacy.responses[0].provenance_status,
+            "exact_receipt",
+        )
 
     async def test_cross_linked_receipt_and_attestation_are_rejected(self) -> None:
         row, _binding, receipt, _attestation = await exact_row()

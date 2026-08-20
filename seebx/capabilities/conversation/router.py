@@ -68,8 +68,8 @@ from seebx.contracts.search import (
     SearchCapabilityManifestV1,
 )
 from seebx.contracts.conversation_provenance import (
-    LEGACY_CONVERSATION_RESPONSE_RUNTIME_V0_2,
-    LEGACY_LIFESWITCH_RESPONSE_RUNTIME_V0_4,
+    CANONICAL_CONVERSATION_RESPONSE_RUNTIME_V1,
+    CANONICAL_LIFESWITCH_RESPONSE_RUNTIME_V1,
 )
 from seebx.capabilities.search.authorization import (
     TEXT_SEARCH_AUTHORIZATION_VALUE,
@@ -499,9 +499,9 @@ async def conversation_response_query(
             "output_kind": finalized.output_kind.value,
             "memory_provenance": memory_provenance,
             "runtime": (
-                LEGACY_LIFESWITCH_RESPONSE_RUNTIME_V0_4
+                CANONICAL_LIFESWITCH_RESPONSE_RUNTIME_V1
                 if lifeswitch_enabled
-                else LEGACY_CONVERSATION_RESPONSE_RUNTIME_V0_2
+                else CANONICAL_CONVERSATION_RESPONSE_RUNTIME_V1
             ),
             "timings": {
                 **execution.stage_timings.model_dump(mode="json"),

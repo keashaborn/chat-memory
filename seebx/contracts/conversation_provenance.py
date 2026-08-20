@@ -3,8 +3,8 @@ from __future__ import annotations
 """One versioned registry for conversation provenance and runtime identifiers.
 
 Legacy values remain exact because immutable rows and traces contain them.
-Canonical values are declared here but are not activated until the paired
-backend/frontend writer cutover. No other module may define a RESSE value.
+Canonical values are emitted by new writers. Historical readers admit only the
+exact legacy values declared here. No other module may define a RESSE value.
 """
 
 
@@ -25,6 +25,12 @@ CANONICAL_CONVERSATION_SAFETY_ASSESSOR_V1 = "conversation_safety_assessor_v1"
 CANONICAL_CONVERSATION_TRANSCRIPT_TAG_V1 = "conversation_response_v1"
 CANONICAL_DEFAULT_RESPONSE_PROFILE_V1 = "default_response_policy"
 
+ACCEPTED_ASSISTANT_TRANSCRIPT_SOURCES = frozenset(
+    {
+        LEGACY_ASSISTANT_TRANSCRIPT_SOURCE_V1,
+        CANONICAL_ASSISTANT_TRANSCRIPT_SOURCE_V2,
+    }
+)
 LEGACY_IDENTIFIER_VALUES = frozenset(
     {
         LEGACY_ASSISTANT_TRANSCRIPT_SOURCE_V1,
@@ -54,6 +60,7 @@ if LEGACY_IDENTIFIER_VALUES & CANONICAL_IDENTIFIER_VALUES:
 
 
 __all__ = [
+    "ACCEPTED_ASSISTANT_TRANSCRIPT_SOURCES",
     "CANONICAL_ASSISTANT_TRANSCRIPT_SOURCE_V2",
     "CANONICAL_CONVERSATION_RESPONSE_RUNTIME_V1",
     "CANONICAL_CONVERSATION_SAFETY_ASSESSOR_V1",

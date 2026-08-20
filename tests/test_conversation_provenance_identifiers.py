@@ -4,7 +4,10 @@ import unittest
 from pathlib import Path
 
 from seebx.contracts.conversation_provenance import (
+    ACCEPTED_ASSISTANT_TRANSCRIPT_SOURCES,
+    CANONICAL_ASSISTANT_TRANSCRIPT_SOURCE_V2,
     CANONICAL_IDENTIFIER_VALUES,
+    LEGACY_ASSISTANT_TRANSCRIPT_SOURCE_V1,
     LEGACY_IDENTIFIER_VALUES,
 )
 
@@ -42,6 +45,15 @@ class ConversationProvenanceIdentifierTests(unittest.TestCase):
         )
         self.assertTrue(
             all("resse" not in value.casefold() for value in CANONICAL_IDENTIFIER_VALUES)
+        )
+
+    def test_new_writes_are_canonical_and_historical_sources_are_exact(self) -> None:
+        self.assertEqual(
+            ACCEPTED_ASSISTANT_TRANSCRIPT_SOURCES,
+            {
+                LEGACY_ASSISTANT_TRANSCRIPT_SOURCE_V1,
+                CANONICAL_ASSISTANT_TRANSCRIPT_SOURCE_V2,
+            },
         )
 
     def test_legacy_and_canonical_namespaces_are_disjoint(self) -> None:
