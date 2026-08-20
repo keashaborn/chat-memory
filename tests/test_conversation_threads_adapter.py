@@ -16,6 +16,7 @@ from seebx.adapters.conversation_threads import (
     THREAD_BELONGS_TO_OWNER_SQL,
     UPDATE_THREAD_AUTOMATIC_TITLE_SQL,
     archive_thread,
+    create_and_select_thread,
     create_thread,
     fetch_thread_title_state,
     fetch_thread_title_transcript,
@@ -31,7 +32,79 @@ OWNER = "1240822d-ac9a-4096-95aa-e2b24d36ef50"
 THREAD = UUID("5240822d-ac9a-4096-95aa-e2b24d36ef50")
 
 
+class RecordingTransaction:
+    def __init__(self, connection) -> None:
+        self.connection = connection
+
+    async def __aenter__(self):
+        if self.connection.transaction_depth != 0:
+            raise AssertionError("nested transaction is not expected")
+        self.connection.transaction_depth = 1
+        self.connection.transaction_entries += 1
+
+    async def __aexit__(self, exc_type, exc, tb):
+        self.connection.transaction_depth = 0
+        self.connection.transaction_exit_type = exc_type
+
+
+class CreateAndSelectConnection:
+    def __init__(self) -> None:
+        self.transaction_depth = 0
+        self.transaction_entries = 0
+        self.transaction_exit_type = object()
+        self.execute_calls = []
+        self.fetchrow_calls = []
+        self.created = {"id": THREAD, "title": "New chat"}
+
+    def transaction(self):
+        return RecordingTransaction(self)
+
+    async def execute(self, query, *args):
+        if self.transaction_depth != 1:
+            raise AssertionError("write escaped transaction")
+        self.execute_calls.append((query, args))
+        return "OK"
+
+    async def fetchrow(self, query, *args):
+        if self.transaction_depth != 1:
+            raise AssertionError("read escaped transaction")
+        self.fetchrow_calls.append((query, args))
+        if query == CREATE_THREAD_SQL:
+            return self.created
+        if "FROM public.threads" in query and "AND id=$2" in query:
+            return {
+                "id": THREAD,
+                "title": "New chat",
+                "updated_at": SimpleNamespace(
+                    isoformat=lambda: "2026-08-20T00:00:00+00:00"
+                ),
+            }
+        raise AssertionError("unexpected fetchrow")
+
+
 class ConversationThreadsAdapterTests(unittest.IsolatedAsyncioTestCase):
+    async def test_create_and_select_is_one_adapter_transaction(self) -> None:
+        connection = CreateAndSelectConnection()
+        result = await create_and_select_thread(
+            connection,
+            owner_user_id=OWNER,
+            title="New chat",
+        )
+        self.assertIs(result, connection.created)
+        self.assertEqual(connection.transaction_entries, 1)
+        self.assertEqual(connection.transaction_depth, 0)
+        self.assertIsNone(connection.transaction_exit_type)
+        self.assertEqual(
+            connection.fetchrow_calls[0],
+            (CREATE_THREAD_SQL, (OWNER, OWNER, "New chat")),
+        )
+        self.assertTrue(
+            any(
+                "INSERT INTO public.active_thread_selection" in query
+                for query, _args in connection.execute_calls
+            )
+        )
+
     async def test_all_thread_queries_are_owner_scoped_and_argument_stable(self) -> None:
         created = {"id": THREAD}
         renamed = {"title": "Manual", "title_source": "manual"}

@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from seebx.adapters.conversation_history import fetch_thread_message_rows
 from seebx.adapters.conversation_threads import (
     archive_thread,
-    create_thread,
+    create_and_select_thread,
     fetch_thread_title_state,
     fetch_thread_title_transcript,
     list_visible_threads,
@@ -184,17 +184,11 @@ def create_thread_lifecycle_router(
             return actor_err
 
         async with postgres.owner_connection(user_id) as conn:
-            async with conn.transaction():
-                row = await create_thread(
-                    conn,
-                    owner_user_id=user_id,
-                    title=title,
-                )
-                await select_active_thread_v1(
-                    conn,
-                    owner_user_id=user_id,
-                    thread_id=row["id"],
-                )
+            row = await create_and_select_thread(
+                conn,
+                owner_user_id=user_id,
+                title=title,
+            )
         return {
             "thread_id": str(row["id"]),
             "title": row["title"],

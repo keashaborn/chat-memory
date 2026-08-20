@@ -166,8 +166,9 @@ class ActiveThreadSelectionContractTests(unittest.TestCase):
     def test_new_thread_selects_itself_in_same_transaction(self) -> None:
         handler = THREAD_ROUTES_SOURCE.split('@router.post("/threads/new")', 1)[1]
         handler = handler.split('@router.get("/threads/list/{user_id}")', 1)[0]
-        self.assertIn("async with conn.transaction():", handler)
-        self.assertIn("select_active_thread_v1(", handler)
+        self.assertNotIn("conn.transaction", handler)
+        self.assertIn("create_and_select_thread(", handler)
+        self.assertNotIn("create_thread(", handler)
 
     def test_migration_is_owner_scoped_and_force_rls(self) -> None:
         self.assertIn(

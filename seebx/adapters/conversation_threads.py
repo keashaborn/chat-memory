@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Any, Protocol, Sequence
 from uuid import UUID
 
+from seebx.adapters.thread_selection import promote_resume_thread_v1
+
 
 THREAD_BELONGS_TO_OWNER_SQL = (
     "SELECT 1 FROM threads WHERE id=$1 AND owner_user_id=$2"
@@ -73,6 +75,8 @@ class ConversationThreadConnection(Protocol):
 
     async def fetchval(self, query: str, *args: object) -> Any: ...
 
+    def transaction(self) -> Any: ...
+
 
 async def thread_belongs_to_owner(
     connection: ConversationThreadConnection,
@@ -100,6 +104,28 @@ async def create_thread(
         owner_user_id,
         title,
     )
+
+
+async def create_and_select_thread(
+    connection: ConversationThreadConnection,
+    *,
+    owner_user_id: str | UUID,
+    title: str,
+) -> Any:
+    """Create a thread and select it atomically inside the adapter boundary."""
+
+    async with connection.transaction():
+        row = await create_thread(
+            connection,
+            owner_user_id=owner_user_id,
+            title=title,
+        )
+        await promote_resume_thread_v1(
+            connection,
+            owner_user_id=owner_user_id,
+            thread_id=row["id"],
+        )
+    return row
 
 
 async def list_visible_threads(
@@ -208,6 +234,7 @@ __all__ = [
     "THREAD_BELONGS_TO_OWNER_SQL",
     "UPDATE_THREAD_AUTOMATIC_TITLE_SQL",
     "archive_thread",
+    "create_and_select_thread",
     "create_thread",
     "fetch_thread_title_state",
     "fetch_thread_title_transcript",
