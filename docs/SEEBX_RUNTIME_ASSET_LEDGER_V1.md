@@ -114,7 +114,7 @@ which have now been retired separately with verified dumps.
 | `memory` schema and Vantage schemas | ARCHIVE THEN RETIRE | Zero Python, SQL-function, timer, cron, frontend, and recovery dependency |
 | `memory_extraction_v2_20260714_test` | RETIRED; verified dump retained under `/var/backups/chat-memory/database-retirements/20260819T051346Z_memory_extraction_v2_20260714_test` | Keep recovery evidence until superseded by retention policy |
 | `memory_v1_pet_core_clone_20260724` | RETIRED; verified dump retained under `/var/backups/chat-memory/database-retirements/20260819T043506Z_memory_v1_pet_core_clone_20260724` | Keep recovery evidence until superseded by retention policy |
-| `lifeswitch_training_family_stage_20260727` | RETIREMENT BLOCKED; 15 MB, three schemas, 29 tables, zero connections and zero code/config references | See `SEEBX_STAGE_DATABASE_RETIREMENT_V1.md`; create a full data dump and disposable restore before any exact drop authorization |
+| `lifeswitch_training_family_stage_20260727` | RECOVERY READY; DROP NOT AUTHORIZED; 15 MB, three schemas, 29 tables, zero connections and zero code/config references | Full dump SHA-256 `a7668fda8ff217071bd3fa418f7588c755f07561704b4913ad8dadb1d0697316` and passing disposable-restore receipt SHA-256 `5049d7ad7827acd67051f47d38c4bc7bb3652a2bf807be5595e29fe726cc4ac0` are protected; see `SEEBX_STAGE_DATABASE_RETIREMENT_V1.md` before any separately authorized exact drop |
 
 ## Security configuration debt
 
@@ -157,11 +157,11 @@ timers, cron, and frontend callers all show zero dependency.
 4. At promotion time, produce and restore-test the final two-schema PostgreSQL
    dump, bind both receipt hashes, and run the exact fail-closed retirement
    package only after the Zep and telemetry migrations are live.
-5. Create and restore-test a full dump of
-   `lifeswitch_training_family_stage_20260727`; do not drop it based on the
-   existing schema-only archive. Its regenerated exercise-family UUIDs are
+5. Review the protected full dump and passing disposable-restore receipt for
+   `lifeswitch_training_family_stage_20260727`; any exact drop remains a
+   separate authorization. Its regenerated exercise-family UUIDs are
    semantically equivalent, and its other differences are superseded template
-   rename/share-revocation state, but recovery evidence is still mandatory.
+   rename/share-revocation state.
 6. Rotate/externalize static Docker credentials without combining the change
    with a database drop or application deployment.
 7. Preserve the exact frontend-only AWS 8088 rule, narrow UFW 8088 from the

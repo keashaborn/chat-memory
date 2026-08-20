@@ -1,6 +1,6 @@
 # SeeBx staging database retirement gate v1
 
-Status: read-only classification complete; full backup and drop not authorized
+Status: full backup and disposable restore verified; source drop not authorized
 
 ## Exact target
 
@@ -39,23 +39,30 @@ found exact inclusion for 25 of 29 tables. Four differences were classified:
 The staging database is therefore an older migration source, not a current
 authority. The comparison does not authorize deletion.
 
-## Required recovery gate
+## Completed recovery gate
 
-Before a drop authorization is requested:
+The bounded recovery run completed on 2026-08-20 without changing or dropping
+the source database. Protected evidence is under
+`/var/backups/seebx-cleanup/stage-database-retirement-v1/20260820T054129Z-lifeswitch_training_family_stage_20260727`:
 
-1. Create a full custom-format dump containing schema and data in a new
-   root-owned mode-`0700` backup directory on encrypted storage.
-2. Record the dump byte count and SHA-256 without recording row values.
-3. Restore the dump into one uniquely named disposable database.
-4. Verify all 29 application tables, row counts, constraints, functions, and
-   row fingerprints against the source.
-5. Drop the disposable database and prove its absence.
-6. Write a content-free receipt binding the source database identity, dump,
-   verifier, restore result, and exact rollback command.
-7. Preserve the receipt and dump before requesting a separately authorized
-   exact database drop.
+- full custom-format dump: 443,577 bytes, SHA-256
+  `a7668fda8ff217071bd3fa418f7588c755f07561704b4913ad8dadb1d0697316`;
+- content-free restore receipt: SHA-256
+  `5049d7ad7827acd67051f47d38c4bc7bb3652a2bf807be5595e29fe726cc4ac0`;
+- verifier: SHA-256
+  `1dd61c52c3b4963e6239b0f94ffa6f7d4057574c01424c2af08bf12b962523a3`;
+- 29 application tables and 3,897 rows matched exactly, together with schemas,
+  columns, constraints, ordinary functions, aggregates, indexes, triggers, and
+  extensions;
+- the uniquely named disposable restore database was removed and its absence
+  proved;
+- the source remained present with zero other connections;
+- the run directory is root-owned mode `0700`; dump and receipt are mode
+  `0400`.
 
-Failure at any step leaves the source database unchanged and blocks retirement.
+The receipt authority is explicitly
+`recovery_evidence_only_no_drop_authority`. Recovery readiness therefore does
+not itself authorize retirement.
 
 ## Later drop boundary
 
