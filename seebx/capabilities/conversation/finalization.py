@@ -4,8 +4,8 @@ from __future__ import annotations
 
 This module performs no database writes. It creates the neutral assistant
 transcript attestation accepted by the append-only conversation persistence
-layer. Successor Memory provenance is owned by the separate governed-Memory
-lifecycle and is never embedded in this host-chat DTO.
+layer. Response-memory provenance is owned by the separate Zep lifecycle and
+is never embedded in this host-chat DTO.
 """
 
 import hashlib

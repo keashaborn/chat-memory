@@ -238,7 +238,7 @@ class TrustedResponseExecutionV0_2(_StrictFrozenModel):
     trusted_plan: TrustedResponsePlanV0_2 = Field(repr=False)
     provider_response: OpenAIChatResponseV1 = Field(repr=False)
     finalized: FinalizedTrustedResponseV1 = Field(repr=False)
-    successor_memory_provenance: MemoryAnswerProvenanceV1 | None = Field(
+    memory_provenance: MemoryAnswerProvenanceV1 | None = Field(
         default=None,
         repr=False,
         exclude_if=lambda value: value is None,
@@ -255,8 +255,8 @@ class TrustedResponseExecutionV0_2(_StrictFrozenModel):
             != self.provider_response.response_sha256
         ):
             raise ValueError("execution finalization differs from its provider response")
-        if self.successor_memory_provenance is not None:
-            if self.successor_memory_provenance.answer_id != self.finalized.answer_id:
+        if self.memory_provenance is not None:
+            if self.memory_provenance.answer_id != self.finalized.answer_id:
                 raise ValueError("successor provenance differs from finalized answer")
         return self
 
@@ -400,7 +400,7 @@ class ConversationResponseComposer:
             stage_timings["answer_generation_ms"] = _elapsed_ms(stage_started_ns)
             zep_memory_provenance = None
             if self.has_zep_memory_lifecycle:
-                stage = "successor_memory_answer_binding"
+                stage = "memory_answer_binding"
                 zep_memory_provenance = (
                     await self.persist_zep_memory_answer_binding(
                         answer_id=answer_id,
@@ -427,7 +427,7 @@ class ConversationResponseComposer:
                 trusted_plan=plan,
                 provider_response=response,
                 finalized=finalized,
-                successor_memory_provenance=zep_memory_provenance,
+                memory_provenance=zep_memory_provenance,
                 stage_timings=ResponseStageTimingsV1(
                     **stage_timings,
                     pipeline_total_ms=_elapsed_ms(pipeline_started_ns),

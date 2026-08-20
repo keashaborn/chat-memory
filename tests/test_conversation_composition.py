@@ -15,6 +15,7 @@ from seebx.capabilities.conversation.composition import (
     ZepMemoryAssemblyV1,
     ConversationResponseComposer,
     ResponseCompositionError,
+    TrustedResponseExecutionV0_2,
 )
 from seebx.capabilities.conversation.snapshot import USER_SOURCE
 from seebx.capabilities.conversation.policy import ResponsePolicySignalsV0_2
@@ -263,6 +264,13 @@ class ConversationCompositionTests(unittest.IsolatedAsyncioTestCase):
         payload["assistant_response_preferences"] = None
         with self.assertRaises(ValidationError):
             AuthenticatedResponseCommandV0_2.model_validate(payload)
+
+    def test_private_execution_uses_provider_neutral_memory_name(self) -> None:
+        self.assertIn("memory_provenance", TrustedResponseExecutionV0_2.model_fields)
+        self.assertNotIn(
+            "successor_memory_provenance",
+            TrustedResponseExecutionV0_2.model_fields,
+        )
 
     def test_zep_assembly_retains_versioned_wire_contract(self) -> None:
         assembly = ZepMemoryAssemblyV1()

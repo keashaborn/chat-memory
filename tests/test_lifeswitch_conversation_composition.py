@@ -6,6 +6,7 @@ from seebx.adapters.lifeswitch_prior_provenance_postgres import (
     PriorLifeSwitchPreparedContextV1,
 )
 from seebx.capabilities.conversation.lifeswitch_composition import (
+    IntegratedTrustedLifeSwitchResponseExecutionV2,
     LifeSwitchResponseStage,
 )
 from seebx.capabilities.conversation.snapshot import (
@@ -31,6 +32,11 @@ class PriorProvider:
 
 
 class LifeSwitchConversationCompositionTests(unittest.IsolatedAsyncioTestCase):
+    def test_integrated_execution_uses_provider_neutral_memory_name(self) -> None:
+        fields = IntegratedTrustedLifeSwitchResponseExecutionV2.model_fields
+        self.assertIn("memory_provenance", fields)
+        self.assertNotIn("successor_memory_provenance", fields)
+
     async def test_text_and_voice_share_the_same_downstream_root(self) -> None:
         message = "What were my macros Monday?"
         prepared_plan = await new_plan(message)

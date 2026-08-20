@@ -475,7 +475,7 @@ async def conversation_response_query(
         else:
             memory_provenance = response_memory_provenance_for_mode(
                 mode=response_memory_mode,
-                memory_provenance=execution.successor_memory_provenance,
+                memory_provenance=execution.memory_provenance,
             )
         persistence_started_ns = time.monotonic_ns()
         await persist_openai_chat_usage(

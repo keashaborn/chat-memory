@@ -108,7 +108,7 @@ class IntegratedTrustedLifeSwitchResponseExecutionV2(_StrictFrozenModel):
     trusted_plan: TrustedLifeSwitchResponsePlanV2 = Field(repr=False)
     provider_response: OpenAIChatResponseV3 = Field(repr=False)
     finalized: FinalizedTrustedResponseV3 = Field(repr=False)
-    successor_memory_provenance: MemoryAnswerProvenanceV1 | None = Field(
+    memory_provenance: MemoryAnswerProvenanceV1 | None = Field(
         default=None,
         repr=False,
         exclude_if=lambda value: value is None,
@@ -124,8 +124,8 @@ class IntegratedTrustedLifeSwitchResponseExecutionV2(_StrictFrozenModel):
             != self.provider_response.response_sha256
         ):
             raise ValueError("finalization differs from provider response")
-        if self.successor_memory_provenance is not None:
-            if self.successor_memory_provenance.answer_id != self.finalized.answer_id:
+        if self.memory_provenance is not None:
+            if self.memory_provenance.answer_id != self.finalized.answer_id:
                 raise ValueError("successor provenance differs from finalized answer")
         return self
 
@@ -331,7 +331,7 @@ class LifeSwitchConversationComposer:
                     != exact_request.request_sha256
                 ):
                     raise LifeSwitchCompositionError(
-                        "successor_memory_answer_binding"
+                        "memory_answer_binding"
                     )
                 zep_memory_provenance = (
                     await self._base_composer.persist_zep_memory_answer_binding(
@@ -353,7 +353,7 @@ class LifeSwitchConversationComposer:
             trusted_plan=downstream.trusted_plan,
             provider_response=downstream.provider_response,
             finalized=downstream.finalized,
-            successor_memory_provenance=zep_memory_provenance,
+            memory_provenance=zep_memory_provenance,
             stage_timings=IntegratedLifeSwitchResponseStageTimingsV2(
                 command_validation_ms=base.command_validation_ms,
                 conversation_snapshot_ms=base.conversation_snapshot_ms,
