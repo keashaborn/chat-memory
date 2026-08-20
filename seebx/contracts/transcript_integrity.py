@@ -16,9 +16,12 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from seebx.contracts.conversation_provenance import (
+    LEGACY_ASSISTANT_TRANSCRIPT_SOURCE_V1,
+)
 
 ASSISTANT_ATTESTATION_VERSION = "assistant_transcript_attestation_v1"
-ATTESTED_ASSISTANT_SOURCE = "backend/resse:assistant:v1"
+ATTESTED_ASSISTANT_SOURCE = LEGACY_ASSISTANT_TRANSCRIPT_SOURCE_V1
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 

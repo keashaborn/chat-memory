@@ -8,6 +8,9 @@ from uuid import UUID
 
 from seebx.capabilities.conversation.finalization import FinalizedTrustedResponseV1
 from seebx.capabilities.conversation.lifeswitch_finalization import FinalizedTrustedResponseV3
+from seebx.contracts.conversation_provenance import (
+    LEGACY_CONVERSATION_TRANSCRIPT_TAG_V0_2,
+)
 from seebx.contracts.transcript_integrity import AssistantTranscriptAttestationV1
 
 
@@ -43,7 +46,12 @@ def normalize_finalized_response(
         value = FinalizedTrustedResponseV1.model_validate_json(
             finalized.model_dump_json()
         )
-        tags = ("assistant", "chat", "server_attested", "resse_v0_2")
+        tags = (
+            "assistant",
+            "chat",
+            "server_attested",
+            LEGACY_CONVERSATION_TRANSCRIPT_TAG_V0_2,
+        )
     elif isinstance(finalized, FinalizedTrustedResponseV3):
         value = FinalizedTrustedResponseV3.model_validate_json(
             finalized.model_dump_json()

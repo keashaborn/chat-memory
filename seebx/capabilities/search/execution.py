@@ -30,6 +30,9 @@ from seebx.contracts.voice_language import (
     AUTO_VOICE_LANGUAGE,
     SUPPORTED_VOICE_LANGUAGE_IDS,
 )
+from seebx.contracts.conversation_provenance import (
+    LEGACY_CONVERSATION_RESPONSE_RUNTIME_V0_2,
+)
 from seebx.capabilities.search.runtime import (
     NO_STORE_HEADERS,
     search_postgres_dsn_from_env,
@@ -116,7 +119,7 @@ def _response_headers(
             if route == "current_news"
             else "trusted_web_v1"
             if route == "trusted_health"
-            else "resse_response_v0_2"
+            else LEGACY_CONVERSATION_RESPONSE_RUNTIME_V0_2
         ),
     }
 

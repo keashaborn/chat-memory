@@ -45,6 +45,9 @@ from seebx.capabilities.conversation.policy import (
 )
 from seebx.capabilities.conversation.source_awareness import MemorySourceStatusV1
 from seebx.contracts.search import SearchCapabilityManifestV1
+from seebx.contracts.conversation_provenance import (
+    LEGACY_CONVERSATION_SHADOW_TRACE_V0_6,
+)
 from seebx.contracts.voice_language import (
     DEFAULT_VOICE_LANGUAGE,
     SUPPORTED_VOICE_LANGUAGE_IDS,
@@ -56,7 +59,7 @@ TRUSTED_PLAN_VERSION = "trusted_response_plan_v0_6"
 TRUSTED_POLICY_SIGNALS_ENVELOPE_VERSION = (
     "trusted_response_policy_signals_envelope_v0_3"
 )
-SHADOW_TRACE_VERSION = "resse_response_shadow_trace_v0_6"
+SHADOW_TRACE_VERSION = LEGACY_CONVERSATION_SHADOW_TRACE_V0_6
 ORCHESTRATOR_VERSION = "trusted_response_orchestrator_v0_6"
 TRUSTED_SAFETY_ASSESSOR_COMPONENTS_V0_2 = (
     "openai_moderation_adapter_v0_2",

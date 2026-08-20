@@ -56,13 +56,28 @@ or frontend parsing and therefore stay unchanged in this batch:
 Historical attestations and transcript rows must never be mutated merely to
 rename a product. Their exact bytes remain recovery and provenance evidence.
 
+## Central registry
+
+`seebx.contracts.conversation_provenance` is the only active source file that
+contains a RESSE literal. It declares the exact legacy namespace and the next
+canonical namespace. Current writers intentionally import legacy constants
+until the paired cutover; this preserves behavior while making the remaining
+switch surface explicit and mechanically enforceable.
+
+The canonical namespace is `backend/seebx:assistant:v2`,
+`conversation_response_v1`, `lifeswitch_response_v1`,
+`conversation_response_shadow_trace_v1`, `conversation_safety_assessor_v1`,
+transcript tag `conversation_response_v1`, and response profile
+`default_response_policy`.
+
 ## Versioned cutover design
 
-1. Define one product-neutral identifier registry owned by
-   `seebx.contracts.conversation_provenance`. It must distinguish exact legacy
-   stored values from the next canonical values and reject unknown values.
-2. Introduce a new attestation contract and source identifier for new writes.
-   Do not reuse `assistant_transcript_attestation_v1` with changed bytes.
+1. Use the implemented product-neutral identifier registry to distinguish exact
+   legacy stored values from the canonical writer values and reject unknowns.
+2. Introduce the canonical source identifier for new writes. Source is not part
+   of the v1 attestation hash payload, so retain and verify
+   `assistant_transcript_attestation_v1`; create a new attestation contract only
+   if its hashed payload changes.
 3. Emit product-neutral response-runtime, shadow-trace, safety-assessor,
    response-profile, and transcript-tag identifiers from one release boundary.
 4. Update Verbal Sage trace types, proxy headers, canary assertions, operational
