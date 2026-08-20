@@ -82,13 +82,22 @@ class LifeSwitchAccountTimezoneV1Tests(unittest.TestCase):
             lowered,
         )
 
-    def test_router_does_not_accept_owner_from_query_or_body(self) -> None:
-        source = (
+    def test_router_keeps_http_authority_and_database_effects_are_adapted(self) -> None:
+        route_source = (
             ROOT / "seebx/capabilities/preferences/timezone.py"
         ).read_text()
-        self.assertNotIn("owner_user_id: str", source)
-        self.assertIn('req.headers.get("x-vs-actor-user-id")', source)
-        self.assertIn("set local role", source)
+        adapter_source = (
+            ROOT / "seebx/adapters/lifeswitch_timezone_postgres.py"
+        ).read_text()
+        self.assertNotIn("owner_user_id: str", route_source)
+        self.assertIn('req.headers.get("x-vs-actor-user-id")', route_source)
+        self.assertIn("account_timezone_repository", route_source)
+        self.assertNotIn("import asyncpg", route_source)
+        self.assertNotIn(".fetchrow(", route_source)
+        self.assertNotIn("set local role", route_source)
+        self.assertIn("set local role", adapter_source)
+        self.assertIn("read_account_timezone_setting_v1", adapter_source)
+        self.assertIn("write_account_timezone_setting_v1", adapter_source)
 
 
 if __name__ == "__main__":
