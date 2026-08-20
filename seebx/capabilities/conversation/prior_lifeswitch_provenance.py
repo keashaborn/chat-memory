@@ -496,9 +496,8 @@ def _response_from_row(
 
 
 async def select_prior_lifeswitch_provenance_v1(
-    conn: Any,
+    rows: tuple[Any, ...],
     *,
-    context_id: UUID,
     authenticated_actor_user_id: UUID,
     conversation_snapshot: ConversationSnapshotV1,
 ) -> PriorLifeSwitchProvenanceEnvelopeV1 | None:
@@ -512,27 +511,6 @@ async def select_prior_lifeswitch_provenance_v1(
         return None
     if snapshot.cutoff_created_at is None or snapshot.current_log_id is None:
         return None
-    try:
-        rows = list(
-            await conn.fetch(
-                """
-                select *
-                from lifeswitch_chat.read_prior_answer_lifeswitch_provenance_v1
-                where context_id=$1 and owner_user_id=$2 and thread_id=$3
-                  and (created_at,answer_id)<($4,$5)
-                order by created_at desc,answer_id desc
-                limit $6
-                """,
-                context_id,
-                authenticated_actor_user_id,
-                snapshot.thread_id,
-                snapshot.cutoff_created_at,
-                snapshot.current_log_id,
-                MAX_PROVENANCE_CANDIDATES,
-            )
-        )
-    except Exception:
-        raise PriorLifeSwitchProvenanceError("prior LifeSwitch provenance read failed") from None
     selected: list[PriorLifeSwitchResponseV1] = []
     for raw in rows:
         response = _response_from_row(

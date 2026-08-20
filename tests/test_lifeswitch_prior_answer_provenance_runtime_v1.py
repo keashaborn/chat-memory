@@ -14,6 +14,7 @@ from seebx.capabilities.conversation.snapshot import (
     create_current_only_conversation_snapshot_v1,
 )
 from tests.test_lifeswitch_answer_provenance_receipt_v1 import ACTOR
+from tests.test_prior_lifeswitch_provenance_v1 import bound_snapshot
 from tests.test_response_orchestration_v0_2 import THREAD
 
 
@@ -24,6 +25,7 @@ class TransactionBoundConnection:
     def __init__(self) -> None:
         self.local_settings: dict[str, str] | None = None
         self.transactions: list[dict[str, str]] = []
+        self.fetch_calls: list[tuple[str, tuple[object, ...]]] = []
 
     @asynccontextmanager
     async def transaction(self, **_kwargs):
@@ -51,6 +53,17 @@ class TransactionBoundConnection:
             if self.local_settings.get("app.lifeswitch_owner_id") != expected:
                 raise AssertionError("read transaction lost app.lifeswitch_owner_id")
         return "OK"
+
+    async def fetch(self, query: str, *args):
+        if self.local_settings is None:
+            raise AssertionError("database operation escaped a transaction")
+        expected = str(ACTOR)
+        if self.local_settings.get("app.user_id") != expected:
+            raise AssertionError("query transaction lost app.user_id")
+        if self.local_settings.get("app.lifeswitch_owner_id") != expected:
+            raise AssertionError("query transaction lost LifeSwitch owner")
+        self.fetch_calls.append((query, args))
+        return []
 
     async def fetchval(self, query: str, *args):
         if self.local_settings is None:
@@ -146,6 +159,30 @@ class PriorLifeSwitchRuntimeV1Tests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(connection.transactions[1], expected)
         self.assertEqual(connection.transactions[2], {})
         selector.assert_awaited_once()
+        self.assertEqual(connection.fetch_calls, [])
+
+    async def test_bound_query_is_owned_by_postgres_adapter(self) -> None:
+        connection = TransactionBoundConnection()
+        session = PostgresPriorLifeSwitchRestrictedReadSessionV1(Pool(connection))
+        source = bound_snapshot()
+        with patch(
+            "seebx.adapters.lifeswitch_prior_provenance_postgres."
+            "select_prior_lifeswitch_provenance_v1",
+            new=AsyncMock(return_value=None),
+        ):
+            result = await session.select(
+                authenticated_actor_user_id=ACTOR,
+                conversation_snapshot=source,
+            )
+        self.assertEqual(result.status, "EMPTY")
+        self.assertEqual(len(connection.fetch_calls), 1)
+        query, args = connection.fetch_calls[0]
+        self.assertIn("read_prior_answer_lifeswitch_provenance_v1", query)
+        self.assertEqual(args[0], CONTEXT_ID)
+        self.assertEqual(args[1], ACTOR)
+        self.assertEqual(args[2], source.thread_id)
+        self.assertEqual(args[3], source.cutoff_created_at)
+        self.assertEqual(args[4], source.current_log_id)
 
 
 if __name__ == "__main__":

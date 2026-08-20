@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
@@ -43,19 +44,9 @@ CURRENT_LOG = UUID("90000000-0000-4000-8000-000000000099")
 QUESTION = "Where did you get those earlier protein numbers?"
 
 
-class FetchFailConn:
-    async def fetch(self, *_args, **_kwargs):
-        raise AssertionError("database must not be read for an unbound snapshot")
-
-
-class RowsConn:
-    def __init__(self, rows: list[dict[str, Any]]) -> None:
-        self.rows = rows
-        self.fetch_calls = 0
-
-    async def fetch(self, *_args, **_kwargs):
-        self.fetch_calls += 1
-        return self.rows
+class ForbiddenRows(tuple[Any, ...]):
+    def __iter__(self):
+        raise AssertionError("rows must not be consumed for an unbound snapshot")
 
 
 def bound_snapshot(message: str = QUESTION):
@@ -216,10 +207,25 @@ class PriorLifeSwitchProvenanceV1Tests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(message=message):
                 self.assertFalse(prior_lifeswitch_provenance_requested_v1(message))
 
+    def test_database_query_is_owned_by_postgres_adapter(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        capability = (
+            root / "seebx/capabilities/conversation/prior_lifeswitch_provenance.py"
+        ).read_text(encoding="utf-8")
+        adapter = (
+            root / "seebx/adapters/lifeswitch_prior_provenance_postgres.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("conn.fetch(", capability)
+        self.assertNotIn(
+            "read_prior_answer_lifeswitch_provenance_v1",
+            capability,
+        )
+        self.assertIn("read_prior_answer_lifeswitch_provenance_v1", adapter)
+        self.assertIn("readonly=True", adapter)
+
     async def test_unbound_snapshot_reads_nothing(self) -> None:
         result = await select_prior_lifeswitch_provenance_v1(
-            FetchFailConn(),
-            context_id=THREAD,
+            ForbiddenRows(),
             authenticated_actor_user_id=ACTOR,
             conversation_snapshot=create_current_only_conversation_snapshot_v1(
                 authenticated_actor_user_id=ACTOR,
@@ -233,8 +239,7 @@ class PriorLifeSwitchProvenanceV1Tests(unittest.IsolatedAsyncioTestCase):
     async def test_exact_receipt_and_historical_fallback_are_distinct(self) -> None:
         row, _binding, _receipt, _attestation = await exact_row()
         exact = await select_prior_lifeswitch_provenance_v1(
-            RowsConn([row]),
-            context_id=THREAD,
+            (row,),
             authenticated_actor_user_id=ACTOR,
             conversation_snapshot=bound_snapshot(),
         )
@@ -243,8 +248,7 @@ class PriorLifeSwitchProvenanceV1Tests(unittest.IsolatedAsyncioTestCase):
         historical_row = dict(row)
         remove_receipt(historical_row)
         historical = await select_prior_lifeswitch_provenance_v1(
-            RowsConn([historical_row]),
-            context_id=THREAD,
+            (historical_row,),
             authenticated_actor_user_id=ACTOR,
             conversation_snapshot=bound_snapshot(),
         )
@@ -257,8 +261,7 @@ class PriorLifeSwitchProvenanceV1Tests(unittest.IsolatedAsyncioTestCase):
         legacy_row = dict(row)
         legacy_row["chat_source"] = LEGACY_ASSISTANT_TRANSCRIPT_SOURCE_V1
         legacy = await select_prior_lifeswitch_provenance_v1(
-            RowsConn([legacy_row]),
-            context_id=THREAD,
+            (legacy_row,),
             authenticated_actor_user_id=ACTOR,
             conversation_snapshot=bound_snapshot(),
         )
@@ -304,8 +307,7 @@ class PriorLifeSwitchProvenanceV1Tests(unittest.IsolatedAsyncioTestCase):
         for index, changed in enumerate(cases):
             with self.subTest(case=index):
                 result = await select_prior_lifeswitch_provenance_v1(
-                    RowsConn([changed]),
-                    context_id=THREAD,
+                    (changed,),
                     authenticated_actor_user_id=ACTOR,
                     conversation_snapshot=bound_snapshot(),
                 )
@@ -328,8 +330,7 @@ class PriorLifeSwitchProvenanceV1Tests(unittest.IsolatedAsyncioTestCase):
         for index, changed in enumerate(cases):
             with self.subTest(case=index):
                 result = await select_prior_lifeswitch_provenance_v1(
-                    RowsConn([changed]),
-                    context_id=THREAD,
+                    (changed,),
                     authenticated_actor_user_id=ACTOR,
                     conversation_snapshot=bound_snapshot(),
                 )
@@ -338,8 +339,7 @@ class PriorLifeSwitchProvenanceV1Tests(unittest.IsolatedAsyncioTestCase):
     async def test_prompt_provenance_remains_content_free(self) -> None:
         row, _binding, _receipt, _attestation = await exact_row()
         result = await select_prior_lifeswitch_provenance_v1(
-            RowsConn([row]),
-            context_id=THREAD,
+            (row,),
             authenticated_actor_user_id=ACTOR,
             conversation_snapshot=bound_snapshot(),
         )

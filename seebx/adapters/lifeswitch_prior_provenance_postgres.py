@@ -11,15 +11,29 @@ import asyncpg
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from seebx.capabilities.conversation.prior_lifeswitch_provenance import (
+    MAX_PROVENANCE_CANDIDATES,
     PriorLifeSwitchProvenanceEnvelopeV1,
+    PriorLifeSwitchProvenanceError,
     prior_lifeswitch_provenance_requested_v1,
     select_prior_lifeswitch_provenance_v1,
 )
-from seebx.capabilities.conversation.snapshot import ConversationSnapshotV1
+from seebx.capabilities.conversation.snapshot import (
+    ConversationSnapshotOutcome,
+    ConversationSnapshotV1,
+)
 
 
 PRIOR_LIFESWITCH_PREPARED_V1 = "prior_lifeswitch_prepared_context_v1"
 LIFESWITCH_READER_ROLE = "lifeswitch_chat_reader"
+
+_READ_PRIOR_LIFESWITCH_PROVENANCE_SQL = """
+    select *
+    from lifeswitch_chat.read_prior_answer_lifeswitch_provenance_v1
+    where context_id=$1 and owner_user_id=$2 and thread_id=$3
+      and (created_at,answer_id)<($4,$5)
+    order by created_at desc,answer_id desc
+    limit $6
+"""
 
 
 class _StrictFrozenModel(BaseModel):
@@ -210,9 +224,31 @@ class PostgresPriorLifeSwitchRestrictedReadSessionV1:
                         str(authenticated_actor_user_id),
                     )
                     await conn.execute(f"set local role {LIFESWITCH_READER_ROLE}")
+                    rows: tuple[Any, ...] = ()
+                    if (
+                        snapshot.outcome
+                        is ConversationSnapshotOutcome.CURRENT_REQUEST_BOUND
+                        and snapshot.cutoff_created_at is not None
+                        and snapshot.current_log_id is not None
+                    ):
+                        try:
+                            rows = tuple(
+                                await conn.fetch(
+                                    _READ_PRIOR_LIFESWITCH_PROVENANCE_SQL,
+                                    context_id,
+                                    authenticated_actor_user_id,
+                                    snapshot.thread_id,
+                                    snapshot.cutoff_created_at,
+                                    snapshot.current_log_id,
+                                    MAX_PROVENANCE_CANDIDATES,
+                                )
+                            )
+                        except Exception:
+                            raise PriorLifeSwitchProvenanceError(
+                                "prior LifeSwitch provenance read failed"
+                            ) from None
                     envelope = await select_prior_lifeswitch_provenance_v1(
-                        conn,
-                        context_id=context_id,
+                        rows,
                         authenticated_actor_user_id=authenticated_actor_user_id,
                         conversation_snapshot=snapshot,
                     )
