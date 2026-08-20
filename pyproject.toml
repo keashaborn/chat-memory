@@ -23,5 +23,5 @@ dependencies = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["seebx", "seebx.*", "lifeswitch_agentic", "lifeswitch_agentic.*"]
+include = ["seebx", "seebx.*"]
 namespaces = false

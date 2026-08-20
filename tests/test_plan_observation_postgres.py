@@ -6,7 +6,7 @@ import uuid
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from lifeswitch_agentic.plan_observation_context import (
+from seebx.adapters.plan_observation_postgres import (
     CanonicalPlanObservationContextRepository,
     ObservationPermissions,
 )

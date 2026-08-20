@@ -91,7 +91,7 @@ Source commit: `49f9e60cf4321c8e42c359845c1a62a8c987614d`
 | Measurements | Live | `capabilities.measurements` | KEEP | Retain owner checks and isolated PostgreSQL |
 | Plan/domain context | Live across multiple readers/adapters | `capabilities.plans` | CONSOLIDATE | One read model and one write authority; retire legacy fallback |
 | LifeSwitch snapshots | Installed schema; currently empty | plans/recovery if required | DECIDE | Prove product caller and retention need |
-| Agentic plan observation | Live import path | plans read model | CONSOLIDATE | Move SQL behind domain adapter; no response-router SQL |
+| Plan observation PostgreSQL adapter | Candidate moves the only live Python implementation from the misleading top-level `lifeswitch_agentic` package to `seebx.adapters.plan_observation_postgres`; the database schema name remains unchanged, the one runtime importer and path-sensitive tests use the canonical adapter, packaging no longer includes the obsolete Python namespace, and no compatibility wrapper remains | plans read model plus PostgreSQL adapter | CANONICAL PLACEMENT COMPLETE IN CANDIDATE; PRODUCTION MOVE PENDING | The moved 916-line implementation is byte-identical at SHA-256 `72e73acc500060343d9c9de2aa4994f0a2c049ed06545933fb617e7a64409eab`; the renamed direct test differs only by its canonical import; old Python imports are zero; 49 focused tests and all 1,152 backend tests pass; changed Python compiles; the candidate remains at 140 routes and OpenAPI SHA-256 `3c296c3e0e286b75287e28e9fb87443467f32fa4b3d296d352edfec861d2506e` |
 | Duplicate nutrition batch routes | Live candidate duplication | nutrition service | CONSOLIDATE | Frontend caller trace and response equivalence |
 
 ## Preferences, forms, administration, and archive

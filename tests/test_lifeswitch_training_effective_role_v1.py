@@ -18,7 +18,7 @@ CHAT_ROLLBACK = (
     SQL_DIR
     / "20260731_lifeswitch_training_effective_role_v1_chat_followup_rollback.sql"
 )
-PLAN_CONTEXT = ROOT / "lifeswitch_agentic" / "plan_observation_context.py"
+PLAN_CONTEXT = ROOT / "seebx" / "adapters" / "plan_observation_postgres.py"
 TRAINING_ROUTER = ROOT / "seebx" / "capabilities" / "training" / "routes.py"
 
 
