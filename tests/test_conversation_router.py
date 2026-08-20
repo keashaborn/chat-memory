@@ -24,10 +24,10 @@ from seebx.capabilities.conversation import router as response_router
 from seebx.core.identity import ActorContext, TEXT_AUTHORITY
 from seebx.capabilities.conversation.router import (
     NO_STORE_HEADERS,
-    ResseResponseRequestV1,
+    ConversationResponseRequestV1,
     apply_no_store_headers,
     response_memory_provenance_for_mode,
-    resse_response_query,
+    conversation_response_query,
     memory_not_applicable_reason,
 )
 
@@ -47,6 +47,9 @@ class ConversationRouterTests(unittest.TestCase):
         self.assertIn("generation_config=generation_config", source)
         self.assertNotIn("OPENAI_CHAT_MODEL", source)
         self.assertNotIn("normalize_chat_model", source)
+        self.assertIn("CONVERSATION_SAFETY_CLASSIFIER_MODEL", source)
+        self.assertNotIn("RESSE_CLASSIFIER_MODEL", source)
+        self.assertNotIn("[resse_response]", source)
 
     def test_attachment_sql_is_owned_by_postgres_adapter(self) -> None:
         source = (ROOT / "seebx/capabilities/conversation/router.py").read_text()
@@ -61,7 +64,7 @@ class ConversationRouterTests(unittest.TestCase):
 
     def test_public_request_rejects_client_policy_controls(self) -> None:
         with self.assertRaises(ValidationError):
-            ResseResponseRequestV1.model_validate(
+            ConversationResponseRequestV1.model_validate(
                 {
                     "user_id": ACTOR,
                     "message": "Explain Fractal Monism.",
@@ -79,7 +82,7 @@ class ConversationRouterTests(unittest.TestCase):
         self.assertIn("req.headers.get(VOICE_SEARCH_AUTHORIZATION_HEADER)", source)
         self.assertNotIn("payload.search_capability", source)
         with self.assertRaises(ValidationError):
-            ResseResponseRequestV1.model_validate(
+            ConversationResponseRequestV1.model_validate(
                 {
                     "user_id": ACTOR,
                     "message": "Hello.",
@@ -96,7 +99,7 @@ class ConversationRouterTests(unittest.TestCase):
         self.assertNotIn("SUCCESSOR_RESPONSE_DEFAULTS", source)
         self.assertNotIn("payload.assistant_name", source)
         with self.assertRaises(ValidationError):
-            ResseResponseRequestV1.model_validate(
+            ConversationResponseRequestV1.model_validate(
                 {
                     "user_id": ACTOR,
                     "message": "Hello.",
@@ -106,7 +109,7 @@ class ConversationRouterTests(unittest.TestCase):
             )
 
     def test_public_request_accepts_only_transport_fields(self) -> None:
-        value = ResseResponseRequestV1.model_validate_json(
+        value = ConversationResponseRequestV1.model_validate_json(
             '{"user_id":"1240822d-ac9a-4096-95aa-e2b24d36ef50",'
             '"message":"Hello.","thread_id":null,"no_store":true}'
         )
@@ -128,7 +131,7 @@ class ConversationRouterTests(unittest.TestCase):
     def test_attachment_transport_fields_are_uuid_bound_and_unique(self) -> None:
         attachment_id = "1a8beae3-58e5-4fb7-8f64-4fbb2bddcb73"
         message_id = "05e79a7d-1e58-4cf4-95d6-b06b46f8898d"
-        value = ResseResponseRequestV1.model_validate(
+        value = ConversationResponseRequestV1.model_validate(
             {
                 "user_id": str(ACTOR),
                 "message": "Review the attachment.",
@@ -140,7 +143,7 @@ class ConversationRouterTests(unittest.TestCase):
         self.assertEqual([str(item) for item in value.attachment_ids], [attachment_id])
         self.assertEqual(str(value.attachment_message_id), message_id)
         with self.assertRaises(ValidationError):
-            ResseResponseRequestV1.model_validate(
+            ConversationResponseRequestV1.model_validate(
                 {
                     "user_id": str(ACTOR),
                     "message": "Review it.",
@@ -152,7 +155,7 @@ class ConversationRouterTests(unittest.TestCase):
 
     def test_public_request_keeps_non_uuid_transport_fields_strict(self) -> None:
         with self.assertRaises(ValidationError):
-            ResseResponseRequestV1.model_validate_json(
+            ConversationResponseRequestV1.model_validate_json(
                 '{"user_id":"1240822d-ac9a-4096-95aa-e2b24d36ef50",'
                 '"message":"Hello.","no_store":"true"}'
             )
@@ -370,8 +373,8 @@ def successor_request() -> Request:
 
 
 class ZepResponseRouterAuthenticationTests(unittest.IsolatedAsyncioTestCase):
-    def payload(self, *, message_id: UUID | None = None) -> ResseResponseRequestV1:
-        return ResseResponseRequestV1(
+    def payload(self, *, message_id: UUID | None = None) -> ConversationResponseRequestV1:
+        return ConversationResponseRequestV1(
             user_id=ACTOR,
             message="Which interface theme do I prefer?",
             thread_id=THREAD,
@@ -387,7 +390,7 @@ class ZepResponseRouterAuthenticationTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def assert_supabase_owner_auth_reaches_response_runtime(
-        self, payload: ResseResponseRequestV1
+        self, payload: ConversationResponseRequestV1
     ) -> None:
         authenticate = AsyncMock(return_value=self.context())
         connect = AsyncMock(side_effect=RuntimeError("stop_after_auth"))
@@ -402,7 +405,7 @@ class ZepResponseRouterAuthenticationTests(unittest.IsolatedAsyncioTestCase):
             patch.object(response_router.asyncpg, "connect", connect),
         ):
             with self.assertRaisesRegex(RuntimeError, "stop_after_auth"):
-                await resse_response_query(
+                await conversation_response_query(
                     payload,
                     request,
                     Response(),
@@ -436,7 +439,7 @@ class ZepResponseRouterAuthenticationTests(unittest.IsolatedAsyncioTestCase):
             ),
         ):
             with self.assertRaises(HTTPException) as raised:
-                await resse_response_query(
+                await conversation_response_query(
                     self.payload(),
                     successor_request(),
                     Response(),

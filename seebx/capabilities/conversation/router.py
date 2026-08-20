@@ -179,7 +179,7 @@ def _no_store_http_exception(
     )
 
 
-class ResseResponseRequestV1(BaseModel):
+class ConversationResponseRequestV1(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     user_id: UUID
@@ -243,8 +243,8 @@ class ResseResponseRequestV1(BaseModel):
 
 
 @router.post("/query")
-async def resse_response_query(
-    payload: ResseResponseRequestV1, req: Request, response: Response
+async def conversation_response_query(
+    payload: ConversationResponseRequestV1, req: Request, response: Response
 ):
     request_started_ns = time.monotonic_ns()
     response_memory_mode = RESPONSE_MEMORY_MODE
@@ -387,7 +387,10 @@ async def resse_response_query(
             memory_lifecycle = memory_provider
         base_composer = ConversationResponseComposer(
             openai_client=openai_client,
-            classifier_model=os.getenv("RESSE_CLASSIFIER_MODEL", "gpt-5.1"),
+            classifier_model=os.getenv(
+                "CONVERSATION_SAFETY_CLASSIFIER_MODEL",
+                "gpt-5.1",
+            ),
             memory_provider=memory_provider,
             zep_memory_lifecycle=memory_lifecycle,
             generation_config=generation_config,
@@ -536,7 +539,7 @@ async def resse_response_query(
         raise
     except asyncio.TimeoutError:
         logger.error(
-            "[resse_response] request deadline exceeded timeout_seconds=%s",
+            "[conversation_response] request deadline exceeded timeout_seconds=%s",
             RESPONSE_QUERY_DEADLINE_SECONDS,
         )
         raise HTTPException(
@@ -544,7 +547,7 @@ async def resse_response_query(
         ) from None
     except Exception as exc:
         logger.error(
-            "[resse_response] request failed error_type=%s persistence_stage=%s",
+            "[conversation_response] request failed error_type=%s persistence_stage=%s",
             type(exc).__name__,
             str(getattr(exc, "stage", "not_applicable")),
         )
