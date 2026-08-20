@@ -27,6 +27,21 @@ class OpenAIAdapterTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "Missing OPENAI_API_KEY"):
                 adapter.get_openai_client()
 
+    def test_optional_client_is_none_without_api_key(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertIsNone(adapter.get_optional_openai_client())
+
+    def test_optional_client_uses_shared_cache_when_configured(self) -> None:
+        shared_client = object()
+        with patch.dict(
+            os.environ,
+            {"OPENAI_API_KEY": "test-secret"},
+            clear=True,
+        ):
+            with patch.object(adapter, "OpenAI", return_value=shared_client):
+                self.assertIs(adapter.get_optional_openai_client(), shared_client)
+                self.assertIs(adapter.get_openai_client(), shared_client)
+
     def test_non_openai_provider_fails_closed(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "Only OpenAI provider is enabled"):
             adapter._get_client("other")

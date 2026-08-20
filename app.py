@@ -1,6 +1,8 @@
 import os
 from fastapi import FastAPI
-from openai import OpenAI
+from seebx.adapters.openai import (
+    get_optional_openai_client,
+)
 from seebx.capabilities.conversation.zep_runtime import (
     ZEP_PROMPT_SETTINGS,
     ZEP_MEMORY_RUNTIME,
@@ -76,7 +78,7 @@ from seebx.capabilities.operations.ai_operations_routes import (
 from seebx.capabilities.operations.health_routes import (
     create_operational_health_router,
 )
-app = FastAPI(title="Brains API", version="1.0.0")
+app = FastAPI(title="SeeBx API", version="1.0.0")
 install_http_boundary(app)
 app.include_router(conversation_router, prefix="/response")
 app.include_router(trusted_web_router, prefix="/trusted-web")
@@ -123,8 +125,7 @@ CONVERSATION_EXPORT = ConversationExportService(
 app.include_router(
     create_conversation_export_router(CONVERSATION_EXPORT)
 )
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+client = get_optional_openai_client()
 
 # ---------- persistent chat memory ----------
 app.include_router(conversation_attachment_router)

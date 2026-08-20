@@ -24,6 +24,14 @@ class AppCompositionTests(unittest.TestCase):
         ):
             cls.backend = importlib.import_module("app")
 
+    def test_application_root_uses_canonical_name_and_openai_adapter(self) -> None:
+        source = (ROOT / "app.py").read_text()
+        self.assertEqual(self.backend.app.title, "SeeBx API")
+        self.assertNotIn("Brains API", source)
+        self.assertNotIn("from openai import OpenAI", source)
+        self.assertNotIn("OpenAI(", source)
+        self.assertIn("get_optional_openai_client()", source)
+
     def test_composition_root_has_no_direct_route_decorators(self) -> None:
         source = (ROOT / "app.py").read_text()
         self.assertNotIn("@app.get(", source)

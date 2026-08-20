@@ -95,6 +95,14 @@ def get_openai_client() -> OpenAI:
     return _get_client("openai")
 
 
+def get_optional_openai_client() -> OpenAI | None:
+    """Return the shared client only when OpenAI credentials are configured."""
+
+    if not (os.getenv("OPENAI_API_KEY") or "").strip():
+        return None
+    return get_openai_client()
+
+
 # ----------------------------
 # Public helpers
 # ----------------------------
