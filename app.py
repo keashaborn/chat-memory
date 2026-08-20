@@ -17,7 +17,6 @@ from seebx.capabilities.observability.telemetry import router as telemetry_route
 from seebx.capabilities.nutrition.meals import router as lifeswitch_meals_router
 from seebx.capabilities.nutrition.logs import router as lifeswitch_nutrition_log_router
 from seebx.capabilities.nutrition.routes import router as lifeswitch_nutrition_router
-from seebx.capabilities.nutrition.batch import router as lifeswitch_nutrition_log_batch_router
 from seebx.capabilities.training.routes import router as lifeswitch_training_router
 from seebx.capabilities.measurements.routes import router as lifeswitch_measurements_router
 from seebx.capabilities.plans.routes import router as lifeswitch_plan_router
@@ -84,7 +83,6 @@ app.include_router(telemetry_router)
 app.include_router(lifeswitch_nutrition_router, prefix="/lifeswitch/nutrition")
 app.include_router(lifeswitch_meals_router, prefix="/lifeswitch/nutrition")
 app.include_router(lifeswitch_nutrition_log_router, prefix="/lifeswitch/nutrition")
-app.include_router(lifeswitch_nutrition_log_batch_router, prefix="/lifeswitch/nutrition")
 app.include_router(catalog_router, prefix="/catalog")
 app.include_router(lifeswitch_training_router, prefix="/lifeswitch/training")
 app.include_router(lifeswitch_plan_router, prefix="/lifeswitch/plan")
