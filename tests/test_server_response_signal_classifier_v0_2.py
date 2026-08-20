@@ -6,6 +6,9 @@ from typing import Any
 import httpx
 from openai import APITimeoutError
 
+from seebx.adapters.openai_signal_classifier import (
+    OpenAIDomainRiskClassificationProvider,
+)
 from seebx.capabilities.conversation.policy import (
     Closure,
     ConversationRole,
@@ -22,7 +25,7 @@ from seebx.capabilities.conversation.policy import (
 from seebx.capabilities.conversation.signal_classifier import (
     ClassificationOutcome,
     DomainRiskCategory,
-    OpenAIServerResponseSignalClassifierV0_2,
+    ServerResponseSignalClassifierV0_2,
     _CLASSIFIER_INSTRUCTIONS,
 )
 
@@ -101,9 +104,11 @@ class FakeClient:
         return self
 
 
-def classifier(client: FakeClient) -> OpenAIServerResponseSignalClassifierV0_2:
-    return OpenAIServerResponseSignalClassifierV0_2(
-        client,
+def classifier(client: FakeClient) -> ServerResponseSignalClassifierV0_2:
+    return ServerResponseSignalClassifierV0_2(
+        OpenAIDomainRiskClassificationProvider(
+            client,
+        ),
         model=MODEL,
         safety_identifier="vs1_" + "a" * 60,
     )

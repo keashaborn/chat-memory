@@ -22,6 +22,9 @@ from seebx.adapters.openai_chat import (
     safety_identifier_v1,
 )
 from seebx.adapters.openai_moderation import OpenAIModerationAdapterV0_2
+from seebx.adapters.openai_signal_classifier import (
+    OpenAIDomainRiskClassificationProvider,
+)
 from seebx.capabilities.conversation.prior_web_provenance import (
     PriorWebProvenanceError,
     load_prior_web_provenance_v1,
@@ -53,7 +56,7 @@ from seebx.capabilities.conversation.policy import (
 )
 from seebx.capabilities.conversation.source_awareness import MemorySourceStatusV1
 from seebx.capabilities.conversation.signal_classifier import (
-    OpenAIServerResponseSignalClassifierV0_2,
+    ServerResponseSignalClassifierV0_2,
 )
 from seebx.contracts.search import SearchCapabilityManifestV1
 from seebx.contracts.voice_language import (
@@ -552,8 +555,10 @@ class ConversationResponseComposer:
             stage_timings["policy_input_ms"] = _elapsed_ms(stage_started_ns)
             stage = "signal_classification"
             stage_started_ns = time.monotonic_ns()
-            classifier = OpenAIServerResponseSignalClassifierV0_2(
-                self._openai_client,
+            classifier = ServerResponseSignalClassifierV0_2(
+                OpenAIDomainRiskClassificationProvider(
+                    self._openai_client,
+                ),
                 model=self._classifier_model,
                 safety_identifier=safety_identifier_v1(
                     command.authenticated_actor_user_id

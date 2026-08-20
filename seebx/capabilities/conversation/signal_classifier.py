@@ -17,9 +17,8 @@ import re
 import unicodedata
 from datetime import date
 from enum import Enum
-from typing import Any, Literal, Mapping
+from typing import Any, Literal, Mapping, Protocol
 
-from openai import APIConnectionError, APIStatusError
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from seebx.capabilities.conversation.policy import (
@@ -43,7 +42,6 @@ _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
 _SAFETY_ID_RE = re.compile(r"^vs1_[0-9a-f]{60}$")
 _DATED_MODEL_RE = re.compile(r"^(?P<base>.+)-(?P<date>\d{4}-\d{2}-\d{2})$")
-_TRANSIENT_PROVIDER_STATUS_CODES = frozenset({408, 409, 429})
 
 
 class DomainRiskCategory(str, Enum):
@@ -73,6 +71,30 @@ class ClassificationOutcome(str, Enum):
     LOCAL_UNCERTAIN = "local_uncertain"
     PROVIDER_CLASSIFIED = "provider_classified"
     PROVIDER_UNCERTAIN = "provider_uncertain"
+
+
+class DomainRiskProviderError(RuntimeError):
+    """Content-free failure from the configured domain-risk provider."""
+
+
+class DomainRiskProviderUnavailableError(DomainRiskProviderError):
+    """Transient provider failure eligible for bounded degraded policy."""
+
+
+class DomainRiskClassificationProvider(Protocol):
+    """Provider boundary for one structured domain-risk classification call."""
+
+    def classify(
+        self,
+        *,
+        model: str,
+        instructions: str,
+        payload: str,
+        text_format: type[BaseModel],
+        max_output_tokens: int,
+        safety_identifier: str,
+        timeout_seconds: float,
+    ) -> Any: ...
 
 
 class _StrictFrozenModel(BaseModel):
@@ -869,21 +891,6 @@ def _compatible_model(requested: str, returned: str) -> bool:
     return True
 
 
-def _provider_is_unavailable(error: Exception) -> bool:
-    if isinstance(error, (APIConnectionError, TimeoutError)):
-        return True
-    if isinstance(error, APIStatusError):
-        status_code = getattr(error, "status_code", None)
-        return bool(
-            status_code in _TRANSIENT_PROVIDER_STATUS_CODES
-            or (
-                isinstance(status_code, int)
-                and 500 <= status_code <= 599
-            )
-        )
-    return False
-
-
 def _provider_failure(
     request: ResponsePolicyInputV0_2,
     *,
@@ -992,20 +999,20 @@ def _signals_from_model(output: _DomainRiskModelOutput) -> ResponsePolicySignals
     )
 
 
-class OpenAIServerResponseSignalClassifierV0_2:
-    """Use Structured Outputs through an injected, already-authenticated client."""
+class ServerResponseSignalClassifierV0_2:
+    """Classify response signals through an injected provider boundary."""
 
     def __init__(
         self,
-        client: Any,
+        provider: DomainRiskClassificationProvider,
         *,
         model: str,
         safety_identifier: str,
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
     ) -> None:
-        if client is None or not callable(getattr(client, "with_options", None)):
+        if provider is None or not callable(getattr(provider, "classify", None)):
             raise ServerResponseSignalClassifierError(
-                "an OpenAI client with request options is required"
+                "a domain-risk classification provider is required"
             )
         if not isinstance(model, str) or not _MODEL_RE.fullmatch(model):
             raise ServerResponseSignalClassifierError("classifier model is invalid")
@@ -1023,7 +1030,7 @@ class OpenAIServerResponseSignalClassifierV0_2:
             raise ServerResponseSignalClassifierError(
                 "classifier timeout is out of bounds"
             )
-        self._client = client
+        self._provider = provider
         self._model = model
         self._safety_identifier = safety_identifier
         self._timeout_seconds = float(timeout_seconds)
@@ -1112,31 +1119,40 @@ class OpenAIServerResponseSignalClassifierV0_2:
             }
         ).decode("utf-8")
         try:
-            call_client = self._client.with_options(
-                max_retries=0,
-                timeout=self._timeout_seconds,
-            )
-            response = call_client.responses.parse(
+            response = self._provider.classify(
                 model=self._model,
-                input=(
-                    {"role": "developer", "content": _CLASSIFIER_INSTRUCTIONS},
-                    {"role": "user", "content": payload},
-                ),
+                instructions=_CLASSIFIER_INSTRUCTIONS,
+                payload=payload,
                 text_format=_DomainRiskModelOutput,
                 max_output_tokens=MAX_OUTPUT_TOKENS,
-                store=False,
                 safety_identifier=self._safety_identifier,
+                timeout_seconds=self._timeout_seconds,
             )
-        except Exception as error:
-            reason_code = (
-                DOMAIN_CLASSIFIER_UNAVAILABLE_REASON
-                if _provider_is_unavailable(error)
-                else "domain_classifier_provider_error"
-            )
+        except DomainRiskProviderUnavailableError:
             signals, assessment = _provider_failure(
                 verified,
                 model=self._model,
-                reason_code=reason_code,
+                reason_code=DOMAIN_CLASSIFIER_UNAVAILABLE_REASON,
+            )
+            return ResponseSignalClassificationResultV0_2.create(
+                assessment=assessment,
+                signals=signals,
+            )
+        except DomainRiskProviderError:
+            signals, assessment = _provider_failure(
+                verified,
+                model=self._model,
+                reason_code="domain_classifier_provider_error",
+            )
+            return ResponseSignalClassificationResultV0_2.create(
+                assessment=assessment,
+                signals=signals,
+            )
+        except Exception:
+            signals, assessment = _provider_failure(
+                verified,
+                model=self._model,
+                reason_code="domain_classifier_provider_error",
             )
             return ResponseSignalClassificationResultV0_2.create(
                 assessment=assessment,
@@ -1193,9 +1209,12 @@ __all__ = [
     "ASSESSMENT_VERSION",
     "CLASSIFIER_VERSION",
     "ClassificationOutcome",
+    "DomainRiskClassificationProvider",
     "DomainRiskAssessmentV0_2",
     "DomainRiskCategory",
-    "OpenAIServerResponseSignalClassifierV0_2",
+    "DomainRiskProviderError",
+    "DomainRiskProviderUnavailableError",
     "ResponseSignalClassificationResultV0_2",
+    "ServerResponseSignalClassifierV0_2",
     "ServerResponseSignalClassifierError",
 ]

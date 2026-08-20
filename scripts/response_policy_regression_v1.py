@@ -17,6 +17,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from seebx.adapters.openai_signal_classifier import (  # noqa: E402
+    OpenAIDomainRiskClassificationProvider,
+)
 from seebx.capabilities.conversation.policy_instructions import (  # noqa: E402
     render_response_policy_prompt_v0_2,
 )
@@ -28,7 +31,7 @@ from seebx.capabilities.conversation.policy import (  # noqa: E402
     decide_response_policy_v0_2,
 )
 from seebx.capabilities.conversation.signal_classifier import (  # noqa: E402
-    OpenAIServerResponseSignalClassifierV0_2,
+    ServerResponseSignalClassifierV0_2,
 )
 
 
@@ -166,8 +169,10 @@ def _actual(
     repeat: int,
 ) -> tuple[dict[str, Any], str]:
     policy_input = _policy_input(case, repeat=repeat)
-    classification = OpenAIServerResponseSignalClassifierV0_2(
-        client,
+    classification = ServerResponseSignalClassifierV0_2(
+        OpenAIDomainRiskClassificationProvider(
+            client,
+        ),
         model=model,
         safety_identifier=_SAFETY_IDENTIFIER,
     ).classify(policy_input)
