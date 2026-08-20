@@ -3,15 +3,20 @@
 Status: read-only runtime inventory and cleanup disposition; no stop, delete,
 drop, migration, deployment, or production-write authority
 
-Evidence date: 2026-08-18 UTC
+Evidence refreshed: 2026-08-20 UTC
 
 Production source: `49f9e60cf4321c8e42c359845c1a62a8c987614d`
 
-Cleanup integration pre-retirement evidence commit:
-`15d28c5665641f20a25a558f2727ca799771a070` on
-`codex/seebx-cleanup-integration-20260818`; 107 commits ahead of production,
-clean, unpushed, and undeployed. The bounded voice-canary repair is
-commit `e7005538` within this integration line.
+Cleanup integration evidence commit:
+`3807a75866f297d7db0176394fabb59463993abc` on
+`codex/seebx-cleanup-integration-20260818`; 160 commits ahead of production,
+clean, remote-matched, and undeployed. The bounded voice-canary repair is
+commit `e7005538` within this integration line. The complete 1,140-test suite
+passes in the sealed 12-dependency runtime. The protected paired package for
+this exact backend and frontend `705422ad1edd4fd4a7d7e1c8a1d6cf0053b869a0`
+passes independent verification with release-package SHA-256
+`e75db25d1650478b7a8fafbe10856db323243857f51ccef5514087472e82eb03`;
+its authority remains `candidate_not_activated`.
 
 ## Purpose
 
@@ -61,23 +66,14 @@ runtime in the cleanup candidate.
 
 ## Cron
 
-The `ubuntu` crontab contains one active legacy memory job:
-
-```text
-0 3 * * * cd /opt/chat-memory && ./eval_all_users.sh >> /opt/chat-memory/logs/cron_eval_all.log 2>&1
-```
-
-`eval_all_users.sh` targets Qdrant collection `memory_raw` on
-`127.0.0.1:6333` and invokes the retired evaluation/card path. Qdrant is not
-running. Recent scheduled runs add start records but perform no useful memory
-work; older runs also failed when the cron environment lacked the provider key.
-
-Disposition: **SOURCE RETIRED IN CANDIDATE; RUNTIME RETIREMENT PENDING**. The
-candidate deletes `bin/eval_all_users.sh` and tests that no active copy returns.
-Production still has the crontab line and historical logs. The runtime batch
-must save and hash the exact crontab and log, remove only this line, run an
-equivalent no-invocation verification, and prove Zep/chat behavior is
-unchanged. Historical logs remain recovery evidence.
+The `ubuntu` crontab has no active commands. The obsolete
+`eval_all_users.sh` Qdrant job was retired on 2026-08-19 through an exact
+rollback-bound batch. Its before/after crontabs, historical log hash, source
+artifact hashes, and receipt are retained under
+`/var/backups/seebx-cleanup/20260819T141946Z-legacy-qdrant-cron-retirement`.
+The cleanup candidate also deletes the source command and tests that it cannot
+be reintroduced. Disposition: **SOURCE AND RUNTIME INVOCATION RETIRED;
+RECOVERY EVIDENCE RETAINED**.
 
 ## Containers and storage
 
@@ -103,8 +99,9 @@ The live service uses `127.0.0.1:55433/lifeswitch`. Retained schemas are
 ### Transitional platform PostgreSQL
 
 The live service uses `127.0.0.1:5432/memory`. The database is approximately
-1.48 GB and cannot be removed while production still reads its active platform
-schemas.
+84 MB and cannot be removed while production still reads its active platform
+schemas. The earlier size included two dormant multi-gigabyte test databases,
+which have now been retired separately with verified dumps.
 
 | Database/schema | Disposition | Gate |
 |---|---|---|
@@ -115,9 +112,9 @@ schemas.
 | `user_settings` | REBUILD OR RETIRE | Current API is unmounted and tables are empty |
 | `memory_ingest_private` | DECOUPLE THEN RETIRE | Remove deletion-function dependency and preserve terminal receipt evidence |
 | `memory` schema and Vantage schemas | ARCHIVE THEN RETIRE | Zero Python, SQL-function, timer, cron, frontend, and recovery dependency |
-| `memory_extraction_v2_20260714_test` | RETIRE CANDIDATE; 1,380 MB, 12 application schemas, 117 tables, zero connections, zero repository/config references | Snapshot/export requirement and exact drop manifest |
-| `memory_v1_pet_core_clone_20260724` | RETIRE CANDIDATE; 1,405 MB, 14 application schemas, 229 tables, zero connections, zero repository/config references | Same gate; clone is not production authority |
-| `lifeswitch_training_family_stage_20260727` | RETIRE CANDIDATE; 15 MB, three application schemas, 29 tables, zero connections, zero repository/config references | Confirm migration/evaluation evidence is preserved elsewhere, then exact drop manifest |
+| `memory_extraction_v2_20260714_test` | RETIRED; verified dump retained under `/var/backups/chat-memory/database-retirements/20260819T051346Z_memory_extraction_v2_20260714_test` | Keep recovery evidence until superseded by retention policy |
+| `memory_v1_pet_core_clone_20260724` | RETIRED; verified dump retained under `/var/backups/chat-memory/database-retirements/20260819T043506Z_memory_v1_pet_core_clone_20260724` | Keep recovery evidence until superseded by retention policy |
+| `lifeswitch_training_family_stage_20260727` | RETIREMENT BLOCKED; 15 MB, three schemas, 29 tables, zero connections and zero code/config references | See `SEEBX_STAGE_DATABASE_RETIREMENT_V1.md`; create a full data dump and disposable restore before any exact drop authorization |
 
 ## Security configuration debt
 
@@ -150,19 +147,21 @@ timers, cron, and frontend callers all show zero dependency.
 
 ## Immediate bounded batches
 
-1. Finish full integration-candidate tests and production-equivalent nonpublic
-   process verification. Review the 96-commit line as one declared structural
-   release; do not deploy the canary repair by extracting an unreviewed subset.
+1. Review the 160-commit line and the exact protected paired package as one
+   declared structural release; do not extract unreviewed production subsets.
 2. Deploy only after route/OpenAPI/data/identity/Zep/voice/search/domain parity,
    rollback, and frontend bearer-forwarding evidence; then run one explicit
    synthetic voice canary and verify the timer returns healthy.
-3. Retire only the legacy production crontab line with a hashed rollback copy;
-   candidate source deletion is already covered by a no-reintroduction test.
-4. Preserve a hashed Redis data/config manifest and stop Redis reversibly; wait
+3. Preserve a hashed Redis data/config manifest and stop Redis reversibly; wait
    through an observation window before removing its container or data.
-5. At promotion time, produce and restore-test the final two-schema PostgreSQL
+4. At promotion time, produce and restore-test the final two-schema PostgreSQL
    dump, bind both receipt hashes, and run the exact fail-closed retirement
    package only after the Zep and telemetry migrations are live.
+5. Create and restore-test a full dump of
+   `lifeswitch_training_family_stage_20260727`; do not drop it based on the
+   existing schema-only archive. Its regenerated exercise-family UUIDs are
+   semantically equivalent, and its other differences are superseded template
+   rename/share-revocation state, but recovery evidence is still mandatory.
 6. Rotate/externalize static Docker credentials without combining the change
    with a database drop or application deployment.
 7. Preserve the exact frontend-only AWS 8088 rule, narrow UFW 8088 from the
