@@ -42,6 +42,10 @@ from seebx.capabilities.conversation.source_awareness import (
     render_base_source_awareness_v1,
     web_source_status_v1,
 )
+from seebx.capabilities.preferences.assistant_contracts import (
+    EffectiveAssistantPreferencePlanV1,
+    render_effective_preference_instructions,
+)
 from seebx.contracts.search import SearchCapabilityManifestV1
 from seebx.contracts.voice_language import (
     DEFAULT_VOICE_LANGUAGE,
@@ -50,12 +54,12 @@ from seebx.contracts.voice_language import (
 )
 
 
-ASSEMBLY_REQUEST_VERSION = "prompt_assembly_request_v3"
-ASSEMBLY_RESULT_VERSION = "assembled_prompt_v3"
-ASSEMBLY_MANIFEST_VERSION = "prompt_assembly_manifest_v6"
+ASSEMBLY_REQUEST_VERSION = "prompt_assembly_request_v4"
+ASSEMBLY_RESULT_VERSION = "assembled_prompt_v4"
+ASSEMBLY_MANIFEST_VERSION = "prompt_assembly_manifest_v7"
 CONTEXT_BLOCK_VERSION = "prompt_reference_context_block_v1"
 CONTEXT_FRAGMENT_VERSION = "prompt_reference_fragment_v1"
-ASSEMBLER_VERSION = "typed_prompt_assembler_v5"
+ASSEMBLER_VERSION = "typed_prompt_assembler_v6"
 TOKEN_ESTIMATOR_VERSION = "utf8_bytes_div4_v1"
 
 HARD_MAX_CONVERSATION_MESSAGES = 256
@@ -162,6 +166,10 @@ class PromptAssemblyRequestV1(_StrictFrozenModel):
     policy_signals: ResponsePolicySignalsV0_2 = Field(repr=False)
     policy_decision: ResponsePolicyDecisionV0_2 = Field(repr=False)
     policy_prompt: ResponsePolicyPromptV0_2 = Field(repr=False)
+    assistant_preference_plan: EffectiveAssistantPreferencePlanV1 | None = Field(
+        default=None, repr=False,
+        exclude_if=lambda value: value is None,
+    )
     successor_memory_context_block: "PromptReferenceContextBlockV1 | None" = Field(
         default=None,
         repr=False,
@@ -348,6 +356,7 @@ class PromptAssemblyManifestV1(_StrictFrozenModel):
     policy_signals_sha256: str
     policy_decision_sha256: str
     policy_prompt_sha256: str
+    assistant_preference_plan_sha256: str | None = None
     search_capability_manifest_sha256: str | None = None
     memory_source_status: MemorySourceStatusV1
     web_source_status: WebSourceStatusV1
@@ -396,6 +405,7 @@ class PromptAssemblyManifestV1(_StrictFrozenModel):
         "policy_signals_sha256",
         "policy_decision_sha256",
         "policy_prompt_sha256",
+        "assistant_preference_plan_sha256",
         "search_capability_manifest_sha256",
         "interaction_instruction_sha256",
         "closure_instruction_sha256",
@@ -438,6 +448,7 @@ class AssembledPromptV1(_StrictFrozenModel):
                 signals,
                 decision,
                 prompt,
+                assistant_preference_plan,
                 successor_memory_context_block,
                 fm_selection,
                 prior_web_provenance,
@@ -471,6 +482,7 @@ class AssembledPromptV1(_StrictFrozenModel):
         manifest = self.manifest
         expected_system = _render_system_prompt(
             prompt,
+            assistant_preference_plan,
             source.memory_source_status,
             search_capability_manifest,
             source.response_language,
@@ -508,6 +520,11 @@ class AssembledPromptV1(_StrictFrozenModel):
             ),
             (manifest.policy_decision_sha256, decision.decision_sha256),
             (manifest.policy_prompt_sha256, prompt.content_sha256),
+            (
+                manifest.assistant_preference_plan_sha256,
+                assistant_preference_plan.plan_sha256
+                if assistant_preference_plan is not None else None,
+            ),
             (
                 manifest.search_capability_manifest_sha256,
                 search_capability_manifest.manifest_sha256
@@ -608,10 +625,17 @@ _SYSTEM_BASELINE = (
 
 def _render_system_prompt(
     policy_prompt: ResponsePolicyPromptV0_2,
+    assistant_preference_plan: EffectiveAssistantPreferencePlanV1 | None,
     memory_source_status: MemorySourceStatusV1,
     search_capability_manifest: SearchCapabilityManifestV1 | None = None,
     response_language: str = DEFAULT_VOICE_LANGUAGE,
 ) -> str:
+    preference_instructions = render_effective_preference_instructions(
+        assistant_preference_plan
+    )
+    preferences = (
+        f"\n\n{preference_instructions}" if preference_instructions else ""
+    )
     capability = (
         f"\n\nApplication capabilities:\n{search_capability_manifest.model_brief}"
         if search_capability_manifest is not None
@@ -627,7 +651,8 @@ def _render_system_prompt(
     return (
         f"{_SYSTEM_BASELINE}{capability}\n\n"
         f"{source_awareness}\n\n"
-        f"Response language:\n{language}\n\n{policy_prompt.content}"
+        f"Response language:\n{language}{preferences}\n\n"
+        f"{policy_prompt.content}"
     )
 
 
@@ -799,6 +824,12 @@ def _strict_source_chain(request: PromptAssemblyRequestV1):
     signals = _revalidate(ResponsePolicySignalsV0_2, source.policy_signals)
     decision = _revalidate(ResponsePolicyDecisionV0_2, source.policy_decision)
     policy_prompt = _revalidate(ResponsePolicyPromptV0_2, source.policy_prompt)
+    assistant_preference_plan = (
+        _revalidate(
+            EffectiveAssistantPreferencePlanV1, source.assistant_preference_plan
+        )
+        if source.assistant_preference_plan is not None else None
+    )
     successor_memory_context_block = (
         _revalidate(
             PromptReferenceContextBlockV1,
@@ -838,6 +869,7 @@ def _strict_source_chain(request: PromptAssemblyRequestV1):
         signals,
         decision,
         policy_prompt,
+        assistant_preference_plan,
         successor_memory_context_block,
         fm_selection,
         prior_web_provenance,
@@ -1022,6 +1054,7 @@ def assemble_prompt(request: PromptAssemblyRequestV1) -> AssembledPromptV1:
             signals,
             decision,
             policy_prompt,
+            assistant_preference_plan,
             successor_memory_context_block,
             fm_selection,
             prior_web_provenance,
@@ -1051,6 +1084,7 @@ def assemble_prompt(request: PromptAssemblyRequestV1) -> AssembledPromptV1:
     )
     system_prompt = _render_system_prompt(
         policy_prompt,
+        assistant_preference_plan,
         request.memory_source_status,
         search_capability_manifest,
         request.response_language,
@@ -1079,6 +1113,10 @@ def assemble_prompt(request: PromptAssemblyRequestV1) -> AssembledPromptV1:
         "policy_signals_sha256": _sha256_bytes(_canonical_json_bytes(signals)),
         "policy_decision_sha256": decision.decision_sha256,
         "policy_prompt_sha256": policy_prompt.content_sha256,
+        "assistant_preference_plan_sha256": (
+            assistant_preference_plan.plan_sha256
+            if assistant_preference_plan is not None else None
+        ),
         "search_capability_manifest_sha256": (
             search_capability_manifest.manifest_sha256
             if search_capability_manifest is not None

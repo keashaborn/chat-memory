@@ -27,6 +27,9 @@ from seebx.capabilities.conversation.prior_web_provenance import (
     load_prior_web_provenance_v1,
 )
 from seebx.capabilities.conversation.prompt import PromptReferenceContextBlockV1
+from seebx.capabilities.preferences.assistant_contracts import (
+    EffectiveAssistantPreferencePlanV1,
+)
 from seebx.adapters.conversation_snapshot import (
     load_conversation_snapshot_v1,
 )
@@ -93,6 +96,10 @@ class AuthenticatedResponseCommandV0_2(_StrictFrozenModel):
         default=None,
         repr=False,
     )
+    assistant_preference_plan: EffectiveAssistantPreferencePlanV1 | None = Field(
+        default=None, repr=False,
+        exclude_if=lambda value: value is None,
+    )
     response_language: str = DEFAULT_VOICE_LANGUAGE
     attachment_context_block: PromptReferenceContextBlockV1 | None = Field(
         default=None,
@@ -126,6 +133,14 @@ class AuthenticatedResponseCommandV0_2(_StrictFrozenModel):
     def bounded_message_bytes(self) -> "AuthenticatedResponseCommandV0_2":
         if len(self.current_message.encode("utf-8")) > 32_768:
             raise ValueError("current message exceeds the byte limit")
+        if (
+            self.assistant_preference_plan is not None
+            and self.assistant_preference_plan.owner_user_id
+            != self.authenticated_actor_user_id
+        ):
+            raise ValueError(
+                "assistant preference plan owner differs from authenticated actor"
+            )
         if self.attachment_context_block is not None:
             if (
                 self.attachment_context_block.request_id_sha256
@@ -570,6 +585,7 @@ class ConversationResponseComposer:
                 conversation_snapshot=snapshot,
                 request_field_names=command.request_field_names,
                 trusted_policy_signals_envelope=signal_envelope,
+                assistant_preference_plan=command.assistant_preference_plan,
                 successor_memory_context_block=(
                     memory.successor_memory_context_block
                 ),

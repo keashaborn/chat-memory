@@ -12,6 +12,10 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from seebx.adapters.assistant_preferences_postgres import (
+    PostgresAssistantPreferencesRepository,
+)
+from seebx.adapters.postgres import PostgresConnectionProvider
 from seebx.adapters.conversation_attachments import (
     fetch_ready_message_attachments,
 )
@@ -105,6 +109,12 @@ NO_STORE_HEADERS = {
     "expires": "0",
 }
 RESPONSE_MEMORY_MODE = MEMORY_MODE_ZEP
+
+
+def _assistant_preferences_repository() -> PostgresAssistantPreferencesRepository:
+    """Construct lazily so offline imports do not require production config."""
+
+    return PostgresAssistantPreferencesRepository(PostgresConnectionProvider(DSN))
 
 
 def response_memory_provenance_for_mode(
@@ -360,6 +370,9 @@ async def conversation_response_query(
             )
         openai_client = get_openai_client()
         generation_config = OpenAIChatGenerationConfigV1()
+        assistant_preference_plan = (
+            await _assistant_preferences_repository().get_effective_plan(owner)
+        )
         exclusion_reason = memory_not_applicable_reason(
             no_store=payload.no_store,
             has_attachments=bool(payload.attachment_ids),
@@ -417,6 +430,7 @@ async def conversation_response_query(
             ),
             stateless=stateless,
             search_capability_manifest=search_capability_manifest,
+            assistant_preference_plan=assistant_preference_plan,
             response_language=response_language,
             attachment_context_block=attachment_context_block,
         )

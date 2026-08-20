@@ -581,7 +581,7 @@ class GuidedReflectionInteractionV1Tests(unittest.TestCase):
         self.assertEqual(prompt.interaction_version, "response_interaction_v3")
         self.assertEqual(
             ASSEMBLY_MANIFEST_VERSION,
-            "prompt_assembly_manifest_v6",
+            "prompt_assembly_manifest_v7",
         )
         self.assertEqual(
             SHADOW_TRACE_VERSION,
@@ -589,11 +589,11 @@ class GuidedReflectionInteractionV1Tests(unittest.TestCase):
         )
         self.assertEqual(
             TRUSTED_PLAN_VERSION,
-            "trusted_response_plan_v0_6",
+            "trusted_response_plan_v0_7",
         )
         self.assertEqual(
             ORCHESTRATOR_VERSION,
-            "trusted_response_orchestrator_v0_6",
+            "trusted_response_orchestrator_v0_7",
         )
         self.assertEqual(
             TRUSTED_POLICY_SIGNALS_ENVELOPE_VERSION,

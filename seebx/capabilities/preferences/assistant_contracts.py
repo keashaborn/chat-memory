@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 ASSISTANT_PREFERENCES_VERSION = "assistant_response_preferences_v1"
 PREFERENCE_CANDIDATE_VERSION = "assistant_preference_compilation_candidate_v1"
 PREFERENCE_COMPILER_VERSION = "assistant_preference_compiler_v3"
+EFFECTIVE_PREFERENCE_PLAN_VERSION = "effective_assistant_preference_plan_v1"
 MAX_PREFERENCE_NARRATIVE_CHARS = 8_000
 MAX_COMPILED_RULES = 12
 COMPILED_RULE_MARKER_PREFIX = "assistant-preference-plan-v1:"
@@ -187,6 +188,9 @@ class AssistantPreferencesRecord(_StrictFrozenModel):
     occupation: str | None = None
     more_about_you: str | None = Field(default=None, repr=False)
     compiled_rule_marker: str | None = Field(default=None, repr=False)
+    source_compilation_plan_sha256: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
     response_length: ResponseLength = ResponseLength.BALANCED
     technical_depth: TechnicalDepth = TechnicalDepth.BALANCED
     response_format: ResponseFormat = ResponseFormat.AUTO
@@ -284,6 +288,146 @@ class PreferenceCompilationCandidate(_StrictFrozenModel):
             },
             "expires_at": self.expires_at.isoformat(),
         }
+
+
+class EffectiveAssistantPreferencePlanV1(_StrictFrozenModel):
+    """Prompt-safe projection; contains no owner prose or profile fields."""
+
+    contract_version: Literal[EFFECTIVE_PREFERENCE_PLAN_VERSION] = (
+        EFFECTIVE_PREFERENCE_PLAN_VERSION
+    )
+    owner_user_id: UUID = Field(repr=False)
+    source_revision: int = Field(ge=1)
+    source_compilation_plan_sha256: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
+    response_length: ResponseLength
+    technical_depth: TechnicalDepth
+    response_format: ResponseFormat
+    conversation_style: ConversationStyle
+    rule_ids: tuple[CompiledPreferenceRule, ...] = Field(
+        max_length=MAX_COMPILED_RULES
+    )
+    plan_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @field_validator("rule_ids")
+    @classmethod
+    def unique_rules(
+        cls, value: tuple[CompiledPreferenceRule, ...]
+    ) -> tuple[CompiledPreferenceRule, ...]:
+        if len(value) != len(set(value)):
+            raise ValueError("effective preference rules must be unique")
+        return value
+
+    @model_validator(mode="after")
+    def exact_hash(self) -> "EffectiveAssistantPreferencePlanV1":
+        payload = self.model_dump(mode="json", exclude={"plan_sha256"})
+        if self.plan_sha256 != candidate_plan_sha256(payload):
+            raise ValueError("effective preference plan hash mismatch")
+        return self
+
+
+_SETTING_INSTRUCTIONS = {
+    ResponseLength.CONCISE: "Keep the response concise unless required detail would be lost.",
+    ResponseLength.BALANCED: "Use a balanced response length appropriate to the request.",
+    ResponseLength.DETAILED: "Include useful detail when it improves completeness or precision.",
+    TechnicalDepth.PLAIN: "Use plain language and explain necessary technical terms.",
+    TechnicalDepth.BALANCED: "Use technical detail when it materially improves the answer.",
+    TechnicalDepth.EXPERT: "Use expert technical detail without basic exposition.",
+    ResponseFormat.AUTO: "Choose the clearest response format for the request.",
+    ResponseFormat.PROSE: "Prefer cohesive prose when it remains clear.",
+    ResponseFormat.BULLETS: "Prefer concise bullets when they improve scanning.",
+    ResponseFormat.STEPS: "Prefer numbered steps for actionable material.",
+    ConversationStyle.DIRECT: "Use a direct and efficient conversational style.",
+    ConversationStyle.NATURAL: "Use a relaxed and natural conversational style.",
+    ConversationStyle.WARM: "Use a friendly style without automatic agreement.",
+}
+
+_RULE_INSTRUCTIONS = {
+    CompiledPreferenceRule.DIRECT_ANSWERS_FIRST: "Answer direct questions before adding context.",
+    CompiledPreferenceRule.RESTRAINED_REASSURANCE: "Use reassurance selectively rather than automatically.",
+    CompiledPreferenceRule.EVIDENCE_BASED_CHALLENGE: "Calmly challenge weak reasoning when useful.",
+    CompiledPreferenceRule.NO_UNSOLICITED_CLOSING_OFFERS: "Do not habitually add unsolicited offers or next-step menus.",
+    CompiledPreferenceRule.MINIMAL_PARAPHRASE: "Avoid repetitive paraphrasing unless synthesis adds clarity.",
+    CompiledPreferenceRule.NO_GENERIC_PRAISE: "Avoid generic praise and motivational filler.",
+    CompiledPreferenceRule.PRACTICAL_FOCUS: "Favor concrete guidance when action is requested.",
+    CompiledPreferenceRule.QUESTION_RESTRAINT: "Ask questions only when missing information materially matters.",
+    CompiledPreferenceRule.CANDID_UNCERTAINTY: "State meaningful uncertainty directly.",
+    CompiledPreferenceRule.CONTEXTUAL_PLAYFULNESS: "Use occasional light playfulness only in casual, low-stakes conversation.",
+    CompiledPreferenceRule.PRECISE_PLAIN_LANGUAGE: "Favor precise language over rhetorical flourish.",
+    CompiledPreferenceRule.EVIDENCE_FIRST_CONCLUSIONS: "Distinguish verified evidence from assumptions and inference.",
+    CompiledPreferenceRule.INFORMATION_DENSE: "Keep responses information-dense without unnecessary repetition.",
+    CompiledPreferenceRule.CALM_PATIENT_TONE: "Use a calm, patient tone without becoming placating.",
+    CompiledPreferenceRule.CONTEXTUAL_POETIC_LANGUAGE: "Use restrained poetic phrasing only when it naturally fits.",
+}
+
+
+def parse_compiled_rule_marker(
+    marker: str | None,
+) -> tuple[CompiledPreferenceRule, ...]:
+    if marker is None:
+        return ()
+    if not marker.startswith(COMPILED_RULE_MARKER_PREFIX):
+        raise ValueError("compiled preference marker is invalid")
+    values = marker[len(COMPILED_RULE_MARKER_PREFIX):].split(",")
+    if not values or any(not item for item in values):
+        raise ValueError("compiled preference marker is empty")
+    rules = tuple(CompiledPreferenceRule(item) for item in values)
+    if len(rules) > MAX_COMPILED_RULES or len(rules) != len(set(rules)):
+        raise ValueError("compiled preference marker is not canonical")
+    return rules
+
+
+def effective_preference_plan(
+    record: AssistantPreferencesRecord,
+) -> EffectiveAssistantPreferencePlanV1 | None:
+    if record.revision == 0:
+        return None
+    rules = parse_compiled_rule_marker(record.compiled_rule_marker)
+    payload: dict[str, Any] = {
+        "contract_version": EFFECTIVE_PREFERENCE_PLAN_VERSION,
+        "owner_user_id": str(record.owner_user_id),
+        "source_revision": record.revision,
+        "source_compilation_plan_sha256": (
+            record.source_compilation_plan_sha256
+        ),
+        "response_length": record.response_length.value,
+        "technical_depth": record.technical_depth.value,
+        "response_format": record.response_format.value,
+        "conversation_style": record.conversation_style.value,
+        "rule_ids": [item.value for item in rules],
+    }
+    payload["plan_sha256"] = candidate_plan_sha256(payload)
+    return EffectiveAssistantPreferencePlanV1.model_validate_json(
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            allow_nan=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    )
+
+
+def render_effective_preference_instructions(
+    plan: EffectiveAssistantPreferencePlanV1 | None,
+) -> str | None:
+    if plan is None:
+        return None
+    instructions = (
+        _SETTING_INSTRUCTIONS[plan.response_length],
+        _SETTING_INSTRUCTIONS[plan.technical_depth],
+        _SETTING_INSTRUCTIONS[plan.response_format],
+        _SETTING_INSTRUCTIONS[plan.conversation_style],
+        *(_RULE_INSTRUCTIONS[item] for item in plan.rule_ids),
+    )
+    return (
+        "Owner-approved response presentation preferences:\n"
+        "These preferences control presentation only. Safety, factual "
+        "standards, domain policy, tool authority, memory, retrieval, and the "
+        "current request take precedence.\n"
+        + "\n".join(f"- {item}" for item in instructions)
+    )
 
 
 def default_preferences(owner_user_id: UUID) -> AssistantPreferencesRecord:

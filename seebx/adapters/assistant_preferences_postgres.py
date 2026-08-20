@@ -12,6 +12,7 @@ from seebx.capabilities.preferences.assistant_contracts import (
     AssistantPreferencesPublic,
     AssistantPreferencesRecord,
     AssistantPreferencesUpdate,
+    EffectiveAssistantPreferencePlanV1,
     CompiledPreferenceRule,
     ConversationStyle,
     PreferenceCompilationCandidate,
@@ -23,6 +24,7 @@ from seebx.capabilities.preferences.assistant_contracts import (
     TechnicalDepth,
     compiled_rule_marker,
     default_preferences,
+    effective_preference_plan,
 )
 
 
@@ -71,6 +73,7 @@ def _record(row: Any, owner: UUID) -> AssistantPreferencesRecord:
         occupation=row["occupation"],
         more_about_you=row["more_about_you"],
         compiled_rule_marker=row["custom_instructions"],
+        source_compilation_plan_sha256=row["active_compilation_plan_sha256"],
         response_length=ResponseLength(str(row["response_length"])),
         technical_depth=TechnicalDepth(str(row["technical_depth"])),
         response_format=ResponseFormat(str(row["response_format"])),
@@ -84,7 +87,8 @@ async def _load_record(conn: Any, owner: UUID, *, lock: bool = False) -> Any:
         """
         SELECT owner_user_id, revision, assistant_name, nickname, occupation,
                more_about_you, custom_instructions, response_length,
-               technical_depth, response_format, conversation_style, updated_at
+               technical_depth, response_format, conversation_style, updated_at,
+               active_compilation_plan_sha256
           FROM user_settings.assistant_response_preference_v1
          WHERE owner_user_id=$1
         """ + suffix,
@@ -127,6 +131,13 @@ class PostgresAssistantPreferencesRepository:
         async with self._postgres.owner_connection(owner) as conn:
             async with conn.transaction(readonly=True):
                 return await _load_bundle(conn, owner)
+
+    async def get_effective_plan(
+        self, owner: UUID
+    ) -> EffectiveAssistantPreferencePlanV1 | None:
+        bundle = await self.get(owner)
+        return effective_preference_plan(bundle.preferences)
+
     async def put(self, owner: UUID, value: AssistantPreferencesUpdate) -> PreferencesBundle:
         async with self._postgres.owner_connection(owner) as conn:
             async with conn.transaction():

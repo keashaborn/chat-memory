@@ -44,6 +44,9 @@ from seebx.capabilities.conversation.policy import (
     decide_response_policy_v0_2,
 )
 from seebx.capabilities.conversation.source_awareness import MemorySourceStatusV1
+from seebx.capabilities.preferences.assistant_contracts import (
+    EffectiveAssistantPreferencePlanV1,
+)
 from seebx.contracts.search import SearchCapabilityManifestV1
 from seebx.contracts.conversation_provenance import (
     CANONICAL_CONVERSATION_SHADOW_TRACE_V1,
@@ -54,13 +57,13 @@ from seebx.contracts.voice_language import (
 )
 
 
-TRUSTED_REQUEST_VERSION = "trusted_response_request_v0_5"
-TRUSTED_PLAN_VERSION = "trusted_response_plan_v0_6"
+TRUSTED_REQUEST_VERSION = "trusted_response_request_v0_6"
+TRUSTED_PLAN_VERSION = "trusted_response_plan_v0_7"
 TRUSTED_POLICY_SIGNALS_ENVELOPE_VERSION = (
     "trusted_response_policy_signals_envelope_v0_3"
 )
 SHADOW_TRACE_VERSION = CANONICAL_CONVERSATION_SHADOW_TRACE_V1
-ORCHESTRATOR_VERSION = "trusted_response_orchestrator_v0_6"
+ORCHESTRATOR_VERSION = "trusted_response_orchestrator_v0_7"
 TRUSTED_SAFETY_ASSESSOR_COMPONENTS_V0_2 = (
     "openai_moderation_adapter_v0_2",
 )
@@ -185,6 +188,10 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
     trusted_policy_signals_envelope: TrustedPolicySignalsEnvelopeV0_2 = Field(
         repr=False,
     )
+    assistant_preference_plan: EffectiveAssistantPreferencePlanV1 | None = Field(
+        default=None, repr=False,
+        exclude_if=lambda value: value is None,
+    )
     successor_memory_context_block: PromptReferenceContextBlockV1 | None = Field(
         default=None,
         repr=False,
@@ -237,6 +244,14 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
         ):
             raise ValueError(
                 "policy-signal envelope differs from the conversation snapshot"
+            )
+        if (
+            self.assistant_preference_plan is not None
+            and self.assistant_preference_plan.owner_user_id
+            != self.authenticated_actor_user_id
+        ):
+            raise ValueError(
+                "assistant preference plan owner differs from authenticated actor"
             )
         if self.successor_memory_context_block is not None:
             context_block = self.successor_memory_context_block
@@ -316,6 +331,7 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
         trusted_policy_signals_envelope: (
             TrustedPolicySignalsEnvelopeV0_2 | None
         ) = None,
+        assistant_preference_plan: EffectiveAssistantPreferencePlanV1 | None = None,
         successor_memory_context_block: PromptReferenceContextBlockV1 | None = None,
         memory_source_status: MemorySourceStatusV1 = (
             MemorySourceStatusV1.NOT_APPLICABLE
@@ -367,6 +383,7 @@ class TrustedResponseRequestV0_2(_StrictFrozenModel):
             conversation_snapshot=snapshot,
             legacy_request_field_names=tuple(sorted(set(request_field_names))),
             trusted_policy_signals_envelope=signal_envelope,
+            assistant_preference_plan=assistant_preference_plan,
             successor_memory_context_block=successor_memory_context_block,
             memory_source_status=memory_source_status,
             prior_web_provenance=prior_web_provenance,
@@ -469,6 +486,10 @@ class TrustedResponsePlanV0_2(_StrictFrozenModel):
     )
     policy_decision: ResponsePolicyDecisionV0_2 = Field(repr=False)
     policy_prompt: ResponsePolicyPromptV0_2 = Field(repr=False)
+    assistant_preference_plan: EffectiveAssistantPreferencePlanV1 | None = Field(
+        default=None, repr=False,
+        exclude_if=lambda value: value is None,
+    )
     fm_selection: RMSelectionEnvelopeV04 = Field(repr=False)
     prior_web_provenance: PriorWebProvenanceEnvelopeV1 | None = Field(
         default=None,
@@ -517,6 +538,16 @@ class TrustedResponsePlanV0_2(_StrictFrozenModel):
             raise ValueError("trusted plan bindings do not reconcile")
         if self.policy_signals != self.assembled_prompt.source_request.policy_signals:
             raise ValueError("trusted plan signals differ from prompt assembly")
+        if (
+            self.assistant_preference_plan
+            != self.assembled_prompt.source_request.assistant_preference_plan
+            or manifest.assistant_preference_plan_sha256
+            != (
+                self.assistant_preference_plan.plan_sha256
+                if self.assistant_preference_plan is not None else None
+            )
+        ):
+            raise ValueError("trusted plan preferences differ from prompt assembly")
         if (
             self.prior_web_provenance
             != self.assembled_prompt.source_request.prior_web_provenance
@@ -634,6 +665,7 @@ def _plan_sha256(
     decision: ResponsePolicyDecisionV0_2,
     prompt: ResponsePolicyPromptV0_2,
     fm: RMSelectionEnvelopeV04,
+    assistant_preference_plan: EffectiveAssistantPreferencePlanV1 | None = None,
     prior_web_provenance: PriorWebProvenanceEnvelopeV1 | None = None,
     assembled: AssembledPromptV1,
     trace: SanitizedResponseShadowTraceV0_2,
@@ -652,6 +684,10 @@ def _plan_sha256(
             "assembly_sha256": assembled.manifest.assembly_sha256,
             "shadow_trace_sha256": trace.trace_sha256,
     }
+    if assistant_preference_plan is not None:
+        payload["assistant_preference_plan_sha256"] = (
+            assistant_preference_plan.plan_sha256
+        )
     if prior_web_provenance is not None:
         payload["prior_web_provenance_manifest_sha256"] = (
             prior_web_provenance.manifest_sha256
@@ -805,6 +841,7 @@ class TrustedResponseOrchestratorV0_2:
                     policy_signals=request.trusted_policy_signals,
                     policy_decision=decision,
                     policy_prompt=prompt,
+                    assistant_preference_plan=request.assistant_preference_plan,
                     successor_memory_context_block=(
                         request.successor_memory_context_block
                     ),
@@ -843,6 +880,7 @@ class TrustedResponseOrchestratorV0_2:
                 ),
                 policy_decision=decision,
                 policy_prompt=prompt,
+                assistant_preference_plan=request.assistant_preference_plan,
                 fm_selection=fm,
                 prior_web_provenance=request.prior_web_provenance,
                 assembled_prompt=assembled,
@@ -861,6 +899,7 @@ class TrustedResponseOrchestratorV0_2:
                     decision=decision,
                     prompt=prompt,
                     fm=fm,
+                    assistant_preference_plan=request.assistant_preference_plan,
                     prior_web_provenance=request.prior_web_provenance,
                     assembled=assembled,
                     trace=trace,
