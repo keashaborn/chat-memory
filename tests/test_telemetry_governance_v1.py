@@ -99,7 +99,8 @@ class TelemetryGovernanceV1Tests(unittest.TestCase):
         insert = conn.execute_calls[1]
         self.assertIn("set_config('app.user_id'", set_config[0])
         self.assertEqual(set_config[1], (ACTOR,))
-        self.assertEqual(insert[1][12], ACTOR)
+        self.assertEqual(insert[1][11], ACTOR)
+        self.assertNotIn("vantage_id", insert[0])
         self.assertIn("no-store", response.headers["cache-control"])
 
 

@@ -79,6 +79,23 @@ class ThreadHttpIdentityTests(unittest.IsolatedAsyncioTestCase):
         }
         self.assertEqual(actual, expected)
 
+    def test_thread_contract_has_no_legacy_vantage_input(self) -> None:
+        application = FastAPI()
+        application.include_router(
+            self.thread_routes.create_thread_lifecycle_router(
+                self.backend.POSTGRES,
+                title_client=None,
+            )
+        )
+        self.assertNotIn(
+            "vantage_id",
+            self.thread_routes.NewThreadReq.model_fields,
+        )
+        for route in application.routes:
+            if route.path.startswith("/threads"):
+                query_names = {item.name for item in route.dependant.query_params}
+                self.assertNotIn("vantage_id", query_names)
+
     def test_missing_bearer_fails_before_thread_database_access(self) -> None:
         application = FastAPI()
         application.include_router(

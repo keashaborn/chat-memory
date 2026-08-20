@@ -56,9 +56,9 @@ WHERE id=$1 AND owner_user_id=$2
 """
 INSERT_USER_TRANSCRIPT_SQL = (
     "INSERT INTO chat_log("
-    "id,owner_user_id,user_id,user_id_alias,source,text,tags,thread_id,"
-    "vantage_id,request_id,created_at"
-    ") VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)"
+    "id,owner_user_id,user_id,user_id_alias,source,text,tags,"
+    "thread_id,request_id,created_at"
+    ") VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)"
 )
 TOUCH_USER_TRANSCRIPT_THREAD_SQL = (
     "UPDATE threads SET updated_at=now() WHERE id=$1 AND owner_user_id=$2"
@@ -87,7 +87,6 @@ async def persist_user_transcript(
     text: str,
     tags: list[Any],
     thread_id: UUID | None,
-    vantage_id: str,
     request_id: str,
     message_id: UUID,
     submission_id: UUID | None,
@@ -193,7 +192,6 @@ async def persist_user_transcript(
             text,
             tags,
             effective_thread_id,
-            vantage_id,
             request_id,
             created_at,
         )
@@ -299,9 +297,9 @@ async def persist_conversation_response(
                 """
                 INSERT INTO public.chat_log(
                   id,owner_user_id,user_id,user_id_alias,source,text,tags,
-                  thread_id,vantage_id,request_id,created_at
+                  thread_id,request_id,created_at
                 )
-                VALUES($1,$2,$3,NULL,$4,$5,$6,$7,'RESSE',$8,$9)
+                VALUES($1,$2,$3,NULL,$4,$5,$6,$7,$8,$9)
                 """,
                 value.answer_id,
                 owner_user_id,
@@ -389,12 +387,12 @@ async def persist_search_exchange(
                 """
                 INSERT INTO public.chat_log(
                   id,owner_user_id,user_id,user_id_alias,source,text,tags,
-                  thread_id,vantage_id,request_id,created_at
+                  thread_id,request_id,created_at
                 )
                 VALUES
-                  ($1,$2,$3,NULL,$4,$5,$6,$7,'default',$8,clock_timestamp()),
+                  ($1,$2,$3,NULL,$4,$5,$6,$7,$8,clock_timestamp()),
                   (
-                    $9,$2,$3,NULL,$10,$11,$12,$7,'default',$8,
+                    $9,$2,$3,NULL,$10,$11,$12,$7,$8,
                     clock_timestamp() + interval '1 microsecond'
                   )
                 """,

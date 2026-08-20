@@ -77,6 +77,7 @@ class SearchTranscriptPersistenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(answer_id, UUID)
         statements = "\n".join(sql for sql, _ in conn.execute_calls)
         self.assertIn("INSERT INTO public.chat_log", statements)
+        self.assertNotIn("vantage_id", statements)
         self.assertIn(
             "INSERT INTO trusted_web.response_transcript_v1",
             statements,

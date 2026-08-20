@@ -72,7 +72,6 @@ def create_transcript_ingest_router(
 
         voice_turn_id_from_request(req)
         tags = body.get("tags") or []
-        vantage_id = (body.get("vantage_id") or "").strip() or "default"
         request_id = sanitize_request_id(
             getattr(req.state, "request_id", None)
         ) or str(uuid.uuid4())
@@ -145,7 +144,6 @@ def create_transcript_ingest_router(
                     text=text,
                     tags=tags,
                     thread_id=thread_id,
-                    vantage_id=vantage_id,
                     request_id=request_id,
                     message_id=message_id,
                     submission_id=submission_id,

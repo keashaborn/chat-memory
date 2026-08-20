@@ -299,7 +299,7 @@ async def telemetry_event(req: Request):
         subject_type, subject_id,
         target_model_id, target_model_version,
         judge_model_id, judge_model_version,
-        vantage_id, condition_id,
+        condition_id,
         thread_id, turn_id,
         actor_user_id,
         payload, occurred_at
@@ -309,10 +309,10 @@ async def telemetry_event(req: Request):
         $3,$4,
         $5,$6,
         $7,$8,
-        $9,$10,
-        $11,$12,
-        $13,
-        $14,$15
+        $9,
+        $10,$11,
+        $12,
+        $13,$14
         )
         ON CONFLICT (event_id) DO NOTHING
     """
@@ -352,7 +352,6 @@ async def telemetry_event(req: Request):
                 target_model_version = (e.get("target_model_version") or None)
                 judge_model_id = (e.get("judge_model_id") or None)
                 judge_model_version = (e.get("judge_model_version") or None)
-                vantage_id = (e.get("vantage_id") or None)
                 condition_id = (e.get("condition_id") or None)
                 thread_id = (e.get("thread_id") or None)
                 turn_id = (e.get("turn_id") or None)
@@ -363,7 +362,7 @@ async def telemetry_event(req: Request):
                     subject_type, subject_id,
                     target_model_id, target_model_version,
                     judge_model_id, judge_model_version,
-                    vantage_id, condition_id,
+                    condition_id,
                     thread_id, turn_id,
                     actor_user_id,
                     payload, occurred_at

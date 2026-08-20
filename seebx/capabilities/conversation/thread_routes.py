@@ -42,7 +42,6 @@ from seebx.core.identity import require_actor, require_request_actor
 class NewThreadReq(BaseModel):
     user_id: str
     title: Optional[str] = None
-    vantage_id: Optional[str] = "default"
 
 
 class PinThreadReq(BaseModel):
@@ -103,9 +102,7 @@ def _identity_error_response(error: HTTPException) -> JSONResponse:
 async def _require_actor_for_user(
     request: Request,
     requested_user_id: str,
-    vantage_id: str = "default",
 ) -> tuple[JSONResponse | None, str | None]:
-    del vantage_id
     actor = _actor_user_id(request)
     if not actor:
         return _actor_missing_response(), None
@@ -180,9 +177,8 @@ def create_thread_lifecycle_router(
     async def threads_new(body: NewThreadReq, req: Request):
         user_id_alias = (body.user_id or "").strip() or "anon"
         title = (body.title or "New chat").strip() or "New chat"
-        vantage_id = (body.vantage_id or "default").strip() or "default"
         actor_err, user_id = await _require_actor_for_user(
-            req, user_id_alias, vantage_id
+            req, user_id_alias
         )
         if actor_err:
             return actor_err
@@ -209,11 +205,10 @@ def create_thread_lifecycle_router(
     async def threads_list(
         user_id: str,
         req: Request,
-        vantage_id: str = "default",
     ):
         user_id_alias = (user_id or "").strip() or "anon"
         actor_err, owner_user_id = await _require_actor_for_user(
-            req, user_id_alias, vantage_id
+            req, user_id_alias
         )
         if actor_err:
             return actor_err
@@ -241,11 +236,10 @@ def create_thread_lifecycle_router(
     async def threads_active_get(
         user_id: str,
         req: Request,
-        vantage_id: str = "default",
     ):
         user_id_alias = (user_id or "").strip() or "anon"
         actor_err, owner_user_id = await _require_actor_for_user(
-            req, user_id_alias, vantage_id
+            req, user_id_alias
         )
         if actor_err:
             return actor_err
@@ -287,11 +281,10 @@ def create_thread_lifecycle_router(
     async def threads_active_clear(
         user_id: str,
         req: Request,
-        vantage_id: str = "default",
     ):
         user_id_alias = (user_id or "").strip() or "anon"
         actor_err, owner_user_id = await _require_actor_for_user(
-            req, user_id_alias, vantage_id
+            req, user_id_alias
         )
         if actor_err:
             return actor_err

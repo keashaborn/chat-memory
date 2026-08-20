@@ -103,6 +103,8 @@ class ConversationPersistenceGenericTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((conn.entered, conn.exited), (1, 1))
         sql = "\n".join(query for query, _ in conn.execute_calls)
         self.assertIn("INSERT INTO public.chat_log", sql)
+        self.assertNotIn("vantage_id", sql)
+        self.assertNotIn("'RESSE'", sql)
         self.assertIn("chat_integrity.assistant_transcript_attestation_v1", sql)
         self.assertNotIn("memory.assistant_transcript_attestation_v1", sql)
         self.assertNotIn("memory.final_answer_memory_binding_v1", sql)

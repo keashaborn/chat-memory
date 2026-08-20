@@ -88,7 +88,6 @@ async def persist(
         text="Tell me about my animals.",
         tags=["user", "chat"],
         thread_id=THREAD,
-        vantage_id="default",
         request_id="synthetic-request",
         message_id=SUBMISSION,
         submission_id=SUBMISSION,
@@ -109,6 +108,7 @@ class UserTranscriptPersistenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(conn.transaction_value.rolled_back)
         statements = [query for query, _ in conn.execute_calls]
         self.assertIn(INSERT_USER_TRANSCRIPT_SQL, statements)
+        self.assertNotIn("vantage_id", INSERT_USER_TRANSCRIPT_SQL)
         self.assertIn(TOUCH_USER_TRANSCRIPT_THREAD_SQL, statements)
 
     async def test_missing_thread_is_created_inside_same_transaction(self) -> None:
@@ -238,6 +238,7 @@ class UserTranscriptPersistenceTests(unittest.IsolatedAsyncioTestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn("persist_user_transcript(", route)
+        self.assertNotIn("vantage_id", route)
         self.assertNotIn("conn.fetchrow(", route)
         self.assertNotIn("conn.execute(", route)
         self.assertNotIn("conn.transaction()", route)
