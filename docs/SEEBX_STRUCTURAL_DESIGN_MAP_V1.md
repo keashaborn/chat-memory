@@ -2,7 +2,7 @@
 
 Status: controlling cleanup map; no deployment, migration, or deletion authority
 
-Evidence date: 2026-08-17 America/Chicago (2026-08-18 UTC)
+Evidence date: 2026-08-20 America/Chicago
 
 Production authority: `49f9e60cf4321c8e42c359845c1a62a8c987614d`
 
@@ -53,6 +53,40 @@ Candidate evidence:
   retirement: `c6285574`
 - LifeSwitch response plan, answer binding, and provenance contract placement:
   `6f1272a1`
+
+## Current verified checkpoint
+
+The integration candidate and its GitHub branch are
+`503c2356e885a48a25e398b1b8c0c1e60f23093c`. Since the earlier structural
+inventory it has completed these bounded database/provider separations:
+
+- application OpenAI client ownership: `0ff15dc7`;
+- domain-risk provider ownership: `f560e131`;
+- account-timezone PostgreSQL boundary: `89ad7bd0`;
+- trusted-web monitoring PostgreSQL boundary: `38cac69a`;
+- prior-web provenance PostgreSQL boundary: `bbab7396`;
+- prior-LifeSwitch provenance PostgreSQL boundary: `4d1581ad`;
+- atomic thread creation/selection PostgreSQL boundary: `503c2356`.
+
+At this checkpoint:
+
+- `app.py` is a 144-line composition root with 26 router mounts, zero direct
+  route decorators, and zero SQL;
+- the candidate exposes 143 routes and 129 OpenAPI paths with route SHA-256
+  `c8d1df9cf48611e6c849614a521979b4a6109b0b4ef14f99ae55f4e85915d7d6`
+  and OpenAPI SHA-256
+  `17aaa3a4a18bfe3a3d3671c1fee02654270524d0b5d764cd4c6eea6627429a8f`;
+- all 1,186 sealed-runtime tests pass;
+- `rag_engine` has zero tracked files and zero files on disk;
+- conversation and search capability packages have zero direct SQL query or
+  transaction effects;
+- eleven direct SQL/transaction capability modules remain, confined to
+  catalog, forms, LifeSwitch domain, operations, and observability.
+
+The current conversation gate is Zep lifecycle proof and versioned retirement
+of compatibility vocabulary, not further conversation SQL extraction. The
+seam descriptions below retain progression history; interim next-step phrases
+are superseded by this checkpoint where they conflict.
 
 The current runtime service, timer, container, database, and cron disposition is
 tracked in `docs/SEEBX_RUNTIME_ASSET_LEDGER_V1.md`.
@@ -202,7 +236,7 @@ candidate evidence, never production authority.
 
 | Current seam | Target seam | Cleanup rule |
 |---|---|---|
-| `app.py` composition plus 36 direct routes and SQL | `seebx.main` plus capability routers/services | move one contract-tested route family at a time; keep external behavior stable |
+| 144-line composition-only `app.py` with 26 canonical router mounts | thin packaged application entry point plus capability routers/services | route and SQL extraction is complete; keep the entry point composition-only and defer any module rename until the immutable service command and rollback manifest change together |
 | governed-memory actor types in live auth | `seebx.core.identity` | Batch 02 candidate completed; retain compatibility re-export only for named dormant callers |
 | legacy response router and version-named composition roots in the current 60-module/24,025-line closure | `seebx.capabilities.conversation` | candidate `b56d0e84` moves the mounted router with no legacy wrapper; `5ed33124` moves both composition implementations and tests into the conversation capability as `ConversationResponseComposer`, `LifeSwitchResponseStage`, and `LifeSwitchConversationComposer`; `7f68089f` places generic and LifeSwitch OpenAI chat contracts under explicit adapter owners; `b9069fa7` places pure prompt assembly under the conversation capability; `6f6ef721` places response orchestration there; `f7a5f7e2` places response policy there; `f89319c8` places generic and LifeSwitch finalization there as distinct versioned contracts; `9438dc52` consolidates inspection into one generic module plus one LifeSwitch module; `c6285574` gives usage persistence one adapter owner; `6f1272a1` places the LifeSwitch response plan, answer binding, and provenance receipt under conversation with no wrappers; next split LifeSwitch context decision logic from PostgreSQL and runtime ownership |
 | obsolete LifeSwitch V1 prompt, response-plan, and request generation | none | candidate `7ae253e1` deletes the complete zero-caller generation and its V1-only tests without a compatibility wrapper; retain the immutable historical handoff and explicit anti-reintroduction guards; current LifeSwitch response generation remains V2/V4 |
@@ -319,7 +353,7 @@ Classification rules:
 | 2 | extract actor identity from retired memory package | Batch 02 candidate and tests |
 | 3 | extract response provider/provenance contracts and choose one composition path | no live governed-memory/successor imports; response equivalence tests |
 | 4 | consolidate search, current-news, and trusted-web orchestration | one provider/audit/cache pipeline; frontend contract tests |
-| 5 | split `app.py`, domain services, and SQL adapters | no router SQL; one router/service per capability |
+| 5 | split `app.py`, domain services, and SQL adapters | composition root complete; conversation/search SQL-free; extract the eleven remaining catalog/forms/domain/operations/observability query owners |
 | 6 | create clean platform migrations and decouple chat deletion from the memory outbox | disposable DB parity, cross-owner denial, replay, backup, rollback |
 | 7 | resolve preferences, forms, export, archive, telemetry, and job queue decisions | explicit keep/rebuild/product/retire decisions and tests |
 | 8 | prove zero dependency and archive/delete retired code, schemas, settings, services, volumes, and old snapshots | exact retirement manifests and post-removal verification |
