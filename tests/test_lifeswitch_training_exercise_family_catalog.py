@@ -19,6 +19,9 @@ ROLLBACK = (
     / "20260727_lifeswitch_training_exercise_family_v1_rollback.sql"
 )
 ROUTER = ROOT / "seebx" / "capabilities" / "catalog" / "routes.py"
+ADAPTER = (
+    ROOT / "seebx" / "adapters" / "lifeswitch_catalog_postgres.py"
+)
 
 
 class TrainingExerciseFamilyCatalogContractTest(unittest.TestCase):
@@ -35,6 +38,15 @@ class TrainingExerciseFamilyCatalogContractTest(unittest.TestCase):
         if match is None:
             raise AssertionError("browse_exercises route not found")
         cls.route = match.group(0).lower()
+        search_match = re.search(
+            r'@router\.get\("/exercises/search"\).*?(?=\n@router\.)',
+            router_source,
+            flags=re.DOTALL,
+        )
+        if search_match is None:
+            raise AssertionError("search_exercises route not found")
+        cls.search_route = search_match.group(0).lower()
+        cls.adapter = ADAPTER.read_text(encoding="utf-8").lower()
 
     def test_migration_is_additive_to_existing_training_data(self) -> None:
         self.assertIn(
@@ -78,14 +90,29 @@ class TrainingExerciseFamilyCatalogContractTest(unittest.TestCase):
             self.assertIn(f"('{family_slug}',", self.sql)
 
     def test_browse_route_is_read_only_and_public_catalog_bounded(self) -> None:
-        self.assertIn('f.is_active=true', self.route)
-        self.assertIn('e.is_active=true', self.route)
-        self.assertIn('e.is_public=true', self.route)
+        self.assertIn("lifeswitch_catalog_reader", self.route)
+        self.assertIn("catalog.browse_exercises", self.route)
         self.assertIn('"variants": []', self.route)
         self.assertNotIn("owner_user_id", self.route)
-        self.assertNotIn("insert into", self.route)
-        self.assertNotIn("update ", self.route)
-        self.assertNotIn("delete from", self.route)
+        self.assertNotIn(".fetch(", self.route)
+        for required in (
+            "f.is_active=true",
+            "fm.is_active=true",
+            "e.is_active=true",
+            "e.is_public=true",
+        ):
+            self.assertIn(required, self.adapter)
+        for forbidden in ("insert into", "update ", "delete from"):
+            self.assertNotIn(forbidden, self.route)
+            self.assertNotIn(forbidden, self.adapter)
+
+    def test_search_route_uses_same_isolated_read_boundary(self) -> None:
+        self.assertIn("lifeswitch_catalog_reader", self.search_route)
+        self.assertIn("catalog.search_exercises", self.search_route)
+        self.assertNotIn("postgres_dsn", self.search_route)
+        self.assertNotIn(".fetch(", self.search_route)
+        self.assertIn("catalog_dev.search_exercises", self.adapter)
+        self.assertIn("readonly=true", self.adapter)
 
     def test_rollback_only_removes_new_taxonomy_tables(self) -> None:
         self.assertIn(
