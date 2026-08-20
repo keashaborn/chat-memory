@@ -51,12 +51,19 @@ class IsolatedPostgresV1Tests(unittest.IsolatedAsyncioTestCase):
 
     async def test_connection_binds_authenticated_actor_for_rls(self):
         conn = FakeConnection()
-        with patch.object(
-            lifeswitch_postgres.asyncpg,
-            "connect",
-            AsyncMock(return_value=conn),
+        authenticated_actor = AsyncMock(return_value=OWNER)
+        connect = AsyncMock(return_value=conn)
+        with (
+            patch.object(
+                lifeswitch_postgres,
+                "require_request_actor",
+                authenticated_actor,
+            ),
+            patch.object(lifeswitch_postgres.asyncpg, "connect", connect),
         ):
             actual = await lifeswitch_postgres.connect_lifeswitch(FakeRequest())
+
+        authenticated_actor.assert_awaited_once()
 
         self.assertIs(actual, conn)
         self.assertEqual(len(conn.execute_calls), 1)
@@ -78,6 +85,11 @@ class IsolatedPostgresV1Tests(unittest.IsolatedAsyncioTestCase):
                 },
                 clear=False,
             ),
+            patch.object(
+                lifeswitch_postgres,
+                "require_request_actor",
+                AsyncMock(return_value=OWNER),
+            ),
             patch.object(lifeswitch_postgres.asyncpg, "connect", connect),
         ):
             await lifeswitch_postgres.connect_lifeswitch(FakeRequest())
@@ -87,16 +99,45 @@ class IsolatedPostgresV1Tests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_platform_dsn_is_never_a_lifeswitch_fallback(self):
-        with patch.dict(
-            os.environ,
-            {"POSTGRES_DSN": "postgresql://platform.invalid/memory"},
-            clear=True,
+        with (
+            patch.dict(
+                os.environ,
+                {"POSTGRES_DSN": "postgresql://platform.invalid/memory"},
+                clear=True,
+            ),
+            patch.object(
+                lifeswitch_postgres,
+                "require_request_actor",
+                AsyncMock(return_value=OWNER),
+            ),
         ):
             with self.assertRaisesRegex(
                 RuntimeError,
                 "LIFESWITCH_POSTGRES_DSN missing",
             ):
                 await lifeswitch_postgres.connect_lifeswitch(FakeRequest())
+
+    async def test_identity_failure_never_opens_lifeswitch_postgres(self):
+        identity_error = HTTPException(
+            status_code=401,
+            detail="missing_or_invalid_supabase_bearer",
+        )
+        authenticated_actor = AsyncMock(side_effect=identity_error)
+        connect = AsyncMock()
+        with (
+            patch.object(
+                lifeswitch_postgres,
+                "require_request_actor",
+                authenticated_actor,
+            ),
+            patch.object(lifeswitch_postgres.asyncpg, "connect", connect),
+        ):
+            with self.assertRaises(HTTPException) as raised:
+                await lifeswitch_postgres.connect_lifeswitch(FakeRequest())
+
+        self.assertIs(raised.exception, identity_error)
+        authenticated_actor.assert_awaited_once()
+        connect.assert_not_awaited()
 
     async def test_delegated_reads_are_disabled_without_people_database(self):
         os.environ.pop("LIFESWITCH_DELEGATED_READS_ENABLED", None)

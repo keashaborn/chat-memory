@@ -5,7 +5,7 @@ import os
 import asyncpg
 from fastapi import Request
 
-from seebx.core.ownership import require_authenticated_actor
+from seebx.core.identity import require_request_actor
 
 
 def resolve_lifeswitch_postgres_dsn() -> str:
@@ -18,7 +18,7 @@ def resolve_lifeswitch_postgres_dsn() -> str:
 
 async def connect_lifeswitch(req: Request) -> asyncpg.Connection:
     """Open one owner-bound LifeSwitch connection for the request."""
-    actor = require_authenticated_actor(req)
+    actor = await require_request_actor(req)
     conn = await asyncpg.connect(resolve_lifeswitch_postgres_dsn())
     try:
         # This connection is request-scoped and always closed by the router.
