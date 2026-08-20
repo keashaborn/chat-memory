@@ -71,13 +71,6 @@ class OperationalHealthRouterTests(unittest.TestCase):
                     "chat_history_store": "postgres",
                     "chat_deletion_retains_memory": True,
                     "full_erasure_route": "/memory/chat-and-zep/clear",
-                    "retired_governed_memory": {
-                        "capture": "disabled",
-                        "response_fallback": "disabled",
-                        "lifecycle_commands": "disabled",
-                        "erasure_proxy": "disabled",
-                        "postgres_access": "disabled",
-                    },
                 },
             },
         )

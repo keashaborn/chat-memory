@@ -35,12 +35,12 @@ class ZepRuntimeRetirementContractTests(unittest.TestCase):
         self.assertNotIn('/user/{user_id}/export', source)
         self.assertIn('create_conversation_export_router', source)
 
-    def test_health_declares_zep_without_retired_qdrant_surface(self) -> None:
+    def test_health_declares_only_canonical_memory_surface(self) -> None:
         source = (
             ROOT / "seebx/capabilities/operations/health_routes.py"
         ).read_text()
         self.assertIn('"provider": "zep"', source)
-        self.assertIn('"postgres_access": "disabled"', source)
+        self.assertNotIn('"retired_governed_memory"', source)
         for retired_symbol in (
             "qdrant_client",
             "make_qdrant_client",
