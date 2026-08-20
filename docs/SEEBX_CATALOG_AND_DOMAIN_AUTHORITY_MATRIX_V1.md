@@ -71,7 +71,7 @@ differ and are not included in parity: platform `brains_app` has DML; isolated
 
 ## Catalog route/caller/effect matrix
 
-There are nine mounted backend routes and six Verbal Sage BFF proxies. Current
+There are four mounted backend routes and four Verbal Sage BFF proxies. Current
 product source calls four catalog route families. Fifteen retained Nginx access
 logs contain three successful catalog calls: two USDA guide and one USDA
 barcode request. The retained SeeBx service journal, spanning
@@ -82,13 +82,13 @@ supporting evidence only; mounted source callers control retention decisions.
 |---|---|---|---|
 | `GET /catalog/exercises/search` | platform catalog read | BFF proxy; active Workouts, Exercises, and Training Capture callers | KEEP; isolated catalog read adapter |
 | `GET /catalog/exercises/browse` | platform catalog read | BFF proxy; active Workouts caller | KEEP; isolated catalog read adapter |
-| `GET /catalog/foods/search` | platform catalog read | BFF proxy; no current UI caller or retained hit | UNMOUNT unless a named caller is retained |
-| `GET /catalog/foods/by_barcode` | platform read plus Open Food Facts lookup and catalog upsert | no BFF proxy, repository caller, or retained hit | RETIRE; GET must never mutate; rebuild only as provider query plus explicit curator command |
-| `GET /catalog/foods/usda/search` | USDA provider lookup only | BFF proxy; no current UI caller or retained hit | UNMOUNT unless a named caller is retained |
+| `GET /catalog/foods/search` | platform catalog read | BFF proxy; no current UI caller or retained hit | RETIRED IN CANDIDATE; no named caller was found |
+| `GET /catalog/foods/by_barcode` | platform read plus Open Food Facts lookup and catalog upsert | no BFF proxy, repository caller, or retained hit | RETIRED IN CANDIDATE; mutating GET removed; rebuild only as provider query plus explicit curator command |
+| `GET /catalog/foods/usda/search` | USDA provider lookup only | BFF proxy; no current UI caller or retained hit | RETIRED IN CANDIDATE; no named caller was found |
 | `GET /catalog/foods/usda/barcode` | USDA provider lookup only | BFF proxy; active Foods caller; one retained 200 | KEEP behind USDA adapter |
 | `GET /catalog/foods/usda/guide` | USDA provider lookup/scoring only | BFF proxy; active Foods caller; two retained 200s | KEEP behind USDA adapter |
-| `POST /catalog/foods/usda/import` | USDA lookup plus platform catalog upsert | no BFF proxy, repository caller, or retained hit | UNMOUNT; rebuild only in authenticated curator capability |
-| `POST /catalog/foods/approve` | platform catalog update | no BFF proxy, repository caller, or retained hit | UNMOUNT; rebuild only in authenticated curator capability |
+| `POST /catalog/foods/usda/import` | USDA lookup plus platform catalog upsert | no BFF proxy, repository caller, or retained hit | RETIRED IN CANDIDATE; rebuild only in an authenticated curator capability |
+| `POST /catalog/foods/approve` | platform catalog update | no BFF proxy, repository caller, or retained hit | RETIRED IN CANDIDATE; rebuild only in an authenticated curator capability |
 
 The current platform HTTP boundary exempts every catalog GET from service-token
 verification. Current BFF proxies authenticate LifeSwitch product access but
