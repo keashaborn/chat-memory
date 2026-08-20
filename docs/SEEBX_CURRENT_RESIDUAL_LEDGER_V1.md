@@ -99,9 +99,10 @@ Status: candidate evidence; no deployment or retirement authority
 
 ## Next cleanup order
 
-1. Generate the exact route/query/caller matrix for catalog and the LifeSwitch
-   domain, then declare one canonical catalog and write authority before moving
-   another aggregate.
+1. Apply the catalog/domain decision in
+   `docs/SEEBX_CATALOG_AND_DOMAIN_AUTHORITY_MATRIX_V1.md`: isolated
+   `catalog_dev` is canonical; first separate active catalog reads/providers
+   without changing security policy or production.
 2. Continue candidate-only database-effect extraction one coherent aggregate
    at a time, with focused and full-suite parity.
 3. Prove Zep owner/thread isolation, deletion, export/retention, outage, and
