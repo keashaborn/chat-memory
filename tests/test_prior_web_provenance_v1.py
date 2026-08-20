@@ -4,6 +4,7 @@ import hashlib
 import json
 import unittest
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
@@ -153,6 +154,21 @@ class PriorWebProvenanceV1Tests(unittest.IsolatedAsyncioTestCase):
             "What happened with OpenAI today?",
         ):
             self.assertFalse(prior_web_provenance_requested_v1(message))
+
+    def test_database_authority_and_sql_are_owned_by_adapter(self) -> None:
+        capability = (
+            Path(__file__).resolve().parents[1]
+            / "seebx/capabilities/conversation/prior_web_provenance.py"
+        ).read_text(encoding="utf-8")
+        adapter = (
+            Path(__file__).resolve().parents[1]
+            / "seebx/adapters/prior_web_provenance_postgres.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("conn.fetch(", capability)
+        self.assertNotIn("response_transcript_v1", capability)
+        self.assertIn("PostgresPriorWebProvenanceRepository", capability)
+        self.assertIn("response_transcript_v1", adapter)
+        self.assertIn("readonly=True", adapter)
 
     async def test_unrelated_question_performs_no_database_work(self) -> None:
         conn = ProvenanceConn([row()])

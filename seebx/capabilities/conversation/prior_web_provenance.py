@@ -13,6 +13,11 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from seebx.adapters.prior_web_provenance_postgres import (
+    PostgresPriorWebProvenanceRepository,
+    PriorWebProvenanceRepositoryError,
+)
+
 from seebx.capabilities.conversation.snapshot import (
     ConversationSnapshotOutcome,
     ConversationSnapshotV1,
@@ -442,69 +447,18 @@ async def load_prior_web_provenance_v1(
     if snapshot.cutoff_created_at is None or snapshot.current_log_id is None:
         return None
 
+    repository = PostgresPriorWebProvenanceRepository(conn)
     try:
-        async with conn.transaction(isolation="repeatable_read", readonly=True):
-            await conn.execute(
-                "SELECT set_config('app.user_id',$1,true)",
-                str(authenticated_actor_user_id),
-            )
-            role = str(await conn.fetchval("SELECT current_user"))
-            read_only = str(
-                await conn.fetchval(
-                    "SELECT current_setting('transaction_read_only')"
-                )
-            )
-            if role != "brains_app" or read_only != "on":
-                raise PriorWebProvenanceError(
-                    "provenance requires brains_app in a read-only transaction"
-                )
-            owns_thread = bool(
-                await conn.fetchval(
-                    """
-                    SELECT EXISTS(
-                      SELECT 1 FROM public.threads
-                      WHERE owner_user_id=$1 AND id=$2
-                    )
-                    """,
-                    authenticated_actor_user_id,
-                    snapshot.thread_id,
-                )
-            )
-            if not owns_thread:
-                raise PriorWebProvenanceError("owner thread is absent")
-            rows = list(
-                await conn.fetch(
-                    """
-                    SELECT log.id AS log_id,log.owner_user_id,log.thread_id,
-                           log.text AS assistant_text,log.created_at,
-                           web.response_id,web.assistant_chat_log_id,
-                           web.search_id,web.route,web.policy_version,web.decision,
-                           web.answer_sha256,web.cited_sources,web.admitted_sources
-                    FROM public.chat_log AS log
-                    JOIN trusted_web.response_transcript_v1 AS web
-                      ON web.owner_user_id=log.owner_user_id
-                     AND web.thread_id=log.thread_id
-                     AND web.assistant_chat_log_id=log.id
-                     AND web.response_id=log.id
-                    WHERE log.owner_user_id=$1
-                      AND log.thread_id=$2
-                      AND log.source=$3
-                      AND (log.created_at,log.id)<($4,$5)
-                    ORDER BY log.created_at DESC,log.id DESC
-                    LIMIT $6
-                    """,
-                    authenticated_actor_user_id,
-                    snapshot.thread_id,
-                    WEB_ASSISTANT_SOURCE,
-                    snapshot.cutoff_created_at,
-                    snapshot.current_log_id,
-                    MAX_PROVENANCE_CANDIDATES,
-                )
-            )
-    except PriorWebProvenanceError:
-        raise
-    except Exception:
-        raise PriorWebProvenanceError("prior web provenance read failed") from None
+        rows = await repository.load_candidates(
+            authenticated_actor_user_id=authenticated_actor_user_id,
+            thread_id=snapshot.thread_id,
+            assistant_source=WEB_ASSISTANT_SOURCE,
+            cutoff_created_at=snapshot.cutoff_created_at,
+            current_log_id=snapshot.current_log_id,
+            limit=MAX_PROVENANCE_CANDIDATES,
+        )
+    except PriorWebProvenanceRepositoryError as error:
+        raise PriorWebProvenanceError(str(error)) from None
 
     selected: list[PriorWebResponseV1] = []
     for raw in rows:
