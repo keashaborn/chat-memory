@@ -103,6 +103,19 @@ class TrustedWebMonitoringV1Tests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("make_interval", sql)
         self.assertEqual(args, (24,))
 
+    def test_database_query_is_owned_by_postgres_adapter(self) -> None:
+        capability = (
+            ROOT / "seebx/capabilities/search/monitoring.py"
+        ).read_text(encoding="utf-8")
+        adapter = (
+            ROOT / "seebx/adapters/trusted_web_monitoring_postgres.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("conn.fetch(", capability)
+        self.assertNotIn("retrieval_monitor_hourly_v1", capability)
+        self.assertIn("PostgresTrustedWebMonitoringRepository", capability)
+        self.assertIn("retrieval_monitor_hourly_v1", adapter)
+        self.assertIn("make_interval", adapter)
+
     async def test_monitor_window_is_bounded(self) -> None:
         conn = FakeConnection([])
         for invalid in (0, -1, 745):

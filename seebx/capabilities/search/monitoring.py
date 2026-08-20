@@ -6,6 +6,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from seebx.adapters.trusted_web_monitoring_postgres import (
+    PostgresTrustedWebMonitoringRepository,
+)
+
 
 MIN_MONITOR_HOURS = 1
 MAX_MONITOR_HOURS = 24 * 31
@@ -170,29 +174,8 @@ async def load_trusted_web_monitoring_summary_v1(
     hours: int = 24,
 ) -> TrustedWebMonitoringSummaryV1:
     bounded_hours = _bounded_hours(hours)
-    rows = await conn.fetch(
-        """
-        SELECT
-            bucket_start,
-            topic,
-            policy_version,
-            request_count,
-            completed_count,
-            failed_count,
-            blocked_count,
-            fail_closed_count,
-            relevance_fail_closed_count,
-            no_result_fail_closed_count,
-            dependency_failure_count
-        FROM trusted_web.retrieval_monitor_hourly_v1
-        WHERE bucket_start >= (
-            date_trunc('hour', now())
-            - make_interval(hours => GREATEST($1 - 1, 0))
-        )
-        ORDER BY bucket_start DESC, topic, policy_version
-        """,
-        bounded_hours,
-    )
+    repository = PostgresTrustedWebMonitoringRepository(conn)
+    rows = await repository.load_buckets(hours=bounded_hours)
     buckets = tuple(TrustedWebMonitorBucketV1.from_row(row) for row in rows)
 
     def total(field: str) -> int:
