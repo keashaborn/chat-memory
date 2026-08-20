@@ -39,7 +39,7 @@ as exact counts. They are inventory evidence, not deletion authority.
 | `memory_ingest_private` | 7 | 1,167 | 0 |
 | `public` | 15 | 3,159 | 0 |
 | `trusted_web` | 4 | 307 | 1 |
-| `user_settings` | 2 | 0 | 0 |
+| `user_settings` | 2 | 20 exact rows | 0 |
 | `vantage_card` | 4 | 1,438 | 0 |
 | `vantage_fact` | 7 | 3,005 | 0 |
 | `vantage_identity` | 2 | 0 | 0 |
@@ -52,7 +52,9 @@ Exact bounded counts verified during the audit:
 - `public.threads`: 49 rows;
 - `public.chat_attachments`: 0 rows;
 - `memory_ingest_private.memory_ingest_outbox`: 2 rows;
-- nonterminal `memory_ingest_outbox` rows: 0.
+- nonterminal `memory_ingest_outbox` rows: 0;
+- `user_settings.assistant_response_preference_v1`: 1 row;
+- `user_settings.assistant_response_preference_compilation_candidate_v1`: 19 rows.
 
 The high `vantage_initiator` estimate is historical-data evidence, not evidence
 of live processing. No Vantage service or live Python root was found.
@@ -88,8 +90,10 @@ The live graph directly references these older-database areas:
 - `lifeswitch_usage`: actor registry and usage events;
 - `ai_operations`: incident monitoring;
 - `catalog_dev`: the standalone catalog router;
-- `user_settings`: only through an unmounted preferences router, not a mounted
-  live route.
+- `user_settings`: production still has an unmounted preferences router and
+  exactly twenty retained rows; the cleanup candidate restores the authenticated
+  owner-scoped route and direct PostgreSQL adapter, but remains undeployed and
+  does not yet project preferences into response composition.
 
 The live graph directly references these isolated LifeSwitch areas:
 

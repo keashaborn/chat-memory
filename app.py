@@ -23,6 +23,9 @@ from seebx.capabilities.plans.routes import router as lifeswitch_plan_router
 from seebx.capabilities.preferences.timezone import (
     router as lifeswitch_account_timezone_router_v1,
 )
+from seebx.capabilities.preferences.assistant_routes import (
+    create_assistant_preferences_router,
+)
 from seebx.capabilities.catalog.routes import router as catalog_router
 from seebx.capabilities.forms.routes import (
     forms_enabled,
@@ -101,6 +104,7 @@ app.include_router(voice_session_router)
 
 DSN = os.environ["POSTGRES_DSN"]
 POSTGRES = PostgresConnectionProvider(DSN)
+app.include_router(create_assistant_preferences_router(POSTGRES))
 app.include_router(create_ai_operations_router(DSN))
 app.include_router(
     create_operational_health_router(

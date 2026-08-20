@@ -98,8 +98,8 @@ Source commit: `49f9e60cf4321c8e42c359845c1a62a8c987614d`
 
 | Component | Verified current state | Target owner | Disposition | Gate |
 |---|---|---|---|---|
-| Assistant response preferences | Backend router is owner-aware but unmounted; frontend calls it | preferences capability | RESTORE through refactor or RETIRE | Determine intended product behavior; do not remount implicitly |
-| `user_settings` schema | Two empty tables in old database | platform preferences | MIGRATE/REBUILD if retained | Current authenticated API and schema contract |
+| Assistant response preferences | Frontend has four authenticated BFF calls; production backend is unmounted; the cleanup candidate rebuilds the exact surface under `seebx.capabilities.preferences` with independent Supabase verification, generic non-reflective validation errors, no-store responses, direct owner-scoped PostgreSQL, revision checks, typed compilation, and explicit approval | preferences capability | RETAIN; CANONICAL CAPABILITY REBUILT IN CANDIDATE; PRODUCTION MOVE PENDING | Disposable schema/RLS/row-preservation proof, paired authenticated frontend verification, and separate lower-authority prompt-consumption review |
+| `user_settings` schema | Two forced-RLS tables contain exactly one preference row and nineteen compilation candidate rows; they are separate from governed memory | platform preferences | RETAIN + MIGRATE INTACT | Use the squashed clean-install baseline; preserve all twenty rows; never expose through the Supabase Data API |
 | Forms capability | Candidate rebuild uses `seebx.capabilities.forms`, independently verified Supabase/voice identity, the isolated LifeSwitch adapter, forced-RLS `lifeswitch_forms` tables, composite owner foreign keys, and a default-off feature flag; the insecure unmounted legacy router remains absent | forms capability | REBUILT; PAIRED FRONTEND AUTH FORWARDING AND PRODUCTION MOVE PENDING | Apply and verify schema, migrate only valid UUID-owned legacy rows, quarantine invalid-owner rows, forward the original bearer through the authenticated BFF, then separately approve activation |
 | Frontend forms surfaces | Six authenticated BFF routes and active Forms Builder, Capture, and SSLG callers retain the existing wire contract | forms capability | KEEP | Enable only after owner-bound data migration and authenticated end-to-end verification |
 | Telemetry router | Live and large/custom | observability capability | CONSOLIDATE behind OpenTelemetry contract | Define redacted trace/request/job correlation; select storage/alert backend separately |
@@ -138,7 +138,7 @@ Source commit: `49f9e60cf4321c8e42c359845c1a62a8c987614d`
 | old `lifeswitch_usage` | live forced-RLS usage ledger; candidate `c6285574` gives its writer one adapter owner and retires disconnected reporting code | MIGRATE, likely rename platform usage |
 | old `ai_operations` | live admin code; no estimated rows | DECIDE/possibly migrate |
 | old `catalog_dev` | live catalog router; duplicate of isolated catalog | CONSOLIDATE into isolated catalog |
-| old `user_settings` | router unmounted; empty | REBUILD/MIGRATE only if preferences retained |
+| old `user_settings` | production router unmounted; exactly 1 preference row plus 19 compilation candidates; canonical candidate rebuilt | MIGRATE INTACT into the clean platform database after disposable parity proof |
 | old `memory_ingest_private` | seven tables; two terminal outbox rows; candidate `c840afed` removes all external routine and trigger dependencies | FINAL BACKUP/RESTORE, then retire with exact fail-closed package |
 | old `memory` | 160 ordinary tables; no candidate runtime SQL reference; exact clone retirement preserves every retained schema byte | FINAL BACKUP/RESTORE, then retire with exact fail-closed package |
 | five old Vantage schemas | removed from production after exact dump, temporary restore, count verification, and manifest receipt | RETIRED WITH RECOVERY EVIDENCE |

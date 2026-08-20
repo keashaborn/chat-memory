@@ -109,7 +109,7 @@ which have now been retired separately with verified dumps.
 | `public`, `chat_history_private`, `chat_integrity`, `trusted_web`, `lifeswitch_usage` | MIGRATE/RENAME AS DECLARED | Row, function, ACL/RLS, trigger, and application parity |
 | old `catalog_dev` | CONSOLIDATE | Move remaining callers to the isolated LifeSwitch catalog; one writable catalog afterward |
 | `ai_operations` | DECIDE | Keep only if a named admin/alert consumer remains |
-| `user_settings` | REBUILD OR RETIRE | Current API is unmounted and tables are empty |
+| `user_settings` | RETAIN + MIGRATE INTACT; exactly 1 preference row and 19 compilation candidates | Canonical capability is rebuilt in the cleanup candidate; prove the squashed baseline, forced RLS, cross-owner denial, and exact row preservation in a disposable database before deployment |
 | `memory_ingest_private` | DECOUPLE THEN RETIRE | Remove deletion-function dependency and preserve terminal receipt evidence |
 | `memory` schema and Vantage schemas | ARCHIVE THEN RETIRE | Zero Python, SQL-function, timer, cron, frontend, and recovery dependency |
 | `memory_extraction_v2_20260714_test` | RETIRED; verified dump retained under `/var/backups/chat-memory/database-retirements/20260819T051346Z_memory_extraction_v2_20260714_test` | Keep recovery evidence until superseded by retention policy |
