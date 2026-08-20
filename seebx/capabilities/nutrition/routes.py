@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import os
-import asyncio
 import uuid
 import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Request
 from seebx.core.ownership import require_actor_matches_owner
 from seebx.adapters.lifeswitch_postgres import connect_lifeswitch
+from seebx.adapters.usda_fdc import (
+    UsdaFdcError,
+    nutrient_summary as usda_nutrient_summary,
+    usda_fdc_client,
+)
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 import decimal
@@ -212,26 +216,11 @@ async def create_my_food_from_usda(
 ):
     owner = require_actor_matches_owner(req, owner_user_id)
 
-    api_key = os.getenv("USDA_API_KEY")
-    if not api_key:
-        raise HTTPException(status_code=500, detail="USDA_API_KEY not configured on server")
+    try:
+        j = await usda_fdc_client().detail(fdc_id)
+    except UsdaFdcError as error:
+        raise HTTPException(status_code=error.status_code, detail=error.detail) from error
 
-    import requests
-
-    def _do():
-        return requests.get(
-            f"https://api.nal.usda.gov/fdc/v1/food/{int(fdc_id)}",
-            params={"api_key": api_key},
-            timeout=(2, 30),
-        )
-
-    r = await asyncio.to_thread(_do)
-    if r.status_code == 404:
-        raise HTTPException(status_code=404, detail="fdc_id not found")
-    if r.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"usda_fdc HTTP {r.status_code}")
-
-    j = r.json() if r.content else {}
     desc = (j or {}).get("description") or f"FDC {fdc_id}"
     brand_owner = (j or {}).get("brandOwner") or (j or {}).get("brandName")
     gtin = (j or {}).get("gtinUpc")
@@ -240,26 +229,14 @@ async def create_my_food_from_usda(
     # Keep macros normalized per 100g, but create a user-facing serving row when possible.
     household_serving = str((j or {}).get("householdServingFullText") or "").strip()
 
-    nutr = (j or {}).get("foodNutrients") or []
-
-    def _nutr_amount(nutrient_number: str):
-        for n in nutr:
-            nn = ((n.get("nutrient") or {}).get("number") or "")
-            if str(nn) == str(nutrient_number):
-                v = n.get("amount")
-                try:
-                    return float(v) if v is not None else None
-                except Exception:
-                    return None
-        return None
-
-    kcal = _nutr_amount("208")
-    protein = _nutr_amount("203")
-    carbs = _nutr_amount("205")
-    fat = _nutr_amount("204")
-    fiber = _nutr_amount("291")
-    sugar = _nutr_amount("269")
-    sodium_mg = _nutr_amount("307")
+    nutrients = usda_nutrient_summary(j or {})
+    kcal = nutrients["kcal"]
+    protein = nutrients["protein_g"]
+    carbs = nutrients["carbs_g"]
+    fat = nutrients["fat_g"]
+    fiber = nutrients["fiber_g"]
+    sugar = nutrients["sugar_g"]
+    sodium_mg = nutrients["sodium_mg"]
     grams = _infer_usda_serving_grams(
         j or {},
         {
