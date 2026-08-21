@@ -56,33 +56,26 @@ Candidate evidence:
 
 ## Current verified checkpoint
 
-The integration candidate and its GitHub branch are
-`503c2356e885a48a25e398b1b8c0c1e60f23093c`. Since the earlier structural
-inventory it has completed these bounded database/provider separations:
-
-- application OpenAI client ownership: `0ff15dc7`;
-- domain-risk provider ownership: `f560e131`;
-- account-timezone PostgreSQL boundary: `89ad7bd0`;
-- trusted-web monitoring PostgreSQL boundary: `38cac69a`;
-- prior-web provenance PostgreSQL boundary: `bbab7396`;
-- prior-LifeSwitch provenance PostgreSQL boundary: `4d1581ad`;
-- atomic thread creation/selection PostgreSQL boundary: `503c2356`.
+The integration candidate and its GitHub branch begin this batch at
+`3b79f53e756e8f7e1e2578c4c48a06f7b5d7c3c2`. Since the earlier structural
+inventory it has also completed the Catalog, Forms, Measurements, and AI
+Operations PostgreSQL adapter separations.
 
 At this checkpoint:
 
-- `app.py` is a 144-line composition root with 26 router mounts, zero direct
+- `app.py` is a 152-line composition root with 26 router mounts, zero direct
   route decorators, and zero SQL;
-- the candidate exposes 143 routes and 129 OpenAPI paths with route SHA-256
-  `c8d1df9cf48611e6c849614a521979b4a6109b0b4ef14f99ae55f4e85915d7d6`
+- the candidate exposes 138 routes and 124 OpenAPI paths with route SHA-256
+  `dacb3665272ec6720fb477340c9d84d977a6af55fae4f061972526eabe10353d`
   and OpenAPI SHA-256
-  `17aaa3a4a18bfe3a3d3671c1fee02654270524d0b5d764cd4c6eea6627429a8f`;
-- all 1,224 locked-runtime tests pass after the Measurements adapter extraction;
+  `44e8aa5f364f85aef4d4fb4fa2596af4ab3eb219a2a82e21d54fbd2768c71091`;
+- all 1,227 locked-runtime tests pass after the AI Operations adapter extraction;
 - `rag_engine` has zero tracked files and zero files on disk;
-- conversation and search capability packages have zero direct SQL query or
-  transaction effects;
-- eight direct SQL/transaction capability modules remain, confined to
-  LifeSwitch domain, operations, and observability; catalog, Forms, and
-  Measurements are now behind named adapters.
+- conversation, search, and AI Operations capability packages have zero direct
+  SQL query or transaction effects;
+- seven direct SQL/transaction capability modules remain, confined to the
+  LifeSwitch domain and observability; Catalog, Forms, Measurements, and AI
+  Operations are behind named adapters.
 
 The current conversation gate is Zep lifecycle proof and versioned retirement
 of compatibility vocabulary, not further conversation SQL extraction. The
@@ -267,7 +260,7 @@ not define a second architecture.
 | Search and current information | `capabilities.search` | canonical package owns routing, planning, authorization, registry, policy, provider, evidence, admission, NCBI, and ODS contracts; candidate `bed831f5` moves the hashed `SearchCapabilityManifestV1` wire contract to `seebx.contracts.search` without changing its bytes; `7ffb6b82` gives audit connections, rate limiting, and metadata-only audit writes to `seebx.adapters.search_audit`; `b2b6311f` gives persisted-search connection ownership to `seebx.adapters.search_transcript` and the active/unexpired ODS cache query to `seebx.adapters.search_cache`; shared language, OpenAI SDK, conversation persistence, request identity, and voice-session boundaries use their canonical owners | platform PostgreSQL search audit/cache | `seebx.adapters.openai` | CANONICALIZED; ALL SEARCH DATABASE EFFECTS EXTRACTED; PRODUCTION MOVE PENDING | prove disposable-database parity, authenticated frontend behavior, ODS refresh/read continuity, and stored audit/transcript evidence before deployment |
 | Voice | `capabilities.voice` with transcription, realtime, synthesis, and lease sub-capabilities | candidate `381704fb` separates session HTTP contract, core authority, and PostgreSQL adapter; shared language is in `seebx.contracts.voice_language`; candidate `92adf9e3` places shared request correlation in `seebx.core.voice_observability` and provider-free realtime state in `seebx.capabilities.voice.realtime_session`; candidates `f3889883` and `03a4657f` mount transcription and synthesis from `seebx.capabilities.voice` with OpenAI effects in adapters; candidate `c9a552df` mounts preview HTTP and isolates negotiation/config; candidate `64cd487e` gives the sideband controller a canonical capability owner and isolates OpenAI WebSocket setup; candidate `fd360921` gives the loopback URL, client lifetime, timeout policy, exact `/search/execute`, `/log`, and `/response/query` paths, and HTTP failure translation one named owner in `seebx.adapters.voice_governed_turns`. The realtime capability has no direct network effects, while owner/lease authority, cursor/order semantics, payload construction, persistence validation, and public failure mapping remain capability-owned | platform PostgreSQL session/lease/audit state | OpenAI speech/realtime behind voice adapters | KEEP + CONSOLIDATE; PROVIDER EFFECTS SEPARATED; GOVERNED LOOPBACK CONTAINED; DIRECT-SERVICE DECISION PENDING; PRODUCTION MOVE PENDING | decide whether to retain the contained same-process transport or replace it with direct capability/service calls; then run bounded canary plus authenticated owner/lease, timeout, cancellation, ordering, persistence, and failure tests before production movement |
 | Preferences, export, and forms | separate reusable capabilities | Forms keeps six default-off owner-bound HTTP contracts and moves all 15 SQL/transaction effects into `adapters.lifeswitch_forms_postgres`; preferences remain unmounted and export response remains retired | isolated LifeSwitch PostgreSQL for Forms; no production Forms schema exists | custom Forms candidate **RETAIN BEHIND ADAPTER**; preferences/export remain separate decisions | FORMS DATABASE EFFECTS SEPARATED IN CANDIDATE; ACTIVATION PROHIBITED | disposable migration/rollback, exact valid/quarantine reconciliation, cross-owner denial, paired frontend bearer forwarding, and explicit activation approval |
-| LifeSwitch domain | `capabilities.nutrition`, `training`, `measurements`, `plans` | Measurements retains three owner-bound routes but moves all four SQL effects, People-permission lookup, validated schema identifier, and connection lifetime into `adapters.lifeswitch_measurements_postgres`; nutrition, training, and plans still contain direct effects | isolated LifeSwitch PostgreSQL | no external product selected; Supabase remains an infrastructure option | KEEP + SPLIT; MEASUREMENTS EFFECTS SEPARATED IN CANDIDATE | preserve the isolated database and route contracts; extract nutrition, training, and plans one coherent aggregate at a time; prove owner and delegated-access behavior before production movement |
+| LifeSwitch domain | `capabilities.nutrition`, `training`, `measurements`, `plans` | Measurements retains three owner-bound routes but moves all four SQL effects, People-permission lookup, validated schema identifier, and connection lifetime into `adapters.lifeswitch_measurements_postgres`; nutrition, training, and plans still contain direct effects. Plan calorie and macro targets are a required input to Nutrition Log target comparison and daily color state; the currently reported loss of that projection is a defect gate, not retirement authority | isolated LifeSwitch PostgreSQL | no external product selected; Supabase remains an infrastructure option | KEEP + SPLIT; MEASUREMENTS EFFECTS SEPARATED IN CANDIDATE; PLAN-TO-NUTRITION CONTRACT REQUIRES REPAIR PROOF | trace and restore the Plan-to-Nutrition projection without restoring retired page-level AI helpers; preserve the isolated database and route contracts; extract nutrition, training, and plans one coherent aggregate at a time; prove owner and delegated-access behavior before production movement |
 | Archive and documents | `capabilities.archive` | planned separately from chat memory | object storage original bytes plus platform PostgreSQL metadata | existing archive platform **EVALUATE** | DECIDE | freeze ingestion, OCR, mapping, retention, export, deletion, and owner-isolation requirements before selecting a product |
 | Work jobs | `capabilities.work` control plane; external Work Runner execution plane | isolated runner exists; cleaned SeeBx intake is not connected | SeeBx job/approval records; signed runner receipts and ephemeral workspaces | rootless Podman **KEEP**; PostgreSQL queue **PILOT**; Temporal **DEFER** | BUILD AFTER CLEANUP | immutable job/receipt contracts, idempotency and failure tests, no production credentials, and explicit promotion authority |
 | Observability and operations | telemetry interface plus operations capability | custom telemetry/admin routes, timers, incident tables | telemetry backend is evidence, never authorization or canonical product data | OpenTelemetry contract **ADOPT**; storage/alert backend **DECIDE** | CONSOLIDATE | define redaction and trace/request/job correlation, then prove every retained timer and alert has an owner and consumer |
@@ -354,7 +347,7 @@ Classification rules:
 | 2 | extract actor identity from retired memory package | Batch 02 candidate and tests |
 | 3 | extract response provider/provenance contracts and choose one composition path | no live governed-memory/successor imports; response equivalence tests |
 | 4 | consolidate search, current-news, and trusted-web orchestration | one provider/audit/cache pipeline; frontend contract tests |
-| 5 | split `app.py`, domain services, and SQL adapters | composition root complete; conversation/search/catalog/Forms/Measurements SQL-free; extract the eight remaining domain/operations/observability query owners |
+| 5 | split `app.py`, domain services, and SQL adapters | composition root complete; conversation/search/catalog/Forms/Measurements/AI Operations SQL-free; extract the seven remaining domain/observability query owners and prove the Plan-to-Nutrition contract before changing either aggregate |
 | 6 | create clean platform migrations and decouple chat deletion from the memory outbox | disposable DB parity, cross-owner denial, replay, backup, rollback |
 | 7 | resolve preferences, forms, export, archive, telemetry, and job queue decisions | explicit keep/rebuild/product/retire decisions and tests |
 | 8 | prove zero dependency and archive/delete retired code, schemas, settings, services, volumes, and old snapshots | exact retirement manifests and post-removal verification |

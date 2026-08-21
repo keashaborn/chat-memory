@@ -65,6 +65,34 @@ class PostgresConnectionProviderTests(unittest.IsolatedAsyncioTestCase):
 
         value.close.assert_awaited_once_with()
 
+    async def test_connection_options_are_copied_and_forwarded(self) -> None:
+        value = connection()
+        connect = AsyncMock(return_value=value)
+        options = {"command_timeout": 10, "timeout": 5}
+        provider = PostgresConnectionProvider(
+            DSN,
+            connect_factory=connect,
+            connect_kwargs=options,
+        )
+        options["timeout"] = 99
+
+        async with provider.connection() as active:
+            self.assertIs(active, value)
+
+        connect.assert_awaited_once_with(
+            DSN,
+            command_timeout=10,
+            timeout=5,
+        )
+        value.close.assert_awaited_once_with()
+
+    def test_connection_option_keys_fail_closed(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError,
+            "connect_kwargs keys must be non-empty strings",
+        ):
+            PostgresConnectionProvider(DSN, connect_kwargs={"": 5})
+
     async def test_readiness_uses_shared_lifetime_boundary(self) -> None:
         value = connection(readiness=1)
         provider = PostgresConnectionProvider(

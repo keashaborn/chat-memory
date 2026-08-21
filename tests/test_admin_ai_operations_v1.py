@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -9,6 +10,15 @@ from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from seebx.adapters.ai_operations_postgres import (
+    ACKNOWLEDGE_INCIDENT_SQL,
+    LIST_INCIDENTS_SQL,
+    RESOLVE_INCIDENT_SQL,
+    SET_ACTOR_SQL,
+    SET_CAPABILITY_SQL,
+    PostgresAiOperationsRepository,
+)
+from seebx.adapters.postgres import PostgresConnectionProvider
 from seebx.capabilities.operations.ai_operations import (
     AiOperationsError,
     acknowledge_admin_ai_operations_incident_v1,
@@ -22,9 +32,12 @@ from seebx.capabilities.operations.ai_operations_routes import (
 
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "app.py"
+CAPABILITY = ROOT / "seebx/capabilities/operations/ai_operations.py"
+ADAPTER = ROOT / "seebx/adapters/ai_operations_postgres.py"
 ROUTES = ROOT / "seebx/capabilities/operations/ai_operations_routes.py"
 ACTOR = str(uuid4())
 INCIDENT = str(uuid4())
+DSN = "postgresql://private"
 
 
 def incident(**overrides):
@@ -86,15 +99,25 @@ class FakeConnection:
         self.closed = True
 
 
-def connector(result):
-    conn = FakeConnection(result)
+def repository(result):
+    connection = FakeConnection(result)
 
     async def connect(_dsn, **kwargs):
         if kwargs != {"command_timeout": 10, "timeout": 5}:
             raise AssertionError("unexpected connection bounds")
-        return conn
+        return connection
 
-    return connect, conn
+    provider = PostgresConnectionProvider(
+        DSN,
+        connect_factory=connect,
+        connect_kwargs={"command_timeout": 10, "timeout": 5},
+    )
+    return PostgresAiOperationsRepository(provider), connection
+
+
+class UnexpectedRepository:
+    def __getattr__(self, _name):
+        raise AssertionError("repository should not be reached")
 
 
 class FakePostgresError(RuntimeError):
@@ -105,53 +128,46 @@ class FakePostgresError(RuntimeError):
 
 class AdminAiOperationsV1Tests(unittest.IsolatedAsyncioTestCase):
     async def test_list_is_actor_and_inspector_bound(self):
-        connect, conn = connector(
+        store, connection = repository(
             {
                 "contract_version": "ai_operations_monitor_inbox_v1",
                 "items": [incident()],
             }
         )
         payload = await list_admin_ai_operations_incidents_v1(
-            dsn="postgresql://private",
+            repository=store,
             actor_user_id=ACTOR,
             state="open",
             limit=25,
-            connect=connect,
         )
 
         self.assertEqual(payload["schema"], "admin_ai_operations_incidents_v1")
         self.assertEqual(len(payload["items"]), 1)
         self.assertEqual(
-            conn.execute_calls,
+            connection.execute_calls,
             [
-                (
-                    "SELECT set_config('app.user_id',$1,true)",
-                    (ACTOR,),
-                ),
-                (
-                    "SELECT set_config('app.ai_operations_capability',$1,true)",
-                    ("inspector.view",),
-                ),
+                (SET_ACTOR_SQL, (ACTOR,)),
+                (SET_CAPABILITY_SQL, ("inspector.view",)),
             ],
         )
-        self.assertIn("list_monitor_incidents_v1", conn.fetchval_calls[0][0])
-        self.assertEqual(conn.fetchval_calls[0][1], ("open", 25))
-        self.assertTrue(conn.closed)
+        self.assertEqual(connection.fetchval_calls[0][0], LIST_INCIDENTS_SQL)
+        self.assertEqual(connection.fetchval_calls[0][1], ("open", 25))
+        self.assertTrue(connection.closed)
 
     async def test_mutations_bind_actor_and_manager_capability(self):
-        for action, call, function_name in (
+        for action, call, sql in (
             (
                 "acknowledged",
                 acknowledge_admin_ai_operations_incident_v1,
-                "acknowledge_monitor_incident_v1",
+                ACKNOWLEDGE_INCIDENT_SQL,
             ),
             (
                 "resolved",
                 resolve_admin_ai_operations_incident_v1,
-                "resolve_monitor_incident_v1",
+                RESOLVE_INCIDENT_SQL,
             ),
         ):
-            connect, conn = connector(
+            store, connection = repository(
                 {
                     "contract_version": "ai_operations_monitor_mutation_v1",
                     "action": action,
@@ -160,24 +176,24 @@ class AdminAiOperationsV1Tests(unittest.IsolatedAsyncioTestCase):
                 }
             )
             payload = await call(
-                dsn="postgresql://private",
+                repository=store,
                 actor_user_id=ACTOR,
                 incident_id=INCIDENT,
-                connect=connect,
             )
             self.assertEqual(payload["action"], action)
             self.assertEqual(
-                conn.execute_calls[1][1],
-                ("incident.manage",),
+                connection.execute_calls[1],
+                (SET_CAPABILITY_SQL, ("incident.manage",)),
             )
-            self.assertIn(function_name, conn.fetchval_calls[0][0])
-            self.assertEqual(conn.fetchval_calls[0][1], (INCIDENT, ACTOR))
-            self.assertTrue(conn.closed)
+            self.assertEqual(connection.fetchval_calls[0][0], sql)
+            self.assertEqual(
+                connection.fetchval_calls[0][1],
+                (INCIDENT, ACTOR),
+            )
+            self.assertTrue(connection.closed)
 
-    async def test_inputs_are_bounded_before_connect(self):
-        async def unexpected_connect(*_args, **_kwargs):
-            raise AssertionError("database should not be reached")
-
+    async def test_inputs_are_bounded_before_repository_access(self):
+        unavailable = UnexpectedRepository()
         for kwargs in (
             {"state": "all", "limit": 50},
             {"state": None, "limit": 0},
@@ -185,17 +201,15 @@ class AdminAiOperationsV1Tests(unittest.IsolatedAsyncioTestCase):
         ):
             with self.assertRaises(ValueError):
                 await list_admin_ai_operations_incidents_v1(
-                    dsn="postgresql://private",
+                    repository=unavailable,
                     actor_user_id=ACTOR,
-                    connect=unexpected_connect,
                     **kwargs,
                 )
         with self.assertRaises(ValueError):
             await acknowledge_admin_ai_operations_incident_v1(
-                dsn="postgresql://private",
+                repository=unavailable,
                 actor_user_id=ACTOR,
                 incident_id="not-a-uuid",
-                connect=unexpected_connect,
             )
 
     async def test_database_errors_are_safely_mapped(self):
@@ -204,20 +218,19 @@ class AdminAiOperationsV1Tests(unittest.IsolatedAsyncioTestCase):
             ("22023", "invalid_incident_transition", 409),
             ("XX000", "ai_operations_unavailable", 500),
         ):
-            connect, conn = connector(FakePostgresError(sqlstate))
+            store, connection = repository(FakePostgresError(sqlstate))
             with self.assertRaises(AiOperationsError) as ctx:
                 await acknowledge_admin_ai_operations_incident_v1(
-                    dsn="postgresql://private",
+                    repository=store,
                     actor_user_id=ACTOR,
                     incident_id=INCIDENT,
-                    connect=connect,
                 )
             self.assertEqual(ctx.exception.code, code)
             self.assertEqual(ctx.exception.status_code, status)
-            self.assertTrue(conn.closed)
+            self.assertTrue(connection.closed)
 
     async def test_unexpected_metadata_is_rejected(self):
-        connect, _conn = connector(
+        store, _connection = repository(
             {
                 "contract_version": "ai_operations_monitor_inbox_v1",
                 "items": [incident(source_url="https://example.invalid")],
@@ -225,13 +238,12 @@ class AdminAiOperationsV1Tests(unittest.IsolatedAsyncioTestCase):
         )
         with self.assertRaises(AiOperationsError) as ctx:
             await list_admin_ai_operations_incidents_v1(
-                dsn="postgresql://private",
+                repository=store,
                 actor_user_id=ACTOR,
-                connect=connect,
             )
         self.assertEqual(ctx.exception.code, "ai_operations_contract_invalid")
 
-        connect, _conn = connector(
+        store, _connection = repository(
             {
                 "contract_version": "ai_operations_monitor_inbox_v1",
                 "items": [incident(incident_id=None)],
@@ -239,20 +251,33 @@ class AdminAiOperationsV1Tests(unittest.IsolatedAsyncioTestCase):
         )
         with self.assertRaises(AiOperationsError) as ctx:
             await list_admin_ai_operations_incidents_v1(
-                dsn="postgresql://private",
+                repository=store,
                 actor_user_id=ACTOR,
-                connect=connect,
             )
         self.assertEqual(ctx.exception.code, "ai_operations_contract_invalid")
 
-    def test_routes_have_one_capability_owner_and_no_root_wrappers(self):
+    def test_capability_is_database_effect_free_and_adapter_owns_six_effects(self):
+        methods = {"execute", "fetch", "fetchrow", "fetchval", "transaction"}
+
+        def effects(path: Path) -> list[tuple[str, int]]:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            return [
+                (node.func.attr, node.lineno)
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr in methods
+            ]
+
+        self.assertEqual(effects(CAPABILITY), [])
+        self.assertEqual(len(effects(ADAPTER)), 6)
+        self.assertNotIn("asyncpg", CAPABILITY.read_text(encoding="utf-8"))
+
+    def test_routes_have_one_capability_owner_and_composed_adapter(self):
         app_source = APP.read_text(encoding="utf-8")
         routes = ROUTES.read_text(encoding="utf-8")
 
-        self.assertIn(
-            '@router.get("/admin/ai-operations/incidents")',
-            routes,
-        )
+        self.assertIn('@router.get("/admin/ai-operations/incidents")', routes)
         self.assertIn(
             '"/admin/ai-operations/incidents/{incident_id}/acknowledge"',
             routes,
@@ -268,15 +293,17 @@ class AdminAiOperationsV1Tests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertNotIn("BaseModel", routes)
         self.assertNotIn("actor_user_id:", routes)
-        self.assertIn("create_ai_operations_router", app_source)
+        self.assertIn("PostgresAiOperationsRepository", app_source)
+        self.assertIn("create_ai_operations_router(AI_OPERATIONS)", app_source)
         self.assertNotIn('@app.get("/admin/ai-operations/incidents")', app_source)
         self.assertNotIn("_require_ai_operations_actor", app_source)
 
 
 class AdminAiOperationsRouteTests(unittest.TestCase):
     def setUp(self) -> None:
+        self.repository = SimpleNamespace()
         app = FastAPI()
-        app.include_router(create_ai_operations_router("postgresql://private"))
+        app.include_router(create_ai_operations_router(self.repository))
         self.client = TestClient(app)
 
     def test_missing_verified_bearer_is_rejected(self) -> None:
@@ -324,7 +351,7 @@ class AdminAiOperationsRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), expected)
         operation.assert_awaited_once_with(
-            dsn="postgresql://private",
+            repository=self.repository,
             actor_user_id=ACTOR,
             state="open",
             limit=25,

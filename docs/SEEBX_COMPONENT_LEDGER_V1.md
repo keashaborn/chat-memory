@@ -136,7 +136,7 @@ Source commit: `49f9e60cf4321c8e42c359845c1a62a8c987614d`
 | old `chat_integrity` | response attestation/snapshot | MIGRATE |
 | old `trusted_web` | live search cache/audit/transcripts | MIGRATE |
 | old `lifeswitch_usage` | live forced-RLS usage ledger; candidate `c6285574` gives its writer one adapter owner and retires disconnected reporting code | MIGRATE, likely rename platform usage |
-| old `ai_operations` | live admin code; no estimated rows | DECIDE/possibly migrate |
+| old `ai_operations` | live admin incident schema; candidate batch 15 moves all six query/transaction effects and capability-session settings behind `adapters.ai_operations_postgres`, leaving the capability SQL-free while preserving inspector/manager authority and HTTP contracts | MIGRATE INTACT into the clean platform database after disposable parity proof |
 | old `catalog_dev` | live catalog router; duplicate of isolated catalog | CONSOLIDATE into isolated catalog |
 | old `user_settings` | production router unmounted; exactly 1 preference row plus 19 compilation candidates; canonical candidate rebuilt | MIGRATE INTACT into the clean platform database after disposable parity proof |
 | old `memory_ingest_private` | seven tables; two terminal outbox rows; candidate `c840afed` removes all external routine and trigger dependencies | FINAL BACKUP/RESTORE, then retire with exact fail-closed package |

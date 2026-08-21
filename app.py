@@ -57,6 +57,9 @@ from seebx.capabilities.conversation.export import (
 from seebx.capabilities.conversation.export_routes import (
     create_conversation_export_router,
 )
+from seebx.adapters.ai_operations_postgres import (
+    PostgresAiOperationsRepository,
+)
 from seebx.adapters.postgres import PostgresConnectionProvider
 
 
@@ -106,8 +109,13 @@ app.include_router(voice_session_router)
 
 DSN = os.environ["POSTGRES_DSN"]
 POSTGRES = PostgresConnectionProvider(DSN)
+AI_OPERATIONS_POSTGRES = PostgresConnectionProvider(
+    DSN,
+    connect_kwargs={"command_timeout": 10, "timeout": 5},
+)
+AI_OPERATIONS = PostgresAiOperationsRepository(AI_OPERATIONS_POSTGRES)
 app.include_router(create_assistant_preferences_router(POSTGRES))
-app.include_router(create_ai_operations_router(DSN))
+app.include_router(create_ai_operations_router(AI_OPERATIONS))
 app.include_router(
     create_operational_health_router(
         POSTGRES,

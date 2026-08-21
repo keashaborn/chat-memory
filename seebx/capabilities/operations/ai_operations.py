@@ -3,10 +3,8 @@ from __future__ import annotations
 """Private, capability-bound access to the AI Operations monitor inbox."""
 
 import json
-from typing import Any, Mapping
+from typing import Any, Mapping, Protocol
 from uuid import UUID
-
-import asyncpg
 
 
 LIST_SCHEMA = "admin_ai_operations_incidents_v1"
@@ -54,6 +52,39 @@ class AiOperationsError(RuntimeError):
         super().__init__(code)
         self.code = code
         self.status_code = status_code
+
+
+class AiOperationsRepositoryError(RuntimeError):
+    def __init__(self, sqlstate: str = "") -> None:
+        super().__init__("ai_operations_repository_error")
+        self.sqlstate = str(sqlstate or "")
+
+
+class AiOperationsRepository(Protocol):
+    async def list_incidents(
+        self,
+        *,
+        actor_user_id: str,
+        capability: str,
+        state: str | None,
+        limit: int,
+    ) -> Any: ...
+
+    async def acknowledge_incident(
+        self,
+        *,
+        actor_user_id: str,
+        capability: str,
+        incident_id: str,
+    ) -> Any: ...
+
+    async def resolve_incident(
+        self,
+        *,
+        actor_user_id: str,
+        capability: str,
+        incident_id: str,
+    ) -> Any: ...
 
 
 def _uuid(value: str | UUID, field: str) -> str:
@@ -160,48 +191,22 @@ def _validate_incident(item: Any) -> dict[str, Any]:
     return dict(item)
 
 
-async def _connect(dsn: str, connect: Any):
-    try:
-        return await connect(
-            dsn,
-            command_timeout=10,
-            timeout=5,
-        )
-    except Exception as exc:
-        raise AiOperationsError("ai_operations_unavailable") from exc
-
-
-async def _set_authority(
-    conn: Any,
-    actor_user_id: str,
-    capability: str,
-) -> None:
-    await conn.execute(
-        "SELECT set_config('app.user_id',$1,true)",
-        actor_user_id,
-    )
-    await conn.execute(
-        "SELECT set_config('app.ai_operations_capability',$1,true)",
-        capability,
-    )
-
-
-def _translate_database_error(exc: Exception) -> AiOperationsError:
-    sqlstate = str(getattr(exc, "sqlstate", "") or "")
-    if sqlstate == "P0002":
+def _translate_repository_error(
+    exc: AiOperationsRepositoryError,
+) -> AiOperationsError:
+    if exc.sqlstate == "P0002":
         return AiOperationsError("monitor_incident_not_found", 404)
-    if sqlstate == "22023":
+    if exc.sqlstate == "22023":
         return AiOperationsError("invalid_incident_transition", 409)
     return AiOperationsError("ai_operations_unavailable")
 
 
 async def list_admin_ai_operations_incidents_v1(
     *,
-    dsn: str,
+    repository: AiOperationsRepository,
     actor_user_id: str | UUID,
     state: str | None = None,
     limit: int = 50,
-    connect: Any = asyncpg.connect,
 ) -> dict[str, Any]:
     actor = _uuid(actor_user_id, "actor_user_id")
     normalized_state = str(state).strip() if state is not None else None
@@ -212,20 +217,17 @@ async def list_admin_ai_operations_incidents_v1(
     if not 1 <= limit <= MAX_LIMIT:
         raise ValueError("invalid incident limit")
 
-    conn = await _connect(dsn, connect)
     try:
-        try:
-            async with conn.transaction():
-                await _set_authority(conn, actor, READ_CAPABILITY)
-                raw = await conn.fetchval(
-                    "SELECT ai_operations.list_monitor_incidents_v1($1,$2)",
-                    normalized_state,
-                    limit,
-                )
-        except Exception as exc:
-            raise _translate_database_error(exc) from exc
-    finally:
-        await conn.close()
+        raw = await repository.list_incidents(
+            actor_user_id=actor,
+            capability=READ_CAPABILITY,
+            state=normalized_state,
+            limit=limit,
+        )
+    except AiOperationsRepositoryError as exc:
+        raise _translate_repository_error(exc) from exc
+    except Exception as exc:
+        raise AiOperationsError("ai_operations_unavailable") from exc
 
     payload = _decode_jsonb(raw)
     if payload.get("contract_version") != LIST_SOURCE_CONTRACT:
@@ -243,36 +245,31 @@ async def list_admin_ai_operations_incidents_v1(
 
 async def _mutate_incident(
     *,
-    dsn: str,
+    repository: AiOperationsRepository,
     actor_user_id: str | UUID,
     incident_id: str | UUID,
     action: str,
-    connect: Any,
 ) -> dict[str, Any]:
     actor = _uuid(actor_user_id, "actor_user_id")
     incident = _uuid(incident_id, "incident_id")
     if action not in {"acknowledged", "resolved"}:
         raise ValueError("invalid incident action")
-    function_name = (
-        "acknowledge_monitor_incident_v1"
-        if action == "acknowledged"
-        else "resolve_monitor_incident_v1"
-    )
 
-    conn = await _connect(dsn, connect)
+    operation = (
+        repository.acknowledge_incident
+        if action == "acknowledged"
+        else repository.resolve_incident
+    )
     try:
-        try:
-            async with conn.transaction():
-                await _set_authority(conn, actor, MANAGE_CAPABILITY)
-                raw = await conn.fetchval(
-                    f"SELECT ai_operations.{function_name}($1,$2)",
-                    incident,
-                    actor,
-                )
-        except Exception as exc:
-            raise _translate_database_error(exc) from exc
-    finally:
-        await conn.close()
+        raw = await operation(
+            actor_user_id=actor,
+            capability=MANAGE_CAPABILITY,
+            incident_id=incident,
+        )
+    except AiOperationsRepositoryError as exc:
+        raise _translate_repository_error(exc) from exc
+    except Exception as exc:
+        raise AiOperationsError("ai_operations_unavailable") from exc
 
     payload = _decode_jsonb(raw)
     if (
@@ -296,31 +293,27 @@ async def _mutate_incident(
 
 async def acknowledge_admin_ai_operations_incident_v1(
     *,
-    dsn: str,
+    repository: AiOperationsRepository,
     actor_user_id: str | UUID,
     incident_id: str | UUID,
-    connect: Any = asyncpg.connect,
 ) -> dict[str, Any]:
     return await _mutate_incident(
-        dsn=dsn,
+        repository=repository,
         actor_user_id=actor_user_id,
         incident_id=incident_id,
         action="acknowledged",
-        connect=connect,
     )
 
 
 async def resolve_admin_ai_operations_incident_v1(
     *,
-    dsn: str,
+    repository: AiOperationsRepository,
     actor_user_id: str | UUID,
     incident_id: str | UUID,
-    connect: Any = asyncpg.connect,
 ) -> dict[str, Any]:
     return await _mutate_incident(
-        dsn=dsn,
+        repository=repository,
         actor_user_id=actor_user_id,
         incident_id=incident_id,
         action="resolved",
-        connect=connect,
     )

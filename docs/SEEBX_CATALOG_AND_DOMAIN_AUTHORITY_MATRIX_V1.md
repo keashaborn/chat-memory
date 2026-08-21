@@ -114,13 +114,12 @@ connection close, provider HTTP calls, and the non-database LifeSwitch stage
 | `training/routes.py` | 41 | 72 | isolated LifeSwitch PostgreSQL | training group: 39 route files |
 | `training/logs.py` | 0 | 2 | caller-owned isolated connection | training group |
 | `plans/routes.py` | 5 | 8 | isolated LifeSwitch PostgreSQL | 5 route files |
-| `operations/ai_operations.py` | 0 | 6 | platform PostgreSQL | internal operations callers |
 | `observability/telemetry.py` | 3 | 9 | platform PostgreSQL | admin/telemetry callers |
 
-These are the exact eight remaining direct database-effect capability modules,
-with 198 AST-derived effects. Catalog, Forms, and Measurements now own zero
-direct database effects in capability code; retained effects are behind named
-adapters.
+These are the exact seven remaining direct database-effect capability modules,
+with 192 AST-derived effects. Catalog, Forms, Measurements, and AI Operations
+now own zero direct database effects in capability code; retained effects are
+behind named adapters.
 
 ## Canonical target flow
 

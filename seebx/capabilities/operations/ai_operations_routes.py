@@ -12,6 +12,7 @@ from seebx.capabilities.operations.ai_operations import (
     MANAGE_CAPABILITY,
     READ_CAPABILITY,
     AiOperationsError,
+    AiOperationsRepository,
     acknowledge_admin_ai_operations_incident_v1,
     list_admin_ai_operations_incidents_v1,
     resolve_admin_ai_operations_incident_v1,
@@ -94,9 +95,11 @@ async def _require_ai_operations_actor(
     return None, actor_user_id
 
 
-def create_ai_operations_router(dsn: str) -> APIRouter:
-    if not str(dsn or "").strip():
-        raise ValueError("ai_operations_dsn_required")
+def create_ai_operations_router(
+    repository: AiOperationsRepository,
+) -> APIRouter:
+    if repository is None:
+        raise ValueError("ai_operations_repository_required")
 
     router = APIRouter()
 
@@ -113,7 +116,7 @@ def create_ai_operations_router(dsn: str) -> APIRouter:
         try:
             limit = int(params.get("limit") or 50)
             return await list_admin_ai_operations_incidents_v1(
-                dsn=dsn,
+                repository=repository,
                 actor_user_id=actor,
                 state=state,
                 limit=limit,
@@ -146,7 +149,7 @@ def create_ai_operations_router(dsn: str) -> APIRouter:
             return denied
         try:
             return await acknowledge_admin_ai_operations_incident_v1(
-                dsn=dsn,
+                repository=repository,
                 actor_user_id=actor,
                 incident_id=incident_id,
             )
@@ -178,7 +181,7 @@ def create_ai_operations_router(dsn: str) -> APIRouter:
             return denied
         try:
             return await resolve_admin_ai_operations_incident_v1(
-                dsn=dsn,
+                repository=repository,
                 actor_user_id=actor,
                 incident_id=incident_id,
             )

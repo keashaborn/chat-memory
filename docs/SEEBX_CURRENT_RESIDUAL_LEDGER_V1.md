@@ -10,12 +10,14 @@ Status: candidate evidence; no deployment or retirement authority
   `49f9e60cf4321c8e42c359845c1a62a8c987614d`; its Git status is empty and
   `brains.service` is active with zero restarts.
 - The cleanup integration candidate and GitHub branch begin this batch at
-  `a9f2aff5fd325bc57e1ef58ec234758164255fdb`; the worktree was clean before the candidate-only Measurements adapter extraction.
-- The candidate has 143 routes and 129 OpenAPI paths. Route SHA-256 remains
-  `c8d1df9cf48611e6c849614a521979b4a6109b0b4ef14f99ae55f4e85915d7d6`
+  `3b79f53e756e8f7e1e2578c4c48a06f7b5d7c3c2`; the worktree was clean before
+  the candidate-only AI Operations adapter extraction.
+- The candidate has 138 routes and 124 OpenAPI paths. Route SHA-256 remains
+  `dacb3665272ec6720fb477340c9d84d977a6af55fae4f061972526eabe10353d`
   and OpenAPI SHA-256 remains
-  `17aaa3a4a18bfe3a3d3671c1fee02654270524d0b5d764cd4c6eea6627429a8f`.
-- The complete candidate suite passes 1,224/1,224 after the candidate-only Measurements adapter extraction.
+  `44e8aa5f364f85aef4d4fb4fa2596af4ab3eb219a2a82e21d54fbd2768c71091`.
+- The complete candidate suite passes 1,227/1,227 after the candidate-only AI
+  Operations adapter extraction.
 - The separate failed voice-canary unit and active timer remain outside this
   cleanup batch.
 
@@ -42,16 +44,15 @@ Status: candidate evidence; no deployment or retirement authority
 
 ## Remaining architectural debt
 
-1. Eight capability modules still contain direct SQL execution or transaction
-   ownership. Conversation, search, preferences, and voice now have zero direct
-   query/transaction effects in their capability packages. The remaining files
-   are exactly:
+1. Seven capability modules still contain direct SQL execution or transaction
+   ownership. Conversation, search, preferences, voice, and AI Operations now
+   have zero direct query/transaction effects in their capability packages. The
+   remaining files are exactly:
 
    - LifeSwitch domain: `nutrition/logs.py`, `nutrition/meals.py`,
      `nutrition/routes.py`, `plans/routes.py`,
      `training/logs.py`, and `training/routes.py`;
-   - operations/observability: `operations/ai_operations.py` and
-     `observability/telemetry.py`.
+   - observability: `observability/telemetry.py`.
 
    Owner-scoped connection acquisition in an HTTP capability is not counted as
    a query effect; raw fetch/execute/transaction ownership is. Each remaining
@@ -94,20 +95,24 @@ Status: candidate evidence; no deployment or retirement authority
 
 ## Next cleanup order
 
-1. Continue candidate-only database-effect extraction with one coherent
+1. Verify the required Plan-to-Nutrition projection before restructuring the
+   two aggregates: Plan calorie and macro targets must remain authoritative for
+   Nutrition Log daily target comparisons and color states. This product
+   contract is independent of the retired page-level AI helpers.
+2. Continue candidate-only database-effect extraction with one coherent
    LifeSwitch domain aggregate at a time; preserve the isolated database,
    route contracts, owner checks, and default-off gates.
-2. Run the Forms schema, exact valid/quarantine reconciliation, rollback, and
+3. Run the Forms schema, exact valid/quarantine reconciliation, rollback, and
    cross-owner denial proof only in a separately authorized disposable restore.
-3. Prove Zep owner/thread isolation, deletion, export/retention, outage, and
+4. Prove Zep owner/thread isolation, deletion, export/retention, outage, and
    provenance behavior before declaring the old memory paths fully replaced.
-4. Regenerate immutable backend/frontend bundles and release manifests from the
+5. Regenerate immutable backend/frontend bundles and release manifests from the
    final candidate commits.
-5. Execute the paired frontend/backend cutover with fresh authorization and
+6. Execute the paired frontend/backend cutover with fresh authorization and
    automatic rollback evidence.
-6. Observe, then retire Redis, stale Qdrant configuration, and legacy
+7. Observe, then retire Redis, stale Qdrant configuration, and legacy
    schemas/databases in independent rollback-safe production batches.
-7. Create encrypted clean-state snapshots, enforce the two-backup policy,
+8. Create encrypted clean-state snapshots, enforce the two-backup policy,
    and only then remove superseded worktrees and older snapshots.
 
 This ledger authorizes no deployment, restart, database change, cache stop,

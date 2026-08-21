@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """Shared PostgreSQL connection lifetime and owner-session boundary."""
 
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from typing import Any
 from uuid import UUID
@@ -12,7 +12,7 @@ import asyncpg
 
 OWNER_SESSION_SQL = "SELECT set_config('app.user_id', $1, false)"
 READINESS_SQL = "select 1"
-ConnectionFactory = Callable[[str], Awaitable[Any]]
+ConnectionFactory = Callable[..., Awaitable[Any]]
 
 
 async def set_connection_actor(
@@ -34,15 +34,20 @@ class PostgresConnectionProvider:
         dsn: str,
         *,
         connect_factory: ConnectionFactory | None = None,
+        connect_kwargs: Mapping[str, Any] | None = None,
     ) -> None:
         if not isinstance(dsn, str) or not dsn:
             raise ValueError("dsn is required")
+        options = dict(connect_kwargs or {})
+        if any(not isinstance(key, str) or not key for key in options):
+            raise ValueError("connect_kwargs keys must be non-empty strings")
         self.dsn = dsn
         self.connect_factory = connect_factory
+        self.connect_kwargs = options
 
     async def _connect(self) -> Any:
         factory = self.connect_factory or asyncpg.connect
-        return await factory(self.dsn)
+        return await factory(self.dsn, **self.connect_kwargs)
 
     @asynccontextmanager
     async def connection(self) -> AsyncIterator[Any]:
