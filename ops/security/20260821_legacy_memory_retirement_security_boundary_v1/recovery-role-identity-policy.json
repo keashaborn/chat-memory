@@ -1,0 +1,15 @@
+{
+  "Statement": [
+    {
+      "Action": [
+        "secretsmanager:DescribeSecret",
+        "secretsmanager:GetSecretValue",
+        "secretsmanager:ListSecretVersionIds"
+      ],
+      "Effect": "Allow",
+      "Resource": "arn:aws:secretsmanager:us-east-2:339712834334:secret:lifeswitch/seebx/legacy-attestation-quarantine-v1-*",
+      "Sid": "ReadExactQuarantineKeyOnly"
+    }
+  ],
+  "Version": "2012-10-17"
+}

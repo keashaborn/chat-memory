@@ -22,7 +22,7 @@ except ModuleNotFoundError:
 
 SCHEMA_VERSION = "seebx-clean-backend-cutover-preflight-v2"
 EXPECTED_DATABASE = "memory"
-EXPECTED_APPLICATION_ROLE = "sage"
+EXPECTED_APPLICATION_ROLE = "brains_app"
 EXPECTED_INSPECTION_ROLE = "lifeswitch_retirement_auditor"
 EXPECTED_BACKUP_SHA256 = "0adc9bcaba1baee76b815aeb3000ce3c0685367648e976c138354145668afa15"
 EXPECTED_RESTORE_RECEIPT_SHA256 = "1f5a117b4dd83176e34141340c9fd9eede8623f1319d8cfd260fbf5f37cb9e24"
@@ -92,8 +92,11 @@ def evaluate_readiness(
         _check("inspection_database_identity", inspection.get("database") == EXPECTED_DATABASE, inspection.get("database"), EXPECTED_DATABASE),
         _check("inspection_role_identity", inspection.get("role") == EXPECTED_INSPECTION_ROLE, inspection.get("role"), EXPECTED_INSPECTION_ROLE),
         _check("inspection_role_separate", inspection.get("role") != application.get("role"), inspection.get("role") != application.get("role"), True),
-        _check("inspection_legacy_private_select_allowed", inspection.get("legacy_private_select") is True, inspection.get("legacy_private_select"), True),
+        _check("inspection_legacy_private_select_denied", inspection.get("legacy_private_select") is False, inspection.get("legacy_private_select"), False),
         _check("inspection_legacy_private_write_denied", inspection.get("legacy_private_write") is False, inspection.get("legacy_private_write"), False),
+        _check("inspection_retirement_evidence_execute_allowed", inspection.get("retirement_evidence_execute") is True, inspection.get("retirement_evidence_execute"), True),
+        _check("inspection_direct_evidence_select_denied", inspection.get("direct_evidence_select") is False, inspection.get("direct_evidence_select"), False),
+        _check("inspection_direct_evidence_write_denied", inspection.get("direct_evidence_write") is False, inspection.get("direct_evidence_write"), False),
         _check("legacy_memory_schema_present", memory_schema_present, memory_schema_present, True),
         _check("legacy_memory_ingest_schema_present", ingest_schema_present, ingest_schema_present, True),
         _check("legacy_memory_table_shape", int(database.get("memory_table_count", -1)) == 160, int(database.get("memory_table_count", -1)), 160),
@@ -139,9 +142,19 @@ async def collect_role_boundary_read_only(connection: Any) -> dict[str, Any]:
         if await _scalar(connection, "SHOW transaction_read_only") != "on":
             raise PreflightOperationalError("database_transaction_not_read_only")
         identity = await connection.fetchrow("SELECT current_database() AS database, current_user AS role")
-        private_select = bool(await _scalar(connection, "SELECT CASE WHEN to_regclass('memory_ingest_private.memory_ingest_outbox') IS NULL OR to_regclass('memory_ingest_private.source_erasure_operation') IS NULL THEN false ELSE has_table_privilege(current_user, 'memory_ingest_private.memory_ingest_outbox', 'SELECT') AND has_table_privilege(current_user, 'memory_ingest_private.source_erasure_operation', 'SELECT') END"))
-        private_write = bool(await _scalar(connection, "SELECT CASE WHEN to_regclass('memory_ingest_private.memory_ingest_outbox') IS NULL OR to_regclass('memory_ingest_private.source_erasure_operation') IS NULL THEN false ELSE has_table_privilege(current_user, 'memory_ingest_private.memory_ingest_outbox', 'INSERT,UPDATE,DELETE,TRUNCATE') OR has_table_privilege(current_user, 'memory_ingest_private.source_erasure_operation', 'INSERT,UPDATE,DELETE,TRUNCATE') END"))
-        return {"database": identity["database"], "role": identity["role"], "legacy_private_select": private_select, "legacy_private_write": private_write, "transaction_read_only": True}
+        private_select = bool(await _scalar(connection, "SELECT CASE WHEN to_regclass('memory_ingest_private.memory_ingest_outbox') IS NULL OR to_regclass('memory_ingest_private.source_erasure_operation') IS NULL THEN false ELSE has_table_privilege(current_user, 'memory_ingest_private.memory_ingest_outbox', 'SELECT') OR has_any_column_privilege(current_user, 'memory_ingest_private.memory_ingest_outbox', 'SELECT') OR has_table_privilege(current_user, 'memory_ingest_private.source_erasure_operation', 'SELECT') OR has_any_column_privilege(current_user, 'memory_ingest_private.source_erasure_operation', 'SELECT') END"))
+        private_write = bool(await _scalar(connection, "SELECT CASE WHEN to_regclass('memory_ingest_private.memory_ingest_outbox') IS NULL OR to_regclass('memory_ingest_private.source_erasure_operation') IS NULL THEN false ELSE has_table_privilege(current_user, 'memory_ingest_private.memory_ingest_outbox', 'INSERT,UPDATE,DELETE,TRUNCATE') OR has_any_column_privilege(current_user, 'memory_ingest_private.memory_ingest_outbox', 'INSERT,UPDATE') OR has_table_privilege(current_user, 'memory_ingest_private.source_erasure_operation', 'INSERT,UPDATE,DELETE,TRUNCATE') OR has_any_column_privilege(current_user, 'memory_ingest_private.source_erasure_operation', 'INSERT,UPDATE') END"))
+        evidence_execute = bool(await _scalar(connection, "SELECT CASE WHEN to_regprocedure('memory.legacy_retirement_evidence_v1()') IS NULL THEN false ELSE has_function_privilege(current_user, 'memory.legacy_retirement_evidence_v1()', 'EXECUTE') END"))
+        direct_evidence_select = bool(await _scalar(connection, "SELECT EXISTS (SELECT 1 FROM unnest(ARRAY['memory.assistant_transcript_attestation_v1','public.chat_log','chat_integrity.assistant_transcript_attestation_v1','memory_ingest_private.memory_ingest_outbox','memory_ingest_private.source_erasure_operation']) AS relation(name) WHERE to_regclass(relation.name) IS NOT NULL AND (has_table_privilege(current_user, relation.name, 'SELECT') OR has_any_column_privilege(current_user, relation.name, 'SELECT')))"))
+        direct_evidence_write = bool(await _scalar(connection, "SELECT EXISTS (SELECT 1 FROM unnest(ARRAY['memory.assistant_transcript_attestation_v1','public.chat_log','chat_integrity.assistant_transcript_attestation_v1','memory_ingest_private.memory_ingest_outbox','memory_ingest_private.source_erasure_operation']) AS relation(name) WHERE to_regclass(relation.name) IS NOT NULL AND (has_table_privilege(current_user, relation.name, 'INSERT,UPDATE,DELETE,TRUNCATE') OR has_any_column_privilege(current_user, relation.name, 'INSERT,UPDATE')))"))
+        return {
+            "database": identity["database"], "role": identity["role"],
+            "legacy_private_select": private_select, "legacy_private_write": private_write,
+            "retirement_evidence_execute": evidence_execute,
+            "direct_evidence_select": direct_evidence_select,
+            "direct_evidence_write": direct_evidence_write,
+            "transaction_read_only": True,
+        }
 
 
 async def collect_database_state(connection: Any) -> dict[str, Any]:
@@ -173,15 +186,17 @@ async def collect_database_state(connection: Any) -> dict[str, Any]:
         "attestation_source_rows": 0, "attestation_eligible_rows": 0,
         "attestation_quarantine_rows": 0, "attestation_reconciled_rows": 0,
     }
-    if ingest_outbox:
-        state["nonterminal_ingest"] = await scalar("SELECT count(*)::integer FROM memory_ingest_private.memory_ingest_outbox WHERE state NOT IN ('completed','skipped')")
-    if erasure_table:
-        state["nonterminal_erasure"] = await scalar("SELECT count(*)::integer FROM memory_ingest_private.source_erasure_operation WHERE state <> 'completed'")
-    if memory_schema:
-        state["attestation_source_rows"] = await scalar("SELECT count(*)::integer FROM memory.assistant_transcript_attestation_v1")
-        state["attestation_eligible_rows"] = await scalar("SELECT count(*)::integer FROM memory.assistant_transcript_attestation_v1 a JOIN public.chat_log l ON l.id=a.answer_id AND l.id=a.chat_log_id AND l.owner_user_id=a.owner_user_id AND l.thread_id=a.thread_id AND encode(public.digest(l.text,'sha256'),'hex')=a.assistant_text_sha256")
-        state["attestation_quarantine_rows"] = int(state["attestation_source_rows"]) - int(state["attestation_eligible_rows"])
-        state["attestation_reconciled_rows"] = await scalar("SELECT count(*)::integer FROM memory.assistant_transcript_attestation_v1 a JOIN public.chat_log l ON l.id=a.answer_id AND l.id=a.chat_log_id AND l.owner_user_id=a.owner_user_id AND l.thread_id=a.thread_id AND encode(public.digest(l.text,'sha256'),'hex')=a.assistant_text_sha256 JOIN chat_integrity.assistant_transcript_attestation_v1 c ON c.answer_id=a.answer_id AND c.attestation_sha256=a.attestation_sha256")
+    evidence_function = await scalar("SELECT to_regprocedure('memory.legacy_retirement_evidence_v1()')") if memory_schema and ingest_outbox and erasure_table else None
+    if evidence_function is not None:
+        evidence = await connection.fetchrow("SELECT source_rows, eligible_rows, quarantine_rows, reconciled_rows, nonterminal_ingest, nonterminal_erasure FROM memory.legacy_retirement_evidence_v1()")
+        state.update(
+            attestation_source_rows=int(evidence["source_rows"]),
+            attestation_eligible_rows=int(evidence["eligible_rows"]),
+            attestation_quarantine_rows=int(evidence["quarantine_rows"]),
+            attestation_reconciled_rows=int(evidence["reconciled_rows"]),
+            nonterminal_ingest=int(evidence["nonterminal_ingest"]),
+            nonterminal_erasure=int(evidence["nonterminal_erasure"]),
+        )
     return state
 
 

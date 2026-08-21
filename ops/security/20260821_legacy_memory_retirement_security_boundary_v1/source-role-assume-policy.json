@@ -1,0 +1,16 @@
+{
+  "Statement": [
+    {
+      "Action": "sts:AssumeRole",
+      "Condition": {
+        "StringEquals": {
+          "sts:ExternalId": "lifeswitch-legacy-attestation-recovery-v1"
+        }
+      },
+      "Effect": "Allow",
+      "Resource": "arn:aws:iam::339712834334:role/LifeSwitchLegacyAttestationRecoveryV1",
+      "Sid": "AssumeExactLegacyAttestationRecoveryRole"
+    }
+  ],
+  "Version": "2012-10-17"
+}

@@ -1,0 +1,72 @@
+{
+  "execution": {
+    "aws_resources_created": false,
+    "database_mutated": false,
+    "deployment_authorized": false,
+    "production_permissions_changed": false
+  },
+  "identities": {
+    "application_role": "brains_app",
+    "inspection_role": "lifeswitch_retirement_auditor",
+    "recovery_role_arn": "arn:aws:iam::339712834334:role/LifeSwitchLegacyAttestationRecoveryV1"
+  },
+  "inputs": {
+    "database_post_retirement_deprovision": {
+      "path": "ops/security/20260821_legacy_memory_retirement_security_boundary_v1/deprovision_after_retirement.pgsql",
+      "sha256": "e8fd6e265852f9f3d0ad4ef3f1de7dea6064786065f7d490c564640322eb78ce"
+    },
+    "database_provision": {
+      "path": "ops/security/20260821_legacy_memory_retirement_security_boundary_v1/provision.pgsql",
+      "sha256": "33ee44a81ae90bbf6b7563ad09595a1b543f84f689baf1f608d6bcac42c7764e"
+    },
+    "database_rollback": {
+      "path": "ops/security/20260821_legacy_memory_retirement_security_boundary_v1/rollback.pgsql",
+      "sha256": "0f528323a4c1527dddc884762d2d09d261964b990c474e2dee69a470057d8d5a"
+    },
+    "offline_verifier": {
+      "path": "scripts/verify_legacy_memory_retirement_security_boundary.py",
+      "sha256": "2d328416d86a067bbbbb637640584f9bffada3373f66951e5b2f7124e9a23ac5"
+    },
+    "readme": {
+      "path": "ops/security/20260821_legacy_memory_retirement_security_boundary_v1/README.md",
+      "sha256": "b99ef2f93b0787920011a705acdbdacdfcb8fd69424089ff7e230c0a865c532d"
+    },
+    "recovery_role_identity_policy": {
+      "path": "ops/security/20260821_legacy_memory_retirement_security_boundary_v1/recovery-role-identity-policy.json",
+      "sha256": "01d6873b39892dc927ee7d40caaab063074ebcb91b459fd65b1ad17fba758bfb"
+    },
+    "recovery_role_trust_policy": {
+      "path": "ops/security/20260821_legacy_memory_retirement_security_boundary_v1/recovery-role-trust-policy.json",
+      "sha256": "221965be78e6cae835f54d87a06ce64323e01a16e45a5655821097bc351922a8"
+    },
+    "secret_resource_policy": {
+      "path": "ops/security/20260821_legacy_memory_retirement_security_boundary_v1/secret-resource-policy.json",
+      "sha256": "57c0ca76e8152c8226d40cd431c04175faf1fe9d37d720e84fac237b2ee96aa0"
+    },
+    "secret_value_schema": {
+      "path": "ops/security/20260821_legacy_memory_retirement_security_boundary_v1/secret-value.schema.json",
+      "sha256": "b15852606ddbdcc5088b6036e7e85b2f469e5e5b7b7bd55758f3396ff641310b"
+    },
+    "source_role_assume_policy": {
+      "path": "ops/security/20260821_legacy_memory_retirement_security_boundary_v1/source-role-assume-policy.json",
+      "sha256": "6770c67c54486cab1b2975ce29cf13d96b8e133e139f8235a9a3bab0ce9bf95d"
+    }
+  },
+  "schema_version": "seebx-legacy-memory-retirement-security-boundary-package-v1",
+  "secret": {
+    "algorithm": "AES-256-GCM",
+    "key_bytes": 32,
+    "name": "lifeswitch/seebx/legacy-attestation-quarantine-v1",
+    "plaintext_in_repository": false,
+    "version_id_required": true
+  },
+  "status": "candidate_not_applied",
+  "target": {
+    "account_id": "339712834334",
+    "database": "memory",
+    "database_admin_role": "sage",
+    "region": "us-east-2",
+    "server": "seebx",
+    "source_instance_role_arn": "arn:aws:iam::339712834334:role/SeeBxSessionManagerRole"
+  }
+}

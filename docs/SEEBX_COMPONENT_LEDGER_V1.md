@@ -156,7 +156,7 @@ mutation batch is approved.
 
 ## 2026-08-21 retirement-readiness candidate update
 
-- The clean-backend preflight is now v2 and requires a separate, write-denied `lifeswitch_retirement_auditor`; it explicitly proves that the `sage` application identity remains denied access to legacy private queues.
+- The clean-backend preflight is now v2 and requires a separate, write-denied `lifeswitch_retirement_auditor`; it explicitly proves that the `brains_app` application identity remains denied access to legacy private queues. The `sage` role remains a separately approved administrative execution identity and is never accepted as either application or inspection authority.
 - The attestation quarantine now requires a mode-0600 AWS Secrets Manager custody receipt bound to the exact key fingerprint and immutable secret version; no secret value is persisted.
 - The legacy-memory retirement SQL is executable only after every migration, queue, dependency, backup, restore, quarantine, and custody assertion passes. The package remains unapplied and unauthorized for production.
 
@@ -172,3 +172,6 @@ mutation batch is approved.
 - Disposable PostgreSQL 16 positive execution: exact 160-table `memory`, 7-table `memory_ingest_private`, and 190/32/158 attestation fixture passed every assertion; only the two legacy schemas were dropped; Zep outbox and both chat-clear functions remained.
 - Disposable PostgreSQL 16 negative execution: an external `public` view produced `external legacy dependencies remain`; the transaction aborted and both legacy schemas and the outside view remained.
 - Package hashes, Python compilation, and `git diff --check` pass. No AWS secret, live database role/grant, migration, schema, service, frontend, or production source was changed.
+
+- Candidate security boundary `20260821_legacy_memory_retirement_security_boundary_v1` corrects the application identity to `brains_app`, keeps `sage` administrative-only, defines a no-membership/read-only auditor that can execute only a content-free count function, and freezes exact read-only AWS Secrets Manager recovery policies. Production database roles, functions, secrets, and IAM resources remain unchanged and separately authorization-gated.
+- Security-boundary verification: 17 focused tests and the complete 1,242-test backend suite pass in the pinned Python 3.12/Pydantic 2.12.3 runtime. A disposable PostgreSQL 16 execution proved read-only-by-default, exact six-count evidence, denial of chat-text reads and writes, and clean rollback. The offline package/hash/policy verifier passes. AWS Access Analyzer validation remains pending a fresh SSO session; no AWS resource was created or changed.

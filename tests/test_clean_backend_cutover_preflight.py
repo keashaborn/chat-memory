@@ -52,7 +52,7 @@ def ready_database() -> dict[str, object]:
 def ready_application() -> dict[str, object]:
     return {
         "database": "memory",
-        "role": "sage",
+        "role": "brains_app",
         "legacy_private_select": False,
         "legacy_private_write": False,
     }
@@ -62,8 +62,11 @@ def ready_inspection() -> dict[str, object]:
     return {
         "database": "memory",
         "role": "lifeswitch_retirement_auditor",
-        "legacy_private_select": True,
+        "legacy_private_select": False,
         "legacy_private_write": False,
+        "retirement_evidence_execute": True,
+        "direct_evidence_select": False,
+        "direct_evidence_write": False,
     }
 
 
@@ -86,6 +89,38 @@ class CleanBackendCutoverPreflightTests(unittest.TestCase):
         self.assertTrue(result["candidate_deploy_ready"])
         self.assertTrue(result["legacy_schema_retirement_ready"])
         self.assertEqual(result["gaps"], [])
+
+    def test_administrative_role_cannot_substitute_for_application_role(self) -> None:
+        application = ready_application()
+        application["role"] = "sage"
+        result = evaluate_readiness(
+            ready_database(), crontab_text="", dependencies={"status": "pass"},
+            application_boundary=application, inspection_boundary=ready_inspection(),
+        )
+        self.assertFalse(result["candidate_deploy_ready"])
+        self.assertIn("application_role_identity", result["deployment_gaps"])
+
+    def test_application_role_cannot_substitute_for_inspection_role(self) -> None:
+        inspection = ready_inspection()
+        inspection["role"] = "brains_app"
+        result = evaluate_readiness(
+            ready_database(), crontab_text="", dependencies={"status": "pass"},
+            application_boundary=ready_application(), inspection_boundary=inspection,
+        )
+        self.assertFalse(result["legacy_schema_retirement_ready"])
+        self.assertIn("inspection_role_identity", result["retirement_gaps"])
+        self.assertIn("inspection_role_separate", result["retirement_gaps"])
+
+    def test_inspector_requires_count_function_without_direct_table_access(self) -> None:
+        inspection = ready_inspection()
+        inspection.update(retirement_evidence_execute=False, direct_evidence_select=True)
+        result = evaluate_readiness(
+            ready_database(), crontab_text="", dependencies={"status": "pass"},
+            application_boundary=ready_application(), inspection_boundary=inspection,
+        )
+        self.assertFalse(result["legacy_schema_retirement_ready"])
+        self.assertIn("inspection_retirement_evidence_execute_allowed", result["retirement_gaps"])
+        self.assertIn("inspection_direct_evidence_select_denied", result["retirement_gaps"])
 
     def test_production_state_fails_closed_without_reading_user_content(self) -> None:
         database = ready_database()
@@ -162,10 +197,16 @@ class FakeConnection:
         self.calls.append((sql, args))
         if sql == "SHOW transaction_read_only":
             return "on"
+        if "direct_evidence" in sql:
+            return False
+        if "SELECT EXISTS (SELECT 1 FROM unnest" in sql:
+            return False
+        if "has_function_privilege" in sql:
+            return True
         if "has_table_privilege" in sql and "INSERT,UPDATE,DELETE,TRUNCATE" in sql:
             return False
         if "has_table_privilege" in sql and "SELECT" in sql:
-            return True
+            return False
         if "conversation_sync_private.zep_turn_outbox" in sql:
             return True
         if "to_regprocedure($1::text)::oid" in sql and args == (
@@ -176,6 +217,8 @@ class FakeConnection:
             "chat_history_private.clear_message_tail(uuid,uuid)",
         ):
             return 102
+        if "to_regprocedure('memory.legacy_retirement_evidence_v1()')" in sql:
+            return 103
         if "pg_get_functiondef" in sql and args:
             return "conversation_sync_private.zep_turn_outbox"
         if "to_regclass('memory_ingest_private.memory_ingest_outbox')" in sql:
@@ -214,6 +257,15 @@ class FakeConnection:
         self.calls.append((sql, args))
         if "current_database()" in sql:
             return {"database": "memory", "role": "lifeswitch_retirement_auditor"}
+        if "FROM memory.legacy_retirement_evidence_v1()" in sql:
+            return {
+                "source_rows": 190,
+                "eligible_rows": 32,
+                "quarantine_rows": 158,
+                "reconciled_rows": 32,
+                "nonterminal_ingest": 0,
+                "nonterminal_erasure": 0,
+            }
         raise AssertionError(f"unexpected query: {sql}")
 
     def transaction(self, **options: object) -> "FakeTransaction":
@@ -268,7 +320,11 @@ class CleanBackendDatabaseCollectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["transaction_read_only"])
         boundary = await collect_role_boundary_read_only(connection)
         self.assertEqual(boundary["role"], "lifeswitch_retirement_auditor")
+        self.assertFalse(boundary["legacy_private_select"])
         self.assertFalse(boundary["legacy_private_write"])
+        self.assertTrue(boundary["retirement_evidence_execute"])
+        self.assertFalse(boundary["direct_evidence_select"])
+        self.assertFalse(boundary["direct_evidence_write"])
         self.assertIn(
             (
                 "transaction",

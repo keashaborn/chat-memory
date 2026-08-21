@@ -161,7 +161,7 @@ separate user authorization.
 
 `scripts/prepare_legacy_memory_retirement_recovery.py` is the canonical recovery tool for the database containing the two legacy schemas. It is candidate-only and has not been run against production. When separately authorized, it will:
 
-1. require the local `memory` database and `sage` administrative role;
+1. require the local `memory` database and separately approved `sage` administrative role;
 2. export a repeatable-read PostgreSQL snapshot and exact per-table row-count manifest;
 3. create a full custom-format database dump so extensions and retained-schema dependencies are recoverable;
 4. restore the full dump into a uniquely named empty disposable database;
