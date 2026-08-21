@@ -11,7 +11,7 @@ Evidence baseline:
 - SeeBx production: `49f9e60cf4321c8e42c359845c1a62a8c987614d`, clean,
   service active with zero restarts;
 - cleanup candidate and GitHub branch begin this batch at:
-  `953a8a324894043c40ac22e8adf23133d44b807c`, clean;
+  `a9f2aff5fd325bc57e1ef58ec234758164255fdb`, clean;
 - Verbal Sage production: `858b61527186571cabb5580dc5159fdf6b69ae2e`,
   service active with zero restarts.
 
@@ -113,14 +113,14 @@ connection close, provider HTTP calls, and the non-database LifeSwitch stage
 | `nutrition/logs.py` | 7 | 26 | isolated LifeSwitch PostgreSQL | nutrition group |
 | `training/routes.py` | 41 | 72 | isolated LifeSwitch PostgreSQL | training group: 39 route files |
 | `training/logs.py` | 0 | 2 | caller-owned isolated connection | training group |
-| `measurements/routes.py` | 3 | 4 | isolated LifeSwitch PostgreSQL | 3 route files |
 | `plans/routes.py` | 5 | 8 | isolated LifeSwitch PostgreSQL | 5 route files |
 | `operations/ai_operations.py` | 0 | 6 | platform PostgreSQL | internal operations callers |
 | `observability/telemetry.py` | 3 | 9 | platform PostgreSQL | admin/telemetry callers |
 
-These are the exact nine remaining direct database-effect capability modules,
-with 202 AST-derived effects. Catalog and Forms now own zero direct database
-effects in capability code; their retained effects are behind named adapters.
+These are the exact eight remaining direct database-effect capability modules,
+with 198 AST-derived effects. Catalog, Forms, and Measurements now own zero
+direct database effects in capability code; retained effects are behind named
+adapters.
 
 ## Canonical target flow
 

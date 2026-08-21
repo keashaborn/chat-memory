@@ -10,12 +10,12 @@ Status: candidate evidence; no deployment or retirement authority
   `49f9e60cf4321c8e42c359845c1a62a8c987614d`; its Git status is empty and
   `brains.service` is active with zero restarts.
 - The cleanup integration candidate and GitHub branch begin this batch at
-  `953a8a324894043c40ac22e8adf23133d44b807c`; the worktree was clean before the candidate-only Forms adapter extraction.
+  `a9f2aff5fd325bc57e1ef58ec234758164255fdb`; the worktree was clean before the candidate-only Measurements adapter extraction.
 - The candidate has 143 routes and 129 OpenAPI paths. Route SHA-256 remains
   `c8d1df9cf48611e6c849614a521979b4a6109b0b4ef14f99ae55f4e85915d7d6`
   and OpenAPI SHA-256 remains
   `17aaa3a4a18bfe3a3d3671c1fee02654270524d0b5d764cd4c6eea6627429a8f`.
-- The complete candidate suite passes 1,211/1,211 after the candidate-only Forms adapter extraction.
+- The complete candidate suite passes 1,224/1,224 after the candidate-only Measurements adapter extraction.
 - The separate failed voice-canary unit and active timer remain outside this
   cleanup batch.
 
@@ -42,13 +42,13 @@ Status: candidate evidence; no deployment or retirement authority
 
 ## Remaining architectural debt
 
-1. Nine capability modules still contain direct SQL execution or transaction
+1. Eight capability modules still contain direct SQL execution or transaction
    ownership. Conversation, search, preferences, and voice now have zero direct
    query/transaction effects in their capability packages. The remaining files
    are exactly:
 
-   - LifeSwitch domain: `measurements/routes.py`, `nutrition/logs.py`,
-     `nutrition/meals.py`, `nutrition/routes.py`, `plans/routes.py`,
+   - LifeSwitch domain: `nutrition/logs.py`, `nutrition/meals.py`,
+     `nutrition/routes.py`, `plans/routes.py`,
      `training/logs.py`, and `training/routes.py`;
    - operations/observability: `operations/ai_operations.py` and
      `observability/telemetry.py`.
