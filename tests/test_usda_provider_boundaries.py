@@ -41,7 +41,7 @@ class UsdaProviderBoundaryTests(unittest.TestCase):
         route = function_source(NUTRITION, "create_my_food_from_usda")
         actor = route.index("require_actor_matches_owner")
         provider = route.index("usda_fdc_client")
-        database = route.index("conn = await _db")
+        database = route.index("lifeswitch_foods_repository")
         self.assertLess(actor, provider)
         self.assertLess(provider, database)
         self.assertNotIn("requests", route)

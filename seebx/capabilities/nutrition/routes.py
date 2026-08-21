@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import os
 import uuid
-import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Request
 from seebx.core.ownership import require_actor_matches_owner
-from seebx.adapters.lifeswitch_postgres import connect_lifeswitch
+from seebx.adapters.lifeswitch_foods_postgres import (
+    FoodsRepositoryError,
+    lifeswitch_foods_repository,
+)
 from seebx.adapters.lifeswitch_meal_plans_postgres import (
     MealPlansRepositoryError,
     lifeswitch_meal_plans_repository,
@@ -34,11 +35,6 @@ def _json_safe(v):
 def _row_to_jsonable(r):
     d = dict(r)
     return {k: _json_safe(v) for k, v in d.items()}
-
-SCHEMA = os.getenv("LIFESWITCH_NUTRITION_SCHEMA", "lifeswitch_nutrition")
-
-CATALOG_SCHEMA = os.getenv("CATALOG_SCHEMA", "catalog_dev")
-
 
 def _positive_float(value):
     try:
@@ -127,26 +123,12 @@ class MyFoodServingUpdate(BaseModel):
     set_preferred: bool | None = None
 
 
-MY_FOOD_RETURN_COLUMNS = """
-  f.my_food_id, f.owner_user_id, f.display_name, f.source_display_name,
-  f.brand, f.variant, f.source_type, f.source_food_id, f.source, f.source_id,
-  f.barcode, f.basis, f.kcal, f.protein_g, f.carbs_g, f.fat_g,
-  f.fiber_g, f.sugar_g, f.sodium_mg, f.nutrient_source,
-  f.nutrient_source_detail, f.nutrient_updated_at, f.preferred_mode,
-  f.preferred_quantity, f.preferred_serving_id,
-  ps.name as preferred_serving_name, ps.grams as preferred_serving_grams,
-  f.is_verified, f.is_active, f.created_at, f.updated_at
-"""
-
 
 def _as_uuid(s: str, name: str) -> str:
     try:
         return str(uuid.UUID(str(s)))
     except Exception:
         raise HTTPException(status_code=400, detail=f"invalid {name}")
-
-async def _db(req: Request):
-    return await connect_lifeswitch(req)
 
 @router.get("/meal_plans")
 async def list_meal_plans(req: Request, owner_user_id: str = Query(...)):
@@ -200,9 +182,6 @@ async def create_my_food_from_usda(
     desc = (j or {}).get("description") or f"FDC {fdc_id}"
     brand_owner = (j or {}).get("brandOwner") or (j or {}).get("brandName")
     gtin = (j or {}).get("gtinUpc")
-
-    # Branded/package foods often include label serving metadata.
-    # Keep macros normalized per 100g, but create a user-facing serving row when possible.
     household_serving = str((j or {}).get("householdServingFullText") or "").strip()
 
     nutrients = usda_nutrient_summary(j or {})
@@ -226,67 +205,31 @@ async def create_my_food_from_usda(
         },
     )
 
-    conn = await _db(req)
-    try:
-        async with conn.transaction():
+    async with lifeswitch_foods_repository(req) as repository:
+        async with repository.transaction():
             source_id = str(int(fdc_id))
             normalized_variant = str(variant).strip() if variant else None
-            existing_food = await conn.fetchrow(
-                f"""
-                select my_food_id, nutrient_source
-                from {SCHEMA}.my_food
-                where owner_user_id=$1::uuid
-                  and source_type='usda'
-                  and source_id=$2
-                  and coalesce(variant,'')=coalesce($3,'')
-                  and is_active
-                limit 1
-                """,
-                owner,
-                source_id,
-                normalized_variant,
+            existing_food = await repository.find_active_usda_food(
+                owner_user_id=owner,
+                source_id=source_id,
+                variant=normalized_variant,
             )
             is_new_food = existing_food is None
 
-            row = await conn.fetchrow(
-                f"""
-                insert into {SCHEMA}.my_food as current
-                  (owner_user_id, display_name, source_display_name, brand, variant,
-                   source_type, source_food_id, source, source_id, barcode,
-                   basis, kcal, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sodium_mg,
-                   nutrient_source, nutrient_updated_at, is_verified, is_active)
-                values
-                  ($1::uuid, $2, $2, $3, $4,
-                   'usda', null, 'usda_fdc', $5, $6,
-                   'per_100g', $7, $8, $9, $10, $11, $12, $13,
-                   'usda', now(), true, true)
-                on conflict (owner_user_id, source_type, source_id, coalesce(variant,''))
-                where is_active
-                do update set
-                  source_display_name = excluded.source_display_name,
-                  brand = excluded.brand,
-                  barcode = excluded.barcode,
-                  basis = excluded.basis,
-                  kcal = case when current.nutrient_source='usda' then excluded.kcal else current.kcal end,
-                  protein_g = case when current.nutrient_source='usda' then excluded.protein_g else current.protein_g end,
-                  carbs_g = case when current.nutrient_source='usda' then excluded.carbs_g else current.carbs_g end,
-                  fat_g = case when current.nutrient_source='usda' then excluded.fat_g else current.fat_g end,
-                  fiber_g = case when current.nutrient_source='usda' then excluded.fiber_g else current.fiber_g end,
-                  sugar_g = case when current.nutrient_source='usda' then excluded.sugar_g else current.sugar_g end,
-                  sodium_mg = case when current.nutrient_source='usda' then excluded.sodium_mg else current.sodium_mg end,
-                  nutrient_updated_at = case when current.nutrient_source='usda' then now() else current.nutrient_updated_at end,
-                  is_verified = case when current.nutrient_source='usda' then true else current.is_verified end,
-                  is_active = true,
-                  updated_at = now()
-                returning my_food_id
-                """,
-                owner,
-                str(desc).strip(),
-                str(brand_owner).strip() if brand_owner else None,
-                normalized_variant,
-                source_id,
-                str(gtin).strip() if gtin else None,
-                kcal, protein, carbs, fat, fiber, sugar, sodium_mg,
+            row = await repository.upsert_usda_food(
+                owner_user_id=owner,
+                display_name=str(desc).strip(),
+                brand=str(brand_owner).strip() if brand_owner else None,
+                variant=normalized_variant,
+                source_id=source_id,
+                barcode=str(gtin).strip() if gtin else None,
+                kcal=kcal,
+                protein_g=protein,
+                carbs_g=carbs,
+                fat_g=fat,
+                fiber_g=fiber,
+                sugar_g=sugar,
+                sodium_mg=sodium_mg,
             )
             if not row:
                 raise HTTPException(status_code=500, detail="insert_failed")
@@ -295,86 +238,40 @@ async def create_my_food_from_usda(
                 serving_name = household_serving or "1 serving"
                 serving_name = " ".join(str(serving_name).strip().split())[:120] or "1 serving"
                 fid = row["my_food_id"]
-                existing_serving = await conn.fetchrow(
-                    f"""
-                    select my_food_serving_id, source_type
-                    from {SCHEMA}.my_food_serving
-                    where my_food_id=$1::uuid and lower(name)=lower($2)
-                    limit 1
-                    """,
-                    fid,
-                    serving_name,
+                existing_serving = await repository.find_serving_by_name(
+                    my_food_id=fid,
+                    name=serving_name,
                 )
-                has_default = await conn.fetchval(
-                    f"select 1 from {SCHEMA}.my_food_serving where my_food_id=$1::uuid and is_default and is_active",
-                    fid,
-                )
+                has_default = await repository.has_active_default_serving(my_food_id=fid)
                 should_default = is_new_food or not has_default
 
                 if should_default:
-                    await conn.execute(
-                        f"update {SCHEMA}.my_food_serving set is_default=false, updated_at=now() where my_food_id=$1::uuid and is_default",
-                        fid,
-                    )
+                    await repository.clear_default_servings(my_food_id=fid)
 
                 if existing_serving:
                     serving_id = existing_serving["my_food_serving_id"]
-                    await conn.execute(
-                        f"""
-                        update {SCHEMA}.my_food_serving
-                        set grams=case when source_type in ('usda','legacy') then $2 else grams end,
-                            source_type=case when source_type in ('usda','legacy') then 'usda' else source_type end,
-                            source_label=coalesce(source_label, $3),
-                            is_active=true,
-                            is_default=case when $4::bool then true else is_default end,
-                            updated_at=now()
-                        where my_food_serving_id=$1::uuid
-                        """,
-                        serving_id,
-                        grams,
-                        serving_name,
-                        should_default,
+                    await repository.update_imported_serving(
+                        serving_id=serving_id,
+                        grams=grams,
+                        source_label=serving_name,
+                        is_default=should_default,
                     )
                 else:
-                    serving_id = await conn.fetchval(
-                        f"""
-                        insert into {SCHEMA}.my_food_serving
-                          (my_food_id, name, grams, is_default, source_type, source_label, is_active)
-                        values ($1::uuid, $2, $3, $4, 'usda', $2, true)
-                        returning my_food_serving_id
-                        """,
-                        fid,
-                        serving_name,
-                        grams,
-                        should_default,
+                    serving_id = await repository.create_imported_serving(
+                        my_food_id=fid,
+                        name=serving_name,
+                        grams=grams,
+                        is_default=should_default,
                     )
 
                 if is_new_food and serving_id:
-                    await conn.execute(
-                        f"""
-                        update {SCHEMA}.my_food
-                        set preferred_mode='serving', preferred_quantity=1,
-                            preferred_serving_id=$2::uuid, updated_at=now()
-                        where my_food_id=$1::uuid
-                        """,
-                        fid,
-                        serving_id,
+                    await repository.set_preferred_serving(
+                        my_food_id=fid,
+                        serving_id=serving_id,
                     )
 
-            updated = await conn.fetchrow(
-                f"""
-                select {MY_FOOD_RETURN_COLUMNS}
-                from {SCHEMA}.my_food f
-                left join {SCHEMA}.my_food_serving ps
-                  on ps.my_food_serving_id=f.preferred_serving_id
-                 and ps.my_food_id=f.my_food_id
-                where f.my_food_id=$1::uuid
-                """,
-                row["my_food_id"],
-            )
+            updated = await repository.get_food_with_preferred(my_food_id=row["my_food_id"])
             return JSONResponse(_row_to_jsonable(updated))
-    finally:
-        await conn.close()
 
 @router.post("/meal_plans/{meal_plan_id}/items/add")
 async def add_item(
@@ -529,34 +426,13 @@ async def list_my_foods(
     include_inactive: int = Query(0, ge=0, le=1),
 ):
     owner = require_actor_matches_owner(req, owner_user_id)
-    conn = await _db(req)
-    try:
-        where = "f.owner_user_id = $1::uuid"
-        args: list[object] = [owner]
-
-        if include_inactive == 0:
-            where += " and f.is_active"
-
-        if q:
-            where += " and (f.display_name ilike $2 or coalesce(f.brand,'') ilike $2 or coalesce(f.variant,'') ilike $2)"
-            args.append(f"%{q}%")
-
-        rows = await conn.fetch(
-            f"""
-            select {MY_FOOD_RETURN_COLUMNS}
-            from {SCHEMA}.my_food f
-            left join {SCHEMA}.my_food_serving ps
-              on ps.my_food_serving_id = f.preferred_serving_id
-             and ps.my_food_id = f.my_food_id
-            where {where}
-            order by lower(f.display_name), lower(coalesce(f.brand,'')), lower(coalesce(f.variant,''))
-            """,
-            *args,
+    async with lifeswitch_foods_repository(req) as repository:
+        rows = await repository.list_foods(
+            owner_user_id=owner,
+            query=q,
+            include_inactive=include_inactive != 0,
         )
-        return JSONResponse([_row_to_jsonable(r) for r in rows])
-    finally:
-        await conn.close()
-
+    return JSONResponse([_row_to_jsonable(row) for row in rows])
 
 @router.post("/my_foods/create_from_catalog")
 async def create_my_food_from_catalog(
@@ -570,18 +446,8 @@ async def create_my_food_from_catalog(
     owner = require_actor_matches_owner(req, owner_user_id)
     fid = _as_uuid(food_id, "food_id")
 
-    conn = await _db(req)
-    try:
-        src = await conn.fetchrow(
-            f"""
-            select food_id, display_name, brand, barcode, source, source_id, basis,
-                   kcal, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sodium_mg
-            from {CATALOG_SCHEMA}.food
-            where food_id = $1::uuid and is_public and is_active
-            limit 1
-            """,
-            fid,
-        )
+    async with lifeswitch_foods_repository(req) as repository:
+        src = await repository.get_public_catalog_food(food_id=fid)
         if not src:
             raise HTTPException(status_code=404, detail="catalog food not found or not public")
 
@@ -591,76 +457,31 @@ async def create_my_food_from_catalog(
 
         br = (brand or (src.get("brand") if hasattr(src, "get") else src["brand"]) or None)
         bc = ((src.get("barcode") if hasattr(src, "get") else src["barcode"]) or None)
-
         src_id = (src.get("source_id") if hasattr(src, "get") else src["source_id"])
         src_id_txt = str(src_id) if src_id is not None else str(fid)
         source_display_name = str(src["display_name"] or dn).strip()
 
-        row = await conn.fetchrow(
-            f"""
-            insert into {SCHEMA}.my_food as current
-              (owner_user_id, display_name, source_display_name, brand, variant,
-               source_type, source_food_id, source, source_id, barcode,
-               basis, kcal, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sodium_mg,
-               nutrient_source, nutrient_updated_at, is_verified, is_active)
-            values
-              ($1::uuid, $2, $3, $4, $5,
-               'catalog', $6::uuid, $7, $8, $9,
-               $10, $11, $12, $13, $14, $15, $16, $17,
-               'catalog', now(), true, true)
-            on conflict (owner_user_id, source_type, source_id, coalesce(variant,''))
-            where is_active
-            do update set
-              source_display_name = excluded.source_display_name,
-              brand = excluded.brand,
-              barcode = excluded.barcode,
-              basis = excluded.basis,
-              kcal = case when current.nutrient_source='catalog' then excluded.kcal else current.kcal end,
-              protein_g = case when current.nutrient_source='catalog' then excluded.protein_g else current.protein_g end,
-              carbs_g = case when current.nutrient_source='catalog' then excluded.carbs_g else current.carbs_g end,
-              fat_g = case when current.nutrient_source='catalog' then excluded.fat_g else current.fat_g end,
-              fiber_g = case when current.nutrient_source='catalog' then excluded.fiber_g else current.fiber_g end,
-              sugar_g = case when current.nutrient_source='catalog' then excluded.sugar_g else current.sugar_g end,
-              sodium_mg = case when current.nutrient_source='catalog' then excluded.sodium_mg else current.sodium_mg end,
-              nutrient_updated_at = case when current.nutrient_source='catalog' then now() else current.nutrient_updated_at end,
-              is_active = true,
-              updated_at = now()
-            returning my_food_id
-            """,
-            owner,
-            dn,
-            source_display_name,
-            br,
-            (variant or None),
-            fid,
-            (src.get("source") if hasattr(src, "get") else src["source"]),
-            src_id_txt,
-            bc,
-            (src.get("basis") if hasattr(src, "get") else src["basis"]),
-            (src.get("kcal") if hasattr(src, "get") else src["kcal"]),
-            (src.get("protein_g") if hasattr(src, "get") else src["protein_g"]),
-            (src.get("carbs_g") if hasattr(src, "get") else src["carbs_g"]),
-            (src.get("fat_g") if hasattr(src, "get") else src["fat_g"]),
-            (src.get("fiber_g") if hasattr(src, "get") else src["fiber_g"]),
-            (src.get("sugar_g") if hasattr(src, "get") else src["sugar_g"]),
-            (src.get("sodium_mg") if hasattr(src, "get") else src["sodium_mg"]),
+        row = await repository.upsert_catalog_food(
+            owner_user_id=owner,
+            display_name=dn,
+            source_display_name=source_display_name,
+            brand=br,
+            variant=(variant or None),
+            source_food_id=fid,
+            source=(src.get("source") if hasattr(src, "get") else src["source"]),
+            source_id=src_id_txt,
+            barcode=bc,
+            basis=(src.get("basis") if hasattr(src, "get") else src["basis"]),
+            kcal=(src.get("kcal") if hasattr(src, "get") else src["kcal"]),
+            protein_g=(src.get("protein_g") if hasattr(src, "get") else src["protein_g"]),
+            carbs_g=(src.get("carbs_g") if hasattr(src, "get") else src["carbs_g"]),
+            fat_g=(src.get("fat_g") if hasattr(src, "get") else src["fat_g"]),
+            fiber_g=(src.get("fiber_g") if hasattr(src, "get") else src["fiber_g"]),
+            sugar_g=(src.get("sugar_g") if hasattr(src, "get") else src["sugar_g"]),
+            sodium_mg=(src.get("sodium_mg") if hasattr(src, "get") else src["sodium_mg"]),
         )
-        updated = await conn.fetchrow(
-            f"""
-            select {MY_FOOD_RETURN_COLUMNS}
-            from {SCHEMA}.my_food f
-            left join {SCHEMA}.my_food_serving ps
-              on ps.my_food_serving_id=f.preferred_serving_id
-             and ps.my_food_id=f.my_food_id
-            where f.my_food_id=$1::uuid
-            """,
-            row["my_food_id"],
-        )
-        return JSONResponse(_row_to_jsonable(updated))
-    finally:
-        await conn.close()
-
-
+        updated = await repository.get_food_with_preferred(my_food_id=row["my_food_id"])
+    return JSONResponse(_row_to_jsonable(updated))
 
 @router.patch("/my_foods/{my_food_id}")
 async def update_my_food(
@@ -673,13 +494,9 @@ async def update_my_food(
     if not fields:
         raise HTTPException(status_code=400, detail="no fields provided")
 
-    conn = await _db(req)
-    try:
-        async with conn.transaction():
-            current = await conn.fetchrow(
-                f"select * from {SCHEMA}.my_food where my_food_id=$1::uuid for update",
-                fid,
-            )
+    async with lifeswitch_foods_repository(req) as repository:
+        async with repository.transaction():
+            current = await repository.lock_food(my_food_id=fid)
             if not current:
                 raise HTTPException(status_code=404, detail="my_food not found")
             require_actor_matches_owner(req, str(current["owner_user_id"]))
@@ -746,16 +563,9 @@ async def update_my_food(
             if preferred_mode == "serving":
                 if preferred_serving_id is None:
                     raise HTTPException(status_code=400, detail="serving mode requires preferred_serving_id")
-                serving_ok = await conn.fetchval(
-                    f"""
-                    select 1
-                    from {SCHEMA}.my_food_serving
-                    where my_food_serving_id=$1::uuid
-                      and my_food_id=$2::uuid
-                      and is_active
-                    """,
-                    preferred_serving_id,
-                    fid,
+                serving_ok = await repository.active_serving_belongs_to_food(
+                    serving_id=preferred_serving_id,
+                    my_food_id=fid,
                 )
                 if not serving_ok:
                     raise HTTPException(status_code=400, detail="preferred serving is not active for this food")
@@ -763,98 +573,48 @@ async def update_my_food(
             def numeric_value(name: str, payload_value):
                 return payload_value if name in fields else current[name]
 
-            row = await conn.fetchrow(
-                f"""
-                update {SCHEMA}.my_food
-                set display_name=$2,
-                    brand=$3,
-                    variant=$4,
-                    barcode=$5,
-                    kcal=$6,
-                    protein_g=$7,
-                    carbs_g=$8,
-                    fat_g=$9,
-                    fiber_g=$10,
-                    sugar_g=$11,
-                    sodium_mg=$12,
-                    nutrient_source=$13,
-                    nutrient_source_detail=$14,
-                    nutrient_updated_at=case when $15::bool then now() else nutrient_updated_at end,
-                    preferred_mode=$16,
-                    preferred_quantity=$17,
-                    preferred_serving_id=$18::uuid,
-                    is_verified=$19,
-                    updated_at=now()
-                where my_food_id=$1::uuid
-                returning my_food_id
-                """,
-                fid,
-                display_name,
-                brand,
-                variant,
-                barcode,
-                numeric_value("kcal", payload.kcal),
-                numeric_value("protein_g", payload.protein_g),
-                numeric_value("carbs_g", payload.carbs_g),
-                numeric_value("fat_g", payload.fat_g),
-                numeric_value("fiber_g", payload.fiber_g),
-                numeric_value("sugar_g", payload.sugar_g),
-                numeric_value("sodium_mg", payload.sodium_mg),
-                nutrient_source,
-                nutrient_source_detail,
-                nutrients_changed or "nutrient_source" in fields,
-                preferred_mode,
-                preferred_quantity,
-                preferred_serving_id,
-                payload.is_verified if "is_verified" in fields else current["is_verified"],
+            row = await repository.update_food_record(
+                my_food_id=fid,
+                values=(
+                    display_name,
+                    brand,
+                    variant,
+                    barcode,
+                    numeric_value("kcal", payload.kcal),
+                    numeric_value("protein_g", payload.protein_g),
+                    numeric_value("carbs_g", payload.carbs_g),
+                    numeric_value("fat_g", payload.fat_g),
+                    numeric_value("fiber_g", payload.fiber_g),
+                    numeric_value("sugar_g", payload.sugar_g),
+                    numeric_value("sodium_mg", payload.sodium_mg),
+                    nutrient_source,
+                    nutrient_source_detail,
+                    nutrients_changed or "nutrient_source" in fields,
+                    preferred_mode,
+                    preferred_quantity,
+                    preferred_serving_id,
+                    payload.is_verified if "is_verified" in fields else current["is_verified"],
+                ),
             )
             if not row:
                 raise HTTPException(status_code=404, detail="my_food not found")
 
-            updated = await conn.fetchrow(
-                f"""
-                select {MY_FOOD_RETURN_COLUMNS}
-                from {SCHEMA}.my_food f
-                left join {SCHEMA}.my_food_serving ps
-                  on ps.my_food_serving_id=f.preferred_serving_id
-                 and ps.my_food_id=f.my_food_id
-                where f.my_food_id=$1::uuid
-                """,
-                fid,
-            )
+            updated = await repository.get_food_with_preferred(my_food_id=fid)
             return JSONResponse(_row_to_jsonable(updated))
-    finally:
-        await conn.close()
-
 
 @router.post("/my_foods/{my_food_id}/deactivate")
 async def deactivate_my_food(my_food_id: str, req: Request):
     fid = _as_uuid(my_food_id, "my_food_id")
-    conn = await _db(req)
-    try:
-        owner = await conn.fetchval(
-            f"select owner_user_id from {SCHEMA}.my_food where my_food_id=$1::uuid",
-            fid,
-        )
+    async with lifeswitch_foods_repository(req) as repository:
+        owner = await repository.food_owner(my_food_id=fid)
         if not owner:
             raise HTTPException(status_code=404, detail="my_food not found")
         require_actor_matches_owner(req, str(owner))
 
-        row = await conn.fetchrow(
-            f"""
-            update {SCHEMA}.my_food
-            set is_active=false, updated_at=now()
-            where my_food_id=$1::uuid
-            returning my_food_id, owner_user_id, display_name, brand, variant, source_type, source_id, is_active, updated_at
-            """,
-            fid,
-        )
+        row = await repository.deactivate_food(my_food_id=fid)
         if not row:
             raise HTTPException(status_code=404, detail="my_food not found")
-        return JSONResponse(_row_to_jsonable(row))
-    finally:
-        await conn.close()
-
+    return JSONResponse(_row_to_jsonable(row))
 
 # ----------------------------
 # My Food servings (presets)
@@ -863,30 +623,14 @@ async def deactivate_my_food(my_food_id: str, req: Request):
 @router.get("/my_foods/{my_food_id}/servings")
 async def list_my_food_servings(my_food_id: str, req: Request):
     fid = _as_uuid(my_food_id, "my_food_id")
-    conn = await _db(req)
-    try:
-        owner = await conn.fetchval(
-            f"select owner_user_id from {SCHEMA}.my_food where my_food_id=$1::uuid",
-            fid,
-        )
+    async with lifeswitch_foods_repository(req) as repository:
+        owner = await repository.food_owner(my_food_id=fid)
         if not owner:
             raise HTTPException(status_code=404, detail="my_food not found")
         require_actor_matches_owner(req, str(owner))
 
-        rows = await conn.fetch(
-            f"""
-            select my_food_serving_id, my_food_id, name, grams, is_default,
-                   source_type, source_label, is_active, created_at, updated_at
-            from {SCHEMA}.my_food_serving
-            where my_food_id = $1::uuid and is_active
-            order by is_default desc, lower(name), grams
-            """,
-            fid,
-        )
-        return JSONResponse([_row_to_jsonable(r) for r in rows])
-    finally:
-        await conn.close()
-
+        rows = await repository.list_active_servings(my_food_id=fid)
+    return JSONResponse([_row_to_jsonable(row) for row in rows])
 
 @router.post("/my_foods/{my_food_id}/servings/create")
 async def create_my_food_serving(
@@ -901,139 +645,43 @@ async def create_my_food_serving(
     if not nm:
         raise HTTPException(status_code=400, detail="name required")
 
-    conn = await _db(req)
-    try:
-        food = await conn.fetchrow(
-            f"select owner_user_id, is_active from {SCHEMA}.my_food where my_food_id=$1::uuid",
-            fid,
-        )
+    async with lifeswitch_foods_repository(req) as repository:
+        food = await repository.food_owner_and_active(my_food_id=fid)
         if not food or food["is_active"] is not True:
             raise HTTPException(status_code=404, detail="my_food not found or inactive")
         require_actor_matches_owner(req, str(food["owner_user_id"]))
 
-        # Upsert by (my_food_id, lower(name)):
-        # - If name exists, overwrite grams and optionally set default.
-        # - If not, insert new row.
-        row = await conn.fetchrow(
-            f"""
-            select my_food_serving_id, my_food_id, name, grams, is_default,
-                   source_type, source_label, is_active, created_at, updated_at
-            from {SCHEMA}.my_food_serving
-            where my_food_id=$1::uuid
-              and lower(name)=lower($2)
-            order by updated_at desc nulls last, created_at desc
-            limit 1
-            """,
-            fid,
-            nm,
-        )
-
+        row = await repository.find_serving_record_by_name(my_food_id=fid, name=nm)
         if row:
             sid = row["my_food_serving_id"]
+            await repository.update_manual_serving(serving_id=sid, name=nm, grams=grams)
 
-            await conn.execute(
-                f"""
-                update {SCHEMA}.my_food_serving
-                set name=$2,
-                    grams=$3,
-                    source_type='manual',
-                    source_label=coalesce(source_label, name),
-                    is_active=true,
-                    updated_at=now()
-                where my_food_serving_id=$1::uuid
-                """,
-                sid,
-                nm,
-                grams,
-            )
-
-            # optionally set as default
             if is_default == 1 and row["is_default"] is not True:
-                await conn.execute(
-                    f"""
-                    update {SCHEMA}.my_food_serving
-                    set is_default=false, updated_at=now()
-                    where my_food_id=$1::uuid and is_default
-                    """,
-                    fid,
-                )
-                await conn.execute(
-                    f"""
-                    update {SCHEMA}.my_food_serving
-                    set is_default=true, updated_at=now()
-                    where my_food_serving_id=$1::uuid
-                    """,
-                    sid,
-                )
+                await repository.clear_default_servings(my_food_id=fid)
+                await repository.set_default_serving(serving_id=sid)
 
             if is_default == 1:
-                await conn.execute(
-                    f"""
-                    update {SCHEMA}.my_food
-                    set preferred_mode='serving',
-                        preferred_quantity=1,
-                        preferred_serving_id=$2::uuid,
-                        updated_at=now()
-                    where my_food_id=$1::uuid
-                    """,
-                    fid,
-                    sid,
-                )
+                await repository.set_preferred_serving(my_food_id=fid, serving_id=sid)
 
-            row2 = await conn.fetchrow(
-                f"""
-                select my_food_serving_id, my_food_id, name, grams, is_default,
-                       source_type, source_label, is_active, created_at, updated_at
-                from {SCHEMA}.my_food_serving
-                where my_food_serving_id=$1::uuid
-                """,
-                sid,
-            )
+            row2 = await repository.get_serving(serving_id=sid)
             return JSONResponse(_row_to_jsonable(row2 or row))
 
-        # insert new row
         if is_default == 1:
-            await conn.execute(
-                f"""
-                update {SCHEMA}.my_food_serving
-                set is_default=false, updated_at=now()
-                where my_food_id=$1::uuid and is_default
-                """,
-                fid,
-            )
+            await repository.clear_default_servings(my_food_id=fid)
 
-        row = await conn.fetchrow(
-            f"""
-            insert into {SCHEMA}.my_food_serving
-              (my_food_id, name, grams, is_default, source_type, source_label, is_active)
-            values ($1::uuid, $2, $3, $4::bool, 'manual', $2, true)
-            returning my_food_serving_id, my_food_id, name, grams, is_default,
-                      source_type, source_label, is_active, created_at, updated_at
-            """,
-            fid,
-            nm,
-            grams,
-            (is_default == 1),
+        row = await repository.create_manual_serving(
+            my_food_id=fid,
+            name=nm,
+            grams=grams,
+            is_default=(is_default == 1),
         )
-
         if row and is_default == 1:
-            await conn.execute(
-                f"""
-                update {SCHEMA}.my_food
-                set preferred_mode='serving',
-                    preferred_quantity=1,
-                    preferred_serving_id=$2::uuid,
-                    updated_at=now()
-                where my_food_id=$1::uuid
-                """,
-                fid,
-                row["my_food_serving_id"],
+            await repository.set_preferred_serving(
+                my_food_id=fid,
+                serving_id=row["my_food_serving_id"],
             )
 
         return JSONResponse(_row_to_jsonable(row) if row else {"error": "insert_failed"})
-    finally:
-        await conn.close()
-
 
 @router.patch("/my_foods/{my_food_id}/servings/{my_food_serving_id}")
 async def update_my_food_serving(
@@ -1048,116 +696,60 @@ async def update_my_food_serving(
     if not fields:
         raise HTTPException(status_code=400, detail="no fields provided")
 
-    conn = await _db(req)
     try:
-        async with conn.transaction():
-            current = await conn.fetchrow(
-                f"""
-                select s.*, f.owner_user_id, f.preferred_serving_id
-                from {SCHEMA}.my_food_serving s
-                join {SCHEMA}.my_food f on f.my_food_id=s.my_food_id
-                where s.my_food_serving_id=$1::uuid
-                  and s.my_food_id=$2::uuid
-                for update of s, f
-                """,
-                sid,
-                fid,
-            )
-            if not current:
-                raise HTTPException(status_code=404, detail="serving not found")
-            require_actor_matches_owner(req, str(current["owner_user_id"]))
+        async with lifeswitch_foods_repository(req) as repository:
+            async with repository.transaction(translate_unique_violation=True):
+                current = await repository.lock_serving(serving_id=sid, my_food_id=fid)
+                if not current:
+                    raise HTTPException(status_code=404, detail="serving not found")
+                require_actor_matches_owner(req, str(current["owner_user_id"]))
 
-            name = current["name"]
-            if "name" in fields:
-                name = str(payload.name or "").strip()
-                if not name:
-                    raise HTTPException(status_code=400, detail="name required")
+                name = current["name"]
+                if "name" in fields:
+                    name = str(payload.name or "").strip()
+                    if not name:
+                        raise HTTPException(status_code=400, detail="name required")
 
-            grams = payload.grams if "grams" in fields else current["grams"]
-            is_active = payload.is_active if "is_active" in fields else current["is_active"]
-            if grams is None or float(grams) <= 0:
-                raise HTTPException(status_code=400, detail="grams must be > 0")
+                grams = payload.grams if "grams" in fields else current["grams"]
+                is_active = payload.is_active if "is_active" in fields else current["is_active"]
+                if grams is None or float(grams) <= 0:
+                    raise HTTPException(status_code=400, detail="grams must be > 0")
 
-            set_preferred = payload.set_preferred if "set_preferred" in fields else None
-            if set_preferred is True and is_active is not True:
-                raise HTTPException(status_code=400, detail="inactive serving cannot be preferred")
+                set_preferred = payload.set_preferred if "set_preferred" in fields else None
+                if set_preferred is True and is_active is not True:
+                    raise HTTPException(status_code=400, detail="inactive serving cannot be preferred")
 
-            manually_changed = bool(fields.intersection({"name", "grams"}))
-            row = await conn.fetchrow(
-                f"""
-                update {SCHEMA}.my_food_serving
-                set name=$3,
-                    grams=$4,
-                    is_active=$5,
-                    source_type=case when $6::bool then 'manual' else source_type end,
-                    source_label=coalesce(source_label, name),
-                    is_default=case when $5::bool then is_default else false end,
-                    updated_at=now()
-                where my_food_serving_id=$1::uuid
-                  and my_food_id=$2::uuid
-                returning my_food_serving_id, my_food_id, name, grams, is_default,
-                          source_type, source_label, is_active, created_at, updated_at
-                """,
-                sid,
-                fid,
-                name,
-                grams,
-                is_active,
-                manually_changed,
-            )
-
-            currently_preferred = str(current["preferred_serving_id"] or "") == str(sid)
-            if set_preferred is True:
-                await conn.execute(
-                    f"update {SCHEMA}.my_food_serving set is_default=false, updated_at=now() where my_food_id=$1::uuid and my_food_serving_id<>$2::uuid and is_default",
-                    fid,
-                    sid,
-                )
-                await conn.execute(
-                    f"update {SCHEMA}.my_food_serving set is_default=true, updated_at=now() where my_food_serving_id=$1::uuid",
-                    sid,
-                )
-                await conn.execute(
-                    f"""
-                    update {SCHEMA}.my_food
-                    set preferred_mode='serving', preferred_quantity=1,
-                        preferred_serving_id=$2::uuid, updated_at=now()
-                    where my_food_id=$1::uuid
-                    """,
-                    fid,
-                    sid,
-                )
-            elif currently_preferred and (is_active is not True or set_preferred is False):
-                await conn.execute(
-                    f"""
-                    update {SCHEMA}.my_food
-                    set preferred_mode='grams', preferred_quantity=$2,
-                        preferred_serving_id=null, updated_at=now()
-                    where my_food_id=$1::uuid
-                    """,
-                    fid,
-                    grams,
-                )
-                await conn.execute(
-                    f"update {SCHEMA}.my_food_serving set is_default=false, updated_at=now() where my_food_serving_id=$1::uuid",
-                    sid,
+                manually_changed = bool(fields.intersection({"name", "grams"}))
+                row = await repository.update_serving_record(
+                    serving_id=sid,
+                    my_food_id=fid,
+                    name=name,
+                    grams=grams,
+                    is_active=is_active,
+                    manually_changed=manually_changed,
                 )
 
-            updated = await conn.fetchrow(
-                f"""
-                select my_food_serving_id, my_food_id, name, grams, is_default,
-                       source_type, source_label, is_active, created_at, updated_at
-                from {SCHEMA}.my_food_serving
-                where my_food_serving_id=$1::uuid
-                """,
-                sid,
-            )
-            return JSONResponse(_row_to_jsonable(updated or row))
-    except asyncpg.UniqueViolationError:
-        raise HTTPException(status_code=409, detail="serving name already exists for this food")
-    finally:
-        await conn.close()
+                currently_preferred = str(current["preferred_serving_id"] or "") == str(sid)
+                if set_preferred is True:
+                    await repository.clear_other_default_servings(
+                        my_food_id=fid,
+                        serving_id=sid,
+                    )
+                    await repository.set_default_serving(serving_id=sid)
+                    await repository.set_preferred_serving(my_food_id=fid, serving_id=sid)
+                elif currently_preferred and (is_active is not True or set_preferred is False):
+                    await repository.set_grams_preference(
+                        my_food_id=fid,
+                        preferred_quantity=grams,
+                    )
+                    await repository.clear_serving_default(serving_id=sid)
 
+                updated = await repository.get_serving(serving_id=sid)
+                return JSONResponse(_row_to_jsonable(updated or row))
+    except FoodsRepositoryError as error:
+        if error.code == "serving_name_conflict":
+            raise HTTPException(status_code=409, detail="serving name already exists for this food") from error
+        raise
 
 # ----------------------------
 # My Food overrides (alias + default grams + sort)
@@ -1169,21 +761,9 @@ async def list_my_food_overrides(
     owner_user_id: str = Query(..., min_length=1),
 ):
     owner = require_actor_matches_owner(req, owner_user_id)
-    conn = await _db(req)
-    try:
-        rows = await conn.fetch(
-            f"""
-            select owner_user_id, my_food_id, alias, default_grams, sort_order, created_at, updated_at
-            from {SCHEMA}.my_food_override
-            where owner_user_id = $1::uuid
-            order by sort_order asc, updated_at desc nulls last, created_at desc
-            """,
-            owner,
-        )
-        return JSONResponse([_row_to_jsonable(r) for r in rows])
-    finally:
-        await conn.close()
-
+    async with lifeswitch_foods_repository(req) as repository:
+        rows = await repository.list_overrides(owner_user_id=owner)
+    return JSONResponse([_row_to_jsonable(row) for row in rows])
 
 @router.post("/my_food_overrides/upsert")
 async def upsert_my_food_override(
@@ -1201,35 +781,19 @@ async def upsert_my_food_override(
     if al == "":
         al = None
 
-    conn = await _db(req)
-    try:
-        ok = await conn.fetchval(
-            f"select is_active from {SCHEMA}.my_food where my_food_id=$1::uuid",
-            fid,
-        )
+    async with lifeswitch_foods_repository(req) as repository:
+        ok = await repository.food_is_active(my_food_id=fid)
         if ok is not True:
             raise HTTPException(status_code=404, detail="my_food not found or inactive")
 
-        row = await conn.fetchrow(
-            f"""
-            insert into {SCHEMA}.my_food_override
-              (owner_user_id, my_food_id, alias, default_grams, sort_order)
-            values
-              ($1::uuid, $2::uuid, $3, $4, $5)
-            on conflict (owner_user_id, my_food_id) do update
-              set
-                alias = coalesce(excluded.alias, {SCHEMA}.my_food_override.alias),
-                default_grams = coalesce(excluded.default_grams, {SCHEMA}.my_food_override.default_grams),
-                sort_order = excluded.sort_order,
-                updated_at = now()
-            returning owner_user_id, my_food_id, alias, default_grams, sort_order, created_at, updated_at
-            """,
-            owner, fid, al, default_grams, sort_order,
+        row = await repository.upsert_override(
+            owner_user_id=owner,
+            my_food_id=fid,
+            alias=al,
+            default_grams=default_grams,
+            sort_order=sort_order,
         )
-        return JSONResponse(_row_to_jsonable(row) if row else {"error": "upsert_failed"})
-    finally:
-        await conn.close()
-
+    return JSONResponse(_row_to_jsonable(row) if row else {"error": "upsert_failed"})
 
 @router.delete("/my_food_overrides")
 async def delete_my_food_override(
@@ -1239,18 +803,8 @@ async def delete_my_food_override(
 ):
     owner = require_actor_matches_owner(req, owner_user_id)
     fid = _as_uuid(my_food_id, "my_food_id")
-    conn = await _db(req)
-    try:
-        row = await conn.fetchrow(
-            f"""
-            delete from {SCHEMA}.my_food_override
-            where owner_user_id=$1::uuid and my_food_id=$2::uuid
-            returning owner_user_id, my_food_id
-            """,
-            owner, fid,
-        )
+    async with lifeswitch_foods_repository(req) as repository:
+        row = await repository.delete_override(owner_user_id=owner, my_food_id=fid)
         if not row:
             raise HTTPException(status_code=404, detail="override not found")
-        return JSONResponse(_row_to_jsonable(row))
-    finally:
-        await conn.close()
+    return JSONResponse(_row_to_jsonable(row))
