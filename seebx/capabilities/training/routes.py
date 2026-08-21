@@ -15,14 +15,17 @@ from seebx.adapters.lifeswitch_postgres import connect_lifeswitch
 from seebx.adapters.lifeswitch_training_exercises_postgres import (
     lifeswitch_training_exercises_repository,
 )
+from seebx.adapters.lifeswitch_training_access_postgres import (
+    lifeswitch_training_access_repository,
+)
+from seebx.adapters.lifeswitch_training_conditioning_postgres import (
+    lifeswitch_training_conditioning_repository,
+)
 from seebx.adapters.lifeswitch_training_writes_postgres import (
     TrainingWriterError,
-    correct_conditioning_session as write_conditioning_correction,
     correct_training_session as write_training_correction,
-    create_conditioning_session as write_conditioning_session,
     create_training_session as write_training_session,
     set_transaction_actor,
-    void_conditioning_session as write_conditioning_void,
     void_training_session as write_training_void,
 )
 from seebx.capabilities.training.write_errors import training_writer_http_error
@@ -31,7 +34,6 @@ from fastapi.responses import JSONResponse
 router = APIRouter()
 
 SCHEMA = os.getenv("LIFESWITCH_TRAINING_SCHEMA", "lifeswitch_training")
-PEOPLE_SCHEMA = os.getenv("LIFESWITCH_PEOPLE_SCHEMA", "lifeswitch_people")
 
 def _json_safe(v):
     if isinstance(v, uuid.UUID):
@@ -134,28 +136,7 @@ async def _db(req: Request):
     return await connect_lifeswitch(req)
 
 
-async def _has_people_permission(conn, grantor_user_id: str, grantee_user_id: str, scope: str) -> bool:
-    row = await conn.fetchrow(
-        f"""
-        select rp.relationship_permission_id
-        from {PEOPLE_SCHEMA}.relationship_permission rp
-        join {PEOPLE_SCHEMA}.relationship r
-          on r.relationship_id=rp.relationship_id
-        where rp.grantor_user_id=$1::uuid
-          and rp.grantee_user_id=$2::uuid
-          and rp.permission_scope=$3
-          and rp.is_enabled=true
-          and r.status='accepted'
-        limit 1
-        """,
-        grantor_user_id,
-        grantee_user_id,
-        scope,
-    )
-    return bool(row)
-
-
-async def _resolve_training_view_target(conn, viewer_user_id: str, target_user_id: str = "") -> tuple[str, bool]:
+async def _resolve_training_view_target(req: Request, viewer_user_id: str, target_user_id: str = "") -> tuple[str, bool]:
     viewer = _as_uuid(viewer_user_id, "owner_user_id")
     target = _as_uuid(target_user_id, "target_user_id") if str(target_user_id or "").strip() else viewer
     delegated = target != viewer
@@ -163,7 +144,12 @@ async def _resolve_training_view_target(conn, viewer_user_id: str, target_user_i
     if delegated:
         if os.getenv("LIFESWITCH_DELEGATED_READS_ENABLED", "0") != "1":
             raise HTTPException(status_code=403, detail="delegated_access_disabled")
-        allowed = await _has_people_permission(conn, target, viewer, "training:view")
+        async with lifeswitch_training_access_repository(req) as repository:
+            allowed = await repository.has_people_permission(
+                grantor_user_id=target,
+                grantee_user_id=viewer,
+                scope="training:view",
+            )
         if not allowed:
             raise HTTPException(status_code=403, detail="training:view permission required")
 
@@ -246,27 +232,12 @@ async def deactivate_my_exercise(
 
 @router.get("/conditioning_library")
 async def list_conditioning_library(
+    req: Request,
     include_inactive: int = Query(0, ge=0, le=1),
 ):
-    conn = await _db(req)
-    try:
-        where_active = "" if include_inactive else "where is_active=true"
-        rows = await conn.fetch(
-            f"""
-            select
-              conditioning_library_id, slug, name, category, modality,
-              purpose, default_duration_min, default_frequency_per_week,
-              default_intensity, interference_risk, joint_stress, equipment,
-              progression_notes, contraindication_notes,
-              sort_order, is_active, created_at, updated_at
-            from {SCHEMA}.conditioning_library
-            {where_active}
-            order by sort_order asc, lower(name) asc
-            """
-        )
-        return JSONResponse([_row_to_jsonable(r) for r in rows])
-    finally:
-        await conn.close()
+    async with lifeswitch_training_conditioning_repository(req) as repository:
+        rows = await repository.list_library(include_inactive=bool(include_inactive))
+    return JSONResponse([_row_to_jsonable(row) for row in rows])
 
 
 @router.get("/my_conditioning_prescriptions")
@@ -276,44 +247,12 @@ async def list_my_conditioning_prescriptions(
     include_inactive: int = Query(0, ge=0, le=1),
 ):
     owner = require_actor_matches_owner(req, owner_user_id)
-    conn = await _db(req)
-    try:
-        where_active = "" if include_inactive else "and p.is_active=true"
-        rows = await conn.fetch(
-            f"""
-            select
-              p.my_conditioning_prescription_id,
-              p.owner_user_id,
-              p.conditioning_library_id,
-              p.name,
-              p.category,
-              p.modality,
-              p.purpose,
-              p.target_duration_min,
-              p.target_frequency_per_week,
-              p.target_intensity,
-              p.preferred_timing,
-              p.recovery_constraints,
-              p.notes,
-              p.dose_type,
-              p.dose_config,
-              p.is_active,
-              p.created_at,
-              p.updated_at,
-              l.slug as library_slug,
-              l.name as library_name
-            from {SCHEMA}.my_conditioning_prescription p
-            left join {SCHEMA}.conditioning_library l
-              on l.conditioning_library_id=p.conditioning_library_id
-            where p.owner_user_id=$1::uuid
-              {where_active}
-            order by p.updated_at desc, lower(p.name) asc
-            """,
-            owner,
+    async with lifeswitch_training_conditioning_repository(req) as repository:
+        rows = await repository.list_prescriptions(
+            owner_user_id=owner,
+            include_inactive=bool(include_inactive),
         )
-        return JSONResponse([_conditioning_row_to_jsonable(r) for r in rows])
-    finally:
-        await conn.close()
+    return JSONResponse([_conditioning_row_to_jsonable(row) for row in rows])
 
 
 @router.post("/my_conditioning_prescriptions/upsert")
@@ -386,212 +325,33 @@ async def upsert_my_conditioning_prescription(
         separators=(",", ":"),
     )
 
-    conn = await _db(req)
-    try:
+    async with lifeswitch_training_conditioning_repository(req) as repository:
         if pid:
-            existing_owner = await conn.fetchval(
-                f"""
-                select owner_user_id
-                from {SCHEMA}.my_conditioning_prescription
-                where my_conditioning_prescription_id=$1::uuid
-                """,
-                pid,
+            existing_owner = await repository.get_prescription_owner(
+                prescription_id=pid
             )
             if existing_owner and str(existing_owner) != owner:
-                raise HTTPException(
-                    status_code=403,
-                    detail="actor_owner_mismatch",
-                )
-
-            row = await conn.fetchrow(
-                f"""
-                insert into {SCHEMA}.my_conditioning_prescription
-                  (
-                    my_conditioning_prescription_id,
-                    owner_user_id,
-                    conditioning_library_id,
-                    name,
-                    category,
-                    modality,
-                    purpose,
-                    target_duration_min,
-                    target_frequency_per_week,
-                    target_intensity,
-                    preferred_timing,
-                    recovery_constraints,
-                    notes,
-                    dose_type,
-                    dose_config,
-                    is_active
-                  )
-                values
-                  (
-                    $1::uuid,
-                    $2::uuid,
-                    $3::uuid,
-                    $4,
-                    $5,
-                    $6,
-                    $7,
-                    $8,
-                    $9,
-                    $10,
-                    $11,
-                    $12,
-                    $13,
-                    $14,
-                    $15::jsonb,
-                    true
-                  )
-                on conflict (my_conditioning_prescription_id) do update
-                  set conditioning_library_id=excluded.conditioning_library_id,
-                      name=excluded.name,
-                      category=excluded.category,
-                      modality=excluded.modality,
-                      purpose=excluded.purpose,
-                      target_duration_min=excluded.target_duration_min,
-                      target_frequency_per_week=excluded.target_frequency_per_week,
-                      target_intensity=excluded.target_intensity,
-                      preferred_timing=excluded.preferred_timing,
-                      recovery_constraints=excluded.recovery_constraints,
-                      notes=excluded.notes,
-                      dose_type=excluded.dose_type,
-                      dose_config=excluded.dose_config,
-                      is_active=true,
-                      updated_at=now()
-                returning
-                  my_conditioning_prescription_id,
-                  owner_user_id,
-                  conditioning_library_id,
-                  name,
-                  category,
-                  modality,
-                  purpose,
-                  target_duration_min,
-                  target_frequency_per_week,
-                  target_intensity,
-                  preferred_timing,
-                  recovery_constraints,
-                  notes,
-                  dose_type,
-                  dose_config,
-                  is_active,
-                  created_at,
-                  updated_at
-                """,
-                pid,
-                owner,
-                libid,
-                name.strip(),
-                category.strip(),
-                modality.strip(),
-                purpose.strip(),
-                int(target_duration_min),
-                float(target_frequency_per_week),
-                target_intensity.strip(),
-                preferred_timing.strip(),
-                recovery_constraints.strip(),
-                notes.strip(),
-                clean_dose_type,
-                dose_config_json,
-            )
-        else:
-            row = await conn.fetchrow(
-                f"""
-                insert into {SCHEMA}.my_conditioning_prescription
-                  (
-                    owner_user_id,
-                    conditioning_library_id,
-                    name,
-                    category,
-                    modality,
-                    purpose,
-                    target_duration_min,
-                    target_frequency_per_week,
-                    target_intensity,
-                    preferred_timing,
-                    recovery_constraints,
-                    notes,
-                    dose_type,
-                    dose_config,
-                    is_active
-                  )
-                values
-                  (
-                    $1::uuid,
-                    $2::uuid,
-                    $3,
-                    $4,
-                    $5,
-                    $6,
-                    $7,
-                    $8,
-                    $9,
-                    $10,
-                    $11,
-                    $12,
-                    $13,
-                    $14::jsonb,
-                    true
-                  )
-                on conflict (owner_user_id, name) do update
-                  set conditioning_library_id=excluded.conditioning_library_id,
-                      category=excluded.category,
-                      modality=excluded.modality,
-                      purpose=excluded.purpose,
-                      target_duration_min=excluded.target_duration_min,
-                      target_frequency_per_week=excluded.target_frequency_per_week,
-                      target_intensity=excluded.target_intensity,
-                      preferred_timing=excluded.preferred_timing,
-                      recovery_constraints=excluded.recovery_constraints,
-                      notes=excluded.notes,
-                      dose_type=excluded.dose_type,
-                      dose_config=excluded.dose_config,
-                      is_active=true,
-                      updated_at=now()
-                returning
-                  my_conditioning_prescription_id,
-                  owner_user_id,
-                  conditioning_library_id,
-                  name,
-                  category,
-                  modality,
-                  purpose,
-                  target_duration_min,
-                  target_frequency_per_week,
-                  target_intensity,
-                  preferred_timing,
-                  recovery_constraints,
-                  notes,
-                  dose_type,
-                  dose_config,
-                  is_active,
-                  created_at,
-                  updated_at
-                """,
-                owner,
-                libid,
-                name.strip(),
-                category.strip(),
-                modality.strip(),
-                purpose.strip(),
-                int(target_duration_min),
-                float(target_frequency_per_week),
-                target_intensity.strip(),
-                preferred_timing.strip(),
-                recovery_constraints.strip(),
-                notes.strip(),
-                clean_dose_type,
-                dose_config_json,
-            )
-
-        return JSONResponse(
-            _conditioning_row_to_jsonable(row)
-            if row
-            else {"error": "upsert_failed"}
+                raise HTTPException(status_code=403, detail="actor_owner_mismatch")
+        row = await repository.upsert_prescription(
+            prescription_id=pid,
+            owner_user_id=owner,
+            conditioning_library_id=libid,
+            name=name.strip(),
+            category=category.strip(),
+            modality=modality.strip(),
+            purpose=purpose.strip(),
+            target_duration_min=int(target_duration_min),
+            target_frequency_per_week=float(target_frequency_per_week),
+            target_intensity=target_intensity.strip(),
+            preferred_timing=preferred_timing.strip(),
+            recovery_constraints=recovery_constraints.strip(),
+            notes=notes.strip(),
+            dose_type=clean_dose_type,
+            dose_config_json=dose_config_json,
         )
-    finally:
-        await conn.close()
+    return JSONResponse(
+        _conditioning_row_to_jsonable(row) if row else {"error": "upsert_failed"}
+    )
 
 
 @router.post("/my_conditioning_prescriptions/{my_conditioning_prescription_id}/deactivate")
@@ -603,24 +363,14 @@ async def deactivate_my_conditioning_prescription(
     pid = _as_uuid(my_conditioning_prescription_id, "my_conditioning_prescription_id")
     owner = require_actor_matches_owner(req, owner_user_id)
 
-    conn = await _db(req)
-    try:
-        row = await conn.fetchrow(
-            f"""
-            update {SCHEMA}.my_conditioning_prescription
-               set is_active=false, updated_at=now()
-             where my_conditioning_prescription_id=$1::uuid
-               and owner_user_id=$2::uuid
-            returning my_conditioning_prescription_id, owner_user_id, is_active, updated_at
-            """,
-            pid,
-            owner,
+    async with lifeswitch_training_conditioning_repository(req) as repository:
+        row = await repository.deactivate_prescription(
+            prescription_id=pid,
+            owner_user_id=owner,
         )
-        if not row:
-            raise HTTPException(status_code=404, detail="not found")
-        return JSONResponse(_row_to_jsonable(row))
-    finally:
-        await conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="not found")
+    return JSONResponse(_row_to_jsonable(row))
 
 
 # ----------------------------
@@ -720,39 +470,16 @@ async def create_conditioning_session(
         "dose_config": parsed_dose_config,
     }
 
-    conn = await _db(req)
     try:
-        async with conn.transaction():
-            await set_transaction_actor(conn, actor_user_id=owner)
-            session_id = await write_conditioning_session(
-                conn,
+        async with lifeswitch_training_conditioning_repository(req) as repository:
+            row = await repository.create_session(
+                owner_user_id=owner,
                 intent=intent,
                 idempotency_key=write_key,
             )
-            row = await conn.fetchrow(
-                f"""
-                select
-                  conditioning_session_log_id, owner_user_id,
-                  my_conditioning_prescription_id, day, name, category,
-                  modality, duration_min, intensity, distance,
-                  distance_value, distance_unit, heart_rate_avg,
-                  recovery_impact, notes, dose_type, dose_config,
-                  is_active, created_at, updated_at
-                from {SCHEMA}.conditioning_session_log
-                where conditioning_session_log_id=$1::uuid
-                  and owner_user_id=$2::uuid
-                """,
-                session_id,
-                owner,
-            )
-
-        return JSONResponse(
-            _conditioning_row_to_jsonable(row)
-        )
     except TrainingWriterError as error:
         raise training_writer_http_error(error) from error
-    finally:
-        await conn.close()
+    return JSONResponse(_conditioning_row_to_jsonable(row))
 
 
 @router.get("/conditioning_sessions")
@@ -773,63 +500,18 @@ async def list_conditioning_sessions(
         except Exception:
             raise HTTPException(status_code=400, detail="invalid day")
 
-    conn = await _db(req)
-    try:
-        owner, delegated = await _resolve_training_view_target(conn, viewer, target_user_id)
-        session_source = (
-            "conditioning_session_log"
-            if include_inactive
-            else "conditioning_session_current_v"
+    owner, delegated = await _resolve_training_view_target(
+        req, viewer, target_user_id
+    )
+    async with lifeswitch_training_conditioning_repository(req) as repository:
+        rows = await repository.list_sessions(
+            owner_user_id=owner,
+            delegated=delegated,
+            day=day_val,
+            include_inactive=bool(include_inactive),
+            limit=limit,
         )
-
-        where = ["c.owner_user_id=$1::uuid"]
-        args = [owner, delegated]
-
-        if day_val:
-            args.append(day_val)
-            where.append(f"c.day=${len(args)}::date")
-
-        if not include_inactive:
-            where.append("c.is_active=true")
-
-        rows = await conn.fetch(
-            f"""
-            select
-              c.conditioning_session_log_id,
-              c.owner_user_id,
-              c.my_conditioning_prescription_id,
-              c.day,
-              c.name,
-              c.category,
-              c.modality,
-              c.duration_min,
-              c.intensity,
-              c.distance,
-              c.distance_value,
-              c.distance_unit,
-              c.heart_rate_avg,
-              c.recovery_impact,
-              c.notes,
-              c.dose_type,
-              c.dose_config,
-              c.is_active,
-              c.created_at,
-              c.updated_at,
-              $1::uuid as _target_user_id,
-              $2::boolean as _delegated_view,
-              p.name as prescription_name
-            from {SCHEMA}.{session_source} c
-            left join {SCHEMA}.my_conditioning_prescription p
-              on p.my_conditioning_prescription_id=c.my_conditioning_prescription_id
-            where {' and '.join(where)}
-            order by c.day desc, c.created_at desc
-            limit {int(limit)}
-            """,
-            *args,
-        )
-        return JSONResponse([_conditioning_row_to_jsonable(r) for r in rows])
-    finally:
-        await conn.close()
+    return JSONResponse([_conditioning_row_to_jsonable(row) for row in rows])
 
 
 @router.get("/conditioning_sessions/{conditioning_session_log_id}")
@@ -841,43 +523,14 @@ async def get_conditioning_session(
     sid = _as_uuid(conditioning_session_log_id, "conditioning_session_log_id")
     owner = require_actor_matches_owner(req, owner_user_id)
 
-    conn = await _db(req)
-    try:
-        row = await conn.fetchrow(
-            f"""
-            select
-              conditioning_session_log_id,
-              owner_user_id,
-              my_conditioning_prescription_id,
-              day,
-              name,
-              category,
-              modality,
-              duration_min,
-              intensity,
-              distance,
-              distance_value,
-              distance_unit,
-              heart_rate_avg,
-              recovery_impact,
-              notes,
-              dose_type,
-              dose_config,
-              is_active,
-              created_at,
-              updated_at
-            from {SCHEMA}.conditioning_session_current_v
-            where conditioning_session_log_id=$1::uuid
-              and owner_user_id=$2::uuid
-            """,
-            sid,
-            owner,
+    async with lifeswitch_training_conditioning_repository(req) as repository:
+        row = await repository.get_session(
+            conditioning_session_log_id=sid,
+            owner_user_id=owner,
         )
-        if not row:
-            raise HTTPException(status_code=404, detail="conditioning session not found")
-        return JSONResponse(_conditioning_row_to_jsonable(row))
-    finally:
-        await conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="conditioning session not found")
+    return JSONResponse(_conditioning_row_to_jsonable(row))
 
 
 @router.post("/conditioning_sessions/{conditioning_session_log_id}/deactivate")
@@ -890,27 +543,23 @@ async def deactivate_conditioning_session(
     sid = _as_uuid(conditioning_session_log_id, "conditioning_session_log_id")
     owner = require_actor_matches_owner(req, owner_user_id)
 
-    conn = await _db(req)
     try:
-        async with conn.transaction():
-            await set_transaction_actor(conn, actor_user_id=owner)
-            voided_id = await write_conditioning_void(
-                conn,
+        async with lifeswitch_training_conditioning_repository(req) as repository:
+            voided_id = await repository.void_session(
                 conditioning_session_log_id=sid,
+                owner_user_id=owner,
                 reason=_clean_text(reason, 1000) or "user_deleted",
             )
-        return JSONResponse(
-            {
-                "conditioning_session_log_id": str(voided_id),
-                "owner_user_id": owner,
-                "is_active": False,
-                "voided": True,
-            }
-        )
     except TrainingWriterError as error:
         raise training_writer_http_error(error) from error
-    finally:
-        await conn.close()
+    return JSONResponse(
+        {
+            "conditioning_session_log_id": str(voided_id),
+            "owner_user_id": owner,
+            "is_active": False,
+            "voided": True,
+        }
+    )
 
 
 @router.post("/conditioning_sessions/{conditioning_session_log_id}/correct")
@@ -927,40 +576,19 @@ async def correct_conditioning_session(
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="JSON object required")
 
-    conn = await _db(req)
     try:
-        async with conn.transaction():
-            await set_transaction_actor(conn, actor_user_id=owner)
-            replacement_id = await write_conditioning_correction(
-                conn,
+        async with lifeswitch_training_conditioning_repository(req) as repository:
+            row = await repository.correct_session(
                 conditioning_session_log_id=sid,
+                owner_user_id=owner,
                 intent=payload,
                 idempotency_key=write_key,
             )
-            row = await conn.fetchrow(
-                f"""
-                select
-                  conditioning_session_log_id, owner_user_id,
-                  my_conditioning_prescription_id, day, name, category,
-                  modality, duration_min, intensity, distance,
-                  distance_value, distance_unit, heart_rate_avg,
-                  recovery_impact, notes, dose_type, dose_config,
-                  supersedes_conditioning_session_id, is_active,
-                  created_at, updated_at
-                from {SCHEMA}.conditioning_session_current_v
-                where conditioning_session_log_id=$1::uuid
-                  and owner_user_id=$2::uuid
-                """,
-                replacement_id,
-                owner,
-            )
-        if not row:
-            raise HTTPException(status_code=500, detail="conditioning correction unavailable")
-        return JSONResponse(_conditioning_row_to_jsonable(row))
     except TrainingWriterError as error:
         raise training_writer_http_error(error) from error
-    finally:
-        await conn.close()
+    if not row:
+        raise HTTPException(status_code=500, detail="conditioning correction unavailable")
+    return JSONResponse(_conditioning_row_to_jsonable(row))
 
 
 # ----------------------------
@@ -2125,7 +1753,7 @@ async def list_training_sessions(
 
     conn = await _db(req)
     try:
-        owner, delegated = await _resolve_training_view_target(conn, viewer, target_user_id)
+        owner, delegated = await _resolve_training_view_target(req, viewer, target_user_id)
         session_source = (
             "training_session"
             if include_inactive
@@ -2268,7 +1896,7 @@ async def get_training_session(
 
     conn = await _db(req)
     try:
-        owner, delegated = await _resolve_training_view_target(conn, viewer, target_user_id)
+        owner, delegated = await _resolve_training_view_target(req, viewer, target_user_id)
 
         row = await conn.fetchrow(
             f"""
@@ -2317,7 +1945,7 @@ async def list_strength_progression(
 
     conn = await _db(req)
     try:
-        owner, delegated = await _resolve_training_view_target(conn, viewer, target_user_id)
+        owner, delegated = await _resolve_training_view_target(req, viewer, target_user_id)
         rows = await conn.fetch(
             f"""
             select
@@ -2476,7 +2104,7 @@ async def list_training_session_sets(
 
     conn = await _db(req)
     try:
-        owner, delegated = await _resolve_training_view_target(conn, viewer, target_user_id)
+        owner, delegated = await _resolve_training_view_target(req, viewer, target_user_id)
 
         where_active = "" if include_inactive else "and l.is_active=true"
         current_parent = "" if include_inactive else f"""
@@ -2566,7 +2194,7 @@ async def list_training_set_log_segments(
     viewer = require_actor_matches_owner(req, owner_user_id)
     conn = await _db(req)
     try:
-        owner, delegated = await _resolve_training_view_target(conn, viewer, target_user_id)
+        owner, delegated = await _resolve_training_view_target(req, viewer, target_user_id)
 
         parent = await conn.fetchrow(
             f"""

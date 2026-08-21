@@ -24,7 +24,7 @@ class TrainingProgressionQueryContractTest(unittest.TestCase):
 
     def test_query_is_owner_scoped_and_uses_current_completed_sessions(self) -> None:
         self.assertIn("require_actor_matches_owner(req, owner_user_id)", self.route)
-        self.assertIn("_resolve_training_view_target(conn, viewer, target_user_id)", self.route)
+        self.assertIn("_resolve_training_view_target(req, viewer, target_user_id)", self.route)
         self.assertIn("from {schema}.training_session_current_v s", self.route)
         self.assertIn("where s.owner_user_id=$1::uuid", self.route)
         self.assertIn("s.finished_at is not null", self.route)

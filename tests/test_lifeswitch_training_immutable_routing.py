@@ -8,6 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 ROUTER = ROOT / "seebx" / "capabilities" / "training" / "routes.py"
 SERVICE = ROOT / "seebx" / "adapters" / "lifeswitch_training_writes_postgres.py"
+CONDITIONING = ROOT / "seebx" / "adapters" / "lifeswitch_training_conditioning_postgres.py"
 
 
 class TrainingImmutableRoutingTest(unittest.TestCase):
@@ -17,6 +18,7 @@ class TrainingImmutableRoutingTest(unittest.TestCase):
         cls.router_lower = cls.router.lower()
         cls.service = SERVICE.read_text(encoding="utf-8")
         cls.service_lower = cls.service.lower()
+        cls.conditioning = CONDITIONING.read_text(encoding="utf-8")
 
     def test_router_has_no_raw_observation_mutations(self) -> None:
         observation_tables = (
@@ -52,7 +54,7 @@ class TrainingImmutableRoutingTest(unittest.TestCase):
             5,
         )
         self.assertGreaterEqual(
-            self.router.count("conditioning_session_current_v"),
+            self.conditioning.count("conditioning_session_current_v"),
             3,
         )
         self.assertGreaterEqual(
