@@ -4,17 +4,19 @@ import os
 import uuid
 import decimal
 import datetime as _dt
-import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Request
 from seebx.core.ownership import require_actor_matches_owner
 from seebx.adapters.lifeswitch_postgres import connect_lifeswitch
+from seebx.adapters.lifeswitch_nutrition_log_postgres import (
+    LifeSwitchNutritionLogReadRepository,
+    lifeswitch_nutrition_log_read_repository,
+)
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 router = APIRouter()
 
 SCHEMA = os.getenv("LIFESWITCH_NUTRITION_SCHEMA", "lifeswitch_nutrition")
-PEOPLE_SCHEMA = os.getenv("LIFESWITCH_PEOPLE_SCHEMA", "lifeswitch_people")
 
 
 def _as_uuid(s: str, name: str) -> str:
@@ -43,28 +45,11 @@ async def _db(req: Request):
     return await connect_lifeswitch(req)
 
 
-async def _has_people_permission(conn, grantor_user_id: str, grantee_user_id: str, scope: str) -> bool:
-    row = await conn.fetchrow(
-        f"""
-        select rp.relationship_permission_id
-        from {PEOPLE_SCHEMA}.relationship_permission rp
-        join {PEOPLE_SCHEMA}.relationship r
-          on r.relationship_id=rp.relationship_id
-        where rp.grantor_user_id=$1::uuid
-          and rp.grantee_user_id=$2::uuid
-          and rp.permission_scope=$3
-          and rp.is_enabled=true
-          and r.status='accepted'
-        limit 1
-        """,
-        grantor_user_id,
-        grantee_user_id,
-        scope,
-    )
-    return bool(row)
-
-
-async def _resolve_nutrition_view_target(conn, viewer_user_id: str, target_user_id: str = "") -> tuple[str, bool]:
+async def _resolve_nutrition_view_target(
+    repository: LifeSwitchNutritionLogReadRepository,
+    viewer_user_id: str,
+    target_user_id: str = "",
+) -> tuple[str, bool]:
     viewer = _as_uuid(viewer_user_id, "owner_user_id")
     target = _as_uuid(target_user_id, "target_user_id") if str(target_user_id or "").strip() else viewer
     delegated = target != viewer
@@ -72,7 +57,11 @@ async def _resolve_nutrition_view_target(conn, viewer_user_id: str, target_user_
     if delegated:
         if os.getenv("LIFESWITCH_DELEGATED_READS_ENABLED", "0") != "1":
             raise HTTPException(status_code=403, detail="delegated_access_disabled")
-        allowed = await _has_people_permission(conn, target, viewer, "nutrition:view")
+        allowed = await repository.has_people_permission(
+            grantor_user_id=target,
+            grantee_user_id=viewer,
+            scope="nutrition:view",
+        )
         if not allowed:
             raise HTTPException(status_code=403, detail="nutrition:view permission required")
 
@@ -604,120 +593,54 @@ async def get_log_range(
     if (end - start).days > 365:
         raise HTTPException(status_code=400, detail="date range cannot exceed 366 days")
 
-    conn = await _db(req)
-    try:
-        owner, delegated = await _resolve_nutrition_view_target(conn, viewer, target_user_id)
-        day_rows = await conn.fetch(
-            f"""
-            select nutrition_day_id, owner_user_id, day, notes, completed_at, created_at, updated_at
-            from {SCHEMA}.nutrition_day
-            where owner_user_id=$1::uuid
-              and day between $2::date and $3::date
-            order by day desc
-            """,
-            owner,
-            start,
-            end,
+    async with lifeswitch_nutrition_log_read_repository(req) as repository:
+        owner, delegated = await _resolve_nutrition_view_target(
+            repository,
+            viewer,
+            target_user_id,
+        )
+        snapshot = await repository.read_range(
+            owner_user_id=owner,
+            start_day=start,
+            end_day=end,
         )
 
-        entry_rows = await conn.fetch(
-            f"""
-            select
-              nd.day as nutrition_day_date,
-              e.nutrition_entry_id, e.nutrition_day_id, e.meal_id, e.my_food_id, e.qty_g,
-              e.my_food_serving_id, e.qty_servings, e.sort_order, e.notes,
-              e.created_at, e.updated_at,
-
-              coalesce(m.name, f.display_name) as label,
-              m.meal_type as meal_type,
-              s.name as serving_name,
-              s.grams as serving_grams,
-
-              f.brand as food_brand,
-              f.variant as food_variant,
-              f.source_type as food_source_type,
-              f.source_id as food_source_id,
-
-              f.kcal as food_kcal_100g,
-              f.protein_g as food_protein_100g,
-              f.carbs_g as food_carbs_100g,
-              f.fat_g as food_fat_100g,
-
-              mt.kcal as meal_kcal,
-              mt.protein_g as meal_protein,
-              mt.carbs_g as meal_carbs,
-              mt.fat_g as meal_fat
-
-            from {SCHEMA}.nutrition_day nd
-            join {SCHEMA}.nutrition_entry e
-              on e.nutrition_day_id = nd.nutrition_day_id
-            left join {SCHEMA}.meal m on m.meal_id = e.meal_id
-            left join {SCHEMA}.my_food f on f.my_food_id = e.my_food_id
-            left join {SCHEMA}.my_food_serving s
-              on s.my_food_serving_id = e.my_food_serving_id
-             and s.my_food_id = e.my_food_id
-
-            left join lateral (
-              select
-                sum((mf.kcal * coalesce(mi.qty_g, ms.grams * mi.qty_servings))/100.0) as kcal,
-                sum((mf.protein_g * coalesce(mi.qty_g, ms.grams * mi.qty_servings))/100.0) as protein_g,
-                sum((mf.carbs_g * coalesce(mi.qty_g, ms.grams * mi.qty_servings))/100.0) as carbs_g,
-                sum((mf.fat_g * coalesce(mi.qty_g, ms.grams * mi.qty_servings))/100.0) as fat_g
-              from {SCHEMA}.meal_item mi
-              join {SCHEMA}.my_food mf on mf.my_food_id = mi.my_food_id
-              left join {SCHEMA}.my_food_serving ms
-                on ms.my_food_serving_id = mi.my_food_serving_id
-               and ms.my_food_id = mi.my_food_id
-              where mi.meal_id = e.meal_id
-            ) mt on true
-
-            where nd.owner_user_id=$1::uuid
-              and nd.day between $2::date and $3::date
-            order by nd.day desc, e.sort_order, e.created_at
-            """,
-            owner,
-            start,
-            end,
+    entries_by_day: dict[str, list[dict]] = {}
+    totals_by_day: dict[str, dict[str, float]] = {}
+    for row in snapshot.entry_rows:
+        day_key = row["nutrition_day_date"].isoformat()
+        totals = totals_by_day.setdefault(
+            day_key,
+            {"kcal": 0.0, "protein_g": 0.0, "carbs_g": 0.0, "fat_g": 0.0},
         )
+        entry_totals = _entry_totals(row)
+        for key, value in entry_totals.items():
+            totals[key] += value
 
-        entries_by_day: dict[str, list[dict]] = {}
-        totals_by_day: dict[str, dict[str, float]] = {}
-        for row in entry_rows:
-            day_key = row["nutrition_day_date"].isoformat()
-            totals = totals_by_day.setdefault(
+        if include_entries:
+            entry = _row_to_jsonable(row)
+            entry.pop("nutrition_day_date", None)
+            entries_by_day.setdefault(day_key, []).append(entry)
+
+    days = []
+    for day_row in snapshot.day_rows:
+        day_key = day_row["day"].isoformat()
+        days.append({
+            "day": _row_to_jsonable(day_row),
+            "entries": entries_by_day.get(day_key, []) if include_entries else [],
+            "totals": totals_by_day.get(
                 day_key,
                 {"kcal": 0.0, "protein_g": 0.0, "carbs_g": 0.0, "fat_g": 0.0},
-            )
-            entry_totals = _entry_totals(row)
-            for key, value in entry_totals.items():
-                totals[key] += value
-
-            if include_entries:
-                entry = _row_to_jsonable(row)
-                entry.pop("nutrition_day_date", None)
-                entries_by_day.setdefault(day_key, []).append(entry)
-
-        days = []
-        for day_row in day_rows:
-            day_key = day_row["day"].isoformat()
-            days.append({
-                "day": _row_to_jsonable(day_row),
-                "entries": entries_by_day.get(day_key, []) if include_entries else [],
-                "totals": totals_by_day.get(
-                    day_key,
-                    {"kcal": 0.0, "protein_g": 0.0, "carbs_g": 0.0, "fat_g": 0.0},
-                ),
-            })
-
-        return JSONResponse({
-            "start_day": start.isoformat(),
-            "end_day": end.isoformat(),
-            "days": days,
-            "_target_user_id": owner,
-            "_delegated_view": delegated,
+            ),
         })
-    finally:
-        await conn.close()
+
+    return JSONResponse({
+        "start_day": start.isoformat(),
+        "end_day": end.isoformat(),
+        "days": days,
+        "_target_user_id": owner,
+        "_delegated_view": delegated,
+    })
 
 
 @router.get("/log/day")
@@ -728,91 +651,33 @@ async def get_log_day(
     target_user_id: str = Query("", max_length=80),
 ):
     viewer = require_actor_matches_owner(req, owner_user_id)
-    d = _parse_day(day)
+    parsed_day = _parse_day(day)
 
-    conn = await _db(req)
-    try:
-        owner, delegated = await _resolve_nutrition_view_target(conn, viewer, target_user_id)
-
-        day_row = await conn.fetchrow(
-            f"""
-            select nutrition_day_id, owner_user_id, day, notes, completed_at, created_at, updated_at
-            from {SCHEMA}.nutrition_day
-            where owner_user_id=$1::uuid and day=$2::date
-            """,
-            owner,
-            d,
+    async with lifeswitch_nutrition_log_read_repository(req) as repository:
+        owner, delegated = await _resolve_nutrition_view_target(
+            repository,
+            viewer,
+            target_user_id,
         )
-        if not day_row:
-            return JSONResponse({
-                "day": None,
-                "entries": [],
-                "_target_user_id": owner,
-                "_delegated_view": delegated,
-            })
-
-        ndid = str(day_row["nutrition_day_id"])
-
-        rows = await conn.fetch(
-            f"""
-            select
-              e.nutrition_entry_id, e.nutrition_day_id, e.meal_id, e.my_food_id, e.qty_g, e.my_food_serving_id, e.qty_servings, e.sort_order, e.notes,
-              e.created_at, e.updated_at,
-
-            coalesce(m.name, f.display_name) as label,
-            m.meal_type as meal_type,
-            s.name as serving_name,
-            s.grams as serving_grams,
-
-            -- Food identity fields (so frontend can render like FoodsPage)
-            f.brand as food_brand,
-            f.variant as food_variant,
-            f.source_type as food_source_type,
-            f.source_id as food_source_id,
-
-            -- per 100g
-            f.kcal as food_kcal_100g,
-            f.protein_g as food_protein_100g,
-            f.carbs_g as food_carbs_100g,
-            f.fat_g as food_fat_100g,
-
-              mt.kcal as meal_kcal, mt.protein_g as meal_protein, mt.carbs_g as meal_carbs, mt.fat_g as meal_fat
-
-            from {SCHEMA}.nutrition_entry e
-            left join {SCHEMA}.meal m on m.meal_id = e.meal_id
-            left join {SCHEMA}.my_food f on f.my_food_id = e.my_food_id
-            left join {SCHEMA}.my_food_serving s
-              on s.my_food_serving_id = e.my_food_serving_id
-             and s.my_food_id = e.my_food_id
-
-            left join lateral (
-              select
-                sum((mf.kcal * coalesce(mi.qty_g, ms.grams * mi.qty_servings))/100.0) as kcal,
-                sum((mf.protein_g * coalesce(mi.qty_g, ms.grams * mi.qty_servings))/100.0) as protein_g,
-                sum((mf.carbs_g * coalesce(mi.qty_g, ms.grams * mi.qty_servings))/100.0) as carbs_g,
-                sum((mf.fat_g * coalesce(mi.qty_g, ms.grams * mi.qty_servings))/100.0) as fat_g
-              from {SCHEMA}.meal_item mi
-              join {SCHEMA}.my_food mf on mf.my_food_id = mi.my_food_id
-              left join {SCHEMA}.my_food_serving ms
-                on ms.my_food_serving_id = mi.my_food_serving_id
-               and ms.my_food_id = mi.my_food_id
-              where mi.meal_id = e.meal_id
-            ) mt on true
-
-            where e.nutrition_day_id = $1::uuid
-            order by e.sort_order, e.created_at
-            """,
-            ndid,
+        snapshot = await repository.read_day(
+            owner_user_id=owner,
+            day=parsed_day,
         )
 
+    if not snapshot.day_row:
         return JSONResponse({
-            "day": _row_to_jsonable(day_row),
-            "entries": [_row_to_jsonable(r) for r in rows],
+            "day": None,
+            "entries": [],
             "_target_user_id": owner,
             "_delegated_view": delegated,
         })
-    finally:
-        await conn.close()
+
+    return JSONResponse({
+        "day": _row_to_jsonable(snapshot.day_row),
+        "entries": [_row_to_jsonable(row) for row in snapshot.entry_rows],
+        "_target_user_id": owner,
+        "_delegated_view": delegated,
+    })
 
 
 @router.patch("/log/day")
