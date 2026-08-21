@@ -1,107 +1,104 @@
 from __future__ import annotations
 
-import os
 import unittest
 import uuid
+from datetime import datetime, timezone
 from typing import Any
-from unittest.mock import patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-os.environ.setdefault("POSTGRES_DSN", "postgresql://test-only")
-
-from seebx.capabilities.observability import telemetry
+from seebx.capabilities.observability.telemetry import create_telemetry_router
+from seebx.capabilities.observability.telemetry_contracts import (
+    TelemetryTimeseriesSnapshotV1,
+)
 
 
 ACTOR = "1240822d-ac9a-4096-95aa-e2b24d36ef50"
 
 
-class FakeTransaction:
-    async def __aenter__(self) -> None:
-        return None
-
-    async def __aexit__(self, *args: Any) -> None:
-        return None
-
-
-class FakeConnection:
+class FakeRepository:
     def __init__(self) -> None:
-        self.execute_calls: list[tuple[str, tuple[Any, ...]]] = []
-        self.closed = False
+        self.write_calls: list[dict[str, Any]] = []
+        self.timeseries_calls: list[dict[str, Any]] = []
 
-    def transaction(self) -> FakeTransaction:
-        return FakeTransaction()
+    async def write_events(self, **kwargs: Any) -> None:
+        self.write_calls.append(kwargs)
 
-    async def execute(self, sql: str, *args: Any) -> str:
-        self.execute_calls.append((sql, args))
-        return "INSERT 0 1"
+    async def read_timeseries(self, **kwargs: Any) -> TelemetryTimeseriesSnapshotV1:
+        self.timeseries_calls.append(kwargs)
+        now = datetime(2026, 8, 21, 12, tzinfo=timezone.utc)
+        return TelemetryTimeseriesSnapshotV1(
+            point_rows=({"t": now, "v": 0.75, "n": 4},),
+            condition_rows=(
+                {"condition_id": "A", "occurred_at": now, "payload": {"label": "Baseline"}},
+            ),
+        )
 
-    async def close(self) -> None:
-        self.closed = True
+    async def read_voice_slo(self, **kwargs: Any) -> Any:
+        raise AssertionError("unexpected voice SLO call")
 
 
 class TelemetryGovernanceV1Tests(unittest.TestCase):
     def setUp(self) -> None:
+        self.repository = FakeRepository()
         app = FastAPI()
-        app.include_router(telemetry.router)
+        app.include_router(create_telemetry_router(self.repository))
         self.client = TestClient(app)
 
-    def test_write_requires_authenticated_actor(self) -> None:
+    def test_write_requires_authenticated_actor_before_repository(self) -> None:
         response = self.client.post(
             "/telemetry/event",
+            json={"events": [{"event_id": str(uuid.uuid4())}]},
+        )
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["errors"][0]["reason"], "missing_actor_user_id")
+        self.assertEqual(self.repository.write_calls, [])
+        self.assertIn("no-store", response.headers["cache-control"])
+
+    def test_write_normalizes_actor_and_passes_typed_records(self) -> None:
+        event_id = uuid.uuid4()
+        response = self.client.post(
+            "/telemetry/event",
+            headers={"x-vs-actor-user-id": ACTOR.upper()},
             json={
                 "events": [
                     {
-                        "event_id": str(uuid.uuid4()),
+                        "event_id": str(event_id),
                         "event_type": "voice.turn.trace",
                         "subject_type": "voice_turn",
                         "subject_id": str(uuid.uuid4()),
+                        "payload": {},
                     }
                 ]
             },
         )
-
-        self.assertEqual(response.status_code, 401)
-        self.assertEqual(
-            response.json()["errors"][0]["reason"],
-            "missing_actor_user_id",
-        )
-        self.assertIn("no-store", response.headers["cache-control"])
-
-    def test_write_sets_rls_actor_and_stamps_canonical_owner(self) -> None:
-        conn = FakeConnection()
-
-        async def connect() -> FakeConnection:
-            return conn
-
-        with patch.object(telemetry, "_connect", connect):
-            response = self.client.post(
-                "/telemetry/event",
-                headers={"x-vs-actor-user-id": ACTOR.upper()},
-                json={
-                    "events": [
-                        {
-                            "event_id": str(uuid.uuid4()),
-                            "event_type": "voice.turn.trace",
-                            "subject_type": "voice_turn",
-                            "subject_id": str(uuid.uuid4()),
-                            "payload": {},
-                        }
-                    ]
-                },
-            )
-
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["accepted"], 1)
-        self.assertTrue(conn.closed)
-        set_config = conn.execute_calls[0]
-        insert = conn.execute_calls[1]
-        self.assertIn("set_config('app.user_id'", set_config[0])
-        self.assertEqual(set_config[1], (ACTOR,))
-        self.assertEqual(insert[1][11], ACTOR)
-        self.assertNotIn("vantage_id", insert[0])
+        call = self.repository.write_calls[0]
+        self.assertEqual(call["actor_user_id"], ACTOR)
+        self.assertEqual(len(call["events"]), 1)
+        record = call["events"][0]
+        self.assertEqual(record.event_id, event_id)
+        self.assertEqual(record.actor_user_id, ACTOR)
         self.assertIn("no-store", response.headers["cache-control"])
+
+    def test_timeseries_transforms_repository_snapshot(self) -> None:
+        response = self.client.get(
+            "/metrics/timeseries",
+            headers={"x-vs-actor-user-id": ACTOR},
+            params={
+                "metric_key": "probe_overall",
+                "subject_type": "thread",
+                "subject_id": "synthetic",
+                "from": "2026-08-20T00:00:00Z",
+                "to": "2026-08-22T00:00:00Z",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["points"][0]["v"], 0.75)
+        self.assertEqual(response.json()["phases"][0]["label"], "Baseline")
+        self.assertEqual(self.repository.timeseries_calls[0]["actor_user_id"], ACTOR)
 
 
 if __name__ == "__main__":

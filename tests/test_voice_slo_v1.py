@@ -1,15 +1,11 @@
 from __future__ import annotations
 
-import os
 import unittest
 from datetime import datetime, timezone
 from typing import Any
-from unittest.mock import patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
-os.environ.setdefault("POSTGRES_DSN", "postgresql://test-only")
 
 from seebx.capabilities.observability import telemetry
 
@@ -56,64 +52,44 @@ def slo_row(**overrides: Any) -> dict[str, Any]:
     return row
 
 
-class FakeTransaction:
-    async def __aenter__(self) -> None:
-        return None
 
-    async def __aexit__(self, *args: Any) -> None:
-        return None
-
-
-class FakeConnection:
+class FakeRepository:
     def __init__(self, row: dict[str, Any]) -> None:
         self.row = row
-        self.execute_calls: list[tuple[str, tuple[Any, ...]]] = []
-        self.fetchrow_calls: list[tuple[str, tuple[Any, ...]]] = []
-        self.closed = False
+        self.calls: list[dict[str, Any]] = []
 
-    def transaction(self) -> FakeTransaction:
-        return FakeTransaction()
+    async def write_events(self, **kwargs: Any) -> None:
+        raise AssertionError("unexpected write")
 
-    async def execute(self, sql: str, *args: Any) -> str:
-        self.execute_calls.append((sql, args))
-        return "SELECT 1"
+    async def read_timeseries(self, **kwargs: Any) -> Any:
+        raise AssertionError("unexpected timeseries read")
 
-    async def fetchrow(self, sql: str, *args: Any) -> dict[str, Any]:
-        self.fetchrow_calls.append((sql, args))
+    async def read_voice_slo(self, **kwargs: Any) -> dict[str, Any]:
+        self.calls.append(kwargs)
         return self.row
-
-    async def close(self) -> None:
-        self.closed = True
 
 
 class VoiceSloV1Tests(unittest.TestCase):
+
     def setUp(self) -> None:
+        self.repository = FakeRepository(slo_row())
         app = FastAPI()
-        app.include_router(telemetry.router)
+        app.include_router(telemetry.create_telemetry_router(self.repository))
         self.client = TestClient(app)
 
+
     def test_endpoint_is_owner_scoped_and_insufficient_below_30(self) -> None:
-        conn = FakeConnection(slo_row())
-
-        async def connect() -> FakeConnection:
-            return conn
-
-        with patch.object(telemetry, "_connect", connect):
-            response = self.client.get(
-                "/metrics/voice-slo?window_days=7",
-                headers={"x-vs-actor-user-id": ACTOR},
-            )
-
+        response = self.client.get(
+            "/metrics/voice-slo?window_days=7",
+            headers={"x-vs-actor-user-id": ACTOR},
+        )
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-store", response.headers["cache-control"])
         payload = response.json()
         self.assertEqual(payload["contract_version"], "voice_slo_v1")
         self.assertEqual(payload["window_days"], 7)
         self.assertEqual(payload["overall_status"], "insufficient_data")
-        self.assertEqual(
-            payload["latest_sample_at"],
-            "2026-07-23T11:30:00Z",
-        )
+        self.assertEqual(payload["latest_sample_at"], "2026-07-23T11:30:00Z")
         self.assertEqual(payload["sample"]["completed"], 1)
         self.assertEqual(payload["current"]["status"], "pass")
         self.assertEqual(payload["current"]["consecutive_successes"], 1)
@@ -121,18 +97,10 @@ class VoiceSloV1Tests(unittest.TestCase):
             payload["latency_ms"]["end_of_speech_to_first_audio"]["p95"],
             9486.0,
         )
-        self.assertTrue(conn.closed)
-        self.assertIn("set_config('app.user_id'", conn.execute_calls[0][0])
-        self.assertEqual(conn.execute_calls[0][1], (ACTOR,))
-        self.assertIn("actor_user_id=$1", conn.fetchrow_calls[0][0])
-        self.assertEqual(conn.fetchrow_calls[0][1], (ACTOR, 7))
-        query = conn.fetchrow_calls[0][0]
-        self.assertIn("detected_speech_end_v1", query)
-        self.assertIn("synthetic_turn_start_v1", query)
-        self.assertIn("coalesce(", query)
-        self.assertIn("max(occurred_at)", query)
-        self.assertIn("consecutive_successes", query)
-        self.assertIn("failure_code", query)
+        self.assertEqual(
+            self.repository.calls,
+            [{"actor_user_id": ACTOR, "window_days": 7}],
+        )
 
     def test_contract_passes_only_after_minimum_samples(self) -> None:
         payload = telemetry._voice_slo_payload(

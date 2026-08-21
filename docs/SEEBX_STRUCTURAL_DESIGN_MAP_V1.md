@@ -365,3 +365,5 @@ retirements have recovery evidence, production and frontend contract tests
 pass, and the clean Git/GitHub state plus encrypted snapshot are verified.
 
 - 2026-08-21 candidate checkpoint: the last direct `asyncpg.connect` in the conversation capability is replaced by a composition-injected PostgreSQL provider without changing route order, timeout policy, or response behavior. Remaining direct database effects are confined to Nutrition, Training, and telemetry pending separate aggregate-sized batches. Exact parent/candidate parity is 138 routes, 124 OpenAPI paths, and identical route/OpenAPI hashes; 36 focused and 1,243 complete backend tests pass.
+
+- 2026-08-21 candidate checkpoint: telemetry is moved from a module-owned router with direct `asyncpg` effects to a factory-injected capability plus one canonical PostgreSQL repository. Nutrition and Training are the only remaining LifeSwitch capability aggregates with legacy request-owned connection lifetimes. Exact parent/candidate parity is 138 routes, 124 OpenAPI paths, and identical route/OpenAPI hashes; 21 focused and 1,247 complete backend tests pass.

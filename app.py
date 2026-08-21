@@ -15,7 +15,7 @@ from seebx.capabilities.search.current_news import router as current_news_router
 from seebx.capabilities.search.execution import (
     router as search_execution_router_v1,
 )
-from seebx.capabilities.observability.telemetry import router as telemetry_router
+from seebx.capabilities.observability.telemetry import create_telemetry_router
 from seebx.capabilities.nutrition.meals import router as lifeswitch_meals_router
 from seebx.capabilities.nutrition.logs import router as lifeswitch_nutrition_log_router
 from seebx.capabilities.nutrition.routes import router as lifeswitch_nutrition_router
@@ -64,6 +64,7 @@ from seebx.adapters.assistant_preferences_postgres import (
     PostgresAssistantPreferencesRepository,
 )
 from seebx.adapters.postgres import PostgresConnectionProvider
+from seebx.adapters.telemetry_postgres import PostgresTelemetryRepository
 
 
 from seebx.capabilities.voice.synthesis import router as voice_tts_router
@@ -88,6 +89,7 @@ app = FastAPI(title="SeeBx API", version="1.0.0")
 install_http_boundary(app)
 DSN = os.environ["POSTGRES_DSN"]
 POSTGRES = PostgresConnectionProvider(DSN)
+TELEMETRY_POSTGRES = PostgresTelemetryRepository(POSTGRES)
 RESPONSE_POSTGRES = PostgresConnectionProvider(
     DSN,
     connect_kwargs={"command_timeout": 90},
@@ -105,7 +107,7 @@ app.include_router(
 app.include_router(trusted_web_router, prefix="/trusted-web")
 app.include_router(current_news_router, prefix="/current-news")
 app.include_router(search_execution_router_v1, prefix="/search")
-app.include_router(telemetry_router)
+app.include_router(create_telemetry_router(TELEMETRY_POSTGRES))
 app.include_router(lifeswitch_nutrition_router, prefix="/lifeswitch/nutrition")
 app.include_router(lifeswitch_meals_router, prefix="/lifeswitch/nutrition")
 app.include_router(lifeswitch_nutrition_log_router, prefix="/lifeswitch/nutrition")
