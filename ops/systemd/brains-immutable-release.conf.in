@@ -3,6 +3,13 @@
 [Service]
 WorkingDirectory=/opt/lifeswitch/releases/@COMMIT@
 Environment=PYTHONDONTWRITEBYTECODE=1
+# Canonical Zep settings are approval-bound values rendered by Work Runner.
+UnsetEnvironment=ZEP_SHADOW_MODE ZEP_SHADOW_OWNER_IDS ZEP_SHADOW_TIMEOUT_SECONDS
+Environment=ZEP_SYNC_MODE=@ZEP_SYNC_MODE@
+Environment=ZEP_SYNC_OWNER_IDS=@ZEP_SYNC_OWNER_IDS@
+Environment=ZEP_TIMEOUT_SECONDS=@ZEP_TIMEOUT_SECONDS@
+Environment=ZEP_PROMPT_MODE=@ZEP_PROMPT_MODE@
+Environment=ZEP_PROMPT_OWNER_IDS=@ZEP_PROMPT_OWNER_IDS@
 UMask=0077
 NoNewPrivileges=yes
 PrivateTmp=yes

@@ -9,11 +9,18 @@ from scripts.render_release_unit import ReleaseUnitError, render_release_unit
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND_TEMPLATE = ROOT / "ops/systemd/brains-immutable-release.conf.in"
 COMMIT = "a" * 40
+ZEP_BINDINGS = {
+    "ZEP_SYNC_MODE": "on",
+    "ZEP_SYNC_OWNER_IDS": "",
+    "ZEP_TIMEOUT_SECONDS": "2.5",
+    "ZEP_PROMPT_MODE": "on",
+    "ZEP_PROMPT_OWNER_IDS": "",
+}
 
 
 class ReleaseUnitRendererTests(unittest.TestCase):
     def test_backend_template_renders_commit_addressed_source_and_runtime(self) -> None:
-        rendered = render_release_unit(BACKEND_TEMPLATE.read_text(), COMMIT)
+        rendered = render_release_unit(BACKEND_TEMPLATE.read_text(), COMMIT, ZEP_BINDINGS)
         self.assertNotIn("@COMMIT@", rendered)
         self.assertIn(f"WorkingDirectory=/opt/lifeswitch/releases/{COMMIT}", rendered)
         self.assertIn(f"/opt/lifeswitch/runtimes/{COMMIT}/venv/bin/uvicorn", rendered)
@@ -23,7 +30,7 @@ class ReleaseUnitRendererTests(unittest.TestCase):
         self.assertIn("Environment=PYTHONDONTWRITEBYTECODE=1", rendered)
 
     def test_backend_template_is_filesystem_and_privilege_hardened(self) -> None:
-        rendered = render_release_unit(BACKEND_TEMPLATE.read_text(), COMMIT)
+        rendered = render_release_unit(BACKEND_TEMPLATE.read_text(), COMMIT, ZEP_BINDINGS)
         for directive in (
             "UMask=0077",
             "NoNewPrivileges=yes",

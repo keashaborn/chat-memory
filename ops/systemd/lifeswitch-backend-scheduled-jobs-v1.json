@@ -1,0 +1,55 @@
+{
+  "jobs": [
+    {
+      "service": "ai-operations-alert-delivery-v1.service",
+      "service_template": "ops/systemd/ai-operations-alert-delivery-v1.service.in",
+      "timer": "ai-operations-alert-delivery-v1.timer",
+      "timer_file": "ops/systemd/ai-operations-alert-delivery-v1.timer"
+    },
+    {
+      "service": "lifeswitch-release-integrity-v1.service",
+      "service_template": "ops/systemd/lifeswitch-release-integrity-v1.service.in",
+      "timer": "lifeswitch-release-integrity-v1.timer",
+      "timer_file": "ops/systemd/lifeswitch-release-integrity-v1.timer"
+    },
+    {
+      "service": "telemetry-retention-v1.service",
+      "service_template": "ops/systemd/telemetry-retention-v1.service.in",
+      "timer": "telemetry-retention-v1.timer",
+      "timer_file": "ops/systemd/telemetry-retention-v1.timer"
+    },
+    {
+      "service": "trusted-web-monitor-v1.service",
+      "service_template": "ops/systemd/trusted-web-monitor-v1.service.in",
+      "timer": "trusted-web-monitor-v1.timer",
+      "timer_file": "ops/systemd/trusted-web-monitor-v1.timer"
+    },
+    {
+      "service": "trusted-web-ods-cache.service",
+      "service_template": "ops/systemd/trusted-web-ods-cache.service.in",
+      "timer": "trusted-web-ods-cache.timer",
+      "timer_file": "ops/systemd/trusted-web-ods-cache.timer"
+    },
+    {
+      "service": "voice-synthetic-canary.service",
+      "service_template": "ops/systemd/voice-synthetic-canary.service.in",
+      "timer": "voice-synthetic-canary.timer",
+      "timer_file": "ops/systemd/voice-synthetic-canary.timer"
+    }
+  ],
+  "manual_services": [
+    {
+      "service": "ai-operations-alert-delivery-drill-v1.service",
+      "service_template": "ops/systemd/ai-operations-alert-delivery-drill-v1.service.in"
+    },
+    {
+      "service": "trusted-web-monitor-drill-v1.service",
+      "service_template": "ops/systemd/trusted-web-monitor-drill-v1.service.in"
+    }
+  ],
+  "retire_units": [
+    "chat-memory-git-sync.service",
+    "chat-memory-git-sync.timer"
+  ],
+  "schema_version": "lifeswitch-backend-scheduled-jobs-v1"
+}

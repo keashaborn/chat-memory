@@ -1,17 +1,18 @@
 [Unit]
-Description=Run the privacy-safe governed voice synthetic canary
-After=network-online.target brains.service
+Description=Enforce owner-scoped telemetry retention
+After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=oneshot
 User=ubuntu
 Group=ubuntu
-WorkingDirectory=/opt/chat-memory
-EnvironmentFile=/etc/verbalsage/voice-canary.env
-Environment=PYTHONPATH=/opt/chat-memory
-ExecStart=/opt/chat-memory/venv/bin/python /opt/chat-memory/scripts/voice_synthetic_canary.py
-TimeoutStartSec=4min
+WorkingDirectory=/opt/lifeswitch/releases/@COMMIT@
+EnvironmentFile=/opt/chat-memory/.env
+Environment=PYTHONPATH=/opt/lifeswitch/releases/@COMMIT@
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/lifeswitch/runtimes/@COMMIT@/venv/bin/python /opt/lifeswitch/releases/@COMMIT@/scripts/telemetry_retention_worker.py
+TimeoutStartSec=2min
 UMask=0077
 Nice=10
 CPUQuota=20%
@@ -32,6 +33,8 @@ RestrictSUIDSGID=true
 RestrictNamespaces=true
 RestrictRealtime=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+IPAddressDeny=any
+IPAddressAllow=localhost
 CapabilityBoundingSet=
 AmbientCapabilities=
 LockPersonality=true

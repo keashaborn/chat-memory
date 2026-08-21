@@ -25,11 +25,11 @@ ROLLBACK = (
     ROOT / "ops/sql/20260731_ai_operations_alert_delivery_v1_rollback.sql"
 )
 SERVICE = (
-    ROOT / "ops/systemd/ai-operations-alert-delivery-v1.service"
+    ROOT / "ops/systemd/ai-operations-alert-delivery-v1.service.in"
 )
 TIMER = ROOT / "ops/systemd/ai-operations-alert-delivery-v1.timer"
 DRILL_SERVICE = (
-    ROOT / "ops/systemd/ai-operations-alert-delivery-drill-v1.service"
+    ROOT / "ops/systemd/ai-operations-alert-delivery-drill-v1.service.in"
 )
 ENV_EXAMPLE = (
     ROOT / "ops/systemd/ai-operations-alert-delivery-v1.env.example"

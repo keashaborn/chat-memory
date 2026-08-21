@@ -1,0 +1,42 @@
+[Unit]
+Description=Verify the active immutable LifeSwitch backend release
+After=brains.service
+
+[Service]
+Type=oneshot
+# Release receipts are root-owned mode 0400. This read-only verifier therefore
+# runs as root with an empty capability set and a strict filesystem sandbox.
+User=root
+Group=root
+WorkingDirectory=/opt/lifeswitch/releases/@COMMIT@
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/lifeswitch/runtimes/@COMMIT@/venv/bin/python /opt/lifeswitch/releases/@COMMIT@/scripts/verify_immutable_backend_release.py --commit @COMMIT@
+TimeoutStartSec=2min
+UMask=0077
+Nice=10
+CPUQuota=10%
+MemoryMax=256M
+TasksMax=16
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_UNIX
+CapabilityBoundingSet=
+AmbientCapabilities=
+LockPersonality=true
+RemoveIPC=true
+SystemCallArchitectures=native
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lifeswitch-release-integrity-v1

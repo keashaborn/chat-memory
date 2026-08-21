@@ -1,12 +1,12 @@
 [Unit]
-Description=Run the chat-memory Git mirror audit daily
+Description=Verify the active immutable LifeSwitch backend release daily
 
 [Timer]
 OnCalendar=daily
 Persistent=true
 RandomizedDelaySec=5m
 AccuracySec=1m
-Unit=chat-memory-git-sync.service
+Unit=lifeswitch-release-integrity-v1.service
 
 [Install]
 WantedBy=timers.target

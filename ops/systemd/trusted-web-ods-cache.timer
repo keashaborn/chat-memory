@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh the trusted-web NIH ODS source cache daily
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=20m
+Persistent=true
+Unit=trusted-web-ods-cache.service
+
+[Install]
+WantedBy=timers.target

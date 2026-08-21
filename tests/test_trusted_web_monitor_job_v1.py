@@ -20,8 +20,8 @@ from scripts.trusted_web_monitor_job_v1 import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SERVICE = ROOT / "ops/systemd/trusted-web-monitor-v1.service"
-DRILL_SERVICE = ROOT / "ops/systemd/trusted-web-monitor-drill-v1.service"
+SERVICE = ROOT / "ops/systemd/trusted-web-monitor-v1.service.in"
+DRILL_SERVICE = ROOT / "ops/systemd/trusted-web-monitor-drill-v1.service.in"
 TIMER = ROOT / "ops/systemd/trusted-web-monitor-v1.timer"
 ENV_EXAMPLE = (
     ROOT / "ops/systemd/trusted-web-monitor-v1.env.example"

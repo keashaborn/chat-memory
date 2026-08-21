@@ -1,5 +1,5 @@
 [Unit]
-Description=Enforce owner-scoped telemetry retention
+Description=Refresh the trusted-web NIH ODS source cache
 After=network-online.target
 Wants=network-online.target
 
@@ -7,21 +7,22 @@ Wants=network-online.target
 Type=oneshot
 User=ubuntu
 Group=ubuntu
-WorkingDirectory=/opt/chat-memory
+WorkingDirectory=/opt/lifeswitch/releases/@COMMIT@
 EnvironmentFile=/opt/chat-memory/.env
-Environment=PYTHONPATH=/opt/chat-memory
-ExecStart=/opt/chat-memory/venv/bin/python /opt/chat-memory/scripts/telemetry_retention_worker.py
-TimeoutStartSec=2min
+Environment=PYTHONPATH=/opt/lifeswitch/releases/@COMMIT@
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/lifeswitch/runtimes/@COMMIT@/venv/bin/python /opt/lifeswitch/releases/@COMMIT@/scripts/refresh_trusted_web_ods_cache.py
+TimeoutStartSec=1min
 UMask=0077
 Nice=10
-CPUQuota=20%
-MemoryMax=256M
-TasksMax=32
+CPUQuota=10%
+MemoryMax=128M
+TasksMax=16
 NoNewPrivileges=true
 PrivateTmp=true
 PrivateDevices=true
 ProtectSystem=strict
-ProtectHome=read-only
+ProtectHome=true
 ProtectClock=true
 ProtectHostname=true
 ProtectKernelTunables=true
@@ -32,10 +33,11 @@ RestrictSUIDSGID=true
 RestrictNamespaces=true
 RestrictRealtime=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-IPAddressDeny=any
-IPAddressAllow=localhost
 CapabilityBoundingSet=
 AmbientCapabilities=
 LockPersonality=true
 RemoveIPC=true
 SystemCallArchitectures=native
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=trusted-web-ods-cache
