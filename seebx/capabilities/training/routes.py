@@ -21,6 +21,10 @@ from seebx.adapters.lifeswitch_training_access_postgres import (
 from seebx.adapters.lifeswitch_training_conditioning_postgres import (
     lifeswitch_training_conditioning_repository,
 )
+from seebx.adapters.lifeswitch_training_sharing_postgres import (
+    WorkoutShareImportError,
+    lifeswitch_training_sharing_repository,
+)
 from seebx.adapters.lifeswitch_training_writes_postgres import (
     TrainingWriterError,
     correct_training_session as write_training_correction,
@@ -102,34 +106,6 @@ def _without_token_hash(row):
     if isinstance(out, dict):
         out.pop("token_hash", None)
     return out
-
-
-async def _unique_imported_workout_name(conn, owner_user_id: str, base_name: str) -> str:
-    base = _clean_text(base_name or "Imported Workout", 160) or "Imported Workout"
-    candidate = base
-    for i in range(0, 50):
-        if i == 0:
-            candidate = base
-        elif i == 1:
-            candidate = f"{base} (Imported)"
-        else:
-            candidate = f"{base} (Imported {i})"
-
-        row = await conn.fetchrow(
-            f"""
-            select workout_template_id
-            from {SCHEMA}.workout_template
-            where owner_user_id=$1::uuid
-              and lower(name)=lower($2)
-            limit 1
-            """,
-            owner_user_id,
-            candidate,
-        )
-        if not row:
-            return candidate
-
-    return f"{base} (Imported {secrets.token_hex(3)})"
 
 
 async def _db(req: Request):
@@ -607,64 +583,24 @@ async def create_workout_template_share(
 ):
     owner = require_actor_matches_owner(req, owner_user_id)
     wid = _as_uuid(workout_template_id, "workout_template_id")
-
     token = _new_share_token()
-    thash = _token_hash(token)
+    token_hash = _token_hash(token)
 
-    conn = await _db(req)
-    try:
-        tpl = await conn.fetchrow(
-            f"""
-            select workout_template_id, owner_user_id, name, notes, is_active
-            from {SCHEMA}.workout_template
-            where workout_template_id=$1::uuid
-              and owner_user_id=$2::uuid
-              and is_active=true
-            limit 1
-            """,
-            wid,
-            owner,
+    async with lifeswitch_training_sharing_repository(req) as repository:
+        template, share = await repository.create_share(
+            owner_user_id=owner,
+            workout_template_id=wid,
+            token_hash=token_hash,
+            label=_clean_text(label, 200),
+            notes=_clean_text(notes, 2000),
         )
-        if not tpl:
-            raise HTTPException(status_code=404, detail="workout template not found")
+    if not template:
+        raise HTTPException(status_code=404, detail="workout template not found")
 
-        row = await conn.fetchrow(
-            f"""
-            insert into {SCHEMA}.workout_template_share (
-              token_hash,
-              created_by_user_id,
-              workout_template_id,
-              status,
-              label,
-              notes
-            )
-            values ($1, $2::uuid, $3::uuid, 'active', $4, $5)
-            returning
-              workout_template_share_id,
-              token_hash,
-              created_by_user_id,
-              workout_template_id,
-              status,
-              label,
-              notes,
-              expires_at,
-              revoked_at,
-              created_at,
-              updated_at
-            """,
-            thash,
-            owner,
-            wid,
-            _clean_text(label, 200),
-            _clean_text(notes, 2000),
-        )
-
-        out = _without_token_hash(row)
-        out["token"] = token
-        out["workout_name"] = str(tpl["name"])
-        return JSONResponse(out)
-    finally:
-        await conn.close()
+    out = _without_token_hash(share)
+    out["token"] = token
+    out["workout_name"] = str(template["name"])
+    return JSONResponse(out)
 
 
 @router.get("/workout_template_shares")
@@ -674,150 +610,48 @@ async def list_workout_template_shares(
     include_inactive: int = Query(0, ge=0, le=1),
 ):
     owner = require_actor_matches_owner(req, owner_user_id)
-    status_filter = "" if include_inactive else "and s.status='active'"
-
-    conn = await _db(req)
-    try:
-        rows = await conn.fetch(
-            f"""
-            select
-              s.workout_template_share_id,
-              s.created_by_user_id,
-              s.workout_template_id,
-              wt.name as workout_name,
-              s.status,
-              s.label,
-              s.notes,
-              s.expires_at,
-              s.revoked_at,
-              s.created_at,
-              s.updated_at
-            from {SCHEMA}.workout_template_share s
-            join {SCHEMA}.workout_template wt
-              on wt.workout_template_id=s.workout_template_id
-            where s.created_by_user_id=$1::uuid
-              {status_filter}
-            order by s.created_at desc
-            limit 100
-            """,
-            owner,
+    async with lifeswitch_training_sharing_repository(req) as repository:
+        rows = await repository.list_shares(
+            owner_user_id=owner,
+            include_inactive=bool(include_inactive),
         )
-        return JSONResponse([_row_to_jsonable(r) for r in rows])
-    finally:
-        await conn.close()
+    return JSONResponse([_row_to_jsonable(row) for row in rows])
 
 
 @router.get("/workout_template_shares/preview")
 async def preview_workout_template_share(
+    req: Request,
     token: str = Query(..., min_length=10),
 ):
-    thash = _token_hash(token)
-
-    conn = await _db(req)
-    try:
-        share = await conn.fetchrow(
-            f"""
-            select
-              s.workout_template_share_id,
-              s.created_by_user_id,
-              coalesce(p.display_name, s.created_by_user_id::text) as creator_display_name,
-              s.workout_template_id,
-              s.status,
-              s.label,
-              s.notes,
-              s.expires_at,
-              s.revoked_at,
-              s.created_at,
-              s.updated_at,
-              wt.name as workout_name,
-              wt.notes as workout_notes,
-              wt.is_active as workout_is_active
-            from {SCHEMA}.workout_template_share s
-            join {SCHEMA}.workout_template wt
-              on wt.workout_template_id=s.workout_template_id
-            left join lifeswitch_people.user_profile p
-              on p.user_id=s.created_by_user_id
-            where s.token_hash=$1
-            limit 1
-            """,
-            thash,
+    token_hash = _token_hash(token)
+    async with lifeswitch_training_sharing_repository(req) as repository:
+        preview = await repository.preview_share(
+            token_hash=token_hash,
+            now=_dt.datetime.now(_dt.timezone.utc),
         )
-        if not share:
-            raise HTTPException(status_code=404, detail="share not found")
-
-        if share["status"] == "active" and share["expires_at"] < _dt.datetime.now(_dt.timezone.utc):
-            await conn.execute(
-                f"""
-                update {SCHEMA}.workout_template_share
-                   set status='expired',
-                       updated_at=now()
-                 where workout_template_share_id=$1::uuid
-                """,
-                str(share["workout_template_share_id"]),
-            )
-            d = _row_to_jsonable(share)
-            d["status"] = "expired"
-            return JSONResponse(d)
-
-        exercises = await conn.fetch(
-            f"""
-            select
-              workout_template_exercise_id,
-              workout_template_id,
-              exercise_id,
-              display_name_snapshot,
-              sort_order,
-              set_type,
-              planned_sets,
-              default_weight,
-              default_reps,
-              flags,
-              created_at,
-              updated_at
-            from {SCHEMA}.workout_template_exercise
-            where workout_template_id=$1::uuid
-            order by sort_order asc, created_at asc
-            """,
-            str(share["workout_template_id"]),
-        )
-
-        exercise_ids = [str(r["workout_template_exercise_id"]) for r in exercises]
-        seg_rows = []
-        if exercise_ids:
-            seg_rows = await conn.fetch(
-                f"""
-                select
-                  workout_template_exercise_segment_id,
-                  workout_template_exercise_id,
-                  segment_index,
-                  label,
-                  default_weight,
-                  default_reps,
-                  created_at,
-                  updated_at
-                from {SCHEMA}.workout_template_exercise_segment
-                where workout_template_exercise_id = any($1::uuid[])
-                order by workout_template_exercise_id, segment_index asc
-                """,
-                exercise_ids,
-            )
-
-        seg_by_parent = {}
-        for seg in seg_rows:
-            key = str(seg["workout_template_exercise_id"])
-            seg_by_parent.setdefault(key, []).append(_row_to_jsonable(seg))
-
-        exercise_out = []
-        for ex in exercises:
-            d = _row_to_jsonable(ex)
-            d["segments"] = seg_by_parent.get(str(ex["workout_template_exercise_id"]), [])
-            exercise_out.append(d)
-
-        out = _row_to_jsonable(share)
-        out["exercises"] = exercise_out
+    if not preview:
+        raise HTTPException(status_code=404, detail="share not found")
+    if preview.expired:
+        out = _row_to_jsonable(preview.share)
+        out["status"] = "expired"
         return JSONResponse(out)
-    finally:
-        await conn.close()
+
+    segments_by_parent = {}
+    for segment in preview.segments:
+        key = str(segment["workout_template_exercise_id"])
+        segments_by_parent.setdefault(key, []).append(_row_to_jsonable(segment))
+
+    exercises = []
+    for exercise in preview.exercises:
+        out = _row_to_jsonable(exercise)
+        out["segments"] = segments_by_parent.get(
+            str(exercise["workout_template_exercise_id"]), []
+        )
+        exercises.append(out)
+
+    out = _row_to_jsonable(preview.share)
+    out["exercises"] = exercises
+    return JSONResponse(out)
 
 
 @router.post("/workout_template_shares/import")
@@ -827,198 +661,27 @@ async def import_workout_template_share(
     token: str = Query(..., min_length=10),
 ):
     importer = require_actor_matches_owner(req, owner_user_id)
-    thash = _token_hash(token)
+    token_hash = _token_hash(token)
 
-    conn = await _db(req)
     try:
-        async with conn.transaction():
-            share = await conn.fetchrow(
-                f"""
-                select
-                  s.workout_template_share_id,
-                  s.created_by_user_id,
-                  s.workout_template_id,
-                  s.status,
-                  s.expires_at,
-                  wt.name as workout_name,
-                  wt.notes as workout_notes,
-                  wt.is_active as workout_is_active
-                from {SCHEMA}.workout_template_share s
-                join {SCHEMA}.workout_template wt
-                  on wt.workout_template_id=s.workout_template_id
-                where s.token_hash=$1
-                for update
-                """,
-                thash,
+        async with lifeswitch_training_sharing_repository(req) as repository:
+            imported = await repository.import_share(
+                importer_user_id=importer,
+                token_hash=token_hash,
+                now=_dt.datetime.now(_dt.timezone.utc),
             )
-            if not share:
-                raise HTTPException(status_code=404, detail="share not found")
-            if str(share["status"]) != "active":
-                raise HTTPException(status_code=400, detail=f"share is {share['status']}")
-            if share["expires_at"] and share["expires_at"] < _dt.datetime.now(_dt.timezone.utc):
-                await conn.execute(
-                    f"""
-                    update {SCHEMA}.workout_template_share
-                       set status='expired',
-                           updated_at=now()
-                     where workout_template_share_id=$1::uuid
-                    """,
-                    str(share["workout_template_share_id"]),
-                )
-                raise HTTPException(status_code=400, detail="share expired")
-            if not share["workout_is_active"]:
-                raise HTTPException(status_code=400, detail="shared workout is inactive")
+    except WorkoutShareImportError as error:
+        status_code = 404 if error.code == "not_found" else 400
+        raise HTTPException(status_code=status_code, detail=error.detail) from error
 
-            new_name = await _unique_imported_workout_name(conn, importer, str(share["workout_name"] or "Imported Workout"))
-
-            new_tpl = await conn.fetchrow(
-                f"""
-                insert into {SCHEMA}.workout_template (
-                  owner_user_id,
-                  name,
-                  notes,
-                  is_active
-                )
-                values ($1::uuid, $2, $3, true)
-                returning workout_template_id, owner_user_id, name, notes, is_active, created_at, updated_at
-                """,
-                importer,
-                new_name,
-                share["workout_notes"] or "",
-            )
-
-            src_exercises = await conn.fetch(
-                f"""
-                select
-                  workout_template_exercise_id,
-                  exercise_id,
-                  display_name_snapshot,
-                  sort_order,
-                  set_type,
-                  planned_sets,
-                  default_weight,
-                  default_reps,
-                  flags
-                from {SCHEMA}.workout_template_exercise
-                where workout_template_id=$1::uuid
-                order by sort_order asc, created_at asc
-                """,
-                str(share["workout_template_id"]),
-            )
-
-            copied = []
-            for ex in src_exercises:
-                exercise_id = str(ex["exercise_id"])
-                display_name = _clean_text(ex["display_name_snapshot"] or exercise_id, 240) or exercise_id
-
-                await conn.execute(
-                    f"""
-                    insert into {SCHEMA}.my_exercise (
-                      owner_user_id,
-                      exercise_id,
-                      display_name,
-                      kind,
-                      modality,
-                      matched_source,
-                      is_active
-                    )
-                    values ($1::uuid, $2, $3, 'strength', 'imported', 'workout_share_import', true)
-                    on conflict (owner_user_id, exercise_id)
-                    do update set
-                      display_name=case
-                        when {SCHEMA}.my_exercise.display_name='' then excluded.display_name
-                        else {SCHEMA}.my_exercise.display_name
-                      end,
-                      is_active=true,
-                      updated_at=now()
-                    """,
-                    importer,
-                    exercise_id,
-                    display_name,
-                )
-
-                new_ex = await conn.fetchrow(
-                    f"""
-                    insert into {SCHEMA}.workout_template_exercise (
-                      workout_template_id,
-                      exercise_id,
-                      display_name_snapshot,
-                      sort_order,
-                      set_type,
-                      planned_sets,
-                      default_weight,
-                      default_reps,
-                      flags
-                    )
-                    values ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9)
-                    returning
-                      workout_template_exercise_id,
-                      workout_template_id,
-                      exercise_id,
-                      display_name_snapshot,
-                      sort_order,
-                      set_type,
-                      planned_sets,
-                      default_weight,
-                      default_reps,
-                      flags,
-                      created_at,
-                      updated_at
-                    """,
-                    str(new_tpl["workout_template_id"]),
-                    exercise_id,
-                    ex["display_name_snapshot"],
-                    int(ex["sort_order"] or 10),
-                    str(ex["set_type"] or "straight"),
-                    int(ex["planned_sets"] or 3),
-                    ex["default_weight"] or 0,
-                    int(ex["default_reps"] or 10),
-                    ex["flags"] or "",
-                )
-
-                src_segments = await conn.fetch(
-                    f"""
-                    select segment_index, label, default_weight, default_reps
-                    from {SCHEMA}.workout_template_exercise_segment
-                    where workout_template_exercise_id=$1::uuid
-                    order by segment_index asc
-                    """,
-                    str(ex["workout_template_exercise_id"]),
-                )
-
-                for seg in src_segments:
-                    await conn.execute(
-                        f"""
-                        insert into {SCHEMA}.workout_template_exercise_segment (
-                          workout_template_exercise_id,
-                          segment_index,
-                          label,
-                          default_weight,
-                          default_reps
-                        )
-                        values ($1::uuid, $2, $3, $4, $5)
-                        on conflict (workout_template_exercise_id, segment_index)
-                        do update set
-                          label=excluded.label,
-                          default_weight=excluded.default_weight,
-                          default_reps=excluded.default_reps,
-                          updated_at=now()
-                        """,
-                        str(new_ex["workout_template_exercise_id"]),
-                        int(seg["segment_index"] or 1),
-                        seg["label"] or "",
-                        seg["default_weight"] or 0,
-                        int(seg["default_reps"] or 0),
-                    )
-
-                copied.append(_row_to_jsonable(new_ex))
-
-        return JSONResponse({
-            "imported_workout": _row_to_jsonable(new_tpl),
-            "copied_exercises": copied,
-        })
-    finally:
-        await conn.close()
+    return JSONResponse(
+        {
+            "imported_workout": _row_to_jsonable(imported.imported_workout),
+            "copied_exercises": [
+                _row_to_jsonable(exercise) for exercise in imported.copied_exercises
+            ],
+        }
+    )
 
 
 @router.post("/workout_template_shares/{workout_template_share_id}/revoke")
@@ -1027,41 +690,18 @@ async def revoke_workout_template_share(
     req: Request,
     owner_user_id: str = Query(..., min_length=1),
 ):
-    sid = _as_uuid(workout_template_share_id, "workout_template_share_id")
+    share_id = _as_uuid(
+        workout_template_share_id, "workout_template_share_id"
+    )
     owner = require_actor_matches_owner(req, owner_user_id)
-
-    conn = await _db(req)
-    try:
-        row = await conn.fetchrow(
-            f"""
-            update {SCHEMA}.workout_template_share
-               set status='revoked',
-                   revoked_at=now(),
-                   updated_at=now()
-             where workout_template_share_id=$1::uuid
-               and created_by_user_id=$2::uuid
-               and status='active'
-            returning
-              workout_template_share_id,
-              created_by_user_id,
-              workout_template_id,
-              status,
-              label,
-              notes,
-              expires_at,
-              revoked_at,
-              created_at,
-              updated_at
-            """,
-            sid,
-            owner,
+    async with lifeswitch_training_sharing_repository(req) as repository:
+        row = await repository.revoke_share(
+            workout_template_share_id=share_id,
+            owner_user_id=owner,
         )
-        if not row:
-            raise HTTPException(status_code=404, detail="active share not found")
-        return JSONResponse(_row_to_jsonable(row))
-    finally:
-        await conn.close()
-
+    if not row:
+        raise HTTPException(status_code=404, detail="active share not found")
+    return JSONResponse(_row_to_jsonable(row))
 
 
 @router.get("/workout_templates")
