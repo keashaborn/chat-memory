@@ -1,18 +1,20 @@
 from __future__ import annotations
 
-import os
-import uuid
-import decimal
 import datetime as _dt
-import asyncpg
+import decimal
+import uuid
+
 from fastapi import APIRouter, HTTPException, Query, Request
-from seebx.core.ownership import require_actor_matches_owner
-from seebx.adapters.lifeswitch_postgres import connect_lifeswitch
 from fastapi.responses import JSONResponse
 
-router = APIRouter()
+from seebx.adapters.lifeswitch_meals_postgres import (
+    MealsRepositoryError,
+    lifeswitch_meals_repository,
+)
+from seebx.core.ownership import require_actor_matches_owner
 
-SCHEMA = os.getenv("LIFESWITCH_NUTRITION_SCHEMA", "lifeswitch_nutrition")
+
+router = APIRouter()
 
 
 def _as_uuid(s: str, name: str) -> str:
@@ -25,7 +27,7 @@ def _as_uuid(s: str, name: str) -> str:
 def _json_safe(v):
     if isinstance(v, uuid.UUID):
         return str(v)
-    if isinstance(v, (decimal.Decimal,)):
+    if isinstance(v, decimal.Decimal):
         return float(v)
     if isinstance(v, (_dt.datetime, _dt.date)):
         return v.isoformat()
@@ -37,14 +39,6 @@ def _row_to_jsonable(r):
     return {k: _json_safe(v) for k, v in d.items()}
 
 
-async def _db(req: Request):
-    return await connect_lifeswitch(req)
-
-
-# ----------------------------
-# Meals (templates)
-# ----------------------------
-
 @router.get("/meals")
 async def list_meals(
     req: Request,
@@ -52,23 +46,12 @@ async def list_meals(
     include_inactive: int = Query(0, ge=0, le=1),
 ):
     owner = require_actor_matches_owner(req, owner_user_id)
-    conn = await _db(req)
-    try:
-        where = "owner_user_id=$1::uuid"
-        if include_inactive == 0:
-            where += " and is_active"
-        rows = await conn.fetch(
-            f"""
-            select meal_id, owner_user_id, name, meal_type, is_active, created_at, updated_at
-            from {SCHEMA}.meal
-            where {where}
-            order by lower(meal_type), lower(name)
-            """,
-            owner,
+    async with lifeswitch_meals_repository(req) as repository:
+        rows = await repository.list_meals(
+            owner_user_id=owner,
+            include_inactive=include_inactive != 0,
         )
-        return JSONResponse([_row_to_jsonable(r) for r in rows])
-    finally:
-        await conn.close()
+    return JSONResponse([_row_to_jsonable(row) for row in rows])
 
 
 @router.post("/meals/create")
@@ -81,24 +64,13 @@ async def create_meal(
     owner = require_actor_matches_owner(req, owner_user_id)
     if meal_type not in ("breakfast", "lunch", "dinner", "snack", "other"):
         raise HTTPException(status_code=400, detail="meal_type must be breakfast|lunch|dinner|snack|other")
-
-    conn = await _db(req)
-    try:
-        row = await conn.fetchrow(
-            f"""
-            insert into {SCHEMA}.meal (owner_user_id, name, meal_type)
-            values ($1::uuid, $2, $3)
-            on conflict (owner_user_id, name) do update
-              set meal_type=excluded.meal_type,
-                  is_active=true,
-                  updated_at=now()
-            returning meal_id, owner_user_id, name, meal_type, is_active, created_at, updated_at
-            """,
-            owner, name.strip(), meal_type,
+    async with lifeswitch_meals_repository(req) as repository:
+        row = await repository.create_meal(
+            owner_user_id=owner,
+            name=name.strip(),
+            meal_type=meal_type,
         )
-        return JSONResponse(_row_to_jsonable(row) if row else {"error": "insert_failed"})
-    finally:
-        await conn.close()
+    return JSONResponse(_row_to_jsonable(row) if row else {"error": "insert_failed"})
 
 
 @router.post("/meals/{meal_id}/deactivate")
@@ -109,29 +81,12 @@ async def deactivate_meal(
 ):
     mid = _as_uuid(meal_id, "meal_id")
     owner = require_actor_matches_owner(req, owner_user_id)
+    async with lifeswitch_meals_repository(req) as repository:
+        row = await repository.deactivate_meal(meal_id=mid, owner_user_id=owner)
+    if not row:
+        raise HTTPException(status_code=404, detail="meal not found")
+    return JSONResponse(_row_to_jsonable(row))
 
-    conn = await _db(req)
-    try:
-        row = await conn.fetchrow(
-            f"""
-            update {SCHEMA}.meal
-               set is_active=false, updated_at=now()
-             where meal_id=$1::uuid
-               and owner_user_id=$2::uuid
-            returning meal_id, owner_user_id, name, meal_type, is_active, created_at, updated_at
-            """,
-            mid, owner,
-        )
-        if not row:
-            raise HTTPException(status_code=404, detail="meal not found")
-        return JSONResponse(_row_to_jsonable(row))
-    finally:
-        await conn.close()
-
-
-# ----------------------------
-# Meal items (support grams OR servings preset)
-# ----------------------------
 
 @router.post("/meals/{meal_id}/items/add")
 async def add_meal_item(
@@ -151,60 +106,35 @@ async def add_meal_item(
     """
     mid = _as_uuid(meal_id, "meal_id")
     fid = _as_uuid(my_food_id, "my_food_id")
-
     use_grams = qty_g is not None
-    use_serv = (my_food_serving_id is not None) or (qty_servings is not None)
-
-    if use_grams and use_serv:
+    use_serving = my_food_serving_id is not None or qty_servings is not None
+    if use_grams and use_serving:
         raise HTTPException(status_code=400, detail="provide qty_g OR (my_food_serving_id + qty_servings), not both")
-    if not use_grams and not use_serv:
+    if not use_grams and not use_serving:
         raise HTTPException(status_code=400, detail="must provide qty_g OR (my_food_serving_id + qty_servings)")
-    if use_serv and (my_food_serving_id is None or qty_servings is None):
+    if use_serving and (my_food_serving_id is None or qty_servings is None):
         raise HTTPException(status_code=400, detail="servings mode requires my_food_serving_id and qty_servings")
-
     sid = _as_uuid(my_food_serving_id, "my_food_serving_id") if my_food_serving_id else None
 
-    conn = await _db(req)
-    try:
-        owner = await conn.fetchval(
-            f"select owner_user_id from {SCHEMA}.meal where meal_id=$1::uuid and is_active",
-            mid,
-        )
+    async with lifeswitch_meals_repository(req) as repository:
+        owner = await repository.active_meal_owner(meal_id=mid)
         if not owner:
             raise HTTPException(status_code=404, detail="meal not found or inactive")
         owner = require_actor_matches_owner(req, str(owner))
-
-        ok = await conn.fetchval(
-            f"select is_active from {SCHEMA}.my_food where my_food_id=$1::uuid and owner_user_id=$2::uuid",
-            fid,
-            owner,
-        )
-        if ok is not True:
+        if not await repository.food_is_active(my_food_id=fid, owner_user_id=owner):
             raise HTTPException(status_code=404, detail="my_food not found or inactive")
-
-        if sid:
-            owns = await conn.fetchval(
-                f"select 1 from {SCHEMA}.my_food_serving where my_food_serving_id=$1::uuid and my_food_id=$2::uuid and is_active",
-                sid, fid,
-            )
-            if owns != 1:
-                raise HTTPException(status_code=404, detail="active serving not found for this my_food_id")
-
-        row = await conn.fetchrow(
-            f"""
-            insert into {SCHEMA}.meal_item
-              (meal_id, my_food_id, qty_g, my_food_serving_id, qty_servings, sort_order, notes)
-            values
-              ($1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7)
-            returning meal_item_id, meal_id, my_food_id,
-                      qty_g, my_food_serving_id, qty_servings,
-                      sort_order, notes, created_at, updated_at
-            """,
-            mid, fid, qty_g, sid, qty_servings, sort_order, notes,
+        if sid and not await repository.serving_is_active(serving_id=sid, my_food_id=fid):
+            raise HTTPException(status_code=404, detail="active serving not found for this my_food_id")
+        row = await repository.create_item(
+            meal_id=mid,
+            my_food_id=fid,
+            qty_g=qty_g,
+            serving_id=sid,
+            qty_servings=qty_servings,
+            sort_order=sort_order,
+            notes=notes,
         )
-        return JSONResponse(_row_to_jsonable(row) if row else {"error": "insert_failed"})
-    finally:
-        await conn.close()
+    return JSONResponse(_row_to_jsonable(row) if row else {"error": "insert_failed"})
 
 
 @router.patch("/meals/{meal_id}/items/{meal_item_id}")
@@ -219,112 +149,45 @@ async def update_meal_item(
     """Replace an item's quantity while preserving its food and sort order."""
     mid = _as_uuid(meal_id, "meal_id")
     iid = _as_uuid(meal_item_id, "meal_item_id")
-
     use_grams = qty_g is not None
-    use_serving = (my_food_serving_id is not None) or (qty_servings is not None)
+    use_serving = my_food_serving_id is not None or qty_servings is not None
     if use_grams and use_serving:
         raise HTTPException(status_code=400, detail="provide qty_g OR (my_food_serving_id + qty_servings), not both")
     if not use_grams and not use_serving:
         raise HTTPException(status_code=400, detail="must provide qty_g OR (my_food_serving_id + qty_servings)")
     if use_serving and (my_food_serving_id is None or qty_servings is None):
         raise HTTPException(status_code=400, detail="servings mode requires my_food_serving_id and qty_servings")
-
     sid = _as_uuid(my_food_serving_id, "my_food_serving_id") if my_food_serving_id else None
-    conn = await _db(req)
     try:
-        async with conn.transaction():
-            current = await conn.fetchrow(
-                f"""
-                select i.my_food_id, m.owner_user_id
-                from {SCHEMA}.meal_item i
-                join {SCHEMA}.meal m on m.meal_id=i.meal_id
-                where i.meal_item_id=$1::uuid
-                  and i.meal_id=$2::uuid
-                  and m.is_active=true
-                """,
-                iid,
-                mid,
+        async with lifeswitch_meals_repository(req) as repository:
+            row = await repository.update_item(
+                meal_id=mid,
+                meal_item_id=iid,
+                qty_g=qty_g,
+                serving_id=sid,
+                qty_servings=qty_servings,
+                authorize_owner=lambda owner: require_actor_matches_owner(req, owner),
             )
-            if not current:
-                raise HTTPException(status_code=404, detail="meal item not found or meal inactive")
-            require_actor_matches_owner(req, str(current["owner_user_id"]))
-
-            if sid:
-                owns = await conn.fetchval(
-                    f"""
-                    select 1
-                    from {SCHEMA}.my_food_serving
-                    where my_food_serving_id=$1::uuid
-                      and my_food_id=$2::uuid
-                      and is_active=true
-                    """,
-                    sid,
-                    current["my_food_id"],
-                )
-                if owns != 1:
-                    raise HTTPException(status_code=404, detail="active serving not found for this meal item's food")
-
-            row = await conn.fetchrow(
-                f"""
-                update {SCHEMA}.meal_item
-                set qty_g=$3,
-                    my_food_serving_id=$4::uuid,
-                    qty_servings=$5,
-                    updated_at=now()
-                where meal_item_id=$1::uuid
-                  and meal_id=$2::uuid
-                returning meal_item_id, meal_id, my_food_id,
-                          qty_g, my_food_serving_id, qty_servings,
-                          sort_order, notes, created_at, updated_at
-                """,
-                iid,
-                mid,
-                qty_g,
-                sid,
-                qty_servings,
-            )
-            return JSONResponse(_row_to_jsonable(row))
-    finally:
-        await conn.close()
+    except MealsRepositoryError as error:
+        details = {
+            "meal_item_not_found_or_inactive": "meal item not found or meal inactive",
+            "serving_not_found_for_item": "active serving not found for this meal item's food",
+        }
+        raise HTTPException(status_code=404, detail=details.get(error.code, "meal repository failure"))
+    return JSONResponse(_row_to_jsonable(row))
 
 
 @router.get("/meals/{meal_id}/items")
 async def list_meal_items(meal_id: str, req: Request):
     mid = _as_uuid(meal_id, "meal_id")
-    conn = await _db(req)
-    try:
-        owner = await conn.fetchval(
-            f"select owner_user_id from {SCHEMA}.meal where meal_id=$1::uuid",
-            mid,
-        )
+    async with lifeswitch_meals_repository(req) as repository:
+        owner = await repository.meal_owner(meal_id=mid)
         if not owner:
             raise HTTPException(status_code=404, detail="meal not found")
         require_actor_matches_owner(req, str(owner))
+        rows = await repository.list_items(meal_id=mid)
+    return JSONResponse([_row_to_jsonable(row) for row in rows])
 
-        rows = await conn.fetch(
-            f"""
-            select
-              i.meal_item_id, i.meal_id, i.my_food_id,
-              i.qty_g, i.my_food_serving_id, i.qty_servings,
-              coalesce(i.qty_g, (s.grams * i.qty_servings)) as qty_g_resolved,
-              s.name as serving_name, s.grams as serving_grams,
-              i.sort_order, i.notes,
-
-              f.display_name, f.brand, f.variant,
-              f.kcal, f.protein_g, f.carbs_g, f.fat_g,
-
-              i.created_at, i.updated_at
-            from {SCHEMA}.meal_item i
-            join {SCHEMA}.my_food f on f.my_food_id = i.my_food_id
-            left join {SCHEMA}.my_food_serving s on s.my_food_serving_id = i.my_food_serving_id
-            where i.meal_id = $1::uuid
-            order by i.sort_order, i.created_at
-            """,
-            mid,
-        )
-        return JSONResponse([_row_to_jsonable(r) for r in rows])
-    finally:
-        await conn.close()
 
 @router.post("/meals/{meal_id}/items/{meal_item_id}/delete")
 async def delete_meal_item(
@@ -336,26 +199,12 @@ async def delete_meal_item(
     owner = require_actor_matches_owner(req, owner_user_id)
     mid = _as_uuid(meal_id, "meal_id")
     iid = _as_uuid(meal_item_id, "meal_item_id")
-
-    conn = await _db(req)
-    try:
-        row = await conn.fetchrow(
-            f"""
-            delete from {SCHEMA}.meal_item i
-            using {SCHEMA}.meal m
-            where i.meal_item_id = $1::uuid
-              and i.meal_id = $2::uuid
-              and m.meal_id = i.meal_id
-              and m.owner_user_id = $3::uuid
-            returning
-              i.meal_item_id, i.meal_id, i.my_food_id,
-              i.qty_g, i.my_food_serving_id, i.qty_servings,
-              i.sort_order, i.notes, i.created_at, i.updated_at
-            """,
-            iid, mid, owner,
+    async with lifeswitch_meals_repository(req) as repository:
+        row = await repository.delete_item(
+            meal_item_id=iid,
+            meal_id=mid,
+            owner_user_id=owner,
         )
-        if not row:
-            raise HTTPException(status_code=404, detail="meal_item not found (or not owned by user)")
-        return JSONResponse(_row_to_jsonable(row))
-    finally:
-        await conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="meal_item not found (or not owned by user)")
+    return JSONResponse(_row_to_jsonable(row))
