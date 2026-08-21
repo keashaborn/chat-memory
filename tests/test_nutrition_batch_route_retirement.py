@@ -10,6 +10,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 LEGACY_MODULE = ROOT / "seebx" / "capabilities" / "nutrition" / "batch.py"
 CANONICAL_MODULE = ROOT / "seebx" / "capabilities" / "nutrition" / "logs.py"
+ADAPTER_MODULE = ROOT / "seebx" / "adapters" / "lifeswitch_nutrition_log_postgres.py"
 
 
 class NutritionBatchRouteRetirementTests(unittest.TestCase):
@@ -34,9 +35,10 @@ class NutritionBatchRouteRetirementTests(unittest.TestCase):
 
     def test_canonical_atomic_batch_route_remains(self) -> None:
         source = CANONICAL_MODULE.read_text(encoding="utf-8")
+        adapter = ADAPTER_MODULE.read_text(encoding="utf-8")
         self.assertIn('@router.post("/log/entries/batch")', source)
-        self.assertIn("async with conn.transaction():", source)
-        self.assertIn("and owner_user_id=$2::uuid", source)
+        self.assertIn("async with self._connection.transaction():", adapter)
+        self.assertIn("and owner_user_id=$2::uuid", adapter)
         self.assertIn("max_length=100", source)
 
         paths = self.backend.app.openapi()["paths"]

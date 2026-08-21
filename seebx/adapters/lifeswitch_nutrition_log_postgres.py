@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""PostgreSQL read boundary for LifeSwitch nutrition logs."""
+"""PostgreSQL effect boundary for LifeSwitch nutrition logs."""
 
 import os
 import re
@@ -56,7 +56,66 @@ class NutritionLogDayRows:
     entry_rows: tuple[Any, ...]
 
 
-class LifeSwitchNutritionLogReadRepository(Protocol):
+
+
+class NutritionLogRepositoryError(RuntimeError):
+    def __init__(self, code: str, *, item_index: int | None = None) -> None:
+        super().__init__(code)
+        self.code = code
+        self.item_index = item_index
+
+
+@dataclass(frozen=True)
+class NutritionLogEntryWrite:
+    day: date
+    meal_id: str | None
+    my_food_id: str | None
+    qty_g: float | None
+    my_food_serving_id: str | None
+    qty_servings: float | None
+    sort_order: int
+    notes: str | None
+
+
+@dataclass(frozen=True)
+class NutritionLogBatchEntryWrite:
+    my_food_id: str
+    qty_g: float | None
+    my_food_serving_id: str | None
+    qty_servings: float | None
+    sort_order: int
+    notes: str | None
+
+
+@dataclass(frozen=True)
+class NutritionLogEntryUpdate:
+    nutrition_entry_id: str
+    qty_g: float | None
+    my_food_serving_id: str | None
+    qty_servings: float | None
+    sort_order: int | None
+    notes: str | None
+
+
+@dataclass(frozen=True)
+class NutritionLogCreateRows:
+    day_row: Any
+    entry_row: Any | None
+
+
+@dataclass(frozen=True)
+class NutritionLogBatchRows:
+    day_row: Any
+    entry_rows: tuple[Any, ...]
+
+
+@dataclass(frozen=True)
+class NutritionDayCompletionRows:
+    day_row: Any
+    changed: bool
+
+
+class LifeSwitchNutritionLogRepository(Protocol):
     async def has_people_permission(
         self,
         *,
@@ -81,8 +140,46 @@ class LifeSwitchNutritionLogReadRepository(Protocol):
     ) -> NutritionLogDayRows: ...
 
 
-class PostgresLifeSwitchNutritionLogReadRepository:
-    """Own delegated permission and the two retained nutrition-log read projections."""
+    async def create_entry(
+        self,
+        *,
+        owner_user_id: str,
+        value: NutritionLogEntryWrite,
+    ) -> NutritionLogCreateRows: ...
+
+    async def create_entries_batch(
+        self,
+        *,
+        owner_user_id: str,
+        day: date,
+        items: tuple[NutritionLogBatchEntryWrite, ...],
+    ) -> NutritionLogBatchRows: ...
+
+    async def update_entry(
+        self,
+        *,
+        owner_user_id: str,
+        value: NutritionLogEntryUpdate,
+    ) -> Any: ...
+
+    async def delete_entry(
+        self,
+        *,
+        owner_user_id: str,
+        nutrition_entry_id: str,
+    ) -> Any | None: ...
+
+    async def set_day_completion(
+        self,
+        *,
+        owner_user_id: str,
+        day: date,
+        completed: bool,
+    ) -> NutritionDayCompletionRows: ...
+
+
+class PostgresLifeSwitchNutritionLogRepository:
+    """Own all retained nutrition-log SQL, transactions, and connection lifetime."""
 
     def __init__(
         self,
@@ -271,19 +368,362 @@ class PostgresLifeSwitchNutritionLogReadRepository:
         return NutritionLogDayRows(day_row, tuple(rows))
 
 
+    async def create_entry(
+        self,
+        *,
+        owner_user_id: str,
+        value: NutritionLogEntryWrite,
+    ) -> NutritionLogCreateRows:
+        if value.meal_id is not None:
+            active = await self._connection.fetchval(
+                f"""
+                select is_active
+                from {self._nutrition_schema}.meal
+                where meal_id=$1::uuid
+                  and owner_user_id=$2::uuid
+                """,
+                value.meal_id,
+                owner_user_id,
+            )
+            if active is not True:
+                raise NutritionLogRepositoryError("meal_not_found_or_inactive")
+
+        resolved_qty_g = value.qty_g
+        if value.my_food_id is not None:
+            active = await self._connection.fetchval(
+                f"""
+                select is_active
+                from {self._nutrition_schema}.my_food
+                where my_food_id=$1::uuid
+                  and owner_user_id=$2::uuid
+                """,
+                value.my_food_id,
+                owner_user_id,
+            )
+            if active is not True:
+                raise NutritionLogRepositoryError("food_not_found_or_inactive")
+
+            if value.my_food_serving_id is not None:
+                serving_grams = await self._connection.fetchval(
+                    f"""
+                    select grams
+                    from {self._nutrition_schema}.my_food_serving
+                    where my_food_serving_id=$1::uuid
+                      and my_food_id=$2::uuid
+                      and is_active=true
+                    """,
+                    value.my_food_serving_id,
+                    value.my_food_id,
+                )
+                if serving_grams is None:
+                    raise NutritionLogRepositoryError("serving_not_found_for_food")
+                resolved_qty_g = float(serving_grams) * float(value.qty_servings)
+
+        day_row = await self._connection.fetchrow(
+            f"""
+            insert into {self._nutrition_schema}.nutrition_day (owner_user_id, day)
+            values ($1::uuid, $2::date)
+            on conflict (owner_user_id, day) do update
+              set updated_at=now()
+            returning
+              nutrition_day_id, owner_user_id, day, notes, completed_at,
+              created_at, updated_at
+            """,
+            owner_user_id,
+            value.day,
+        )
+        if not day_row:
+            raise NutritionLogRepositoryError("nutrition_day_create_failed")
+
+        nutrition_day_id = str(day_row["nutrition_day_id"])
+        entry_row = await self._connection.fetchrow(
+            f"""
+            insert into {self._nutrition_schema}.nutrition_entry
+              (
+                nutrition_day_id, meal_id, my_food_id, qty_g,
+                my_food_serving_id, qty_servings,
+                sort_order, notes
+              )
+            values
+              ($1::uuid, $2::uuid, $3::uuid, $4, $5::uuid, $6, $7, $8)
+            returning
+              nutrition_entry_id, nutrition_day_id, meal_id, my_food_id,
+              qty_g, my_food_serving_id, qty_servings,
+              sort_order, notes, created_at, updated_at
+            """,
+            nutrition_day_id,
+            value.meal_id,
+            value.my_food_id,
+            resolved_qty_g,
+            value.my_food_serving_id,
+            value.qty_servings,
+            value.sort_order,
+            value.notes,
+        )
+        current_day = await self._connection.fetchrow(
+            f"""
+            select
+              nutrition_day_id, owner_user_id, day, notes, completed_at,
+              created_at, updated_at
+            from {self._nutrition_schema}.nutrition_day
+            where nutrition_day_id=$1::uuid
+            """,
+            nutrition_day_id,
+        )
+        return NutritionLogCreateRows(current_day, entry_row)
+
+    async def create_entries_batch(
+        self,
+        *,
+        owner_user_id: str,
+        day: date,
+        items: tuple[NutritionLogBatchEntryWrite, ...],
+    ) -> NutritionLogBatchRows:
+        async with self._connection.transaction():
+            prepared = []
+            for index, item in enumerate(items):
+                food_active = await self._connection.fetchval(
+                    f"""
+                    select is_active
+                    from {self._nutrition_schema}.my_food
+                    where my_food_id=$1::uuid
+                      and owner_user_id=$2::uuid
+                    """,
+                    item.my_food_id,
+                    owner_user_id,
+                )
+                if food_active is not True:
+                    raise NutritionLogRepositoryError(
+                        "batch_food_not_found_or_inactive",
+                        item_index=index,
+                    )
+
+                resolved_qty_g = item.qty_g
+                if item.my_food_serving_id is not None:
+                    serving_grams = await self._connection.fetchval(
+                        f"""
+                        select grams
+                        from {self._nutrition_schema}.my_food_serving
+                        where my_food_serving_id=$1::uuid
+                          and my_food_id=$2::uuid
+                          and is_active=true
+                        """,
+                        item.my_food_serving_id,
+                        item.my_food_id,
+                    )
+                    if serving_grams is None:
+                        raise NutritionLogRepositoryError(
+                            "batch_serving_not_found_for_food",
+                            item_index=index,
+                        )
+                    resolved_qty_g = float(serving_grams) * float(item.qty_servings)
+
+                prepared.append((item, resolved_qty_g))
+
+            day_row = await self._connection.fetchrow(
+                f"""
+                insert into {self._nutrition_schema}.nutrition_day (owner_user_id, day)
+                values ($1::uuid, $2::date)
+                on conflict (owner_user_id, day) do update set updated_at=now()
+                returning nutrition_day_id, owner_user_id, day, notes, completed_at, created_at, updated_at
+                """,
+                owner_user_id,
+                day,
+            )
+            entries = []
+            for item, resolved_qty_g in prepared:
+                row = await self._connection.fetchrow(
+                    f"""
+                    insert into {self._nutrition_schema}.nutrition_entry
+                      (nutrition_day_id, my_food_id, qty_g, my_food_serving_id,
+                       qty_servings, sort_order, notes)
+                    values ($1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7)
+                    returning nutrition_entry_id, nutrition_day_id, meal_id, my_food_id,
+                              qty_g, my_food_serving_id, qty_servings,
+                              sort_order, notes, created_at, updated_at
+                    """,
+                    day_row["nutrition_day_id"],
+                    item.my_food_id,
+                    resolved_qty_g,
+                    item.my_food_serving_id,
+                    item.qty_servings,
+                    item.sort_order,
+                    item.notes,
+                )
+                entries.append(row)
+
+            current_day = await self._connection.fetchrow(
+                f"""
+                select
+                  nutrition_day_id, owner_user_id, day, notes, completed_at,
+                  created_at, updated_at
+                from {self._nutrition_schema}.nutrition_day
+                where nutrition_day_id=$1::uuid
+                """,
+                day_row["nutrition_day_id"],
+            )
+            return NutritionLogBatchRows(current_day, tuple(entries))
+
+    async def update_entry(
+        self,
+        *,
+        owner_user_id: str,
+        value: NutritionLogEntryUpdate,
+    ) -> Any:
+        async with self._connection.transaction():
+            entry = await self._connection.fetchrow(
+                f"""
+                select e.my_food_id, e.meal_id
+                from {self._nutrition_schema}.nutrition_entry e
+                join {self._nutrition_schema}.nutrition_day d
+                  on d.nutrition_day_id=e.nutrition_day_id
+                where d.owner_user_id=$1::uuid
+                  and e.nutrition_entry_id=$2::uuid
+                """,
+                owner_user_id,
+                value.nutrition_entry_id,
+            )
+            if not entry:
+                raise NutritionLogRepositoryError("entry_not_found")
+            if entry["my_food_id"] is None:
+                raise NutritionLogRepositoryError("entry_not_single_food")
+
+            resolved_qty_g = value.qty_g
+            if value.my_food_serving_id is not None:
+                serving_grams = await self._connection.fetchval(
+                    f"""
+                    select grams
+                    from {self._nutrition_schema}.my_food_serving
+                    where my_food_serving_id=$1::uuid
+                      and my_food_id=$2::uuid
+                      and is_active
+                    """,
+                    value.my_food_serving_id,
+                    entry["my_food_id"],
+                )
+                if serving_grams is None:
+                    raise NutritionLogRepositoryError("active_serving_not_found")
+                resolved_qty_g = float(serving_grams) * float(value.qty_servings)
+
+            return await self._connection.fetchrow(
+                f"""
+                update {self._nutrition_schema}.nutrition_entry e
+                set
+                  qty_g = $3,
+                  my_food_serving_id = $4::uuid,
+                  qty_servings = $5,
+                  sort_order = coalesce($6, e.sort_order),
+                  notes = coalesce($7, e.notes),
+                  updated_at = now()
+                from {self._nutrition_schema}.nutrition_day d
+                where e.nutrition_day_id = d.nutrition_day_id
+                  and d.owner_user_id = $1::uuid
+                  and e.nutrition_entry_id = $2::uuid
+                returning
+                  e.nutrition_entry_id, e.nutrition_day_id, e.meal_id, e.my_food_id,
+                  e.qty_g, e.my_food_serving_id, e.qty_servings, e.sort_order, e.notes,
+                  e.created_at, e.updated_at
+                """,
+                owner_user_id,
+                value.nutrition_entry_id,
+                resolved_qty_g,
+                value.my_food_serving_id,
+                value.qty_servings if value.my_food_serving_id is not None else None,
+                value.sort_order,
+                value.notes,
+            )
+
+    async def delete_entry(
+        self,
+        *,
+        owner_user_id: str,
+        nutrition_entry_id: str,
+    ) -> Any | None:
+        return await self._connection.fetchrow(
+            f"""
+            delete from {self._nutrition_schema}.nutrition_entry e
+            using {self._nutrition_schema}.nutrition_day d
+            where e.nutrition_day_id = d.nutrition_day_id
+              and d.owner_user_id = $1::uuid
+              and e.nutrition_entry_id = $2::uuid
+            returning
+              e.nutrition_entry_id, e.nutrition_day_id, e.meal_id, e.my_food_id, e.qty_g, e.my_food_serving_id, e.qty_servings, e.sort_order, e.notes,
+              e.created_at, e.updated_at
+            """,
+            owner_user_id,
+            nutrition_entry_id,
+        )
+
+    async def set_day_completion(
+        self,
+        *,
+        owner_user_id: str,
+        day: date,
+        completed: bool,
+    ) -> NutritionDayCompletionRows:
+        async with self._connection.transaction():
+            day_row = await self._connection.fetchrow(
+                f"""
+                select
+                  nutrition_day_id, owner_user_id, day, notes, completed_at,
+                  created_at, updated_at
+                from {self._nutrition_schema}.nutrition_day
+                where owner_user_id=$1::uuid and day=$2::date
+                for update
+                """,
+                owner_user_id,
+                day,
+            )
+            if not day_row:
+                raise NutritionLogRepositoryError("nutrition_day_not_found")
+
+            was_completed = day_row["completed_at"] is not None
+            if was_completed == completed:
+                return NutritionDayCompletionRows(day_row, False)
+
+            updated = await self._connection.fetchrow(
+                f"""
+                update {self._nutrition_schema}.nutrition_day
+                set completed_at = case when $3::boolean then now() else null end
+                where nutrition_day_id=$1::uuid
+                  and owner_user_id=$2::uuid
+                returning
+                  nutrition_day_id, owner_user_id, day, notes, completed_at,
+                  created_at, updated_at
+                """,
+                day_row["nutrition_day_id"],
+                owner_user_id,
+                completed,
+            )
+            if not updated:
+                raise NutritionLogRepositoryError("nutrition_day_completion_conflict")
+
+            await self._connection.execute(
+                f"""
+                insert into {self._nutrition_schema}.nutrition_day_completion_event
+                  (nutrition_day_id, owner_user_id, actor_user_id, action, source)
+                values ($1::uuid, $2::uuid, $2::uuid, $3, 'user')
+                """,
+                day_row["nutrition_day_id"],
+                owner_user_id,
+                "completed" if completed else "reopened",
+            )
+            return NutritionDayCompletionRows(updated, True)
+
+
 @asynccontextmanager
-async def lifeswitch_nutrition_log_read_repository(
+async def lifeswitch_nutrition_log_repository(
     request: Request,
     *,
     connection_factory: ConnectionFactory = connect_lifeswitch,
     nutrition_schema: str | None = None,
     people_schema: str | None = None,
-) -> AsyncIterator[PostgresLifeSwitchNutritionLogReadRepository]:
+) -> AsyncIterator[PostgresLifeSwitchNutritionLogRepository]:
     resolved_nutrition_schema = resolve_nutrition_schema(nutrition_schema)
     resolved_people_schema = resolve_people_schema(people_schema)
     connection = await connection_factory(request)
     try:
-        yield PostgresLifeSwitchNutritionLogReadRepository(
+        yield PostgresLifeSwitchNutritionLogRepository(
             connection,
             nutrition_schema=resolved_nutrition_schema,
             people_schema=resolved_people_schema,

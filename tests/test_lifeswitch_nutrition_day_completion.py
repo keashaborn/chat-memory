@@ -10,8 +10,8 @@ from typing import Any
 
 os.environ.setdefault("POSTGRES_DSN", "postgresql://unused")
 
-router_module = importlib.import_module(
-    "seebx.capabilities.nutrition.logs"
+adapter_module = importlib.import_module(
+    "seebx.adapters.lifeswitch_nutrition_log_postgres"
 )
 
 
@@ -27,6 +27,8 @@ class FakeConnection:
         )
         self.events: list[tuple[Any, ...]] = []
         self.fetchrow_calls: list[tuple[str, tuple[Any, ...]]] = []
+        self.transaction_enters = 0
+        self.transaction_exits = 0
 
     def row(self) -> dict[str, Any]:
         now = dt.datetime(2026, 7, 20, 21, 0, tzinfo=dt.timezone.utc)
@@ -59,35 +61,57 @@ class FakeConnection:
         self.events.append(args)
         return "INSERT 0 1"
 
+    def transaction(self):
+        connection = self
+
+        class Transaction:
+            async def __aenter__(self):
+                connection.transaction_enters += 1
+
+            async def __aexit__(self, exc_type, exc, traceback):
+                connection.transaction_exits += 1
+
+        return Transaction()
+
 
 class NutritionDayCompletionTest(unittest.IsolatedAsyncioTestCase):
     async def test_complete_is_owner_scoped_and_audited(self) -> None:
         conn = FakeConnection(completed=False)
-        result = await router_module._set_nutrition_day_completion(
+        repository = adapter_module.PostgresLifeSwitchNutritionLogRepository(
             conn,
+            nutrition_schema="lifeswitch_nutrition",
+            people_schema="lifeswitch_people",
+        )
+        result = await repository.set_day_completion(
             owner_user_id=conn.owner,
             day=conn.day,
             completed=True,
         )
 
-        self.assertTrue(result["changed"])
-        self.assertIsNotNone(result["day"]["completed_at"])
+        self.assertTrue(result.changed)
+        self.assertIsNotNone(result.day_row["completed_at"])
         self.assertEqual(conn.fetchrow_calls[0][1], (conn.owner, conn.day))
         self.assertIn("owner_user_id=$1::uuid", conn.fetchrow_calls[0][0])
         self.assertEqual(conn.events[0][1:], (conn.owner, "completed"))
+        self.assertEqual((conn.transaction_enters, conn.transaction_exits), (1, 1))
 
     async def test_reopen_is_idempotent(self) -> None:
         conn = FakeConnection(completed=False)
-        result = await router_module._set_nutrition_day_completion(
+        repository = adapter_module.PostgresLifeSwitchNutritionLogRepository(
             conn,
+            nutrition_schema="lifeswitch_nutrition",
+            people_schema="lifeswitch_people",
+        )
+        result = await repository.set_day_completion(
             owner_user_id=conn.owner,
             day=conn.day,
             completed=False,
         )
 
-        self.assertFalse(result["changed"])
+        self.assertFalse(result.changed)
         self.assertEqual(len(conn.fetchrow_calls), 1)
         self.assertEqual(conn.events, [])
+        self.assertEqual((conn.transaction_enters, conn.transaction_exits), (1, 1))
 
     def test_migration_reopens_after_entry_changes_and_keeps_audit_append_only(self) -> None:
         sql = (

@@ -6,18 +6,18 @@ import decimal
 import datetime as _dt
 from fastapi import APIRouter, HTTPException, Query, Request
 from seebx.core.ownership import require_actor_matches_owner
-from seebx.adapters.lifeswitch_postgres import connect_lifeswitch
 from seebx.adapters.lifeswitch_nutrition_log_postgres import (
-    LifeSwitchNutritionLogReadRepository,
-    lifeswitch_nutrition_log_read_repository,
+    LifeSwitchNutritionLogRepository,
+    NutritionLogBatchEntryWrite,
+    NutritionLogEntryUpdate,
+    NutritionLogEntryWrite,
+    NutritionLogRepositoryError,
+    lifeswitch_nutrition_log_repository,
 )
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 router = APIRouter()
-
-SCHEMA = os.getenv("LIFESWITCH_NUTRITION_SCHEMA", "lifeswitch_nutrition")
-
 
 def _as_uuid(s: str, name: str) -> str:
     try:
@@ -41,12 +41,8 @@ def _row_to_jsonable(r):
     return {k: _json_safe(v) for k, v in d.items()}
 
 
-async def _db(req: Request):
-    return await connect_lifeswitch(req)
-
-
 async def _resolve_nutrition_view_target(
-    repository: LifeSwitchNutritionLogReadRepository,
+    repository: LifeSwitchNutritionLogRepository,
     viewer_user_id: str,
     target_user_id: str = "",
 ) -> tuple[str, bool]:
@@ -111,60 +107,33 @@ class NutritionDayCompletionUpdate(BaseModel):
     completed: bool
 
 
-async def _set_nutrition_day_completion(
-    conn,
-    *,
-    owner_user_id: str,
-    day: _dt.date,
-    completed: bool,
-) -> dict:
-    day_row = await conn.fetchrow(
-        f"""
-        select
-          nutrition_day_id, owner_user_id, day, notes, completed_at,
-          created_at, updated_at
-        from {SCHEMA}.nutrition_day
-        where owner_user_id=$1::uuid and day=$2::date
-        for update
-        """,
-        owner_user_id,
-        day,
+def _raise_repository_error(error: NutritionLogRepositoryError) -> None:
+    static = {
+        "meal_not_found_or_inactive": (404, "meal not found or inactive"),
+        "food_not_found_or_inactive": (404, "my_food not found or inactive"),
+        "serving_not_found_for_food": (404, "serving not found for this my_food_id"),
+        "nutrition_day_create_failed": (500, "failed to create nutrition_day"),
+        "entry_not_found": (404, "nutrition_entry not found (or not owned by user)"),
+        "entry_not_single_food": (400, "only single-food entries support quantity editing"),
+        "active_serving_not_found": (400, "active serving not found for this food"),
+        "nutrition_day_not_found": (404, "nutrition day not found"),
+        "nutrition_day_completion_conflict": (409, "nutrition day completion changed concurrently"),
+    }
+    if error.code == "batch_food_not_found_or_inactive":
+        raise HTTPException(
+            status_code=404,
+            detail=f"items[{error.item_index}] food not found or inactive",
+        )
+    if error.code == "batch_serving_not_found_for_food":
+        raise HTTPException(
+            status_code=404,
+            detail=f"items[{error.item_index}] active serving not found for this food",
+        )
+    status_code, detail = static.get(
+        error.code,
+        (500, "nutrition repository failure"),
     )
-    if not day_row:
-        raise HTTPException(status_code=404, detail="nutrition day not found")
-
-    was_completed = day_row["completed_at"] is not None
-    if was_completed == completed:
-        return {"day": _row_to_jsonable(day_row), "changed": False}
-
-    updated = await conn.fetchrow(
-        f"""
-        update {SCHEMA}.nutrition_day
-        set completed_at = case when $3::boolean then now() else null end
-        where nutrition_day_id=$1::uuid
-          and owner_user_id=$2::uuid
-        returning
-          nutrition_day_id, owner_user_id, day, notes, completed_at,
-          created_at, updated_at
-        """,
-        day_row["nutrition_day_id"],
-        owner_user_id,
-        completed,
-    )
-    if not updated:
-        raise HTTPException(status_code=409, detail="nutrition day completion changed concurrently")
-
-    await conn.execute(
-        f"""
-        insert into {SCHEMA}.nutrition_day_completion_event
-          (nutrition_day_id, owner_user_id, actor_user_id, action, source)
-        values ($1::uuid, $2::uuid, $2::uuid, $3, 'user')
-        """,
-        day_row["nutrition_day_id"],
-        owner_user_id,
-        "completed" if completed else "reopened",
-    )
-    return {"day": _row_to_jsonable(updated), "changed": True}
+    raise HTTPException(status_code=status_code, detail=detail)
 
 
 @router.post("/log/entry")
@@ -181,157 +150,51 @@ async def create_log_entry(
     notes: str | None = Query(None, max_length=500),
 ):
     owner = require_actor_matches_owner(req, owner_user_id)
-    d = _parse_day(day)
+    parsed_day = _parse_day(day)
 
     if (meal_id is None) == (my_food_id is None):
         raise HTTPException(status_code=400, detail="provide exactly one: meal_id or my_food_id")
 
-    mid = _as_uuid(meal_id, "meal_id") if meal_id is not None else None
-    fid = _as_uuid(my_food_id, "my_food_id") if my_food_id is not None else None
-
+    parsed_meal_id = _as_uuid(meal_id, "meal_id") if meal_id is not None else None
+    parsed_food_id = _as_uuid(my_food_id, "my_food_id") if my_food_id is not None else None
     use_grams = qty_g is not None
     use_serving = my_food_serving_id is not None or qty_servings is not None
 
-    if mid is not None and use_serving:
-        raise HTTPException(
-            status_code=400,
-            detail="serving quantity is only valid for my_food_id",
-        )
-
-    if fid is not None:
+    if parsed_meal_id is not None and use_serving:
+        raise HTTPException(status_code=400, detail="serving quantity is only valid for my_food_id")
+    if parsed_food_id is not None:
         if use_grams and use_serving:
-            raise HTTPException(
-                status_code=400,
-                detail="provide qty_g OR (my_food_serving_id + qty_servings), not both",
-            )
+            raise HTTPException(status_code=400, detail="provide qty_g OR (my_food_serving_id + qty_servings), not both")
         if not use_grams and not use_serving:
-            raise HTTPException(
-                status_code=400,
-                detail="must provide qty_g OR (my_food_serving_id + qty_servings)",
-            )
+            raise HTTPException(status_code=400, detail="must provide qty_g OR (my_food_serving_id + qty_servings)")
         if use_serving and (my_food_serving_id is None or qty_servings is None):
-            raise HTTPException(
-                status_code=400,
-                detail="serving mode requires my_food_serving_id and qty_servings",
-            )
+            raise HTTPException(status_code=400, detail="serving mode requires my_food_serving_id and qty_servings")
 
-    sid = (
+    parsed_serving_id = (
         _as_uuid(my_food_serving_id, "my_food_serving_id")
         if my_food_serving_id is not None
         else None
     )
-
-    conn = await _db(req)
+    value = NutritionLogEntryWrite(
+        day=parsed_day,
+        meal_id=parsed_meal_id,
+        my_food_id=parsed_food_id,
+        qty_g=qty_g,
+        my_food_serving_id=parsed_serving_id,
+        qty_servings=qty_servings,
+        sort_order=sort_order,
+        notes=notes,
+    )
     try:
-        if mid is not None:
-            ok = await conn.fetchval(
-                f"""
-                select is_active
-                from {SCHEMA}.meal
-                where meal_id=$1::uuid
-                  and owner_user_id=$2::uuid
-                """,
-                mid,
-                owner,
-            )
-            if ok is not True:
-                raise HTTPException(status_code=404, detail="meal not found or inactive")
+        async with lifeswitch_nutrition_log_repository(req) as repository:
+            result = await repository.create_entry(owner_user_id=owner, value=value)
+    except NutritionLogRepositoryError as error:
+        _raise_repository_error(error)
 
-        resolved_qty_g = qty_g
-
-        if fid is not None:
-            ok = await conn.fetchval(
-                f"""
-                select is_active
-                from {SCHEMA}.my_food
-                where my_food_id=$1::uuid
-                  and owner_user_id=$2::uuid
-                """,
-                fid,
-                owner,
-            )
-            if ok is not True:
-                raise HTTPException(status_code=404, detail="my_food not found or inactive")
-
-            if sid is not None:
-                serving_grams = await conn.fetchval(
-                    f"""
-                    select grams
-                    from {SCHEMA}.my_food_serving
-                    where my_food_serving_id=$1::uuid
-                      and my_food_id=$2::uuid
-                      and is_active=true
-                    """,
-                    sid,
-                    fid,
-                )
-                if serving_grams is None:
-                    raise HTTPException(
-                        status_code=404,
-                        detail="serving not found for this my_food_id",
-                    )
-                resolved_qty_g = float(serving_grams) * float(qty_servings)
-
-        day_row = await conn.fetchrow(
-            f"""
-            insert into {SCHEMA}.nutrition_day (owner_user_id, day)
-            values ($1::uuid, $2::date)
-            on conflict (owner_user_id, day) do update
-              set updated_at=now()
-            returning
-              nutrition_day_id, owner_user_id, day, notes, completed_at,
-              created_at, updated_at
-            """,
-            owner,
-            d,
-        )
-        if not day_row:
-            raise HTTPException(status_code=500, detail="failed to create nutrition_day")
-
-        ndid = str(day_row["nutrition_day_id"])
-
-        entry_row = await conn.fetchrow(
-            f"""
-            insert into {SCHEMA}.nutrition_entry
-              (
-                nutrition_day_id, meal_id, my_food_id, qty_g,
-                my_food_serving_id, qty_servings,
-                sort_order, notes
-              )
-            values
-              ($1::uuid, $2::uuid, $3::uuid, $4, $5::uuid, $6, $7, $8)
-            returning
-              nutrition_entry_id, nutrition_day_id, meal_id, my_food_id,
-              qty_g, my_food_serving_id, qty_servings,
-              sort_order, notes, created_at, updated_at
-            """,
-            ndid,
-            mid,
-            fid,
-            resolved_qty_g,
-            sid,
-            qty_servings,
-            sort_order,
-            notes,
-        )
-
-        day_row = await conn.fetchrow(
-            f"""
-            select
-              nutrition_day_id, owner_user_id, day, notes, completed_at,
-              created_at, updated_at
-            from {SCHEMA}.nutrition_day
-            where nutrition_day_id=$1::uuid
-            """,
-            ndid,
-        )
-
-        return JSONResponse({
-            "day": _row_to_jsonable(day_row),
-            "entry": _row_to_jsonable(entry_row) if entry_row else None,
-        })
-    finally:
-        await conn.close()
+    return JSONResponse({
+        "day": _row_to_jsonable(result.day_row),
+        "entry": _row_to_jsonable(result.entry_row) if result.entry_row else None,
+    })
 
 
 @router.post("/log/entries/batch")
@@ -343,112 +206,45 @@ async def create_log_entries_batch(
     """Create several food entries in one transaction or create none."""
     owner = require_actor_matches_owner(req, owner_user_id)
     day = _parse_day(body.day)
-    conn = await _db(req)
+    prepared = []
+    for index, item in enumerate(body.items):
+        food_id = _as_uuid(item.my_food_id, f"items[{index}].my_food_id")
+        use_grams = item.qty_g is not None
+        use_serving = item.my_food_serving_id is not None or item.qty_servings is not None
+        if use_grams and use_serving:
+            raise HTTPException(status_code=400, detail=f"items[{index}] must provide qty_g OR serving quantity, not both")
+        if not use_grams and not use_serving:
+            raise HTTPException(status_code=400, detail=f"items[{index}] must provide qty_g OR serving quantity")
+        if use_serving and (item.my_food_serving_id is None or item.qty_servings is None):
+            raise HTTPException(status_code=400, detail=f"items[{index}] serving mode requires my_food_serving_id and qty_servings")
+        serving_id = (
+            _as_uuid(item.my_food_serving_id, f"items[{index}].my_food_serving_id")
+            if item.my_food_serving_id is not None
+            else None
+        )
+        prepared.append(NutritionLogBatchEntryWrite(
+            my_food_id=food_id,
+            qty_g=item.qty_g,
+            my_food_serving_id=serving_id,
+            qty_servings=item.qty_servings,
+            sort_order=item.sort_order,
+            notes=item.notes,
+        ))
+
     try:
-        async with conn.transaction():
-            prepared = []
-            for index, item in enumerate(body.items):
-                fid = _as_uuid(item.my_food_id, f"items[{index}].my_food_id")
-                use_grams = item.qty_g is not None
-                use_serving = item.my_food_serving_id is not None or item.qty_servings is not None
-                if use_grams and use_serving:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"items[{index}] must provide qty_g OR serving quantity, not both",
-                    )
-                if not use_grams and not use_serving:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"items[{index}] must provide qty_g OR serving quantity",
-                    )
-                if use_serving and (item.my_food_serving_id is None or item.qty_servings is None):
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"items[{index}] serving mode requires my_food_serving_id and qty_servings",
-                    )
-
-                food_active = await conn.fetchval(
-                    f"""
-                    select is_active
-                    from {SCHEMA}.my_food
-                    where my_food_id=$1::uuid
-                      and owner_user_id=$2::uuid
-                    """,
-                    fid,
-                    owner,
-                )
-                if food_active is not True:
-                    raise HTTPException(status_code=404, detail=f"items[{index}] food not found or inactive")
-
-                sid = None
-                resolved_qty_g = item.qty_g
-                if use_serving:
-                    sid = _as_uuid(item.my_food_serving_id, f"items[{index}].my_food_serving_id")
-                    serving_grams = await conn.fetchval(
-                        f"""
-                        select grams
-                        from {SCHEMA}.my_food_serving
-                        where my_food_serving_id=$1::uuid
-                          and my_food_id=$2::uuid
-                          and is_active=true
-                        """,
-                        sid,
-                        fid,
-                    )
-                    if serving_grams is None:
-                        raise HTTPException(
-                            status_code=404,
-                            detail=f"items[{index}] active serving not found for this food",
-                        )
-                    resolved_qty_g = float(serving_grams) * float(item.qty_servings)
-
-                prepared.append((fid, sid, resolved_qty_g, item.qty_servings, item.sort_order, item.notes))
-
-            day_row = await conn.fetchrow(
-                f"""
-                insert into {SCHEMA}.nutrition_day (owner_user_id, day)
-                values ($1::uuid, $2::date)
-                on conflict (owner_user_id, day) do update set updated_at=now()
-                returning nutrition_day_id, owner_user_id, day, notes, completed_at, created_at, updated_at
-                """,
-                owner,
-                day,
+        async with lifeswitch_nutrition_log_repository(req) as repository:
+            result = await repository.create_entries_batch(
+                owner_user_id=owner,
+                day=day,
+                items=tuple(prepared),
             )
-            entries = []
-            for fid, sid, resolved_qty_g, qty_servings, sort_order, notes in prepared:
-                row = await conn.fetchrow(
-                    f"""
-                    insert into {SCHEMA}.nutrition_entry
-                      (nutrition_day_id, my_food_id, qty_g, my_food_serving_id,
-                       qty_servings, sort_order, notes)
-                    values ($1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7)
-                    returning nutrition_entry_id, nutrition_day_id, meal_id, my_food_id,
-                              qty_g, my_food_serving_id, qty_servings,
-                              sort_order, notes, created_at, updated_at
-                    """,
-                    day_row["nutrition_day_id"],
-                    fid,
-                    resolved_qty_g,
-                    sid,
-                    qty_servings,
-                    sort_order,
-                    notes,
-                )
-                entries.append(_row_to_jsonable(row))
+    except NutritionLogRepositoryError as error:
+        _raise_repository_error(error)
 
-            day_row = await conn.fetchrow(
-                f"""
-                select
-                  nutrition_day_id, owner_user_id, day, notes, completed_at,
-                  created_at, updated_at
-                from {SCHEMA}.nutrition_day
-                where nutrition_day_id=$1::uuid
-                """,
-                day_row["nutrition_day_id"],
-            )
-            return JSONResponse({"day": _row_to_jsonable(day_row), "entries": entries})
-    finally:
-        await conn.close()
+    return JSONResponse({
+        "day": _row_to_jsonable(result.day_row),
+        "entries": [_row_to_jsonable(row) for row in result.entry_rows],
+    })
 
 
 @router.patch("/log/entry")
@@ -463,8 +259,7 @@ async def update_log_entry(
     notes: str | None = Query(None, max_length=500),
 ):
     owner = require_actor_matches_owner(req, owner_user_id)
-    eid = _as_uuid(nutrition_entry_id, "nutrition_entry_id")
-
+    entry_id = _as_uuid(nutrition_entry_id, "nutrition_entry_id")
     use_grams = qty_g is not None
     use_serving = my_food_serving_id is not None or qty_servings is not None
     if use_grams and use_serving:
@@ -474,75 +269,26 @@ async def update_log_entry(
     if use_serving and (my_food_serving_id is None or qty_servings is None):
         raise HTTPException(status_code=400, detail="serving mode requires my_food_serving_id and qty_servings")
 
-    conn = await _db(req)
+    serving_id = (
+        _as_uuid(my_food_serving_id, "my_food_serving_id")
+        if my_food_serving_id is not None
+        else None
+    )
+    value = NutritionLogEntryUpdate(
+        nutrition_entry_id=entry_id,
+        qty_g=qty_g,
+        my_food_serving_id=serving_id,
+        qty_servings=qty_servings,
+        sort_order=sort_order,
+        notes=notes,
+    )
     try:
-        async with conn.transaction():
-            entry = await conn.fetchrow(
-                f"""
-                select e.my_food_id, e.meal_id
-                from {SCHEMA}.nutrition_entry e
-                join {SCHEMA}.nutrition_day d
-                  on d.nutrition_day_id=e.nutrition_day_id
-                where d.owner_user_id=$1::uuid
-                  and e.nutrition_entry_id=$2::uuid
-                """,
-                owner,
-                eid,
-            )
-            if not entry:
-                raise HTTPException(status_code=404, detail="nutrition_entry not found (or not owned by user)")
-            if entry["my_food_id"] is None:
-                raise HTTPException(status_code=400, detail="only single-food entries support quantity editing")
+        async with lifeswitch_nutrition_log_repository(req) as repository:
+            row = await repository.update_entry(owner_user_id=owner, value=value)
+    except NutritionLogRepositoryError as error:
+        _raise_repository_error(error)
+    return JSONResponse({"entry": _row_to_jsonable(row)})
 
-            sid = None
-            resolved_qty_g = qty_g
-            if use_serving:
-                sid = _as_uuid(my_food_serving_id, "my_food_serving_id")
-                serving_grams = await conn.fetchval(
-                    f"""
-                    select grams
-                    from {SCHEMA}.my_food_serving
-                    where my_food_serving_id=$1::uuid
-                      and my_food_id=$2::uuid
-                      and is_active
-                    """,
-                    sid,
-                    entry["my_food_id"],
-                )
-                if serving_grams is None:
-                    raise HTTPException(status_code=400, detail="active serving not found for this food")
-                resolved_qty_g = float(serving_grams) * float(qty_servings)
-
-            row = await conn.fetchrow(
-                f"""
-                update {SCHEMA}.nutrition_entry e
-                set
-                  qty_g = $3,
-                  my_food_serving_id = $4::uuid,
-                  qty_servings = $5,
-                  sort_order = coalesce($6, e.sort_order),
-                  notes = coalesce($7, e.notes),
-                  updated_at = now()
-                from {SCHEMA}.nutrition_day d
-                where e.nutrition_day_id = d.nutrition_day_id
-                  and d.owner_user_id = $1::uuid
-                  and e.nutrition_entry_id = $2::uuid
-                returning
-                  e.nutrition_entry_id, e.nutrition_day_id, e.meal_id, e.my_food_id,
-                  e.qty_g, e.my_food_serving_id, e.qty_servings, e.sort_order, e.notes,
-                  e.created_at, e.updated_at
-                """,
-                owner,
-                eid,
-                resolved_qty_g,
-                sid,
-                qty_servings if use_serving else None,
-                sort_order,
-                notes,
-            )
-            return JSONResponse({"entry": _row_to_jsonable(row)})
-    finally:
-        await conn.close()
 
 @router.delete("/log/entry")
 async def delete_log_entry(
@@ -551,29 +297,15 @@ async def delete_log_entry(
     nutrition_entry_id: str = Query(..., min_length=1),
 ):
     owner = require_actor_matches_owner(req, owner_user_id)
-    eid = _as_uuid(nutrition_entry_id, "nutrition_entry_id")
-
-    conn = await _db(req)
-    try:
-        row = await conn.fetchrow(
-            f"""
-            delete from {SCHEMA}.nutrition_entry e
-            using {SCHEMA}.nutrition_day d
-            where e.nutrition_day_id = d.nutrition_day_id
-              and d.owner_user_id = $1::uuid
-              and e.nutrition_entry_id = $2::uuid
-            returning
-              e.nutrition_entry_id, e.nutrition_day_id, e.meal_id, e.my_food_id, e.qty_g, e.my_food_serving_id, e.qty_servings, e.sort_order, e.notes,
-              e.created_at, e.updated_at
-            """,
-            owner,
-            eid,
+    entry_id = _as_uuid(nutrition_entry_id, "nutrition_entry_id")
+    async with lifeswitch_nutrition_log_repository(req) as repository:
+        row = await repository.delete_entry(
+            owner_user_id=owner,
+            nutrition_entry_id=entry_id,
         )
-        if not row:
-            raise HTTPException(status_code=404, detail="nutrition_entry not found (or not owned by user)")
-        return JSONResponse({"deleted": _row_to_jsonable(row)})
-    finally:
-        await conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="nutrition_entry not found (or not owned by user)")
+    return JSONResponse({"deleted": _row_to_jsonable(row)})
 
 
 @router.get("/log/range")
@@ -593,7 +325,7 @@ async def get_log_range(
     if (end - start).days > 365:
         raise HTTPException(status_code=400, detail="date range cannot exceed 366 days")
 
-    async with lifeswitch_nutrition_log_read_repository(req) as repository:
+    async with lifeswitch_nutrition_log_repository(req) as repository:
         owner, delegated = await _resolve_nutrition_view_target(
             repository,
             viewer,
@@ -653,7 +385,7 @@ async def get_log_day(
     viewer = require_actor_matches_owner(req, owner_user_id)
     parsed_day = _parse_day(day)
 
-    async with lifeswitch_nutrition_log_read_repository(req) as repository:
+    async with lifeswitch_nutrition_log_repository(req) as repository:
         owner, delegated = await _resolve_nutrition_view_target(
             repository,
             viewer,
@@ -689,16 +421,16 @@ async def set_log_day_completion(
 ):
     owner = require_actor_matches_owner(req, owner_user_id)
     parsed_day = _parse_day(day)
-
-    conn = await _db(req)
     try:
-        async with conn.transaction():
-            result = await _set_nutrition_day_completion(
-                conn,
+        async with lifeswitch_nutrition_log_repository(req) as repository:
+            result = await repository.set_day_completion(
                 owner_user_id=owner,
                 day=parsed_day,
                 completed=body.completed,
             )
-        return JSONResponse(result)
-    finally:
-        await conn.close()
+    except NutritionLogRepositoryError as error:
+        _raise_repository_error(error)
+    return JSONResponse({
+        "day": _row_to_jsonable(result.day_row),
+        "changed": result.changed,
+    })
