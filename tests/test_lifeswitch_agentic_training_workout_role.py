@@ -8,6 +8,9 @@ ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "ops" / "sql" / "20260726_lifeswitch_training_workout_role.sql"
 WRITER = ROOT / "ops" / "sql" / "20260723_lifeswitch_training_writer_api.sql"
 ROUTER = ROOT / "seebx" / "capabilities" / "training" / "routes.py"
+TEMPLATES = (
+    ROOT / "seebx" / "adapters" / "lifeswitch_training_templates_postgres.py"
+)
 
 
 class TrainingWorkoutRoleContractTest(unittest.TestCase):
@@ -16,6 +19,7 @@ class TrainingWorkoutRoleContractTest(unittest.TestCase):
         cls.sql = MIGRATION.read_text(encoding="utf-8").lower()
         cls.writer = WRITER.read_text(encoding="utf-8").lower()
         cls.router = ROUTER.read_text(encoding="utf-8").lower()
+        cls.templates = TEMPLATES.read_text(encoding="utf-8").lower()
 
     def test_migration_adds_bounded_roles_and_append_only_audit(self) -> None:
         self.assertIn("add column if not exists workout_role text", self.sql)
@@ -41,10 +45,13 @@ class TrainingWorkoutRoleContractTest(unittest.TestCase):
         self.assertIn("v_workout_role", self.writer)
 
     def test_workouts_api_exposes_role_and_confirmed_historical_action(self) -> None:
-        self.assertIn("unclassified_session_count", self.router)
-        self.assertIn("/workout_templates/{workout_template_id}/classify_historical_sessions", self.router)
-        self.assertIn("set_workout_template_role", self.router)
-        self.assertIn("classify_unclassified_training_sessions", self.router)
+        self.assertIn("unclassified_session_count", self.templates)
+        self.assertIn(
+            "/workout_templates/{workout_template_id}/classify_historical_sessions",
+            self.router,
+        )
+        self.assertIn("set_workout_template_role", self.templates)
+        self.assertIn("classify_unclassified_training_sessions", self.templates)
         self.assertIn("idempotency-key", self.router)
 
     def test_session_role_is_derived_from_canonical_set_roles(self) -> None:

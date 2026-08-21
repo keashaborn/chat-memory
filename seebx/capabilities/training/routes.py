@@ -25,6 +25,10 @@ from seebx.adapters.lifeswitch_training_sharing_postgres import (
     WorkoutShareImportError,
     lifeswitch_training_sharing_repository,
 )
+from seebx.adapters.lifeswitch_training_templates_postgres import (
+    TemplateUpsertError,
+    lifeswitch_training_templates_repository,
+)
 from seebx.adapters.lifeswitch_training_writes_postgres import (
     TrainingWriterError,
     correct_training_session as write_training_correction,
@@ -711,49 +715,13 @@ async def list_workout_templates(
     include_inactive: int = Query(0, ge=0, le=1),
 ):
     owner = require_actor_matches_owner(req, owner_user_id)
-    conn = await _db(req)
-    try:
-        where_active = "" if include_inactive else "and is_active=true"
-        rows = await conn.fetch(
-            f"""
-            select
-              workout_template_id, owner_user_id,
-              name, notes, workout_role, is_active, created_at, updated_at,
-              (
-                select count(*)::int
-                from {SCHEMA}.training_session s
-                where s.owner_user_id=wt.owner_user_id
-                  and s.workout_template_id=wt.workout_template_id
-                  and s.finished_at is not null
-                  and s.is_active=true
-                  and s.workout_role_snapshot is null
-                  and not exists (
-                    select 1 from {SCHEMA}.training_session_role_event re
-                    where re.training_session_id=s.training_session_id
-                  )
-                  and not exists (
-                    select 1
-                    from {SCHEMA}.training_set_log l
-                    join {SCHEMA}.training_set_effective_role_v1 role_resolution
-                      on role_resolution.training_set_log_id=l.training_set_log_id
-                     and role_resolution.training_session_id=l.training_session_id
-                     and role_resolution.owner_user_id=l.owner_user_id
-                    where l.training_session_id=s.training_session_id
-                      and l.owner_user_id=s.owner_user_id
-                      and l.is_active=true
-                      and role_resolution.effective_role in ('strength', 'rehab')
-                  )
-              ) as unclassified_session_count
-            from {SCHEMA}.workout_template wt
-            where owner_user_id=$1::uuid
-              {where_active}
-            order by updated_at desc
-            """,
-            owner,
+    async with lifeswitch_training_templates_repository(req) as repository:
+        rows = await repository.list_templates(
+            owner_user_id=owner,
+            include_inactive=bool(include_inactive),
         )
-        return JSONResponse([_row_to_jsonable(r) for r in rows])
-    finally:
-        await conn.close()
+    return JSONResponse([_row_to_jsonable(row) for row in rows])
+
 
 @router.post("/workout_templates/upsert")
 async def upsert_workout_template(
@@ -766,80 +734,36 @@ async def upsert_workout_template(
     idempotency_key: str = Header(..., alias="Idempotency-Key"),
 ):
     owner = require_actor_matches_owner(req, owner_user_id)
-    wid = _as_uuid(workout_template_id, "workout_template_id") if workout_template_id else None
+    template_id = (
+        _as_uuid(workout_template_id, "workout_template_id")
+        if workout_template_id
+        else None
+    )
     role = _clean_text(workout_role, 16).lower()
     if role not in {"strength", "rehab"}:
-        raise HTTPException(status_code=400, detail="workout_role must be strength or rehab")
+        raise HTTPException(
+            status_code=400, detail="workout_role must be strength or rehab"
+        )
     write_key = _require_idempotency_key(idempotency_key)
 
-    conn = await _db(req)
-    try:
-        async with conn.transaction():
-            await set_transaction_actor(conn, actor_user_id=owner)
-            if wid:
-                existing_owner = await conn.fetchval(
-                    f"select owner_user_id from {SCHEMA}.workout_template where workout_template_id=$1::uuid",
-                    wid,
-                )
-                if existing_owner and str(existing_owner) != owner:
-                    raise HTTPException(status_code=403, detail="actor_owner_mismatch")
+    def verify_existing_owner(existing_owner) -> None:
+        if existing_owner and str(existing_owner) != owner:
+            raise HTTPException(status_code=403, detail="actor_owner_mismatch")
 
-                row = await conn.fetchrow(
-                    f"""
-                    insert into {SCHEMA}.workout_template
-                      (workout_template_id, owner_user_id, name, notes, is_active)
-                    values
-                      ($1::uuid, $2::uuid, $3, $4, true)
-                    on conflict (workout_template_id) do update
-                      set name=excluded.name,
-                          notes=excluded.notes,
-                          updated_at=now(),
-                          is_active=true
-                    returning workout_template_id
-                    """,
-                    wid, owner, name.strip(), (notes or "").strip()
-                )
-            else:
-                row = await conn.fetchrow(
-                    f"""
-                    insert into {SCHEMA}.workout_template
-                      (owner_user_id, name, notes, is_active)
-                    values
-                      ($1::uuid, $2, $3, true)
-                    on conflict (owner_user_id, name) do update
-                      set notes=excluded.notes,
-                          updated_at=now(),
-                          is_active=true
-                    returning workout_template_id
-                    """,
-                    owner, name.strip(), (notes or "").strip()
-                )
-            if not row:
-                raise HTTPException(status_code=500, detail="upsert_failed")
-            saved_id = str(row["workout_template_id"])
-            current_role = await conn.fetchval(
-                f"select workout_role from {SCHEMA}.workout_template where owner_user_id=$1::uuid and workout_template_id=$2::uuid",
-                owner,
-                saved_id,
+    try:
+        async with lifeswitch_training_templates_repository(req) as repository:
+            row = await repository.upsert_template(
+                owner_user_id=owner,
+                workout_template_id=template_id,
+                name=name.strip(),
+                notes=(notes or "").strip(),
+                workout_role=role,
+                idempotency_key=write_key,
+                verify_existing_owner=verify_existing_owner,
             )
-            if current_role == role:
-                final_row = await conn.fetchrow(
-                    f"select * from {SCHEMA}.workout_template where owner_user_id=$1::uuid and workout_template_id=$2::uuid",
-                    owner,
-                    saved_id,
-                )
-            else:
-                final_row = await conn.fetchrow(
-                    f"select * from {SCHEMA}.set_workout_template_role($1::uuid, $2::uuid, $3, $4, $5)",
-                    owner,
-                    saved_id,
-                    role,
-                    "Workout role selected in Workouts",
-                    write_key,
-                )
-            return JSONResponse(_row_to_jsonable(final_row))
-    finally:
-        await conn.close()
+    except TemplateUpsertError as error:
+        raise HTTPException(status_code=500, detail="upsert_failed") from error
+    return JSONResponse(_row_to_jsonable(row))
 
 
 @router.post("/workout_templates/{workout_template_id}/classify_historical_sessions")
@@ -852,27 +776,24 @@ async def classify_historical_workout_sessions(
     idempotency_key: str = Header(..., alias="Idempotency-Key"),
 ):
     owner = require_actor_matches_owner(req, owner_user_id)
-    wid = _as_uuid(workout_template_id, "workout_template_id")
+    template_id = _as_uuid(workout_template_id, "workout_template_id")
     role = _clean_text(workout_role, 16).lower()
     if role not in {"strength", "rehab"}:
-        raise HTTPException(status_code=400, detail="workout_role must be strength or rehab")
+        raise HTTPException(
+            status_code=400, detail="workout_role must be strength or rehab"
+        )
     write_key = _require_idempotency_key(idempotency_key)
+    async with lifeswitch_training_templates_repository(req) as repository:
+        count = await repository.classify_historical_sessions(
+            owner_user_id=owner,
+            workout_template_id=template_id,
+            workout_role=role,
+            reason=_clean_text(reason, 240)
+            or "User applied workout role to older unclassified sessions",
+            idempotency_key=write_key,
+        )
+    return JSONResponse({"ok": True, "classified_session_count": count})
 
-    conn = await _db(req)
-    try:
-        async with conn.transaction():
-            await set_transaction_actor(conn, actor_user_id=owner)
-            count = await conn.fetchval(
-                f"select {SCHEMA}.classify_unclassified_training_sessions($1::uuid, $2::uuid, $3, $4, $5)",
-                owner,
-                wid,
-                role,
-                _clean_text(reason, 240) or "User applied workout role to older unclassified sessions",
-                write_key,
-            )
-        return JSONResponse({"ok": True, "classified_session_count": int(count or 0)})
-    finally:
-        await conn.close()
 
 @router.post("/workout_templates/{workout_template_id}/deactivate")
 async def deactivate_workout_template(
@@ -880,25 +801,17 @@ async def deactivate_workout_template(
     req: Request,
     owner_user_id: str = Query(..., min_length=1),
 ):
-    wid = _as_uuid(workout_template_id, "workout_template_id")
+    template_id = _as_uuid(workout_template_id, "workout_template_id")
     owner = require_actor_matches_owner(req, owner_user_id)
-    conn = await _db(req)
-    try:
-        row = await conn.fetchrow(
-            f"""
-            update {SCHEMA}.workout_template
-               set is_active=false, updated_at=now()
-             where workout_template_id=$1::uuid
-               and owner_user_id=$2::uuid
-            returning workout_template_id, owner_user_id, is_active, updated_at
-            """,
-            wid, owner
+    async with lifeswitch_training_templates_repository(req) as repository:
+        row = await repository.deactivate_template(
+            workout_template_id=template_id,
+            owner_user_id=owner,
         )
-        if not row:
-            raise HTTPException(status_code=404, detail="not found")
-        return JSONResponse(_row_to_jsonable(row))
-    finally:
-        await conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="not found")
+    return JSONResponse(_row_to_jsonable(row))
+
 
 # ----------------------------
 # Workout Template Exercises
@@ -906,33 +819,16 @@ async def deactivate_workout_template(
 
 @router.get("/workout_templates/{workout_template_id}/exercises")
 async def list_workout_template_exercises(workout_template_id: str, req: Request):
-    wid = _as_uuid(workout_template_id, "workout_template_id")
-    conn = await _db(req)
-    try:
-        owner = await conn.fetchval(
-            f"select owner_user_id from {SCHEMA}.workout_template where workout_template_id=$1::uuid",
-            wid,
+    template_id = _as_uuid(workout_template_id, "workout_template_id")
+    async with lifeswitch_training_templates_repository(req) as repository:
+        result = await repository.list_template_exercises(
+            workout_template_id=template_id,
+            authorize_owner=lambda owner: require_actor_matches_owner(req, owner),
         )
-        if not owner:
-            raise HTTPException(status_code=404, detail="workout_template not found")
-        require_actor_matches_owner(req, str(owner))
+    if result is None:
+        raise HTTPException(status_code=404, detail="workout_template not found")
+    return JSONResponse([_row_to_jsonable(row) for row in result.value])
 
-        rows = await conn.fetch(
-            f"""
-            select
-              workout_template_exercise_id, workout_template_id,
-              exercise_id, display_name_snapshot, sort_order, set_type,
-              planned_sets, default_weight, default_reps, flags,
-              created_at, updated_at
-            from {SCHEMA}.workout_template_exercise
-            where workout_template_id=$1::uuid
-            order by sort_order asc, created_at asc
-            """,
-            wid,
-        )
-        return JSONResponse([_row_to_jsonable(r) for r in rows])
-    finally:
-        await conn.close()
 
 @router.post("/workout_templates/{workout_template_id}/exercises/upsert")
 async def upsert_workout_template_exercise(
@@ -947,50 +843,27 @@ async def upsert_workout_template_exercise(
     default_reps: int = Query(10, ge=0, le=200),
     flags: str | None = Query(None, max_length=240),
 ):
-    wid = _as_uuid(workout_template_id, "workout_template_id")
-    conn = await _db(req)
-    try:
-        owner = await conn.fetchval(
-            f"select owner_user_id from {SCHEMA}.workout_template where workout_template_id=$1::uuid and is_active",
-            wid,
+    template_id = _as_uuid(workout_template_id, "workout_template_id")
+    async with lifeswitch_training_templates_repository(req) as repository:
+        result = await repository.upsert_template_exercise(
+            workout_template_id=template_id,
+            exercise_id=exercise_id.strip(),
+            display_name_snapshot=(display_name_snapshot or "").strip(),
+            sort_order=int(sort_order),
+            set_type=(set_type or "straight").strip().lower(),
+            planned_sets=int(planned_sets),
+            default_weight=float(default_weight),
+            default_reps=int(default_reps),
+            flags=(flags or "").strip(),
+            authorize_owner=lambda owner: require_actor_matches_owner(req, owner),
         )
-        if not owner:
-            raise HTTPException(status_code=404, detail="workout_template not found or inactive")
-        require_actor_matches_owner(req, str(owner))
+    if result is None:
+        raise HTTPException(
+            status_code=404, detail="workout_template not found or inactive"
+        )
+    row = result.value
+    return JSONResponse(_row_to_jsonable(row) if row else {"error": "upsert_failed"})
 
-        row = await conn.fetchrow(
-            f"""
-            insert into {SCHEMA}.workout_template_exercise
-              (workout_template_id, exercise_id, display_name_snapshot, sort_order, set_type, planned_sets, default_weight, default_reps, flags)
-            values
-              ($1::uuid, $2, nullif($3, ''), $4, $5, $6, $7, $8, $9)
-            on conflict (workout_template_id, exercise_id) do update
-              set display_name_snapshot=coalesce(excluded.display_name_snapshot, {SCHEMA}.workout_template_exercise.display_name_snapshot),
-                  sort_order=excluded.sort_order,
-                  set_type=excluded.set_type,
-                  planned_sets=excluded.planned_sets,
-                  default_weight=excluded.default_weight,
-                  default_reps=excluded.default_reps,
-                  flags=excluded.flags,
-                  updated_at=now()
-            returning
-              workout_template_exercise_id, workout_template_id,
-              exercise_id, display_name_snapshot, sort_order, set_type, planned_sets, default_weight, default_reps, flags,
-              created_at, updated_at
-            """,
-            wid,
-            exercise_id.strip(),
-              (display_name_snapshot or "").strip(),
-            int(sort_order),
-              (set_type or "straight").strip().lower(),
-            int(planned_sets),
-            float(default_weight),
-            int(default_reps),
-            (flags or "").strip(),
-        )
-        return JSONResponse(_row_to_jsonable(row) if row else {"error": "upsert_failed"})
-    finally:
-        await conn.close()
 
 @router.post("/workout_templates/{workout_template_id}/exercises/{workout_template_exercise_id}/delete")
 async def delete_workout_template_exercise(
@@ -998,31 +871,19 @@ async def delete_workout_template_exercise(
     workout_template_exercise_id: str,
     req: Request,
 ):
-    wid = _as_uuid(workout_template_id, "workout_template_id")
-    weid = _as_uuid(workout_template_exercise_id, "workout_template_exercise_id")
-    conn = await _db(req)
-    try:
-        owner = await conn.fetchval(
-            f"select owner_user_id from {SCHEMA}.workout_template where workout_template_id=$1::uuid",
-            wid,
+    template_id = _as_uuid(workout_template_id, "workout_template_id")
+    exercise_id = _as_uuid(
+        workout_template_exercise_id, "workout_template_exercise_id"
+    )
+    async with lifeswitch_training_templates_repository(req) as repository:
+        result = await repository.delete_template_exercise(
+            workout_template_id=template_id,
+            workout_template_exercise_id=exercise_id,
+            authorize_owner=lambda owner: require_actor_matches_owner(req, owner),
         )
-        if not owner:
-            raise HTTPException(status_code=404, detail="workout_template not found")
-        require_actor_matches_owner(req, str(owner))
-
-        res = await conn.execute(
-            f"""
-            delete from {SCHEMA}.workout_template_exercise
-             where workout_template_exercise_id=$1::uuid
-               and workout_template_id=$2::uuid
-            """,
-            weid, wid
-        )
-        # asyncpg returns "DELETE N"
-        return JSONResponse({"ok": True, "result": str(res)})
-    finally:
-        await conn.close()
-
+    if result is None:
+        raise HTTPException(status_code=404, detail="workout_template not found")
+    return JSONResponse({"ok": True, "result": str(result.value)})
 
 
 # ----------------------------
@@ -1030,44 +891,22 @@ async def delete_workout_template_exercise(
 # ----------------------------
 
 @router.get("/workout_template_exercises/{workout_template_exercise_id}/segments")
-async def list_workout_template_exercise_segments(workout_template_exercise_id: str, req: Request):
-    weid = _as_uuid(workout_template_exercise_id, "workout_template_exercise_id")
-    conn = await _db(req)
-    try:
-        owner = await conn.fetchval(
-            f"""
-            select wt.owner_user_id
-            from {SCHEMA}.workout_template_exercise e
-            join {SCHEMA}.workout_template wt
-              on wt.workout_template_id=e.workout_template_id
-            where e.workout_template_exercise_id=$1::uuid
-            """,
-            weid,
+async def list_workout_template_exercise_segments(
+    workout_template_exercise_id: str, req: Request
+):
+    exercise_id = _as_uuid(
+        workout_template_exercise_id, "workout_template_exercise_id"
+    )
+    async with lifeswitch_training_templates_repository(req) as repository:
+        result = await repository.list_exercise_segments(
+            workout_template_exercise_id=exercise_id,
+            authorize_owner=lambda owner: require_actor_matches_owner(req, owner),
         )
-        if not owner:
-            raise HTTPException(status_code=404, detail="workout_template_exercise not found")
-        require_actor_matches_owner(req, str(owner))
-
-        rows = await conn.fetch(
-            f"""
-            select
-              workout_template_exercise_segment_id,
-              workout_template_exercise_id,
-              segment_index,
-              label,
-              default_weight,
-              default_reps,
-              created_at,
-              updated_at
-            from {SCHEMA}.workout_template_exercise_segment
-            where workout_template_exercise_id=$1::uuid
-            order by segment_index asc, created_at asc
-            """,
-            weid,
+    if result is None:
+        raise HTTPException(
+            status_code=404, detail="workout_template_exercise not found"
         )
-        return JSONResponse([_row_to_jsonable(r) for r in rows])
-    finally:
-        await conn.close()
+    return JSONResponse([_row_to_jsonable(row) for row in result.value])
 
 
 @router.post("/workout_template_exercises/{workout_template_exercise_id}/segments/upsert")
@@ -1079,54 +918,25 @@ async def upsert_workout_template_exercise_segment(
     default_weight: float = Query(0),
     default_reps: int = Query(0, ge=0, le=1000),
 ):
-    weid = _as_uuid(workout_template_exercise_id, "workout_template_exercise_id")
-    conn = await _db(req)
-    try:
-        owner = await conn.fetchval(
-            f"""
-            select wt.owner_user_id
-            from {SCHEMA}.workout_template_exercise e
-            join {SCHEMA}.workout_template wt
-              on wt.workout_template_id=e.workout_template_id
-            where e.workout_template_exercise_id=$1::uuid
-              and wt.is_active=true
-            """,
-            weid,
+    exercise_id = _as_uuid(
+        workout_template_exercise_id, "workout_template_exercise_id"
+    )
+    async with lifeswitch_training_templates_repository(req) as repository:
+        result = await repository.upsert_exercise_segment(
+            workout_template_exercise_id=exercise_id,
+            segment_index=int(segment_index),
+            label=(label or "").strip(),
+            default_weight=float(default_weight),
+            default_reps=int(default_reps),
+            authorize_owner=lambda owner: require_actor_matches_owner(req, owner),
         )
-        if not owner:
-            raise HTTPException(status_code=404, detail="workout_template_exercise not found or inactive")
-        require_actor_matches_owner(req, str(owner))
-
-        row = await conn.fetchrow(
-            f"""
-            insert into {SCHEMA}.workout_template_exercise_segment
-              (workout_template_exercise_id, segment_index, label, default_weight, default_reps)
-            values
-              ($1::uuid, $2, $3, $4, $5)
-            on conflict (workout_template_exercise_id, segment_index) do update
-              set label=excluded.label,
-                  default_weight=excluded.default_weight,
-                  default_reps=excluded.default_reps,
-                  updated_at=now()
-            returning
-              workout_template_exercise_segment_id,
-              workout_template_exercise_id,
-              segment_index,
-              label,
-              default_weight,
-              default_reps,
-              created_at,
-              updated_at
-            """,
-            weid,
-            int(segment_index),
-            (label or "").strip(),
-            float(default_weight),
-            int(default_reps),
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail="workout_template_exercise not found or inactive",
         )
-        return JSONResponse(_row_to_jsonable(row) if row else {"error": "upsert_failed"})
-    finally:
-        await conn.close()
+    row = result.value
+    return JSONResponse(_row_to_jsonable(row) if row else {"error": "upsert_failed"})
 
 
 @router.post("/workout_template_exercises/{workout_template_exercise_id}/segments/{workout_template_exercise_segment_id}/delete")
@@ -1135,36 +945,24 @@ async def delete_workout_template_exercise_segment(
     workout_template_exercise_segment_id: str,
     req: Request,
 ):
-    weid = _as_uuid(workout_template_exercise_id, "workout_template_exercise_id")
-    segid = _as_uuid(workout_template_exercise_segment_id, "workout_template_exercise_segment_id")
-    conn = await _db(req)
-    try:
-        owner = await conn.fetchval(
-            f"""
-            select wt.owner_user_id
-            from {SCHEMA}.workout_template_exercise e
-            join {SCHEMA}.workout_template wt
-              on wt.workout_template_id=e.workout_template_id
-            where e.workout_template_exercise_id=$1::uuid
-            """,
-            weid,
+    exercise_id = _as_uuid(
+        workout_template_exercise_id, "workout_template_exercise_id"
+    )
+    segment_id = _as_uuid(
+        workout_template_exercise_segment_id,
+        "workout_template_exercise_segment_id",
+    )
+    async with lifeswitch_training_templates_repository(req) as repository:
+        result = await repository.delete_exercise_segment(
+            workout_template_exercise_id=exercise_id,
+            workout_template_exercise_segment_id=segment_id,
+            authorize_owner=lambda owner: require_actor_matches_owner(req, owner),
         )
-        if not owner:
-            raise HTTPException(status_code=404, detail="workout_template_exercise not found")
-        require_actor_matches_owner(req, str(owner))
-
-        res = await conn.execute(
-            f"""
-            delete from {SCHEMA}.workout_template_exercise_segment
-             where workout_template_exercise_segment_id=$1::uuid
-               and workout_template_exercise_id=$2::uuid
-            """,
-            segid,
-            weid,
+    if result is None:
+        raise HTTPException(
+            status_code=404, detail="workout_template_exercise not found"
         )
-        return JSONResponse({"ok": True, "result": str(res)})
-    finally:
-        await conn.close()
+    return JSONResponse({"ok": True, "result": str(result.value)})
 
 
 # ----------------------------

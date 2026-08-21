@@ -108,14 +108,15 @@ connection close, provider HTTP calls, and the non-database LifeSwitch stage
 
 | Capability module | Mounted routes | Direct SQL/transaction callsites | Current database | Frontend BFF surface |
 |---|---:|---:|---|---|
-| `training/routes.py` | 41 | 34 | isolated LifeSwitch PostgreSQL | training group: 39 route files |
+| `training/routes.py` | 41 | 11 | isolated LifeSwitch PostgreSQL | training group: 39 route files |
 
-This is the exact remaining direct database-effect capability module, with 29
-query/write calls and five transactions. Its 18 request-owned connection closes
-are tracked separately. Catalog, Forms, Measurements, AI Operations,
-observability, Plans, Conditioning, workout sharing, and all retained Nutrition
-modules now own zero direct database effects in capability code; retained
-effects are behind named adapters.
+This is the exact remaining direct database-effect capability module, with
+eight query/write calls and three transactions. Its eight request-owned
+connection closes are tracked separately. Catalog, Forms, Measurements, AI
+Operations, observability, Plans, Conditioning, workout sharing,
+templates/exercises/segments, and all retained Nutrition modules now own zero
+direct database effects in capability code; retained effects are behind named
+adapters.
 
 ## Canonical target flow
 
