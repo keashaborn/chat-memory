@@ -12,6 +12,9 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Body, Header, Request
 from seebx.core.ownership import require_actor_matches_owner
 from seebx.adapters.lifeswitch_postgres import connect_lifeswitch
+from seebx.adapters.lifeswitch_training_exercises_postgres import (
+    lifeswitch_training_exercises_repository,
+)
 from seebx.capabilities.training.logs import (
     correct_conditioning_session as write_conditioning_correction,
     correct_training_session as write_training_correction,
@@ -176,27 +179,13 @@ async def list_my_exercises(
     include_inactive: int = Query(0, ge=0, le=1),
 ):
     owner = require_actor_matches_owner(req, owner_user_id)
-    conn = await _db(req)
-    try:
-        where_active = "" if include_inactive else "and me.is_active=true"
-        rows = await conn.fetch(
-            f"""
-            select
-              my_exercise_id, owner_user_id,
-              exercise_id, display_name, kind, modality,
-              brand_name, model_name, matched_text, matched_source,
-              exercise_role,
-              is_active, created_at, updated_at
-            from {SCHEMA}.my_exercise as me
-            where me.owner_user_id=$1::uuid
-              {where_active}
-            order by lower(display_name) asc
-            """,
-            owner,
+    async with lifeswitch_training_exercises_repository(req) as repository:
+        rows = await repository.list_exercises(
+            owner_user_id=owner,
+            include_inactive=bool(include_inactive),
         )
-        return JSONResponse([_row_to_jsonable(r) for r in rows])
-    finally:
-        await conn.close()
+    return JSONResponse([_row_to_jsonable(row) for row in rows])
+
 
 @router.post("/my_exercises/upsert")
 async def upsert_my_exercise(
@@ -216,76 +205,21 @@ async def upsert_my_exercise(
     clean_role = _clean_text(exercise_role, 20).lower()
     if clean_role and clean_role not in {"strength", "rehab"}:
         raise HTTPException(status_code=400, detail="exercise_role must be strength or rehab")
-    conn = await _db(req)
-    try:
-        async with conn.transaction():
-            existing = await conn.fetchrow(
-                f"""
-                select my_exercise_id, exercise_role
-                from {SCHEMA}.my_exercise
-                where owner_user_id=$1::uuid and exercise_id=$2
-                for update
-                """,
-                owner,
-                exercise_id.strip(),
-            )
-            row = await conn.fetchrow(
-                f"""
-                insert into {SCHEMA}.my_exercise
-                  (owner_user_id, exercise_id, display_name, kind, modality,
-                   brand_name, model_name, matched_text, matched_source,
-                   exercise_role, is_active)
-                values
-                  ($1::uuid, $2, $3, $4, $5,
-                   $6, $7, $8, $9, coalesce($10, 'strength'), true)
-                on conflict (owner_user_id, exercise_id) do update
-                  set display_name=excluded.display_name,
-                      kind=excluded.kind,
-                      modality=excluded.modality,
-                      brand_name=excluded.brand_name,
-                      model_name=excluded.model_name,
-                      matched_text=excluded.matched_text,
-                      matched_source=excluded.matched_source,
-                      exercise_role=coalesce($10, {SCHEMA}.my_exercise.exercise_role),
-                      updated_at=now(),
-                      is_active=true
-                returning
-                  my_exercise_id, owner_user_id,
-                  exercise_id, display_name, kind, modality,
-                  brand_name, model_name, matched_text, matched_source,
-                  exercise_role,
-                  is_active, created_at, updated_at
-                """,
-                owner,
-                exercise_id.strip(),
-                display_name.strip(),
-                (kind or "").strip(),
-                (modality or "").strip(),
-                (brand_name or None),
-                (model_name or None),
-                (matched_text or None),
-                (matched_source or None),
-                (clean_role or None),
-            )
-            previous_role = str(existing["exercise_role"]) if existing else None
-            next_role = str(row["exercise_role"]) if row else ""
-            if row and previous_role != next_role:
-                await conn.execute(
-                    f"""
-                    insert into {SCHEMA}.my_exercise_role_event
-                      (owner_user_id, my_exercise_id, exercise_id,
-                       previous_role, new_role, changed_by_user_id, change_source)
-                    values ($1::uuid, $2::uuid, $3, $4, $5, $1::uuid, 'user')
-                    """,
-                    owner,
-                    row["my_exercise_id"],
-                    row["exercise_id"],
-                    previous_role,
-                    next_role,
-                )
-        return JSONResponse(_row_to_jsonable(row) if row else {"error": "upsert_failed"})
-    finally:
-        await conn.close()
+    async with lifeswitch_training_exercises_repository(req) as repository:
+        row = await repository.upsert_exercise(
+            owner_user_id=owner,
+            exercise_id=exercise_id.strip(),
+            display_name=display_name.strip(),
+            kind=(kind or "").strip(),
+            modality=(modality or "").strip(),
+            brand_name=(brand_name or None),
+            model_name=(model_name or None),
+            matched_text=(matched_text or None),
+            matched_source=(matched_source or None),
+            exercise_role=(clean_role or None),
+        )
+    return JSONResponse(_row_to_jsonable(row) if row else {"error": "upsert_failed"})
+
 
 @router.post("/my_exercises/{my_exercise_id}/deactivate")
 async def deactivate_my_exercise(
@@ -295,23 +229,14 @@ async def deactivate_my_exercise(
 ):
     mid = _as_uuid(my_exercise_id, "my_exercise_id")
     owner = require_actor_matches_owner(req, owner_user_id)
-    conn = await _db(req)
-    try:
-        row = await conn.fetchrow(
-            f"""
-            update {SCHEMA}.my_exercise
-               set is_active=false, updated_at=now()
-             where my_exercise_id=$1::uuid
-               and owner_user_id=$2::uuid
-            returning my_exercise_id, owner_user_id, is_active, updated_at
-            """,
-            mid, owner
+    async with lifeswitch_training_exercises_repository(req) as repository:
+        row = await repository.deactivate_exercise(
+            my_exercise_id=mid,
+            owner_user_id=owner,
         )
-        if not row:
-            raise HTTPException(status_code=404, detail="not found")
-        return JSONResponse(_row_to_jsonable(row))
-    finally:
-        await conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="not found")
+    return JSONResponse(_row_to_jsonable(row))
 
 # ----------------------------
 # Conditioning Library / Prescriptions

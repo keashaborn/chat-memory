@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "ops" / "sql" / "20260720_lifeswitch_training_exercise_role.sql"
 WRITER = ROOT / "ops" / "sql" / "20260723_lifeswitch_training_writer_api.sql"
 ROUTER = ROOT / "seebx" / "capabilities" / "training" / "routes.py"
+EXERCISES_ADAPTER = ROOT / "seebx" / "adapters" / "lifeswitch_training_exercises_postgres.py"
 
 
 class TrainingExerciseRoleContractTest(unittest.TestCase):
@@ -16,6 +17,7 @@ class TrainingExerciseRoleContractTest(unittest.TestCase):
         cls.sql = MIGRATION.read_text(encoding="utf-8").lower()
         cls.writer = WRITER.read_text(encoding="utf-8").lower()
         cls.router = ROUTER.read_text(encoding="utf-8")
+        cls.exercises_adapter = EXERCISES_ADAPTER.read_text(encoding="utf-8")
 
     def test_migration_adds_bounded_roles_without_deleting_logs(self) -> None:
         self.assertIn("add column if not exists exercise_role text", self.sql)
@@ -33,7 +35,7 @@ class TrainingExerciseRoleContractTest(unittest.TestCase):
             self.writer,
         )
         self.assertIn("v_role, v_role, v_load_unit", self.writer)
-        self.assertIn("my_exercise_role_event", self.router)
+        self.assertIn("my_exercise_role_event", self.exercises_adapter)
         self.assertNotIn('raw_set.get("exercise_role")', self.router)
 
     def test_session_list_publishes_deterministic_role_summaries(self) -> None:
