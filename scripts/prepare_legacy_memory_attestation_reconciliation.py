@@ -18,10 +18,12 @@ from urllib.parse import unquote, urlsplit
 
 import asyncpg
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from jsonschema import Draft202012Validator, FormatChecker
 
 
 SCHEMA_VERSION = "seebx-legacy-attestation-reconciliation-receipt-v1"
 ARCHIVE_VERSION = "seebx-legacy-attestation-encrypted-quarantine-v1"
+KEY_CUSTODY_VERSION = "seebx-legacy-attestation-key-custody-receipt-v1"
 EXPECTED_DATABASE = "memory"
 EXPECTED_ROLE = "sage"
 EXPECTED_PORT = 5432
@@ -38,6 +40,8 @@ ATTESTATION_COLUMNS = (
     "provider_request_sha256", "provider_response_sha256", "provider_response_id",
     "output_kind", "assistant_text_sha256", "attestation_sha256", "created_at",
 )
+ROOT = Path(__file__).resolve().parents[1]
+KEY_CUSTODY_SCHEMA = ROOT / "ops/migrations/20260820_legacy_attestation_reconciliation_v1/key-custody-receipt.schema.json"
 
 
 class ReconciliationContractError(RuntimeError):
@@ -59,10 +63,7 @@ def json_value(value: Any) -> Any:
 
 
 def normalize_rows(rows: list[Any]) -> list[dict[str, Any]]:
-    normalized = [
-        {column: json_value(row[column]) for column in ATTESTATION_COLUMNS}
-        for row in rows
-    ]
+    normalized = [{column: json_value(row[column]) for column in ATTESTATION_COLUMNS} for row in rows]
     return sorted(normalized, key=lambda row: row["answer_id"])
 
 
@@ -88,10 +89,33 @@ def encrypt_quarantine(plaintext: bytes, key: bytes) -> bytes:
         "ciphertext": base64.urlsafe_b64encode(ciphertext).decode("ascii"),
     }
     encoded = canonical_bytes(envelope)
-    decoded = AESGCM(key).decrypt(nonce, ciphertext, aad)
-    if decoded != plaintext:
+    if AESGCM(key).decrypt(nonce, ciphertext, aad) != plaintext:
         raise ReconciliationContractError("quarantine_encryption_roundtrip_failed")
     return encoded
+
+
+def _secure_regular_file(path: Path) -> bytes:
+    metadata = path.lstat()
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+        raise ReconciliationContractError("key_custody_receipt_file_invalid")
+    if metadata.st_uid != os.geteuid() or stat.S_IMODE(metadata.st_mode) & 0o077:
+        raise ReconciliationContractError("key_custody_receipt_permissions_invalid")
+    return path.read_bytes()
+
+
+def load_key_custody_receipt(path: Path, key: bytes) -> tuple[dict[str, Any], str]:
+    try:
+        raw = _secure_regular_file(path)
+        document = json.loads(raw)
+        schema = json.loads(KEY_CUSTODY_SCHEMA.read_text(encoding="utf-8"))
+        Draft202012Validator(schema, format_checker=FormatChecker()).validate(document)
+    except ReconciliationContractError:
+        raise
+    except Exception as error:
+        raise ReconciliationContractError("key_custody_receipt_invalid") from error
+    if document["key_fingerprint_sha256"] != sha256_bytes(key):
+        raise ReconciliationContractError("key_custody_key_fingerprint_mismatch")
+    return document, sha256_bytes(raw)
 
 
 def atomic_write(path: Path, value: bytes) -> None:
@@ -145,6 +169,7 @@ async def execute(arguments: argparse.Namespace) -> dict[str, Any]:
         raise ReconciliationContractError("quarantine_key_environment_missing")
     validate_dsn(dsn)
     key = decode_key(raw_key)
+    custody, custody_sha256 = load_key_custody_receipt(arguments.key_custody_receipt, key)
     connection = await asyncpg.connect(dsn, command_timeout=30)
     try:
         transaction = connection.transaction(isolation="repeatable_read", readonly=True)
@@ -155,8 +180,7 @@ async def execute(arguments: argparse.Namespace) -> dict[str, Any]:
                 raise ReconciliationContractError("database_identity_mismatch")
             rows = await connection.fetch(
                 """
-                SELECT a.*,
-                       (l.id IS NOT NULL) AS eligible
+                SELECT a.*, (l.id IS NOT NULL) AS eligible
                 FROM memory.assistant_transcript_attestation_v1 AS a
                 LEFT JOIN public.chat_log AS l
                   ON l.id = a.answer_id
@@ -198,6 +222,17 @@ async def execute(arguments: argparse.Namespace) -> dict[str, Any]:
         "run_id": arguments.run_id,
         "source": {"database": EXPECTED_DATABASE, "role": EXPECTED_ROLE},
         "classification": {"counts": counts, "sha256": hashes},
+        "key_custody": {
+            "provider": custody["provider"],
+            "region": custody["region"],
+            "secret_arn": custody["secret_arn"],
+            "secret_version_id": custody["secret_version_id"],
+            "retrieval_principal_arn": custody["retrieval_principal_arn"],
+            "key_fingerprint_sha256": custody["key_fingerprint_sha256"],
+            "recovery_tested_at_utc": custody["recovery_tested_at_utc"],
+            "receipt_sha256": custody_sha256,
+            "secret_value_persisted_in_receipt": False,
+        },
         "quarantine": {
             "path": archive_path.name,
             "algorithm": "AES-256-GCM",
@@ -205,6 +240,7 @@ async def execute(arguments: argparse.Namespace) -> dict[str, Any]:
             "ciphertext_sha256": sha256_bytes(archive),
             "mode": "0600",
             "key_persisted": False,
+            "recoverable_from_bound_custody": True,
         },
     }
     receipt_bytes = canonical_bytes(receipt)
@@ -216,6 +252,7 @@ async def execute(arguments: argparse.Namespace) -> dict[str, Any]:
         "output_directory": str(output),
         "receipt_sha256": sha256_bytes(receipt_bytes),
         "quarantine_ciphertext_sha256": receipt["quarantine"]["ciphertext_sha256"],
+        "key_custody_receipt_sha256": custody_sha256,
         "classification": receipt["classification"],
     }
 
@@ -224,6 +261,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dsn-env", default="LEGACY_MEMORY_ADMIN_DSN")
     parser.add_argument("--key-env", default="LEGACY_ATTESTATION_QUARANTINE_KEY_B64")
+    parser.add_argument("--key-custody-receipt", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--run-id", required=True)
     arguments = parser.parse_args(argv)

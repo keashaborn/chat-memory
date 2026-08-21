@@ -170,3 +170,22 @@ separate user authorization.
 7. emit content-free SHA-256 bindings for the dump, source manifest, tool, retirement SQL, package, and restore receipt.
 
 The DSN and password never enter a subprocess argument or receipt. A temporary mode-0600 pgpass file is removed in all outcomes. A failure emits only fixed error codes, retains any completed backup artifact, and attempts to remove the disposable database before exiting. Running the tool creates a backup directory and creates/drops a temporary database, so it requires a separate production authorization.
+
+## Executable retirement candidate (2026-08-21)
+
+The retirement package now contains executable transaction-bound SQL, but remains `candidate_not_applied` with `retirement_authorized=false`. It will acquire an advisory lock and abort before either schema drop unless all of the following are true: exact schema/table shape; zero nonterminal ingest/erasure work; no legacy triggers; active Zep-backed clear functions; 190/32/158 attestation classification with all 32 eligible rows reconciled; zero external function, view, materialized-view, trigger, or foreign-key references; exact backup and disposable-restore hashes; and hash-bound reconciliation, encrypted-quarantine, AWS Secrets Manager custody, and dependency-catalog receipts.
+
+The quarantine key contract binds an immutable Secrets Manager ARN/version, retrieval principal, successful recovery time, and SHA-256 fingerprint of the exact 32-byte key. It stores no secret value. No AWS secret, database role, grant, migration, schema drop, service change, or production file was created or changed by this candidate batch.
+
+## Candidate verification evidence (2026-08-21)
+
+- Base candidate commit: `dcf7b2092800b3d875a72fdd9d1c264b5f649c05`; production was not edited.
+- Key-custody schema SHA-256: `442ae5d7006e860cd4a5eab999ee268ab8f6536d8625d4d2c52c2fbf3f66c1ce`.
+- Reconciliation tool SHA-256: `cf35c1dd0885ae11c05d1e44e347b7f85193758f59e77193b8911a65e8c7028b`.
+- Clean-backend preflight SHA-256: `87e8a861de1734aa8adb37a607c61172e66858eec764503f82d32f24e9d21e90`.
+- Executable retirement SQL SHA-256: `00a82f89c47c68002cae61546adafcf5264b3507f2f296dd22829d09cf1f19e3`.
+- Focused custody/preflight/retirement tests: 17/17 pass.
+- Full backend suite in the verified pinned Python 3.12/Pydantic 2.12.3 runtime: 1,235/1,235 pass.
+- Disposable PostgreSQL 16 positive execution: exact 160-table `memory`, 7-table `memory_ingest_private`, and 190/32/158 attestation fixture passed every assertion; only the two legacy schemas were dropped; Zep outbox and both chat-clear functions remained.
+- Disposable PostgreSQL 16 negative execution: an external `public` view produced `external legacy dependencies remain`; the transaction aborted and both legacy schemas and the outside view remained.
+- Package hashes, Python compilation, and `git diff --check` pass. No AWS secret, live database role/grant, migration, schema, service, frontend, or production source was changed.

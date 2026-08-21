@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lifeswitch.internal/schemas/seebx-legacy-attestation-key-custody-receipt-v1.json",
+  "additionalProperties": false,
+  "properties": {
+    "key_algorithm": {"const": "AES-256-GCM"},
+    "key_bytes": {"const": 32},
+    "key_fingerprint_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "provider": {"const": "aws_secrets_manager"},
+    "recovery_tested_at_utc": {"format": "date-time", "type": "string"},
+    "region": {"const": "us-east-2"},
+    "retrieval_principal_arn": {
+      "pattern": "^arn:aws:iam::339712834334:role/[A-Za-z0-9+=,.@_/-]{1,128}$",
+      "type": "string"
+    },
+    "schema_version": {"const": "seebx-legacy-attestation-key-custody-receipt-v1"},
+    "secret_arn": {
+      "pattern": "^arn:aws:secretsmanager:us-east-2:339712834334:secret:lifeswitch/seebx/legacy-attestation-quarantine-[A-Za-z0-9/_+=.@-]+$",
+      "type": "string"
+    },
+    "secret_value_persisted_in_receipt": {"const": false},
+    "secret_version_id": {"pattern": "^[A-Za-z0-9-]{32,64}$", "type": "string"},
+    "status": {"const": "pass"}
+  },
+  "required": [
+    "schema_version",
+    "status",
+    "provider",
+    "region",
+    "secret_arn",
+    "secret_version_id",
+    "retrieval_principal_arn",
+    "key_algorithm",
+    "key_bytes",
+    "key_fingerprint_sha256",
+    "recovery_tested_at_utc",
+    "secret_value_persisted_in_receipt"
+  ],
+  "title": "SeeBx legacy attestation key custody receipt v1",
+  "type": "object"
+}

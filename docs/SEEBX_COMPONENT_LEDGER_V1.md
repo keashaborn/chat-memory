@@ -153,3 +153,22 @@ after static imports, mounted routes, frontend callers, SQL/functions, services,
 timers, environment settings, data retention, backups, tests, and rollback are
 all explicitly resolved. Newly discovered components are added here before any
 mutation batch is approved.
+
+## 2026-08-21 retirement-readiness candidate update
+
+- The clean-backend preflight is now v2 and requires a separate, write-denied `lifeswitch_retirement_auditor`; it explicitly proves that the `sage` application identity remains denied access to legacy private queues.
+- The attestation quarantine now requires a mode-0600 AWS Secrets Manager custody receipt bound to the exact key fingerprint and immutable secret version; no secret value is persisted.
+- The legacy-memory retirement SQL is executable only after every migration, queue, dependency, backup, restore, quarantine, and custody assertion passes. The package remains unapplied and unauthorized for production.
+
+## Candidate verification evidence (2026-08-21)
+
+- Base candidate commit: `dcf7b2092800b3d875a72fdd9d1c264b5f649c05`; production was not edited.
+- Key-custody schema SHA-256: `442ae5d7006e860cd4a5eab999ee268ab8f6536d8625d4d2c52c2fbf3f66c1ce`.
+- Reconciliation tool SHA-256: `cf35c1dd0885ae11c05d1e44e347b7f85193758f59e77193b8911a65e8c7028b`.
+- Clean-backend preflight SHA-256: `87e8a861de1734aa8adb37a607c61172e66858eec764503f82d32f24e9d21e90`.
+- Executable retirement SQL SHA-256: `00a82f89c47c68002cae61546adafcf5264b3507f2f296dd22829d09cf1f19e3`.
+- Focused custody/preflight/retirement tests: 17/17 pass.
+- Full backend suite in the verified pinned Python 3.12/Pydantic 2.12.3 runtime: 1,235/1,235 pass.
+- Disposable PostgreSQL 16 positive execution: exact 160-table `memory`, 7-table `memory_ingest_private`, and 190/32/158 attestation fixture passed every assertion; only the two legacy schemas were dropped; Zep outbox and both chat-clear functions remained.
+- Disposable PostgreSQL 16 negative execution: an external `public` view produced `external legacy dependencies remain`; the transaction aborted and both legacy schemas and the outside view remained.
+- Package hashes, Python compilation, and `git diff --check` pass. No AWS secret, live database role/grant, migration, schema, service, frontend, or production source was changed.

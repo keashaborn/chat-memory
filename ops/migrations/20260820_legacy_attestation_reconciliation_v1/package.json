@@ -24,16 +24,30 @@
   "inputs": {
     "forward": {
       "path": "forward.pgsql",
-      "sha256": "7e59f84d4850eeea8e0060542e648568deb23a29d1873f6ebd34957658c4d72e"
+      "sha256": "500f9f219336c9b679ede936dcf1fcba723cf79fc85c2d2122e69c62da051a1e"
+    },
+    "key_custody_schema": {
+      "path": "ops/migrations/20260820_legacy_attestation_reconciliation_v1/key-custody-receipt.schema.json",
+      "sha256": "442ae5d7006e860cd4a5eab999ee268ab8f6536d8625d4d2c52c2fbf3f66c1ce"
     },
     "quarantine_tool": {
       "path": "scripts/prepare_legacy_memory_attestation_reconciliation.py",
-      "sha256": "d7a0bff586c663b89b94f5aeaf04d8df25eadc245d08fa6bb383b9d514db0472"
+      "sha256": "cf35c1dd0885ae11c05d1e44e347b7f85193758f59e77193b8911a65e8c7028b"
     },
     "rollback": {
       "path": "rollback.pgsql",
       "sha256": "b318a3165f61d5779ce534c965cf96ff8947543f13ba0d75a584b27d06583efb"
     }
+  },
+  "key_custody": {
+    "account_id": "339712834334",
+    "immutable_secret_version_required": true,
+    "plaintext_key_in_repository_or_receipt": false,
+    "provider": "aws_secrets_manager",
+    "recovery_test_required": true,
+    "region": "us-east-2",
+    "secret_created": false,
+    "secret_read": false
   },
   "migration_id": "legacy_attestation_reconciliation_v1",
   "schema_version": "seebx-legacy-attestation-reconciliation-package-v1",

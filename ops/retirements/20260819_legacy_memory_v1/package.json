@@ -1,22 +1,41 @@
 {
-  "blocked_by": [
-    "legacy_attestation_reconciliation_v1 not applied",
-    "158 orphan attestations not yet preserved in encrypted hash-bound quarantine",
-    "external dependency catalog proof not yet bound",
-    "new full backup and disposable restore receipt not yet bound"
-  ],
   "execution": {
     "production_database_mutated": false,
     "retirement_authorized": false
   },
+  "expected": {
+    "attestations": {
+      "eligible": 32,
+      "quarantine": 158,
+      "reconciled": 32,
+      "source": 190
+    },
+    "backup_sha256": "0adc9bcaba1baee76b815aeb3000ce3c0685367648e976c138354145668afa15",
+    "restore_receipt_sha256": "1f5a117b4dd83176e34141340c9fd9eede8623f1319d8cfd260fbf5f37cb9e24",
+    "tables": {
+      "memory": 160,
+      "memory_ingest_private": 7
+    }
+  },
   "forward": {
     "path": "forward.pgsql",
-    "sha256": "9d40d69bcaed352116e01bb20055f8ffd44da76861d2875cdc4863e55ca75d9c"
+    "sha256": "00a82f89c47c68002cae61546adafcf5264b3507f2f296dd22829d09cf1f19e3"
   },
   "migration_id": "legacy_memory_schema_retirement_v1",
+  "prerequisites": [
+    "canonical Zep erasure boundary active",
+    "all legacy ingest and erasure jobs terminal",
+    "32 eligible attestations reconciled",
+    "158 orphan attestations encrypted and recoverable",
+    "AWS Secrets Manager custody receipt bound to exact key version",
+    "zero external function, view, materialized-view, trigger, or foreign-key dependencies",
+    "exact full backup and disposable restore receipt"
+  ],
   "recovery": {
     "exact_row_manifest_required": true,
     "restore_into_disposable_database_required": true,
+    "rollback_mode": "restore_only",
+    "sql_rollback_available": false,
     "tool": {
       "path": "scripts/prepare_legacy_memory_retirement_recovery.py",
       "sha256": "6bd40b5efe6935ff9d8b46f078733a0adabf8a665642a99cfcaee5808c7cc467"
@@ -24,16 +43,35 @@
   },
   "schema_version": "seebx-retirement-package-v1",
   "scope": {
-    "drop_statements_present": false,
-    "protected_schemas": [
+    "drop_schemas": [
       "memory_ingest_private",
       "memory"
-    ]
+    ],
+    "drop_statements_present": true,
+    "structured_lifeswitch_data_mutated": false,
+    "visible_chat_history_mutated": false,
+    "zep_data_mutated": false
   },
-  "status": "blocked_pending_reconciliation_and_dependency_proof",
+  "session_proofs": [
+    "lifeswitch.legacy_memory_backup_sha256",
+    "lifeswitch.legacy_memory_restore_receipt_sha256",
+    "lifeswitch.legacy_attestation_reconciliation_receipt_sha256",
+    "lifeswitch.legacy_attestation_quarantine_ciphertext_sha256",
+    "lifeswitch.legacy_attestation_key_custody_receipt_sha256",
+    "lifeswitch.legacy_memory_dependency_catalog_sha256",
+    "lifeswitch.legacy_attestation_source_sha256",
+    "lifeswitch.legacy_attestation_eligible_sha256",
+    "lifeswitch.legacy_attestation_quarantine_sha256"
+  ],
+  "status": "candidate_not_applied",
   "target": {
     "database": "memory",
     "execution_role": "sage",
     "server": "seebx"
+  },
+  "transaction": {
+    "advisory_lock": "legacy_memory_schema_retirement_v1",
+    "all_or_nothing": true,
+    "migration_supplies_begin_commit": true
   }
 }

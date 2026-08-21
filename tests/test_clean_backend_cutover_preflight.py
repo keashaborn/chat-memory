@@ -12,6 +12,7 @@ from scripts.verify_clean_backend_cutover import (
     PreflightOperationalError,
     collect_database_state,
     collect_database_state_read_only,
+    collect_role_boundary_read_only,
     evaluate_readiness,
     main,
     read_crontab,
@@ -34,8 +35,35 @@ def ready_database() -> dict[str, object]:
         "memory_table_count": 160,
         "memory_ingest_table_count": 7,
         "external_legacy_function_refs": 0,
+        "external_legacy_view_refs": 0,
+        "external_legacy_materialized_view_refs": 0,
+        "external_legacy_trigger_refs": 0,
+        "external_legacy_foreign_keys": 0,
+        "external_legacy_catalog_dependencies": 0,
+        "attestation_source_rows": 190,
+        "attestation_eligible_rows": 32,
+        "attestation_quarantine_rows": 158,
+        "attestation_reconciled_rows": 32,
         "nonterminal_ingest": 0,
         "nonterminal_erasure": 0,
+    }
+
+
+def ready_application() -> dict[str, object]:
+    return {
+        "database": "memory",
+        "role": "sage",
+        "legacy_private_select": False,
+        "legacy_private_write": False,
+    }
+
+
+def ready_inspection() -> dict[str, object]:
+    return {
+        "database": "memory",
+        "role": "lifeswitch_retirement_auditor",
+        "legacy_private_select": True,
+        "legacy_private_write": False,
     }
 
 
@@ -45,8 +73,14 @@ class CleanBackendCutoverPreflightTests(unittest.TestCase):
             ready_database(),
             crontab_text="15 2 * * * /usr/local/bin/other-job\n",
             dependencies={"status": "pass"},
-            backup_sha256="a" * 64,
-            restore_receipt_sha256="b" * 64,
+            application_boundary=ready_application(),
+            inspection_boundary=ready_inspection(),
+            backup_sha256="0adc9bcaba1baee76b815aeb3000ce3c0685367648e976c138354145668afa15",
+            restore_receipt_sha256="1f5a117b4dd83176e34141340c9fd9eede8623f1319d8cfd260fbf5f37cb9e24",
+            attestation_receipt_sha256="c" * 64,
+            quarantine_ciphertext_sha256="d" * 64,
+            key_custody_receipt_sha256="e" * 64,
+            dependency_catalog_sha256="f" * 64,
         )
         self.assertEqual(result["status"], "pass")
         self.assertTrue(result["candidate_deploy_ready"])
@@ -64,12 +98,14 @@ class CleanBackendCutoverPreflightTests(unittest.TestCase):
             database,
             crontab_text="0 3 * * * cd /opt/chat-memory && ./eval_all_users.sh >> /tmp/log 2>&1\n",
             dependencies={"status": "fail"},
+            application_boundary=ready_application(),
+            inspection_boundary=ready_inspection(),
         )
         self.assertEqual(result["status"], "fail")
         self.assertFalse(result["candidate_deploy_ready"])
         self.assertIn("legacy_memory_cron_absent", result["gaps"])
         self.assertIn("zep_turn_outbox_present", result["gaps"])
-        self.assertIn("backup_sha256_bound", result["gaps"])
+        self.assertIn("backup_sha256_exact", result["gaps"])
         rendered = str(result)
         self.assertNotIn("/tmp/log", rendered)
 
@@ -78,6 +114,7 @@ class CleanBackendCutoverPreflightTests(unittest.TestCase):
             ready_database(),
             crontab_text="# 0 3 * * * cd /opt/chat-memory && ./eval_all_users.sh\n",
             dependencies={"status": "pass"},
+            application_boundary=ready_application(),
         )
         cron = next(item for item in result["deployment_checks"] if item["name"] == "legacy_memory_cron_absent")
         self.assertEqual(cron["status"], "pass")
@@ -90,7 +127,10 @@ class CleanBackendCutoverPreflightTests(unittest.TestCase):
             memory_table_count=0,
             memory_ingest_table_count=0,
         )
-        result = evaluate_readiness(database, crontab_text="", dependencies={"status": "pass"})
+        result = evaluate_readiness(
+            database, crontab_text="", dependencies={"status": "pass"},
+            application_boundary=ready_application(),
+        )
         self.assertEqual(result["legacy_schema_state"], "retired")
         self.assertFalse(result["legacy_schema_retirement_ready"])
         self.assertEqual(result["deployment_gaps"], [])
@@ -105,7 +145,10 @@ class CleanBackendCutoverPreflightTests(unittest.TestCase):
             memory_ingest_table_count=0,
             zep_turn_outbox_present=False,
         )
-        result = evaluate_readiness(database, crontab_text="", dependencies={"status": "pass"})
+        result = evaluate_readiness(
+            database, crontab_text="", dependencies={"status": "pass"},
+            application_boundary=ready_application(),
+        )
         self.assertEqual(result["legacy_schema_state"], "retired")
         self.assertIn("zep_turn_outbox_present", result["deployment_gaps"])
         self.assertIn("zep_turn_outbox_present", result["gaps"])
@@ -119,6 +162,10 @@ class FakeConnection:
         self.calls.append((sql, args))
         if sql == "SHOW transaction_read_only":
             return "on"
+        if "has_table_privilege" in sql and "INSERT,UPDATE,DELETE,TRUNCATE" in sql:
+            return False
+        if "has_table_privilege" in sql and "SELECT" in sql:
+            return True
         if "conversation_sync_private.zep_turn_outbox" in sql:
             return True
         if "to_regprocedure($1::text)::oid" in sql and args == (
@@ -147,12 +194,26 @@ class FakeConnection:
             return 7
         if "n.nspname = 'memory'" in sql:
             return 160
-        if "FROM pg_proc" in sql:
+        if "FROM pg_proc" in sql or "FROM pg_views" in sql or "FROM pg_matviews" in sql or "FROM pg_constraint" in sql or "FROM pg_depend" in sql:
             return 0
+        if "FROM pg_trigger t JOIN" in sql:
+            return 0
+        if "FROM memory.assistant_transcript_attestation_v1 a JOIN public.chat_log" in sql and "JOIN chat_integrity" in sql:
+            return 32
+        if "FROM memory.assistant_transcript_attestation_v1 a JOIN public.chat_log" in sql:
+            return 32
+        if "FROM memory.assistant_transcript_attestation_v1" in sql:
+            return 190
         if "memory_ingest_outbox WHERE state" in sql:
             return 0
         if "source_erasure_operation WHERE state" in sql:
             return 0
+        raise AssertionError(f"unexpected query: {sql}")
+
+    async def fetchrow(self, sql: str, *args: object) -> dict[str, str]:
+        self.calls.append((sql, args))
+        if "current_database()" in sql:
+            return {"database": "memory", "role": "lifeswitch_retirement_auditor"}
         raise AssertionError(f"unexpected query: {sql}")
 
     def transaction(self, **options: object) -> "FakeTransaction":
@@ -205,6 +266,9 @@ class CleanBackendDatabaseCollectionTests(unittest.IsolatedAsyncioTestCase):
         connection = FakeConnection()
         result = await collect_database_state_read_only(connection)
         self.assertTrue(result["transaction_read_only"])
+        boundary = await collect_role_boundary_read_only(connection)
+        self.assertEqual(boundary["role"], "lifeswitch_retirement_auditor")
+        self.assertFalse(boundary["legacy_private_write"])
         self.assertIn(
             (
                 "transaction",
@@ -244,13 +308,13 @@ class CleanBackendCliRedactionTests(unittest.TestCase):
     def test_unexpected_database_error_does_not_emit_exception_text(self) -> None:
         output = io.StringIO()
         with (
-            patch.dict(os.environ, {"CUTOVER_TEST_DSN": "postgres://user:secret@example/db"}),
+            patch.dict(os.environ, {"CUTOVER_TEST_DSN": "postgres://user:secret@example/db", "CUTOVER_INSPECTION_DSN": "postgres://audit:other@example/db"}),
             patch("scripts.verify_clean_backend_cutover.load_contract", return_value=((3, 12), {})),
             patch("scripts.verify_clean_backend_cutover.verify_contract", return_value={"status": "pass"}),
             patch("scripts.verify_clean_backend_cutover.asyncpg.connect", new=AsyncMock(side_effect=ValueError("postgres://user:secret@example/db"))),
             redirect_stdout(output),
         ):
-            exit_code = main(["--dsn-env", "CUTOVER_TEST_DSN"])
+            exit_code = main(["--dsn-env", "CUTOVER_TEST_DSN", "--inspection-dsn-env", "CUTOVER_INSPECTION_DSN"])
         self.assertEqual(exit_code, 3)
         document = json.loads(output.getvalue())
         self.assertEqual(document["error"], "preflight_unexpected_error")

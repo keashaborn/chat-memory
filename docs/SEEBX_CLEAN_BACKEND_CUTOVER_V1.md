@@ -29,3 +29,24 @@ python scripts/verify_clean_backend_cutover.py \
 ```
 
 Exit code `0` means the candidate deployment gates pass, `2` means the system is not ready, and `3` means the preflight itself could not complete. The JSON report never emits the DSN, cron contents, database rows, message text, or credentials.
+
+## Privileged inspection boundary (candidate v2)
+
+The preflight now requires two distinct database identities. `POSTGRES_DSN` remains the normal `sage` application identity and must continue to have no read or write authority over the private legacy queues. `LEGACY_MEMORY_INSPECTION_DSN` must resolve to the dedicated `lifeswitch_retirement_auditor` identity, which is read-only, can inspect only the retirement evidence tables, and has no insert, update, delete, or truncate authority. The verifier rejects a shared DSN, a shared role, write-capable inspection, or widened application access.
+
+The auditor role does not yet exist and no grants were changed by this candidate. Creating its credential and exact read-only grants is a separate production database/security operation.
+
+Retirement readiness additionally binds the attestation reconciliation receipt, encrypted-quarantine hash, AWS Secrets Manager key-custody receipt, dependency-catalog hash, and the exact backup/restore hashes. Missing evidence keeps deployment and retirement decisions separate and fail-closed.
+
+## Candidate verification evidence (2026-08-21)
+
+- Base candidate commit: `dcf7b2092800b3d875a72fdd9d1c264b5f649c05`; production was not edited.
+- Key-custody schema SHA-256: `442ae5d7006e860cd4a5eab999ee268ab8f6536d8625d4d2c52c2fbf3f66c1ce`.
+- Reconciliation tool SHA-256: `cf35c1dd0885ae11c05d1e44e347b7f85193758f59e77193b8911a65e8c7028b`.
+- Clean-backend preflight SHA-256: `87e8a861de1734aa8adb37a607c61172e66858eec764503f82d32f24e9d21e90`.
+- Executable retirement SQL SHA-256: `00a82f89c47c68002cae61546adafcf5264b3507f2f296dd22829d09cf1f19e3`.
+- Focused custody/preflight/retirement tests: 17/17 pass.
+- Full backend suite in the verified pinned Python 3.12/Pydantic 2.12.3 runtime: 1,235/1,235 pass.
+- Disposable PostgreSQL 16 positive execution: exact 160-table `memory`, 7-table `memory_ingest_private`, and 190/32/158 attestation fixture passed every assertion; only the two legacy schemas were dropped; Zep outbox and both chat-clear functions remained.
+- Disposable PostgreSQL 16 negative execution: an external `public` view produced `external legacy dependencies remain`; the transaction aborted and both legacy schemas and the outside view remained.
+- Package hashes, Python compilation, and `git diff --check` pass. No AWS secret, live database role/grant, migration, schema, service, frontend, or production source was changed.

@@ -12,7 +12,8 @@ BEGIN
     RAISE EXCEPTION 'legacy attestation reconciliation target mismatch';
   END IF;
   IF COALESCE(current_setting('lifeswitch.legacy_attestation_receipt_sha256', true), '') !~ '^[0-9a-f]{64}$'
-     OR COALESCE(current_setting('lifeswitch.legacy_attestation_quarantine_ciphertext_sha256', true), '') !~ '^[0-9a-f]{64}$' THEN
+     OR COALESCE(current_setting('lifeswitch.legacy_attestation_quarantine_ciphertext_sha256', true), '') !~ '^[0-9a-f]{64}$'
+     OR COALESCE(current_setting('lifeswitch.legacy_attestation_key_custody_receipt_sha256', true), '') !~ '^[0-9a-f]{64}$' THEN
     RAISE EXCEPTION 'hash-bound encrypted quarantine receipt is required';
   END IF;
   IF COALESCE(current_setting('lifeswitch.legacy_attestation_source_sha256', true), '') <> 'c07967305707d83e258bd441939359b472b95bb414eeb739a7edd99a5f657831'
