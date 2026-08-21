@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import ast
 import os
 import unittest
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from fastapi import FastAPI, HTTPException
 from starlette.requests import Request
@@ -25,22 +27,9 @@ def request(actor: str | None) -> Request:
     return Request({"type": "http", "headers": headers})
 
 
-class FakeConnection:
-    def __init__(self, *, row=None, rows=None):
-        self.row = row
-        self.rows = rows or []
-        self.fetchrow_calls = []
-        self.closed = False
-
-    async def fetchrow(self, query, *args):
-        self.fetchrow_calls.append((query, args))
-        return self.row
-
-    async def fetch(self, _query, *_args):
-        return self.rows
-
-    async def close(self):
-        self.closed = True
+@asynccontextmanager
+async def repository_context(repository):
+    yield repository
 
 
 class FormsCapabilityTests(unittest.IsolatedAsyncioTestCase):
@@ -76,58 +65,63 @@ class FormsCapabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("if forms_enabled():", source)
         self.assertIn('app.include_router(forms_router, prefix="/forms")', source)
 
-    def test_router_uses_isolated_database_and_no_platform_dsn(self):
-        source = (ROOT / "seebx/capabilities/forms/routes.py").read_text()
-        self.assertIn("connect_lifeswitch", source)
-        self.assertIn("require_actor", source)
-        self.assertIn("require_request_actor", source)
+    def test_router_has_no_database_effect_or_connection_ownership(self):
+        path = ROOT / "seebx/capabilities/forms/routes.py"
+        source = path.read_text()
+        tree = ast.parse(source)
+        forbidden = {"execute", "fetch", "fetchrow", "fetchval", "transaction"}
+        effects = [
+            node.attr
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Attribute) and node.attr in forbidden
+        ]
+        self.assertEqual(effects, [])
+        self.assertIn("lifeswitch_forms_repository", source)
+        self.assertNotIn("connect_lifeswitch", source)
         self.assertNotIn("POSTGRES_DSN", source)
         self.assertNotIn("vb_form_", source)
 
-    async def test_list_rejects_actor_owner_mismatch_before_database(self):
-        connect = AsyncMock()
+    async def test_list_rejects_actor_owner_mismatch_before_repository(self):
+        repository_factory = Mock()
         denied = HTTPException(status_code=403, detail="supabase_actor_owner_mismatch")
         with (
             patch.object(routes, "require_actor", AsyncMock(side_effect=denied)),
-            patch.object(routes, "connect_lifeswitch", connect),
+            patch.object(routes, "lifeswitch_forms_repository", repository_factory),
         ):
             with self.assertRaises(HTTPException) as caught:
                 await routes.list_templates(request(OTHER), OWNER)
         self.assertEqual(caught.exception.status_code, 403)
-        connect.assert_not_awaited()
+        repository_factory.assert_not_called()
 
-    async def test_template_list_serializes_database_uuids(self):
+    async def test_template_list_serializes_repository_rows(self):
         template_id = uuid.uuid4()
         version_id = uuid.uuid4()
         now = datetime.now(timezone.utc)
-        conn = FakeConnection(
-            rows=[
-                {
-                    "template_id": template_id,
-                    "name": "Daily check-in",
-                    "status": "published",
-                    "created_at": now,
-                    "latest_version_id": version_id,
-                    "latest_version": 2,
-                    "latest_version_created_at": now,
-                }
-            ]
-        )
+        repository = Mock()
+        repository.list_templates = AsyncMock(return_value=[{
+            "template_id": template_id,
+            "name": "Daily check-in",
+            "status": "published",
+            "created_at": now,
+            "latest_version_id": version_id,
+            "latest_version": 2,
+            "latest_version_created_at": now,
+        }])
         with (
             patch.object(routes, "require_actor", AsyncMock(return_value=OWNER)),
             patch.object(
                 routes,
-                "connect_lifeswitch",
-                AsyncMock(return_value=conn),
+                "lifeswitch_forms_repository",
+                side_effect=lambda _req: repository_context(repository),
             ),
         ):
             result = await routes.list_templates(request(OWNER), OWNER)
         self.assertEqual(result[0].template_id, str(template_id))
         self.assertEqual(result[0].latest_version_id, str(version_id))
         self.assertEqual(result[0].latest_version, 2)
-        self.assertTrue(conn.closed)
+        repository.list_templates.assert_awaited_once_with(OWNER)
 
-    async def test_version_requires_actor_and_binds_query_to_actor(self):
+    async def test_version_requires_actor_and_binds_repository_to_actor(self):
         denied = HTTPException(status_code=401, detail="missing_supabase_access_token")
         with patch.object(
             routes,
@@ -138,7 +132,8 @@ class FormsCapabilityTests(unittest.IsolatedAsyncioTestCase):
                 await routes.get_version(request(None), VERSION)
         self.assertEqual(caught.exception.status_code, 401)
 
-        conn = FakeConnection(row=None)
+        repository = Mock()
+        repository.get_version = AsyncMock(return_value=None)
         with (
             patch.object(
                 routes,
@@ -147,34 +142,35 @@ class FormsCapabilityTests(unittest.IsolatedAsyncioTestCase):
             ),
             patch.object(
                 routes,
-                "connect_lifeswitch",
-                AsyncMock(return_value=conn),
+                "lifeswitch_forms_repository",
+                side_effect=lambda _req: repository_context(repository),
             ),
         ):
             with self.assertRaises(HTTPException) as missing:
                 await routes.get_version(request(OWNER), VERSION)
         self.assertEqual(missing.exception.status_code, 404)
-        self.assertEqual(conn.fetchrow_calls[0][1][1], OWNER)
-        self.assertIn("v.owner_user_id=$2::uuid", conn.fetchrow_calls[0][0])
-        self.assertTrue(conn.closed)
+        repository.get_version.assert_awaited_once_with(
+            owner=OWNER,
+            version_id=uuid.UUID(VERSION),
+        )
 
-    async def test_entry_owner_mismatch_is_rejected_before_database(self):
+    async def test_entry_owner_mismatch_is_rejected_before_repository(self):
         payload = CreateEntryRequest(
             owner_user_id=OWNER,
             subject_id="subject-1",
             template_version_id=VERSION,
             data={"value": 1},
         )
-        connect = AsyncMock()
+        repository_factory = Mock()
         denied = HTTPException(status_code=403, detail="supabase_actor_owner_mismatch")
         with (
             patch.object(routes, "require_actor", AsyncMock(side_effect=denied)),
-            patch.object(routes, "connect_lifeswitch", connect),
+            patch.object(routes, "lifeswitch_forms_repository", repository_factory),
         ):
             with self.assertRaises(HTTPException) as caught:
                 await routes.create_entry(request(OTHER), payload)
         self.assertEqual(caught.exception.status_code, 403)
-        connect.assert_not_awaited()
+        repository_factory.assert_not_called()
 
     def test_missing_json_schema_dependency_fails_closed(self):
         with patch.object(routes, "jsonschema", None):
@@ -203,32 +199,18 @@ class FormsCapabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(invalid_schema.exception.detail, "invalid_json_schema")
 
     def test_schema_migration_forces_owner_rls_and_private_grants(self):
-        migration = (
-            ROOT / "ops/sql/20260819_lifeswitch_forms_v1.sql"
-        ).read_text()
-        self.assertEqual(
-            migration.count("FORCE ROW LEVEL SECURITY"),
-            3,
-        )
+        migration = (ROOT / "ops/sql/20260819_lifeswitch_forms_v1.sql").read_text()
+        self.assertEqual(migration.count("FORCE ROW LEVEL SECURITY"), 3)
         self.assertEqual(
             migration.count("FOR ALL TO lifeswitch_app, lifeswitch_owner"),
             3,
         )
         self.assertEqual(migration.count("WITH CHECK ("), 3)
-        self.assertIn(
-            "REVOKE ALL ON SCHEMA lifeswitch_forms FROM PUBLIC",
-            migration,
-        )
+        self.assertIn("REVOKE ALL ON SCHEMA lifeswitch_forms FROM PUBLIC", migration)
         self.assertNotIn(" TO anon", migration)
         self.assertNotIn(" TO authenticated", migration)
-        self.assertIn(
-            "FOREIGN KEY (form_template_id, owner_user_id)",
-            migration,
-        )
-        self.assertIn(
-            "FOREIGN KEY (form_version_id, owner_user_id)",
-            migration,
-        )
+        self.assertIn("FOREIGN KEY (form_template_id, owner_user_id)", migration)
+        self.assertIn("FOREIGN KEY (form_version_id, owner_user_id)", migration)
 
 
 if __name__ == "__main__":

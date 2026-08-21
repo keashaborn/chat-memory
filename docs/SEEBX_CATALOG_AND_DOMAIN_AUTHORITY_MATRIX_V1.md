@@ -10,8 +10,8 @@ Evidence baseline:
 
 - SeeBx production: `49f9e60cf4321c8e42c359845c1a62a8c987614d`, clean,
   service active with zero restarts;
-- cleanup candidate and GitHub branch:
-  `555ecfd8af052a2e6f62214ca76ad7a3d438e134`, clean;
+- cleanup candidate and GitHub branch begin this batch at:
+  `953a8a324894043c40ac22e8adf23133d44b807c`, clean;
 - Verbal Sage production: `858b61527186571cabb5580dc5159fdf6b69ae2e`,
   service active with zero restarts.
 
@@ -108,7 +108,6 @@ connection close, provider HTTP calls, and the non-database LifeSwitch stage
 
 | Capability module | Mounted routes | Direct SQL/transaction callsites | Current database | Frontend BFF surface |
 |---|---:|---:|---|---|
-| `catalog/routes.py` | 9 | 7 | platform PostgreSQL | 6 route files |
 | `nutrition/routes.py` | 17 | 61 | isolated LifeSwitch PostgreSQL | nutrition group: 27 route files |
 | `nutrition/meals.py` | 7 | 14 | isolated LifeSwitch PostgreSQL | nutrition group |
 | `nutrition/logs.py` | 7 | 26 | isolated LifeSwitch PostgreSQL | nutrition group |
@@ -116,10 +115,12 @@ connection close, provider HTTP calls, and the non-database LifeSwitch stage
 | `training/logs.py` | 0 | 2 | caller-owned isolated connection | training group |
 | `measurements/routes.py` | 3 | 4 | isolated LifeSwitch PostgreSQL | 3 route files |
 | `plans/routes.py` | 5 | 8 | isolated LifeSwitch PostgreSQL | 5 route files |
+| `operations/ai_operations.py` | 0 | 6 | platform PostgreSQL | internal operations callers |
+| `observability/telemetry.py` | 3 | 9 | platform PostgreSQL | admin/telemetry callers |
 
-These are eight of the eleven remaining direct database-effect capability
-modules. Forms, AI operations, and telemetry are separate capability groups
-and are not part of this catalog/domain decision.
+These are the exact nine remaining direct database-effect capability modules,
+with 202 AST-derived effects. Catalog and Forms now own zero direct database
+effects in capability code; their retained effects are behind named adapters.
 
 ## Canonical target flow
 

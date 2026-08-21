@@ -9,13 +9,13 @@ Status: candidate evidence; no deployment or retirement authority
 - Production SeeBx remains at backend commit
   `49f9e60cf4321c8e42c359845c1a62a8c987614d`; its Git status is empty and
   `brains.service` is active with zero restarts.
-- The cleanup integration candidate and GitHub branch are both
-  `be653e03c403c43492f243bac198b538ee4a6f07`; the worktree is clean before this candidate-only safety batch.
+- The cleanup integration candidate and GitHub branch begin this batch at
+  `953a8a324894043c40ac22e8adf23133d44b807c`; the worktree was clean before the candidate-only Forms adapter extraction.
 - The candidate has 143 routes and 129 OpenAPI paths. Route SHA-256 remains
   `c8d1df9cf48611e6c849614a521979b4a6109b0b4ef14f99ae55f4e85915d7d6`
   and OpenAPI SHA-256 remains
   `17aaa3a4a18bfe3a3d3671c1fee02654270524d0b5d764cd4c6eea6627429a8f`.
-- The complete candidate suite passes 1,204/1,204 after the candidate-only retirement safety batch.
+- The complete candidate suite passes 1,211/1,211 after the candidate-only Forms adapter extraction.
 - The separate failed voice-canary unit and active timer remain outside this
   cleanup batch.
 
@@ -42,12 +42,11 @@ Status: candidate evidence; no deployment or retirement authority
 
 ## Remaining architectural debt
 
-1. Ten capability modules still contain direct SQL execution or transaction
+1. Nine capability modules still contain direct SQL execution or transaction
    ownership. Conversation, search, preferences, and voice now have zero direct
    query/transaction effects in their capability packages. The remaining files
    are exactly:
 
-   - forms: `seebx/capabilities/forms/routes.py`;
    - LifeSwitch domain: `measurements/routes.py`, `nutrition/logs.py`,
      `nutrition/meals.py`, `nutrition/routes.py`, `plans/routes.py`,
      `training/logs.py`, and `training/routes.py`;
@@ -95,12 +94,11 @@ Status: candidate evidence; no deployment or retirement authority
 
 ## Next cleanup order
 
-1. Apply the catalog/domain decision in
-   `docs/SEEBX_CATALOG_AND_DOMAIN_AUTHORITY_MATRIX_V1.md`: isolated
-   `catalog_dev` is canonical; first separate active catalog reads/providers
-   without changing security policy or production.
-2. Continue candidate-only database-effect extraction one coherent aggregate
-   at a time, with focused and full-suite parity.
+1. Continue candidate-only database-effect extraction with one coherent
+   LifeSwitch domain aggregate at a time; preserve the isolated database,
+   route contracts, owner checks, and default-off gates.
+2. Run the Forms schema, exact valid/quarantine reconciliation, rollback, and
+   cross-owner denial proof only in a separately authorized disposable restore.
 3. Prove Zep owner/thread isolation, deletion, export/retention, outage, and
    provenance behavior before declaring the old memory paths fully replaced.
 4. Regenerate immutable backend/frontend bundles and release manifests from the
