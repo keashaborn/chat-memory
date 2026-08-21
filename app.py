@@ -8,7 +8,7 @@ from seebx.capabilities.conversation.zep_runtime import (
     ZEP_MEMORY_RUNTIME,
 )
 from seebx.capabilities.conversation.router import (
-    router as conversation_router,
+    create_conversation_response_router,
 )
 from seebx.capabilities.search.trusted_health import router as trusted_web_router
 from seebx.capabilities.search.current_news import router as current_news_router
@@ -60,6 +60,9 @@ from seebx.capabilities.conversation.export_routes import (
 from seebx.adapters.ai_operations_postgres import (
     PostgresAiOperationsRepository,
 )
+from seebx.adapters.assistant_preferences_postgres import (
+    PostgresAssistantPreferencesRepository,
+)
 from seebx.adapters.postgres import PostgresConnectionProvider
 
 
@@ -83,7 +86,22 @@ from seebx.capabilities.operations.health_routes import (
 )
 app = FastAPI(title="SeeBx API", version="1.0.0")
 install_http_boundary(app)
-app.include_router(conversation_router, prefix="/response")
+DSN = os.environ["POSTGRES_DSN"]
+POSTGRES = PostgresConnectionProvider(DSN)
+RESPONSE_POSTGRES = PostgresConnectionProvider(
+    DSN,
+    connect_kwargs={"command_timeout": 90},
+)
+RESPONSE_ASSISTANT_PREFERENCES = PostgresAssistantPreferencesRepository(
+    POSTGRES
+)
+app.include_router(
+    create_conversation_response_router(
+        RESPONSE_POSTGRES,
+        assistant_preferences=RESPONSE_ASSISTANT_PREFERENCES,
+    ),
+    prefix="/response",
+)
 app.include_router(trusted_web_router, prefix="/trusted-web")
 app.include_router(current_news_router, prefix="/current-news")
 app.include_router(search_execution_router_v1, prefix="/search")
@@ -107,8 +125,6 @@ app.include_router(voice_realtime_preview_router)
 app.include_router(voice_session_router)
 
 
-DSN = os.environ["POSTGRES_DSN"]
-POSTGRES = PostgresConnectionProvider(DSN)
 AI_OPERATIONS_POSTGRES = PostgresConnectionProvider(
     DSN,
     connect_kwargs={"command_timeout": 10, "timeout": 5},

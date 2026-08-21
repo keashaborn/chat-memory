@@ -363,3 +363,5 @@ object, every active capability follows the allowed dependency direction, each
 canonical record has one owner, compatibility adapters have zero callers, all
 retirements have recovery evidence, production and frontend contract tests
 pass, and the clean Git/GitHub state plus encrypted snapshot are verified.
+
+- 2026-08-21 candidate checkpoint: the last direct `asyncpg.connect` in the conversation capability is replaced by a composition-injected PostgreSQL provider without changing route order, timeout policy, or response behavior. Remaining direct database effects are confined to Nutrition, Training, and telemetry pending separate aggregate-sized batches. Exact parent/candidate parity is 138 routes, 124 OpenAPI paths, and identical route/OpenAPI hashes; 36 focused and 1,243 complete backend tests pass.

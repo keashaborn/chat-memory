@@ -22,6 +22,7 @@ from seebx.capabilities.conversation.memory_contracts import (
 )
 from seebx.capabilities.conversation import router as response_router
 from seebx.core.identity import ActorContext, TEXT_AUTHORITY
+from seebx.adapters.postgres import PostgresConnectionProvider
 from seebx.capabilities.conversation.router import (
     NO_STORE_HEADERS,
     ConversationResponseRequestV1,
@@ -50,6 +51,16 @@ class ConversationRouterTests(unittest.TestCase):
         self.assertIn("CONVERSATION_SAFETY_CLASSIFIER_MODEL", source)
         self.assertNotIn("RESSE_CLASSIFIER_MODEL", source)
         self.assertNotIn("[resse_response]", source)
+
+    def test_response_connection_lifetime_is_adapter_owned_and_injected(self) -> None:
+        source = (ROOT / "seebx/capabilities/conversation/router.py").read_text()
+        app_source = (ROOT / "app.py").read_text()
+        self.assertNotIn("import asyncpg", source)
+        self.assertNotIn("asyncpg.connect", source)
+        self.assertNotIn("await conn.close()", source)
+        self.assertIn("async with postgres.connection() as conn:", source)
+        self.assertIn("create_conversation_response_router(", app_source)
+        self.assertIn('connect_kwargs={"command_timeout": 90}', app_source)
 
     def test_attachment_sql_is_owned_by_postgres_adapter(self) -> None:
         source = (ROOT / "seebx/capabilities/conversation/router.py").read_text()
@@ -346,13 +357,13 @@ class ConversationRouterTests(unittest.TestCase):
     def test_non_zep_routes_retain_not_applicable_provenance_lifecycle(self) -> None:
         source = (ROOT / "seebx/capabilities/conversation/router.py").read_text()
         self.assertIn(
-            """        else:
-            if exclusion_reason is None:
-                raise MemoryResponseConfigurationError(
-                    "memory_response_exclusion_reason_missing"
-                )
-            memory_provider = InactiveMemoryContextProviderV1(exclusion_reason)
-            memory_lifecycle = memory_provider
+            """            else:
+                if exclusion_reason is None:
+                    raise MemoryResponseConfigurationError(
+                        "memory_response_exclusion_reason_missing"
+                    )
+                memory_provider = InactiveMemoryContextProviderV1(exclusion_reason)
+                memory_lifecycle = memory_provider
 """,
             source,
         )
@@ -395,6 +406,11 @@ class ZepResponseRouterAuthenticationTests(unittest.IsolatedAsyncioTestCase):
         authenticate = AsyncMock(return_value=self.context())
         connect = AsyncMock(side_effect=RuntimeError("stop_after_auth"))
         request = successor_request()
+        postgres = PostgresConnectionProvider(
+            "synthetic-configured-dsn",
+            connect_factory=connect,
+            connect_kwargs={"command_timeout": 90},
+        )
         with (
             patch.object(response_router, "DSN", "synthetic-configured-dsn"),
             patch.object(
@@ -402,16 +418,20 @@ class ZepResponseRouterAuthenticationTests(unittest.IsolatedAsyncioTestCase):
                 "require_actor_context",
                 new=authenticate,
             ),
-            patch.object(response_router.asyncpg, "connect", connect),
         ):
             with self.assertRaisesRegex(RuntimeError, "stop_after_auth"):
                 await conversation_response_query(
                     payload,
                     request,
                     Response(),
+                    postgres=postgres,
+                    assistant_preferences=AsyncMock(),
                 )
         authenticate.assert_awaited_once_with(request, str(ACTOR))
-        connect.assert_awaited_once()
+        connect.assert_awaited_once_with(
+            "synthetic-configured-dsn",
+            command_timeout=90,
+        )
 
     async def test_normal_text_uses_supabase_owner_auth_without_retired_authority(
         self,
@@ -429,6 +449,12 @@ class ZepResponseRouterAuthenticationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_non_successor_runtime_mode_refuses_before_resources(self) -> None:
         authenticate = AsyncMock()
+        connect = AsyncMock()
+        postgres = PostgresConnectionProvider(
+            "synthetic-configured-dsn",
+            connect_factory=connect,
+            connect_kwargs={"command_timeout": 90},
+        )
         with (
             patch.object(response_router, "RESPONSE_MEMORY_MODE", "legacy"),
             patch.object(response_router, "DSN", "synthetic-configured-dsn"),
@@ -443,10 +469,13 @@ class ZepResponseRouterAuthenticationTests(unittest.IsolatedAsyncioTestCase):
                     self.payload(),
                     successor_request(),
                     Response(),
+                    postgres=postgres,
+                    assistant_preferences=AsyncMock(),
                 )
         self.assertEqual(raised.exception.status_code, 503)
         self.assertEqual(raised.exception.detail, "response_memory_mode_invalid")
         authenticate.assert_not_awaited()
+        connect.assert_not_awaited()
 
     def test_retired_live_authority_is_absent_from_zep_text_router(self) -> None:
         source = (ROOT / "seebx/capabilities/conversation/router.py").read_text()

@@ -8,7 +8,6 @@ import logging
 import time
 from uuid import UUID, uuid4
 
-import asyncpg
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -95,9 +94,6 @@ from seebx.capabilities.conversation.zep_runtime import (
 )
 
 
-router = APIRouter()
-router.add_event_handler("startup", ZEP_SYNC_CONTROLLER.start)
-router.add_event_handler("shutdown", ZEP_SYNC_CONTROLLER.stop)
 logger = logging.getLogger("uvicorn.error")
 DSN = (os.getenv("POSTGRES_DSN") or "").strip()
 LIFESWITCH_CHAT_SETTINGS = LifeSwitchChatRuntimeSettingsV1.from_environment()
@@ -109,12 +105,6 @@ NO_STORE_HEADERS = {
     "expires": "0",
 }
 RESPONSE_MEMORY_MODE = MEMORY_MODE_ZEP
-
-
-def _assistant_preferences_repository() -> PostgresAssistantPreferencesRepository:
-    """Construct lazily so offline imports do not require production config."""
-
-    return PostgresAssistantPreferencesRepository(PostgresConnectionProvider(DSN))
 
 
 def response_memory_provenance_for_mode(
@@ -165,7 +155,6 @@ def memory_not_applicable_reason(
     return None
 
 
-@router.on_event("shutdown")
 async def close_lifeswitch_chat_pool_v1() -> None:
     try:
         await LIFESWITCH_CHAT_POOL.close()
@@ -256,9 +245,13 @@ class ConversationResponseRequestV1(BaseModel):
         return value
 
 
-@router.post("/query")
-async def conversation_response_query(
-    payload: ConversationResponseRequestV1, req: Request, response: Response
+async def execute_conversation_response(
+    payload: ConversationResponseRequestV1,
+    req: Request,
+    response: Response,
+    *,
+    postgres: PostgresConnectionProvider,
+    assistant_preferences: PostgresAssistantPreferencesRepository,
 ):
     request_started_ns = time.monotonic_ns()
     response_memory_mode = RESPONSE_MEMORY_MODE
@@ -350,234 +343,268 @@ async def conversation_response_query(
         and ZEP_PROMPT_SETTINGS.enabled_for(owner)
     )
 
-    conn = await asyncpg.connect(DSN, command_timeout=90)
-    try:
-        attachment_context_block = None
-        if payload.attachment_ids:
-            attachment_rows = await fetch_ready_message_attachments(
-                conn,
-                owner_user_id=owner,
-                thread_id=payload.thread_id,
-                message_id=payload.attachment_message_id,
-                attachment_ids=payload.attachment_ids,
-            )
-            if len(attachment_rows) != len(payload.attachment_ids):
-                raise HTTPException(status_code=404, detail="attachment_not_found")
-            attachment_context_block = build_attachment_context_block_v1(
-                rows=attachment_rows,
-                request_id=request_id,
-                current_message=payload.message,
-            )
-        openai_client = get_openai_client()
-        generation_config = OpenAIChatGenerationConfigV1()
-        assistant_preference_plan = (
-            await _assistant_preferences_repository().get_effective_plan(owner)
-        )
-        exclusion_reason = memory_not_applicable_reason(
-            no_store=payload.no_store,
-            has_attachments=bool(payload.attachment_ids),
-            is_voice=voice_turn_id is not None,
-            has_web_search=search_capability_manifest is not None,
-        )
-        zep_eligible = (
-            payload.thread_id is not None and exclusion_reason is None
-        )
-        zep_memory_provider = None
-        if zep_eligible:
-            if not zep_prompt_enabled:
-                raise _no_store_http_exception(
-                    503,
-                    "zep_prompt_memory_unavailable",
+    async with postgres.connection() as conn:
+        try:
+            attachment_context_block = None
+            if payload.attachment_ids:
+                attachment_rows = await fetch_ready_message_attachments(
+                    conn,
+                    owner_user_id=owner,
+                    thread_id=payload.thread_id,
+                    message_id=payload.attachment_message_id,
+                    attachment_ids=payload.attachment_ids,
                 )
-            zep_memory_provider = ZepMemoryChatProviderV1(
-                ZEP_MEMORY_RUNTIME,
-                logger=logger,
+                if len(attachment_rows) != len(payload.attachment_ids):
+                    raise HTTPException(status_code=404, detail="attachment_not_found")
+                attachment_context_block = build_attachment_context_block_v1(
+                    rows=attachment_rows,
+                    request_id=request_id,
+                    current_message=payload.message,
+                )
+            openai_client = get_openai_client()
+            generation_config = OpenAIChatGenerationConfigV1()
+            assistant_preference_plan = (
+                await assistant_preferences.get_effective_plan(owner)
             )
-            memory_provider = zep_memory_provider
-            memory_lifecycle = None
-        else:
-            if exclusion_reason is None:
-                raise MemoryResponseConfigurationError(
-                    "memory_response_exclusion_reason_missing"
-                )
-            memory_provider = InactiveMemoryContextProviderV1(exclusion_reason)
-            memory_lifecycle = memory_provider
-        base_composer = ConversationResponseComposer(
-            openai_client=openai_client,
-            classifier_model=os.getenv(
-                "CONVERSATION_SAFETY_CLASSIFIER_MODEL",
-                "gpt-5.1",
-            ),
-            memory_provider=memory_provider,
-            zep_memory_lifecycle=memory_lifecycle,
-            generation_config=generation_config,
-        )
-        command = AuthenticatedResponseCommandV0_2(
-            authenticated_actor_user_id=owner,
-            thread_id=thread_id,
-            request_id=request_id,
-            current_message=payload.message,
-            request_field_names=tuple(
-                sorted(
-                    set(payload.model_fields_set)
-                    - {
-                        "include_inspection",
-                        "message_id",
-                        "attachment_ids",
-                        "attachment_message_id",
-                    }
-                )
-            ),
-            stateless=stateless,
-            search_capability_manifest=search_capability_manifest,
-            assistant_preference_plan=assistant_preference_plan,
-            response_language=response_language,
-            attachment_context_block=attachment_context_block,
-        )
-        lifeswitch_enabled = LIFESWITCH_CHAT_SETTINGS.enabled_for(owner)
-        if lifeswitch_enabled:
-            context_provider = LifeSwitchResponseContextProviderV1(
-                LazyPostgresRestrictedLifeSwitchReadSessionV1(
-                    LIFESWITCH_CHAT_POOL
-                )
+            exclusion_reason = memory_not_applicable_reason(
+                no_store=payload.no_store,
+                has_attachments=bool(payload.attachment_ids),
+                is_voice=voice_turn_id is not None,
+                has_web_search=search_capability_manifest is not None,
             )
-            prior_provenance_provider = InactivePriorLifeSwitchProvenanceProviderV1()
-            lifeswitch_composer = LifeSwitchConversationComposer(
-                base_composer=base_composer,
+            zep_eligible = (
+                payload.thread_id is not None and exclusion_reason is None
+            )
+            zep_memory_provider = None
+            if zep_eligible:
+                if not zep_prompt_enabled:
+                    raise _no_store_http_exception(
+                        503,
+                        "zep_prompt_memory_unavailable",
+                    )
+                zep_memory_provider = ZepMemoryChatProviderV1(
+                    ZEP_MEMORY_RUNTIME,
+                    logger=logger,
+                )
+                memory_provider = zep_memory_provider
+                memory_lifecycle = None
+            else:
+                if exclusion_reason is None:
+                    raise MemoryResponseConfigurationError(
+                        "memory_response_exclusion_reason_missing"
+                    )
+                memory_provider = InactiveMemoryContextProviderV1(exclusion_reason)
+                memory_lifecycle = memory_provider
+            base_composer = ConversationResponseComposer(
                 openai_client=openai_client,
-                context_provider=context_provider,
-                prior_provenance_provider=prior_provenance_provider,
+                classifier_model=os.getenv(
+                    "CONVERSATION_SAFETY_CLASSIFIER_MODEL",
+                    "gpt-5.1",
+                ),
+                memory_provider=memory_provider,
+                zep_memory_lifecycle=memory_lifecycle,
                 generation_config=generation_config,
             )
-            execution = await asyncio.wait_for(
-                lifeswitch_composer.execute_detailed(conn, command),
-                timeout=RESPONSE_QUERY_DEADLINE_SECONDS,
-            )
-        else:
-            execution = await asyncio.wait_for(
-                base_composer.execute_detailed(
-                    conn,
-                    command,
-                ),
-                timeout=RESPONSE_QUERY_DEADLINE_SECONDS,
-            )
-        finalized = execution.finalized
-        if zep_memory_provider is not None:
-            memory_provenance = zep_memory_provider.build_answer_provenance(
-                answer_id=finalized.answer_id,
-                prompt_sha256=(
-                    execution.trusted_plan.assembled_prompt.manifest.assembly_sha256
-                ),
-                provider_request_sha256=(
-                    execution.provider_response.provider_request_sha256
-                ),
-            ).model_dump(mode="json")
-        else:
-            memory_provenance = response_memory_provenance_for_mode(
-                mode=response_memory_mode,
-                memory_provenance=execution.memory_provenance,
-            )
-        persistence_started_ns = time.monotonic_ns()
-        await persist_openai_chat_usage(
-            conn,
-            owner_user_id=owner,
-            answer_id=finalized.answer_id,
-            source_channel="voice" if voice_turn_id is not None else "chat",
-            provider_response=execution.provider_response,
-        )
-        if not payload.no_store:
-            zep_sync_user_message_id = (
-                payload.message_id
-                if payload.message_id is not None
-                and (zep_eligible or voice_turn_id is not None)
-                and ZEP_MEMORY_RUNTIME.sync_enabled_for(owner)
-                else None
-            )
-            await persist_conversation_response(
-                conn,
-                owner_user_id=owner,
+            command = AuthenticatedResponseCommandV0_2(
+                authenticated_actor_user_id=owner,
                 thread_id=thread_id,
                 request_id=request_id,
-                finalized=finalized,
-                zep_sync_user_message_id=zep_sync_user_message_id,
-            )
-            if zep_sync_user_message_id is not None:
-                ZEP_SYNC_CONTROLLER.notify()
-        persistence_ms = max(
-            0,
-            round((time.monotonic_ns() - persistence_started_ns) / 1_000_000),
-        )
-        result = {
-            "answer": finalized.assistant_text,
-            "answer_id": str(finalized.answer_id),
-            "output_kind": finalized.output_kind.value,
-            "memory_provenance": memory_provenance,
-            "runtime": (
-                CANONICAL_LIFESWITCH_RESPONSE_RUNTIME_V1
-                if lifeswitch_enabled
-                else CANONICAL_CONVERSATION_RESPONSE_RUNTIME_V1
-            ),
-            "timings": {
-                **execution.stage_timings.model_dump(mode="json"),
-                "persistence_ms": persistence_ms,
-                "backend_total_ms": max(
-                    0,
-                    round((time.monotonic_ns() - request_started_ns) / 1_000_000),
+                current_message=payload.message,
+                request_field_names=tuple(
+                    sorted(
+                        set(payload.model_fields_set)
+                        - {
+                            "include_inspection",
+                            "message_id",
+                            "attachment_ids",
+                            "attachment_message_id",
+                        }
+                    )
                 ),
-            },
-        }
-        if payload.include_inspection:
-            try:
-                if lifeswitch_enabled:
-                    inspection = build_response_inspection_v4(
-                        trusted_plan=execution.trusted_plan,
-                        provider_response=execution.provider_response,
-                        finalized=finalized,
-                        transcript_persistence=(
-                            "skipped" if payload.no_store else "persisted"
-                        ),
-                        voice_turn_id=voice_turn_id,
+                stateless=stateless,
+                search_capability_manifest=search_capability_manifest,
+                assistant_preference_plan=assistant_preference_plan,
+                response_language=response_language,
+                attachment_context_block=attachment_context_block,
+            )
+            lifeswitch_enabled = LIFESWITCH_CHAT_SETTINGS.enabled_for(owner)
+            if lifeswitch_enabled:
+                context_provider = LifeSwitchResponseContextProviderV1(
+                    LazyPostgresRestrictedLifeSwitchReadSessionV1(
+                        LIFESWITCH_CHAT_POOL
                     )
-                else:
-                    inspection = build_response_inspection_v2(
-                        trusted_plan=execution.trusted_plan,
-                        provider_response=execution.provider_response,
-                        finalized=finalized,
-                        transcript_persistence=(
-                            "skipped" if payload.no_store else "persisted"
-                        ),
-                        voice_turn_id=voice_turn_id,
-                    )
-                result["inspection"] = inspection.model_dump(mode="json")
-            except Exception:
-                logger.error(
-                    "[response_inspection] trace unavailable answer_id=%s",
-                    finalized.answer_id,
                 )
-        return result
-    except HTTPException:
-        raise
-    except asyncio.TimeoutError:
-        logger.error(
-            "[conversation_response] request deadline exceeded timeout_seconds=%s",
-            RESPONSE_QUERY_DEADLINE_SECONDS,
+                prior_provenance_provider = InactivePriorLifeSwitchProvenanceProviderV1()
+                lifeswitch_composer = LifeSwitchConversationComposer(
+                    base_composer=base_composer,
+                    openai_client=openai_client,
+                    context_provider=context_provider,
+                    prior_provenance_provider=prior_provenance_provider,
+                    generation_config=generation_config,
+                )
+                execution = await asyncio.wait_for(
+                    lifeswitch_composer.execute_detailed(conn, command),
+                    timeout=RESPONSE_QUERY_DEADLINE_SECONDS,
+                )
+            else:
+                execution = await asyncio.wait_for(
+                    base_composer.execute_detailed(
+                        conn,
+                        command,
+                    ),
+                    timeout=RESPONSE_QUERY_DEADLINE_SECONDS,
+                )
+            finalized = execution.finalized
+            if zep_memory_provider is not None:
+                memory_provenance = zep_memory_provider.build_answer_provenance(
+                    answer_id=finalized.answer_id,
+                    prompt_sha256=(
+                        execution.trusted_plan.assembled_prompt.manifest.assembly_sha256
+                    ),
+                    provider_request_sha256=(
+                        execution.provider_response.provider_request_sha256
+                    ),
+                ).model_dump(mode="json")
+            else:
+                memory_provenance = response_memory_provenance_for_mode(
+                    mode=response_memory_mode,
+                    memory_provenance=execution.memory_provenance,
+                )
+            persistence_started_ns = time.monotonic_ns()
+            await persist_openai_chat_usage(
+                conn,
+                owner_user_id=owner,
+                answer_id=finalized.answer_id,
+                source_channel="voice" if voice_turn_id is not None else "chat",
+                provider_response=execution.provider_response,
+            )
+            if not payload.no_store:
+                zep_sync_user_message_id = (
+                    payload.message_id
+                    if payload.message_id is not None
+                    and (zep_eligible or voice_turn_id is not None)
+                    and ZEP_MEMORY_RUNTIME.sync_enabled_for(owner)
+                    else None
+                )
+                await persist_conversation_response(
+                    conn,
+                    owner_user_id=owner,
+                    thread_id=thread_id,
+                    request_id=request_id,
+                    finalized=finalized,
+                    zep_sync_user_message_id=zep_sync_user_message_id,
+                )
+                if zep_sync_user_message_id is not None:
+                    ZEP_SYNC_CONTROLLER.notify()
+            persistence_ms = max(
+                0,
+                round((time.monotonic_ns() - persistence_started_ns) / 1_000_000),
+            )
+            result = {
+                "answer": finalized.assistant_text,
+                "answer_id": str(finalized.answer_id),
+                "output_kind": finalized.output_kind.value,
+                "memory_provenance": memory_provenance,
+                "runtime": (
+                    CANONICAL_LIFESWITCH_RESPONSE_RUNTIME_V1
+                    if lifeswitch_enabled
+                    else CANONICAL_CONVERSATION_RESPONSE_RUNTIME_V1
+                ),
+                "timings": {
+                    **execution.stage_timings.model_dump(mode="json"),
+                    "persistence_ms": persistence_ms,
+                    "backend_total_ms": max(
+                        0,
+                        round((time.monotonic_ns() - request_started_ns) / 1_000_000),
+                    ),
+                },
+            }
+            if payload.include_inspection:
+                try:
+                    if lifeswitch_enabled:
+                        inspection = build_response_inspection_v4(
+                            trusted_plan=execution.trusted_plan,
+                            provider_response=execution.provider_response,
+                            finalized=finalized,
+                            transcript_persistence=(
+                                "skipped" if payload.no_store else "persisted"
+                            ),
+                            voice_turn_id=voice_turn_id,
+                        )
+                    else:
+                        inspection = build_response_inspection_v2(
+                            trusted_plan=execution.trusted_plan,
+                            provider_response=execution.provider_response,
+                            finalized=finalized,
+                            transcript_persistence=(
+                                "skipped" if payload.no_store else "persisted"
+                            ),
+                            voice_turn_id=voice_turn_id,
+                        )
+                    result["inspection"] = inspection.model_dump(mode="json")
+                except Exception:
+                    logger.error(
+                        "[response_inspection] trace unavailable answer_id=%s",
+                        finalized.answer_id,
+                    )
+            return result
+        except HTTPException:
+            raise
+        except asyncio.TimeoutError:
+            logger.error(
+                "[conversation_response] request deadline exceeded timeout_seconds=%s",
+                RESPONSE_QUERY_DEADLINE_SECONDS,
+            )
+            raise HTTPException(
+                status_code=504, detail="response_generation_timeout"
+            ) from None
+        except Exception as exc:
+            logger.error(
+                "[conversation_response] request failed error_type=%s persistence_stage=%s",
+                type(exc).__name__,
+                str(getattr(exc, "stage", "not_applicable")),
+            )
+            raise HTTPException(status_code=503, detail="response_generation_unavailable") from None
+
+
+def create_conversation_response_router(
+    postgres: PostgresConnectionProvider,
+    *,
+    assistant_preferences: PostgresAssistantPreferencesRepository,
+) -> APIRouter:
+    if postgres is None or assistant_preferences is None:
+        raise ValueError("conversation response dependencies are required")
+    router = APIRouter()
+    router.add_event_handler("startup", ZEP_SYNC_CONTROLLER.start)
+    router.add_event_handler("shutdown", ZEP_SYNC_CONTROLLER.stop)
+    router.add_event_handler("shutdown", close_lifeswitch_chat_pool_v1)
+
+    @router.post("/query")
+    async def conversation_response_query(
+        payload: ConversationResponseRequestV1,
+        req: Request,
+        response: Response,
+    ):
+        return await execute_conversation_response(
+            payload,
+            req,
+            response,
+            postgres=postgres,
+            assistant_preferences=assistant_preferences,
         )
-        raise HTTPException(
-            status_code=504, detail="response_generation_timeout"
-        ) from None
-    except Exception as exc:
-        logger.error(
-            "[conversation_response] request failed error_type=%s persistence_stage=%s",
-            type(exc).__name__,
-            str(getattr(exc, "stage", "not_applicable")),
-        )
-        raise HTTPException(status_code=503, detail="response_generation_unavailable") from None
-    finally:
-        await conn.close()
+
+    return router
+
+
+# Retain the test/import name without restoring a module-owned router or
+# connection. Runtime registration always uses the dependency-injected factory.
+conversation_response_query = execute_conversation_response
 
 
 __all__ = [
-    "response_memory_provenance_for_mode",
-    "router",
+    "conversation_response_query",
+    "create_conversation_response_router",
+    "execute_conversation_response",
     "memory_not_applicable_reason",
+    "response_memory_provenance_for_mode",
 ]
