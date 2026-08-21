@@ -34,15 +34,11 @@ _PROJECTION_BY_INTENT = {
 _ALLOWED_RELATIONS = {
     "current_plan": frozenset(
         {
-            "lifeswitch_agentic.plan_owner_state",
-            "lifeswitch_agentic.plan_versions",
             "lifeswitch_plan.plan_profile",
         }
     ),
     "plan_adherence": frozenset(
         {
-            "lifeswitch_agentic.plan_owner_state",
-            "lifeswitch_agentic.plan_versions",
             "lifeswitch_plan.plan_profile",
             "lifeswitch_nutrition.nutrition_day",
             "lifeswitch_nutrition.nutrition_entry",
@@ -58,8 +54,6 @@ _ALLOWED_RELATIONS = {
     ),
     "nutrition_day": frozenset(
         {
-            "lifeswitch_agentic.plan_owner_state",
-            "lifeswitch_agentic.plan_versions",
             "lifeswitch_plan.plan_profile",
             "lifeswitch_nutrition.nutrition_day",
             "lifeswitch_nutrition.nutrition_entry",
@@ -70,8 +64,6 @@ _ALLOWED_RELATIONS = {
     ),
     "nutrition_range": frozenset(
         {
-            "lifeswitch_agentic.plan_owner_state",
-            "lifeswitch_agentic.plan_versions",
             "lifeswitch_plan.plan_profile",
             "lifeswitch_nutrition.nutrition_day",
             "lifeswitch_nutrition.nutrition_entry",
@@ -82,8 +74,6 @@ _ALLOWED_RELATIONS = {
     ),
     "training_summary": frozenset(
         {
-            "lifeswitch_agentic.plan_owner_state",
-            "lifeswitch_agentic.plan_versions",
             "lifeswitch_plan.plan_profile",
             "lifeswitch_training.training_session_current_v",
             "lifeswitch_training.training_set_log",
@@ -108,8 +98,6 @@ _ALLOWED_RELATIONS = {
     ),
     "daily_status_range": frozenset(
         {
-            "lifeswitch_agentic.plan_owner_state",
-            "lifeswitch_agentic.plan_versions",
             "lifeswitch_plan.plan_profile",
             "lifeswitch_nutrition.nutrition_day",
             "lifeswitch_nutrition.nutrition_entry",
@@ -138,8 +126,6 @@ _ALLOWED_RELATIONS = {
     ),
     "lifting_progression_summary": frozenset(
         {
-            "lifeswitch_agentic.plan_owner_state",
-            "lifeswitch_agentic.plan_versions",
             "lifeswitch_plan.plan_profile",
             "lifeswitch_training.training_session_current_v",
             "lifeswitch_training.training_set_log",
@@ -175,8 +161,7 @@ class LifeSwitchReadResultV1(_StrictFrozenModel):
             raise ValueError("invalid LifeSwitch read status")
         if self.plan_source not in {
             "not_requested",
-            "agentic_active",
-            "legacy_fallback",
+            "canonical_plan",
             "unavailable",
         }:
             raise ValueError("invalid LifeSwitch plan source")

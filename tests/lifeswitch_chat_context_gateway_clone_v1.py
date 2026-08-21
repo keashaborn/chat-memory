@@ -152,7 +152,7 @@ async def main() -> None:
                 TEST_DAY - dt.timedelta(days=30),
                 TEST_DAY,
             )
-            require(plan["plan_source"] == "agentic_active", "wrong plan source")
+            require(plan["plan_source"] == "canonical_plan", "wrong plan source")
             document_value = plan["document"]
             document = (
                 json.loads(document_value)

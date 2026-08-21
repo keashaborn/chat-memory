@@ -15,16 +15,18 @@ class LifeSwitchPlanRestoreTests(unittest.TestCase):
         owner = "11111111-1111-4111-8111-111111111111"
         other = "22222222-2222-4222-8222-222222222222"
         self.assertEqual(
-            asyncio.run(_resolve_plan_target(None, owner)),
+            asyncio.run(_resolve_plan_target(owner)),
             (owner, False),
         )
         with self.assertRaises(HTTPException) as raised:
-            asyncio.run(_resolve_plan_target(None, owner, other, ["plan:view"]))
+            asyncio.run(_resolve_plan_target(owner, other))
         self.assertEqual(raised.exception.status_code, 403)
 
     def test_router_uses_isolated_owner_bound_connection(self):
         source = (ROOT / "seebx" / "capabilities" / "plans" / "routes.py").read_text()
-        self.assertIn("from seebx.adapters.lifeswitch_postgres import connect_lifeswitch", source)
+        self.assertIn("from seebx.adapters.lifeswitch_plan_postgres import (", source)
+        self.assertIn("lifeswitch_plan_repository", source)
+        self.assertNotIn("connect_lifeswitch", source)
         self.assertNotIn('os.getenv("POSTGRES_DSN")', source)
         self.assertNotIn("lifeswitch_people", source)
         self.assertIn('detail="owner-only Plan access required"', source)

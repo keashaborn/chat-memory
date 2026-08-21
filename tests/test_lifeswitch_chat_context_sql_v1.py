@@ -52,6 +52,11 @@ class LifeSwitchChatContextSqlV1Tests(unittest.TestCase):
 
     def test_plan_gateway_whitelists_fields_and_excludes_private_document(self) -> None:
         sql = APPLY.read_text().lower()
+        gateway = sql.split("create function lifeswitch_chat.read_plan_v1", 1)[1].split("create function lifeswitch_chat.read_nutrition_daily_v1", 1)[0]
+        self.assertIn("'canonical_plan'::text", gateway)
+        self.assertIn("lifeswitch_plan.plan_profile", gateway)
+        self.assertNotIn("lifeswitch_agentic", gateway)
+        self.assertNotIn("legacy_fallback", gateway)
         self.assertIn("whitelist_plan_document_v1", sql)
         self.assertIn("'nutrition_targets'", sql)
         self.assertIn("'training_targets'", sql)

@@ -54,7 +54,7 @@ def _section(
     *,
     projection: str = "current_plan",
     payload: dict | None = None,
-    sources: tuple[str, ...] = ("lifeswitch_agentic.plan_versions",),
+    sources: tuple[str, ...] = ("lifeswitch_plan.plan_profile",),
     start: dt.date | None = None,
     end: dt.date | None = None,
 ) -> LifeSwitchContextSectionV1:
@@ -74,7 +74,7 @@ def _section(
     )
 
 
-def _envelope(request, *sections, plan_source="agentic_active"):
+def _envelope(request, *sections, plan_source="canonical_plan"):
     return create_lifeswitch_context_envelope_v1(
         request=request,
         plan_source=plan_source,

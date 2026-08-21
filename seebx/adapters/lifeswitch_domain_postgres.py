@@ -16,11 +16,7 @@ from seebx.adapters.plan_observation_postgres import (
 from seebx.capabilities.plans.domain_provider import LifeSwitchReadResultV1
 
 
-PLAN_AGENTIC_SOURCES = (
-    "lifeswitch_agentic.plan_owner_state",
-    "lifeswitch_agentic.plan_versions",
-)
-PLAN_LEGACY_SOURCES = ("lifeswitch_plan.plan_profile",)
+PLAN_SOURCES = ("lifeswitch_plan.plan_profile",)
 NUTRITION_SOURCES = (
     "lifeswitch_nutrition.nutrition_day",
     "lifeswitch_nutrition.nutrition_entry",
@@ -330,10 +326,9 @@ class PostgresLifeSwitchDomainReaderV1:
         if row is None:
             return "unavailable", {}, ()
         source = str(row["plan_source"])
-        if source not in {"agentic_active", "legacy_fallback"}:
+        if source != "canonical_plan":
             raise ValueError("LifeSwitch plan gateway returned an invalid source")
-        relations = PLAN_AGENTIC_SOURCES if source == "agentic_active" else PLAN_LEGACY_SOURCES
-        return source, _json_object(row["document"]), relations
+        return source, _json_object(row["document"]), PLAN_SOURCES
 
     async def _nutrition_rows(
         self,

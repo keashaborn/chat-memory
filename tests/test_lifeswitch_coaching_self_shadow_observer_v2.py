@@ -43,12 +43,12 @@ def _source():
         status="AVAILABLE",
         window=None,
         record_count=1,
-        source_relations=("lifeswitch_agentic.plan_versions",),
+        source_relations=("lifeswitch_plan.plan_profile",),
         payload={"primary_goal": "Maintain"},
     )
     envelope = create_lifeswitch_context_envelope_v1(
         request=request,
-        plan_source="agentic_active",
+        plan_source="canonical_plan",
         as_of_local_date=TODAY,
         sections=(section,),
         generated_at=NOW,

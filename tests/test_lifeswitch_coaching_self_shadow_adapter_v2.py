@@ -194,13 +194,12 @@ class SelfShadowAdapterTests(unittest.TestCase):
                 "training_targets": {"strength_sessions_per_week": 4},
             },
             sources=(
-                "lifeswitch_agentic.plan_owner_state",
-                "lifeswitch_agentic.plan_versions",
+                "lifeswitch_plan.plan_profile",
             ),
         )
         result = _adapt(
             request,
-            _envelope(request, section, plan_source="agentic_active"),
+            _envelope(request, section, plan_source="canonical_plan"),
             "plan.current.v1",
             ("plan:view",),
         )
@@ -235,8 +234,7 @@ class SelfShadowAdapterTests(unittest.TestCase):
                 ],
             },
             sources=(
-                "lifeswitch_agentic.plan_owner_state",
-                "lifeswitch_agentic.plan_versions",
+                "lifeswitch_plan.plan_profile",
                 "lifeswitch_nutrition.nutrition_day",
                 "lifeswitch_nutrition.nutrition_entry",
             ),
@@ -245,7 +243,7 @@ class SelfShadowAdapterTests(unittest.TestCase):
         )
         result = _adapt(
             request,
-            _envelope(request, section, plan_source="agentic_active"),
+            _envelope(request, section, plan_source="canonical_plan"),
             "nutrition.range.v1",
             ("nutrition:view",),
         )
@@ -487,27 +485,12 @@ class SelfShadowAdapterTests(unittest.TestCase):
         section = _section(
             projection="current_plan",
             payload={"primary_goal": "Maintain", "coach_notes": "private"},
-            sources=("lifeswitch_agentic.plan_versions",),
+            sources=("lifeswitch_plan.plan_profile",),
         )
         with self.assertRaisesRegex(LifeSwitchSelfShadowAdapterError, "unapproved fields"):
             _adapt(
                 request,
-                _envelope(request, section, plan_source="agentic_active"),
-                "plan.current.v1",
-                ("plan:view",),
-            )
-
-    def test_legacy_plan_source_fails_closed(self):
-        request = _request("What is my current plan?")
-        section = _section(
-            projection="current_plan",
-            payload={"primary_goal": "Maintain"},
-            sources=("lifeswitch_plan.plan_profile",),
-        )
-        with self.assertRaisesRegex(LifeSwitchSelfShadowAdapterError, "legacy plan fallback"):
-            _adapt(
-                request,
-                _envelope(request, section, plan_source="legacy_fallback"),
+                _envelope(request, section, plan_source="canonical_plan"),
                 "plan.current.v1",
                 ("plan:view",),
             )
@@ -553,12 +536,12 @@ class SelfShadowAdapterTests(unittest.TestCase):
         section = _section(
             projection="current_plan",
             payload={"primary_goal": "Maintain"},
-            sources=("lifeswitch_agentic.plan_versions",),
+            sources=("lifeswitch_plan.plan_profile",),
         )
         with self.assertRaisesRegex(LifeSwitchSelfShadowAdapterError, "scopes differ"):
             adapt_lifeswitch_v1_envelope_to_self_shadow_projection_v2(
                 request=request,
-                envelope=_envelope(request, section, plan_source="agentic_active"),
+                envelope=_envelope(request, section, plan_source="canonical_plan"),
                 authorization=_authorization(
                     request, "plan.current.v1", ("nutrition:view",)
                 ),
@@ -570,7 +553,7 @@ class SelfShadowAdapterTests(unittest.TestCase):
         first = _section(
             projection="current_plan",
             payload={"primary_goal": "Maintain"},
-            sources=("lifeswitch_agentic.plan_versions",),
+            sources=("lifeswitch_plan.plan_profile",),
         )
         second = _section(
             projection="nutrition_range",
@@ -593,7 +576,7 @@ class SelfShadowAdapterTests(unittest.TestCase):
         with self.assertRaisesRegex(LifeSwitchSelfShadowAdapterError, "exactly one"):
             _adapt(
                 request,
-                _envelope(request, first, second, plan_source="agentic_active"),
+                _envelope(request, first, second, plan_source="canonical_plan"),
                 "plan.current.v1",
                 ("plan:view",),
             )

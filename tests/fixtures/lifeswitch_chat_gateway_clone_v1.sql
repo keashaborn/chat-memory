@@ -174,6 +174,29 @@ INSERT INTO lifeswitch_agentic.plan_owner_state(
 ('11111111-1111-4111-8111-111111111111','aaaaaaaa-0000-4000-8000-000000000001'),
 ('22222222-2222-4222-8222-222222222222','bbbbbbbb-0000-4000-8000-000000000001');
 
+INSERT INTO lifeswitch_plan.plan_profile(
+  plan_profile_id,owner_user_id,phase,phase_label,primary_goal,
+  start_date,review_date,review_cadence,body_state,nutrition_targets,
+  training_targets,conditioning_targets,activity_targets,recovery_targets,
+  monitoring_rules,coach_notes,is_active
+) VALUES
+(
+  'aaaaaaaa-0100-4000-8000-000000000001',
+  '11111111-1111-4111-8111-111111111111',
+  'lean_gain','Build','Owner A goal',NULL,NULL,'weekly',
+  '{"private":"a"}',
+  '{"calorie_target":{"nominal_kcal":2800,"private_note":"owner-a-private"},"protein_target":{"minimum_g":190,"private_note":"owner-a-private"},"macro_notes":"owner-a-private"}',
+  '{"workouts_per_week":4}','{}','{}','{}','{"private":"a"}',
+  'owner-a-secret',true
+),
+(
+  'bbbbbbbb-0100-4000-8000-000000000001',
+  '22222222-2222-4222-8222-222222222222',
+  'maintenance','Maintain','Owner B goal',NULL,NULL,'weekly','{}',
+  '{"calorie_target":2100,"protein_g":140}',
+  '{}','{}','{}','{}','{}','owner-b-secret',true
+);
+
 INSERT INTO lifeswitch_nutrition.nutrition_day(
   nutrition_day_id,owner_user_id,day
 ) VALUES

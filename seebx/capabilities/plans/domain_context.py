@@ -42,8 +42,7 @@ LifeSwitchContextStatus = Literal["OFF", "EMPTY", "SELECTED", "PARTIAL"]
 LifeSwitchSectionStatus = Literal["AVAILABLE", "EMPTY", "UNAVAILABLE"]
 LifeSwitchPlanSource = Literal[
     "not_requested",
-    "agentic_active",
-    "legacy_fallback",
+    "canonical_plan",
     "unavailable",
 ]
 

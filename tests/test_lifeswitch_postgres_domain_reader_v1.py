@@ -67,12 +67,12 @@ class FakeConnection:
         if "lifeswitch_chat.read_plan_v1" in query:
             if self.active_plan is not None:
                 return {
-                    "plan_source": "agentic_active",
+                    "plan_source": "canonical_plan",
                     "document": self.active_plan["document"],
                 }
             if self.legacy_plan is not None:
                 return {
-                    "plan_source": "legacy_fallback",
+                    "plan_source": "canonical_plan",
                     "document": self.legacy_plan,
                 }
             return None
@@ -156,7 +156,7 @@ class PostgresLifeSwitchDomainReaderV1Tests(unittest.IsolatedAsyncioTestCase):
             owner_user_id=OWNER,
             owner_timezone="America/Chicago",
         )
-        self.assertEqual(result.plan_source, "agentic_active")
+        self.assertEqual(result.plan_source, "canonical_plan")
         self.assertEqual(result.payload["phase"], "lean_gain")
         self.assertEqual(len(conn.calls), 1)
         self.assertIn("read_plan_v1", conn.calls[0][0])
@@ -187,7 +187,7 @@ class PostgresLifeSwitchDomainReaderV1Tests(unittest.IsolatedAsyncioTestCase):
             owner_user_id=OWNER,
             owner_timezone="America/Chicago",
         )
-        self.assertEqual(result.plan_source, "legacy_fallback")
+        self.assertEqual(result.plan_source, "canonical_plan")
         self.assertEqual(result.source_relations, ("lifeswitch_plan.plan_profile",))
         self.assertEqual(len(conn.calls), 1)
 
@@ -660,7 +660,7 @@ class PostgresLifeSwitchDomainReaderV1Tests(unittest.IsolatedAsyncioTestCase):
             start_date=start,
             end_date=TODAY,
         )
-        self.assertEqual(result.plan_source, "agentic_active")
+        self.assertEqual(result.plan_source, "canonical_plan")
         self.assertEqual(result.payload["plan_targets"]["workouts_per_week"], 4)
         columns = result.payload["columns"]
         rows = {

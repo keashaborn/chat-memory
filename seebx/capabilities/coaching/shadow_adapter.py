@@ -171,12 +171,9 @@ _PLAN_TARGET_FIELDS = {
     "recovery_targets": {"sleep_hours", "rest_days"},
 }
 
-_PLAN_AGENTIC_RELATIONS = {
-    "lifeswitch_agentic.plan_owner_state",
-    "lifeswitch_agentic.plan_versions",
-}
+_PLAN_RELATIONS = {"lifeswitch_plan.plan_profile"}
 _NUTRITION_RELATIONS = {
-    *_PLAN_AGENTIC_RELATIONS,
+    *_PLAN_RELATIONS,
     "lifeswitch_nutrition.nutrition_day",
     "lifeswitch_nutrition.nutrition_entry",
     "lifeswitch_nutrition.my_food",
@@ -196,7 +193,7 @@ _TRAINING_DAY_RELATIONS = {
 _MEASUREMENT_RELATIONS = {"public.lifeswitch_measurement_entries"}
 
 _ALLOWED_RELATIONS = {
-    "current_plan": _PLAN_AGENTIC_RELATIONS,
+    "current_plan": _PLAN_RELATIONS,
     "nutrition_day": _NUTRITION_RELATIONS,
     "nutrition_range": _NUTRITION_RELATIONS,
     "exercise_frequency": _TRAINING_RELATIONS,
@@ -911,8 +908,6 @@ def adapt_lifeswitch_v1_envelope_to_self_shadow_projection_v2(
         required_scopes=required_scopes,
         context_bridge_sha256=context_bridge_sha256,
     )
-    if envelope.plan_source == "legacy_fallback":
-        _fail("legacy plan fallback is not approved for V2 adaptation")
     allowed_relations = _ALLOWED_RELATIONS[section.projection]
     if not set(section.source_relations).issubset(allowed_relations):
         _fail("V1 section contains an unapproved source relation")

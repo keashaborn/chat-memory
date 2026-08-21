@@ -63,7 +63,7 @@ def selected_context(base_plan, message: str):
     )
     envelope = create_lifeswitch_context_envelope_v1(
         request=trusted,
-        plan_source="agentic_active",
+        plan_source="canonical_plan",
         as_of_local_date=TODAY,
         sections=(section,),
         generated_at=NOW,

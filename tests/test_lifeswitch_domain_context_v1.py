@@ -45,7 +45,7 @@ class SpyReader:
     def _result(self, method: str, kwargs: dict[str, object]) -> LifeSwitchReadResultV1:
         self.calls.append((method, kwargs))
         relation = self.source_override or {
-            "read_plan": "lifeswitch_agentic.plan_versions",
+            "read_plan": "lifeswitch_plan.plan_profile",
             "read_overall_status": "lifeswitch_nutrition.nutrition_day",
             "read_nutrition_day": "lifeswitch_nutrition.nutrition_day",
             "read_nutrition_range": "lifeswitch_nutrition.nutrition_day",
@@ -61,7 +61,7 @@ class SpyReader:
         return LifeSwitchReadResultV1(
             status="AVAILABLE",
             plan_source=(
-                "agentic_active"
+                "canonical_plan"
                 if method in {
                     "read_plan",
                     "read_overall_status",

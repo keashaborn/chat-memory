@@ -312,49 +312,37 @@ $$;
 
 CREATE FUNCTION lifeswitch_chat.read_plan_v1(p_context_id uuid)
 RETURNS TABLE(plan_source text,document jsonb)
-LANGUAGE plpgsql
+LANGUAGE sql
 STABLE
 SECURITY DEFINER
 SET search_path=''
 AS $$
-DECLARE
-  v_owner_user_id uuid;
-  v_document jsonb;
-BEGIN
-  v_owner_user_id := lifeswitch_chat.resolve_owner_read_context_v1(p_context_id);
-  SELECT version.document INTO v_document
-  FROM lifeswitch_agentic.plan_owner_state state
-  JOIN lifeswitch_agentic.plan_versions version
-    ON version.owner_user_id=state.owner_user_id
-   AND version.id=state.active_plan_version_id
-  WHERE state.owner_user_id=v_owner_user_id;
-  IF FOUND THEN
-    RETURN QUERY SELECT 'agentic_active'::text,
-      lifeswitch_chat.whitelist_plan_document_v1(v_document);
-    RETURN;
-  END IF;
-  SELECT pg_catalog.jsonb_build_object(
-    'phase',profile.phase,
-    'phase_label',profile.phase_label,
-    'primary_goal',profile.primary_goal,
-    'start_date',profile.start_date,
-    'review_date',profile.review_date,
-    'review_cadence',profile.review_cadence,
-    'nutrition_targets',profile.nutrition_targets,
-    'training_targets',profile.training_targets,
-    'conditioning_targets',profile.conditioning_targets,
-    'activity_targets',profile.activity_targets,
-    'recovery_targets',profile.recovery_targets
-  ) INTO v_document
-  FROM lifeswitch_plan.plan_profile profile
-  WHERE profile.owner_user_id=v_owner_user_id AND profile.is_active=true
+  WITH owner_scope AS (
+    SELECT lifeswitch_chat.resolve_owner_read_context_v1(p_context_id) AS owner_user_id
+  )
+  SELECT
+    'canonical_plan'::text,
+    lifeswitch_chat.whitelist_plan_document_v1(
+      pg_catalog.jsonb_build_object(
+        'phase',profile.phase,
+        'phase_label',profile.phase_label,
+        'primary_goal',profile.primary_goal,
+        'start_date',profile.start_date,
+        'review_date',profile.review_date,
+        'review_cadence',profile.review_cadence,
+        'nutrition_targets',profile.nutrition_targets,
+        'training_targets',profile.training_targets,
+        'conditioning_targets',profile.conditioning_targets,
+        'activity_targets',profile.activity_targets,
+        'recovery_targets',profile.recovery_targets
+      )
+    )
+  FROM owner_scope
+  JOIN lifeswitch_plan.plan_profile profile
+    ON profile.owner_user_id=owner_scope.owner_user_id
+  WHERE profile.is_active=true
   ORDER BY profile.updated_at DESC NULLS LAST
-  LIMIT 1;
-  IF FOUND THEN
-    RETURN QUERY SELECT 'legacy_fallback'::text,
-      lifeswitch_chat.whitelist_plan_document_v1(v_document);
-  END IF;
-END
+  LIMIT 1
 $$;
 
 CREATE FUNCTION lifeswitch_chat.read_nutrition_daily_v1(
