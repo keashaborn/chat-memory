@@ -7,7 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ROUTER = ROOT / "seebx" / "capabilities" / "training" / "routes.py"
-SERVICE = ROOT / "seebx" / "capabilities" / "training" / "logs.py"
+SERVICE = ROOT / "seebx" / "adapters" / "lifeswitch_training_writes_postgres.py"
 
 
 class TrainingImmutableRoutingTest(unittest.TestCase):

@@ -15,7 +15,8 @@ from seebx.adapters.lifeswitch_postgres import connect_lifeswitch
 from seebx.adapters.lifeswitch_training_exercises_postgres import (
     lifeswitch_training_exercises_repository,
 )
-from seebx.capabilities.training.logs import (
+from seebx.adapters.lifeswitch_training_writes_postgres import (
+    TrainingWriterError,
     correct_conditioning_session as write_conditioning_correction,
     correct_training_session as write_training_correction,
     create_conditioning_session as write_conditioning_session,
@@ -24,6 +25,7 @@ from seebx.capabilities.training.logs import (
     void_conditioning_session as write_conditioning_void,
     void_training_session as write_training_void,
 )
+from seebx.capabilities.training.write_errors import training_writer_http_error
 from fastapi.responses import JSONResponse
 
 router = APIRouter()
@@ -747,6 +749,8 @@ async def create_conditioning_session(
         return JSONResponse(
             _conditioning_row_to_jsonable(row)
         )
+    except TrainingWriterError as error:
+        raise training_writer_http_error(error) from error
     finally:
         await conn.close()
 
@@ -903,6 +907,8 @@ async def deactivate_conditioning_session(
                 "voided": True,
             }
         )
+    except TrainingWriterError as error:
+        raise training_writer_http_error(error) from error
     finally:
         await conn.close()
 
@@ -951,6 +957,8 @@ async def correct_conditioning_session(
         if not row:
             raise HTTPException(status_code=500, detail="conditioning correction unavailable")
         return JSONResponse(_conditioning_row_to_jsonable(row))
+    except TrainingWriterError as error:
+        raise training_writer_http_error(error) from error
     finally:
         await conn.close()
 
@@ -2079,6 +2087,8 @@ async def complete_training_session(
             result = _row_to_jsonable(session)
             result["set_count"] = len(normalized_sets)
             return JSONResponse(result)
+    except TrainingWriterError as error:
+        raise training_writer_http_error(error) from error
     finally:
         await conn.close()
 
@@ -2398,6 +2408,8 @@ async def deactivate_training_session(
                 "voided": True,
             }
         )
+    except TrainingWriterError as error:
+        raise training_writer_http_error(error) from error
     finally:
         await conn.close()
 
@@ -2445,6 +2457,8 @@ async def correct_training_session(
         result = _row_to_jsonable(row)
         result["set_count"] = len(payload.get("sets") or [])
         return JSONResponse(result)
+    except TrainingWriterError as error:
+        raise training_writer_http_error(error) from error
     finally:
         await conn.close()
 

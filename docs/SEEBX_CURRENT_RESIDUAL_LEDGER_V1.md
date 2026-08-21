@@ -9,15 +9,15 @@ Status: candidate evidence; no deployment or retirement authority
 - Production SeeBx remains at backend commit
   `49f9e60cf4321c8e42c359845c1a62a8c987614d`; its Git status is empty and
   `brains.service` is active with zero restarts.
-- The cleanup integration candidate and GitHub branch begin this batch at
-  `3b79f53e756e8f7e1e2578c4c48a06f7b5d7c3c2`; the worktree was clean before
-  the candidate-only AI Operations adapter extraction.
+- The cleanup integration candidate and GitHub branch began the Training
+  stored-writer batch at `1a992f0a9ee0b27b3c3556abfd5464dab9099866`; the
+  worktree was clean and matched its remote before candidate-only changes.
 - The candidate has 138 routes and 124 OpenAPI paths. Route SHA-256 remains
   `dacb3665272ec6720fb477340c9d84d977a6af55fae4f061972526eabe10353d`
   and OpenAPI SHA-256 remains
   `44e8aa5f364f85aef4d4fb4fa2596af4ab3eb219a2a82e21d54fbd2768c71091`.
-- The complete candidate suite passes 1,227/1,227 after the candidate-only AI
-  Operations adapter extraction.
+- The complete candidate suite passes 1,296/1,296 after the candidate-only
+  Training stored-writer extraction.
 - The separate failed voice-canary unit and active timer remain outside this
   cleanup batch.
 
@@ -44,20 +44,14 @@ Status: candidate evidence; no deployment or retirement authority
 
 ## Remaining architectural debt
 
-1. Seven capability modules still contain direct SQL execution or transaction
-   ownership. Conversation, search, preferences, voice, and AI Operations now
-   have zero direct query/transaction effects in their capability packages. The
-   remaining files are exactly:
-
-   - LifeSwitch domain: `nutrition/logs.py`, `nutrition/meals.py`,
-     `nutrition/routes.py`, `plans/routes.py`,
-     `training/logs.py`, and `training/routes.py`;
-   - observability: `observability/telemetry.py`.
-
-   Owner-scoped connection acquisition in an HTTP capability is not counted as
-   a query effect; raw fetch/execute/transaction ownership is. Each remaining
-   aggregate must move behind a named adapter without preserving duplicate
-   catalog or write authority.
+1. One capability module still contains direct SQL execution or transaction
+   ownership: `training/routes.py`, with 57 direct query/write calls, nine
+   transactions, and 32 request-owned connection closes. Conversation, search,
+   preferences, voice, AI Operations, observability, Plans, Measurements, and
+   all retained Nutrition capability modules now place database effects behind
+   named adapters. Connection acquisition and close are tracked separately from
+   query/transaction effects. The remaining Training aggregates must move behind
+   named adapters without preserving duplicate catalog or write authority.
 2. Immutable release control is installed on SeeBx and Verbal Sage at exact
    package release `08322acd1ff738c88cc83c2361ffdb4c35e5b29d`. The current
    cleanup candidate postdates the sealed backend build, so final application

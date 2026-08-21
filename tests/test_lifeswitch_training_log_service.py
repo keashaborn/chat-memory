@@ -32,7 +32,7 @@ except ModuleNotFoundError:
     fastapi_stub.HTTPException = HTTPException
     sys.modules["fastapi"] = fastapi_stub
 
-from seebx.capabilities.training import logs as service
+from seebx.adapters import lifeswitch_training_writes_postgres as service
 
 
 class FakeConnection:
