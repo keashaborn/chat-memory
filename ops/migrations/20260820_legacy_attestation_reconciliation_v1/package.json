@@ -1,0 +1,50 @@
+{
+  "execution": {
+    "deployment_authorized": false,
+    "encrypted_quarantine_required": true,
+    "migration_deletes_source_rows": false,
+    "production_database_mutated": false,
+    "quarantine_mode": "0600",
+    "schema_retirement_authorized": false
+  },
+  "expected": {
+    "counts": {
+      "destination_conflicts": 0,
+      "eligible": 32,
+      "quarantine": 158,
+      "source": 190
+    },
+    "sha256": {
+      "destination_before": "40cb618be4a0d2b87f7ee8f3ad71ffe1e5f9e68fe73aefb0299577f4517e6c14",
+      "eligible": "4b3917cac82fc5a4522a2bb8e0a9296651daedc3d94fb6b02840d9b5f6b64678",
+      "quarantine": "38f20b7df5cbd1d3a8d413825eb76a6a7a682f0e78b491e1aa09a315113d90e1",
+      "source": "c07967305707d83e258bd441939359b472b95bb414eeb739a7edd99a5f657831"
+    }
+  },
+  "inputs": {
+    "forward": {
+      "path": "forward.pgsql",
+      "sha256": "7e59f84d4850eeea8e0060542e648568deb23a29d1873f6ebd34957658c4d72e"
+    },
+    "quarantine_tool": {
+      "path": "scripts/prepare_legacy_memory_attestation_reconciliation.py",
+      "sha256": "d7a0bff586c663b89b94f5aeaf04d8df25eadc245d08fa6bb383b9d514db0472"
+    },
+    "rollback": {
+      "path": "rollback.pgsql",
+      "sha256": "b318a3165f61d5779ce534c965cf96ff8947543f13ba0d75a584b27d06583efb"
+    }
+  },
+  "migration_id": "legacy_attestation_reconciliation_v1",
+  "schema_version": "seebx-legacy-attestation-reconciliation-package-v1",
+  "status": "candidate_not_applied",
+  "target": {
+    "database": "memory",
+    "execution_role": "sage",
+    "server": "seebx"
+  },
+  "transaction": {
+    "advisory_lock": "legacy_attestation_reconciliation_v1",
+    "all_or_nothing": true
+  }
+}

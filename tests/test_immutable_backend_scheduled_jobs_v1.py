@@ -131,7 +131,7 @@ class ImmutableBackendScheduledJobsTests(unittest.TestCase):
         ):
             self.assertIn(f"Environment={name}=@{name}@", raw)
         self.assertIn(
-            "UnsetEnvironment=ZEP_SHADOW_MODE ZEP_SHADOW_OWNER_IDS ZEP_SHADOW_TIMEOUT_SECONDS",
+            "UnsetEnvironment=QDRANT_URL ZEP_SHADOW_MODE ZEP_SHADOW_OWNER_IDS ZEP_SHADOW_TIMEOUT_SECONDS",
             raw,
         )
 

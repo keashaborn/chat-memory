@@ -1,0 +1,29 @@
+{
+  "ci_only": false,
+  "execution_owner": "sage",
+  "forward": {
+    "path": "forward.pgsql",
+    "sha256": "58b6cbfd0f6592beb1cff0bcd168b66a57081946c5cfa1d1f4552ac8c8218f53"
+  },
+  "lane": "lifeswitch_live_context",
+  "migration_id": "lifeswitch_answer_provenance_receipt_v1",
+  "policy": {
+    "data_operations_allowed": false,
+    "destructive_forward_allowed": false,
+    "grant_widening_allowed": false,
+    "nontransactional_allowed": false,
+    "rls_weakening_allowed": false
+  },
+  "recovery": {
+    "exact_restoration_required": true,
+    "mode": "rollback",
+    "path": "rollback.pgsql",
+    "sha256": "89ed1e16c7c5de56f30b36e8be089b18cb5637a5a9719d86e2c5d3c5ce08cd89"
+  },
+  "retired_surface": {
+    "cross_database_dependency": "memory.assistant_transcript_attestation_v1",
+    "read_prior_answer_view": true
+  },
+  "schema_version": "governed-migration-package-v1",
+  "status": "candidate_not_applied"
+}

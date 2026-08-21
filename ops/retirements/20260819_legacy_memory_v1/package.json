@@ -1,66 +1,39 @@
 {
+  "blocked_by": [
+    "legacy_attestation_reconciliation_v1 not applied",
+    "158 orphan attestations not yet preserved in encrypted hash-bound quarantine",
+    "external dependency catalog proof not yet bound",
+    "new full backup and disposable restore receipt not yet bound"
+  ],
+  "execution": {
+    "production_database_mutated": false,
+    "retirement_authorized": false
+  },
   "forward": {
     "path": "forward.pgsql",
-    "sha256": "b3ecbab30974882d3c91fb85cf44d2598267d6a2a00c59a8b48f503493f190d7"
+    "sha256": "9d40d69bcaed352116e01bb20055f8ffd44da76861d2875cdc4863e55ca75d9c"
   },
   "migration_id": "legacy_memory_schema_retirement_v1",
-  "prerequisites": [
-    "conversation_sync_private.zep_turn_outbox",
-    "ai_operations.enforce_telemetry_retention_v1()",
-    "chat_history_private.clear_history bound to Zep outbox",
-    "zero legacy source-erasure triggers",
-    "zero nonterminal legacy ingest or erasure jobs"
-  ],
   "recovery": {
-    "backup_format": "pg_dump custom",
-    "backup_scope": "full_database",
     "exact_row_manifest_required": true,
     "restore_into_disposable_database_required": true,
-    "restore_receipt_sha256_required": true,
-    "rollback_mode": "restore_only",
-    "sql_rollback_available": false,
     "tool": {
       "path": "scripts/prepare_legacy_memory_retirement_recovery.py",
       "sha256": "6bd40b5efe6935ff9d8b46f078733a0adabf8a665642a99cfcaee5808c7cc467"
-    },
-    "receipt_schema_version": "seebx-legacy-memory-recovery-receipt-v1"
-  },
-  "runtime_retirement": {
-    "cron_line": "0 3 * * * cd /opt/chat-memory && ./eval_all_users.sh >> /opt/chat-memory/logs/cron_eval_all.log 2>&1",
-    "cron_rollback_copy_required": true,
-    "cron_must_be_absent_before_forward": true,
-    "source_path": "bin/eval_all_users.sh",
-    "source_retired_in_candidate": true
+    }
   },
   "schema_version": "seebx-retirement-package-v1",
   "scope": {
-    "drop_schemas": [
+    "drop_statements_present": false,
+    "protected_schemas": [
       "memory_ingest_private",
       "memory"
-    ],
-    "expected_ordinary_tables": {
-      "memory": 160,
-      "memory_ingest_private": 7
-    },
-    "governed_memory_rows_archived_before_drop": true,
-    "structured_lifeswitch_data_mutated": false,
-    "visible_chat_history_mutated": false,
-    "zep_data_mutated": false
+    ]
   },
-  "session_proofs": [
-    "lifeswitch.legacy_memory_backup_sha256",
-    "lifeswitch.legacy_memory_restore_receipt_sha256",
-    "lifeswitch.legacy_memory_cron_retired"
-  ],
-  "status": "candidate_not_applied",
+  "status": "blocked_pending_reconciliation_and_dependency_proof",
   "target": {
     "database": "memory",
     "execution_role": "sage",
     "server": "seebx"
-  },
-  "transaction": {
-    "advisory_lock": "legacy_memory_schema_retirement_v1",
-    "all_or_nothing": true,
-    "migration_supplies_begin_commit": true
   }
 }

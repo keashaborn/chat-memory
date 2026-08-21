@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from seebx.adapters.lifeswitch_prior_provenance_postgres import (
+from seebx.capabilities.conversation.prior_lifeswitch_provenance_contract import (
     PriorLifeSwitchPreparedContextV1,
 )
 from seebx.capabilities.conversation.lifeswitch_composition import (

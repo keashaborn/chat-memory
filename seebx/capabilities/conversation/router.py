@@ -43,7 +43,7 @@ from seebx.adapters.lifeswitch_context_runtime import (
 from seebx.capabilities.conversation.lifeswitch_context import (
     LifeSwitchResponseContextProviderV1,
 )
-from seebx.adapters.lifeswitch_prior_provenance_postgres import (
+from seebx.capabilities.conversation.prior_lifeswitch_provenance_contract import (
     InactivePriorLifeSwitchProvenanceProviderV1,
 )
 from seebx.core.identity import (

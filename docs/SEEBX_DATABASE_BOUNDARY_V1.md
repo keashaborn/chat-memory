@@ -2,7 +2,7 @@
 
 Status: target and migration constraints; no database-change authority
 
-Evidence date: 2026-08-17 America/Chicago (2026-08-18 UTC)
+Evidence date: 2026-08-20 America/Chicago
 
 Source commit: `49f9e60cf4321c8e42c359845c1a62a8c987614d`
 
@@ -14,7 +14,7 @@ The live `brains.service` process was inspected without exposing credentials.
 |---|---|---|
 | `POSTGRES_DSN` | PostgreSQL `127.0.0.1:5432/memory` | chat/platform, search audit/cache, usage, legacy schemas |
 | `LIFESWITCH_POSTGRES_DSN` | PostgreSQL `127.0.0.1:55433/lifeswitch` | isolated LifeSwitch domain data |
-| `QDRANT_URL` | HTTP `127.0.0.1:6333` | configured but no verified live caller or running service |
+| `QDRANT_URL` | HTTP `127.0.0.1:6333` | stale production setting; no caller or runtime; immutable candidate explicitly unsets it |
 
 The cleanup candidate uses `seebx/adapters/lifeswitch_postgres.py` and requires
 `LIFESWITCH_POSTGRES_DSN` for every new connection. It does not fall back to
@@ -33,18 +33,13 @@ as exact counts. They are inventory evidence, not deletion authority.
 | `ai_operations` | 4 | 0 | 0 |
 | `catalog_dev` | 14 | 1,610 | 0 |
 | `chat_history_private` | 2 | 0 | 0 |
-| `chat_integrity` | 1 | 59 | 0 |
+| `chat_integrity` | 1 | 101 exact rows | 0 |
 | `lifeswitch_usage` | 2 | 581 | 0 |
 | `memory` | 160 | 33,014 | 6 |
 | `memory_ingest_private` | 7 | 1,167 | 0 |
 | `public` | 15 | 3,159 | 0 |
 | `trusted_web` | 4 | 307 | 1 |
 | `user_settings` | 2 | 20 exact rows | 0 |
-| `vantage_card` | 4 | 1,438 | 0 |
-| `vantage_fact` | 7 | 3,005 | 0 |
-| `vantage_identity` | 2 | 0 | 0 |
-| `vantage_initiator` | 4 | 1,784,402 | 0 |
-| `vantage_profile` | 1 | 2 | 0 |
 
 Exact bounded counts verified during the audit:
 
@@ -56,8 +51,7 @@ Exact bounded counts verified during the audit:
 - `user_settings.assistant_response_preference_v1`: 1 row;
 - `user_settings.assistant_response_preference_compilation_candidate_v1`: 19 rows.
 
-The high `vantage_initiator` estimate is historical-data evidence, not evidence
-of live processing. No Vantage service or live Python root was found.
+The five Vantage schemas are absent from the current platform database. No Vantage service or executable Python root remains.
 
 ### Isolated LifeSwitch database: `lifeswitch`
 

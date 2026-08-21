@@ -207,21 +207,19 @@ class PriorLifeSwitchProvenanceV1Tests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(message=message):
                 self.assertFalse(prior_lifeswitch_provenance_requested_v1(message))
 
-    def test_database_query_is_owned_by_postgres_adapter(self) -> None:
+    def test_retired_database_query_is_absent_from_executable_code(self) -> None:
         root = Path(__file__).resolve().parents[1]
         capability = (
             root / "seebx/capabilities/conversation/prior_lifeswitch_provenance.py"
         ).read_text(encoding="utf-8")
         adapter = (
-            root / "seebx/adapters/lifeswitch_prior_provenance_postgres.py"
+            root / "seebx/capabilities/conversation/prior_lifeswitch_provenance_contract.py"
         ).read_text(encoding="utf-8")
         self.assertNotIn("conn.fetch(", capability)
-        self.assertNotIn(
-            "read_prior_answer_lifeswitch_provenance_v1",
-            capability,
-        )
-        self.assertIn("read_prior_answer_lifeswitch_provenance_v1", adapter)
-        self.assertIn("readonly=True", adapter)
+        self.assertNotIn("read_prior_answer_lifeswitch_provenance_v1", capability)
+        self.assertNotIn("read_prior_answer_lifeswitch_provenance_v1", adapter)
+        self.assertNotIn("asyncpg", adapter)
+        self.assertIn("InactivePriorLifeSwitchProvenanceProviderV1", adapter)
 
     async def test_unbound_snapshot_reads_nothing(self) -> None:
         result = await select_prior_lifeswitch_provenance_v1(

@@ -10,12 +10,12 @@ Status: candidate evidence; no deployment or retirement authority
   `49f9e60cf4321c8e42c359845c1a62a8c987614d`; its Git status is empty and
   `brains.service` is active with zero restarts.
 - The cleanup integration candidate and GitHub branch are both
-  `503c2356e885a48a25e398b1b8c0c1e60f23093c`; the worktree is clean.
+  `be653e03c403c43492f243bac198b538ee4a6f07`; the worktree is clean before this candidate-only safety batch.
 - The candidate has 143 routes and 129 OpenAPI paths. Route SHA-256 remains
   `c8d1df9cf48611e6c849614a521979b4a6109b0b4ef14f99ae55f4e85915d7d6`
   and OpenAPI SHA-256 remains
   `17aaa3a4a18bfe3a3d3671c1fee02654270524d0b5d764cd4c6eea6627429a8f`.
-- The complete candidate suite passes 1,186/1,186 in the sealed runtime.
+- The complete candidate suite passes 1,204/1,204 after the candidate-only retirement safety batch.
 - The separate failed voice-canary unit and active timer remain outside this
   cleanup batch.
 
@@ -42,12 +42,11 @@ Status: candidate evidence; no deployment or retirement authority
 
 ## Remaining architectural debt
 
-1. Eleven capability modules still contain direct SQL execution or transaction
+1. Ten capability modules still contain direct SQL execution or transaction
    ownership. Conversation, search, preferences, and voice now have zero direct
    query/transaction effects in their capability packages. The remaining files
    are exactly:
 
-   - catalog: `seebx/capabilities/catalog/routes.py`;
    - forms: `seebx/capabilities/forms/routes.py`;
    - LifeSwitch domain: `measurements/routes.py`, `nutrition/logs.py`,
      `nutrition/meals.py`, `nutrition/routes.py`, `plans/routes.py`,
@@ -66,14 +65,11 @@ Status: candidate evidence; no deployment or retirement authority
 3. Production still runs the unused `brains-redis-1` container on loopback
    port 6379 with 203 persistent idle keys. The reversible stop plan is ready;
    deletion is a later decision after observation.
-4. Production still injects `QDRANT_URL`, although the candidate has no Python
-   reader and no Qdrant runtime exists. Remove the stale setting only after an
-   exact service-environment diff, immutable release rebuild, and rollback proof.
+4. Production still injects `QDRANT_URL`, although no Python reader or Qdrant runtime exists. The immutable candidate now explicitly unsets it; production changes only through a separately approved release cutover.
 5. `voice-synthetic-canary.service` is failed while its timer remains active.
    Repair belongs to the separate voice worktree and must not be folded into
    backend cleanup.
-6. Platform PostgreSQL still contains legacy memory/Vantage schemas and clone
-   databases. Recovery and disposable-restore evidence exists, but migrations,
+6. Platform PostgreSQL still contains the legacy `memory` and `memory_ingest_private` schemas and clone databases; the five Vantage schemas are absent. The old retirement package is blocked because 32 attestations require canonical migration and 158 require encrypted quarantine. Recovery and disposable-restore evidence exists, but migrations,
    schema retirement, and database drops remain separate production batches.
 7. The production service still runs the mutable checkout with weak systemd
    hardening. Its mutable virtual environment also lacks declared

@@ -21,7 +21,7 @@ from seebx.capabilities.conversation.lifeswitch_context import (
 from seebx.capabilities.conversation.prior_lifeswitch_provenance import (
     PriorLifeSwitchProvenanceEnvelopeV1,
 )
-from seebx.adapters.lifeswitch_prior_provenance_postgres import (
+from seebx.capabilities.conversation.prior_lifeswitch_provenance_contract import (
     PriorLifeSwitchPreparedContextV1,
 )
 from seebx.capabilities.conversation.orchestration import TrustedResponsePlanV0_2

@@ -5,7 +5,7 @@ Status: controlling cleanup target; isolated candidate in progress; production u
 Evidence date: 2026-08-19 America/Chicago
 
 Production authority: SeeBx backend commit `49f9e60cf4321c8e42c359845c1a62a8c987614d`
-Candidate evidence: SeeBx commit `acec9d109f5f4cc8d5912a32cd134109cd23a57d`
+Candidate evidence: SeeBx commit `be653e03c403c43492f243bac198b538ee4a6f07` before this candidate-only safety batch
 
 ## Purpose
 
@@ -41,8 +41,7 @@ classification fields, and product decision register are controlled by
 - The live backend connects to two PostgreSQL instances: the older platform
   database on loopback port 5432 and the isolated LifeSwitch database on
   loopback port 55433.
-- The live process still receives `QDRANT_URL`, but no live Python caller uses
-  the Qdrant client and no Qdrant service or container is running.
+- The live process still receives stale `QDRANT_URL`, but no caller or Qdrant runtime exists. The immutable candidate explicitly unsets it at the future approved cutover.
 
 The ignored-cache purge, candidate deployment, service restart, and production
 route retirement each require their own explicit authorization and rollback
