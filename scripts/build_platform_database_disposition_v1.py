@@ -105,6 +105,107 @@ ROLE_TARGETS = {
 }
 REQUIRED_ROLES = set(ROLE_TARGETS)
 
+PUBLIC_TARGET_SCHEMAS = {
+    "public.active_thread_selection": "conversation",
+    "public.chat_attachments": "conversation",
+    "public.chat_log": "conversation",
+    "public.guard_canonical_owner()": "conversation",
+    "public.guard_chat_log_immutable()": "conversation",
+    "public.telemetry_event": "telemetry",
+    "public.threads": "conversation",
+    "public.voice_session_lease": "voice",
+}
+SOURCE_SCHEMA_TARGETS = {
+    "ai_operations": ("ai_operations", "ai_operations_store_v1"),
+    "chat_history_private": ("conversation_private", "seebx_platform_owner_v1"),
+    "chat_integrity": ("conversation_integrity", "seebx_platform_owner_v1"),
+    "lifeswitch_usage": ("usage", "seebx_platform_owner_v1"),
+    "trusted_web": ("trusted_web", "seebx_trusted_web_owner_v1"),
+    "user_settings": ("user_settings", "seebx_platform_owner_v1"),
+}
+TARGET_SCHEMA_CONTRACTS = (
+    {
+        "name": "ai_operations",
+        "owner": "ai_operations_store_v1",
+        "source": "ai_operations",
+    },
+    {
+        "name": "conversation",
+        "owner": "seebx_platform_owner_v1",
+        "source": "public",
+    },
+    {
+        "name": "conversation_integrity",
+        "owner": "seebx_platform_owner_v1",
+        "source": "chat_integrity",
+    },
+    {
+        "name": "conversation_private",
+        "owner": "seebx_platform_owner_v1",
+        "source": "chat_history_private",
+    },
+    {
+        "name": "telemetry",
+        "owner": "seebx_platform_owner_v1",
+        "source": "public",
+    },
+    {
+        "name": "trusted_web",
+        "owner": "seebx_trusted_web_owner_v1",
+        "source": "trusted_web",
+    },
+    {
+        "name": "usage",
+        "owner": "seebx_platform_owner_v1",
+        "source": "lifeswitch_usage",
+    },
+    {
+        "name": "user_settings",
+        "owner": "seebx_platform_owner_v1",
+        "source": "user_settings",
+    },
+    {
+        "name": "voice",
+        "owner": "seebx_platform_owner_v1",
+        "source": "public",
+    },
+)
+TARGET_ROLE_CONTRACTS = (
+    {
+        "can_login": False,
+        "name": "ai_operations_store_v1",
+        "purpose": "ai_operations_owner",
+    },
+    {
+        "can_login": True,
+        "name": "seebx_platform_app_v1",
+        "purpose": "runtime_application_login",
+    },
+    {
+        "can_login": False,
+        "name": "seebx_platform_owner_v1",
+        "purpose": "general_platform_object_owner",
+    },
+    {
+        "can_login": False,
+        "name": "seebx_trusted_web_owner_v1",
+        "purpose": "trusted_web_object_owner",
+    },
+    {
+        "can_login": False,
+        "name": "seebx_usage_admin_v1",
+        "purpose": "separate_usage_administration",
+    },
+    {
+        "can_login": False,
+        "name": "seebx_usage_writer_v1",
+        "purpose": "runtime_owner_scoped_usage_writer",
+    },
+)
+TARGET_MEMBERSHIPS = {
+    ("seebx_platform_app_v1", "seebx_usage_writer_v1"),
+}
+
 
 class DispositionError(RuntimeError):
     pass
@@ -203,6 +304,30 @@ def _role_decision(role: dict[str, Any]) -> tuple[str, str, str, str]:
     raise DispositionError("unknown_role_without_exact_disposition")
 
 
+def _object_target(
+    identity: str,
+    classification: str,
+    baseline_action: str,
+) -> tuple[str | None, str | None]:
+    if baseline_action != "include":
+        return None, None
+    if classification == "extension_owned":
+        return identity, "extension"
+    source_schema, separator, remainder = identity.partition(".")
+    if not separator or not remainder:
+        raise DispositionError("retained_object_identity_invalid")
+    if source_schema == "public":
+        target_schema = PUBLIC_TARGET_SCHEMAS.get(identity)
+        if target_schema is None:
+            raise DispositionError("public_retained_object_target_missing")
+        return f"{target_schema}.{remainder}", "seebx_platform_owner_v1"
+    target = SOURCE_SCHEMA_TARGETS.get(source_schema)
+    if target is None:
+        raise DispositionError("retained_schema_target_missing")
+    target_schema, owner = target
+    return f"{target_schema}.{remainder}", owner
+
+
 def build_manifest(audit: dict[str, Any], audit_sha256: str) -> dict[str, Any]:
     if audit.get("schema_version") != AUDIT_SCHEMA_VERSION or audit.get("status") != "pass":
         raise DispositionError("audit_contract_invalid")
@@ -226,6 +351,7 @@ def build_manifest(audit: dict[str, Any], audit_sha256: str) -> dict[str, Any]:
     }
     entries: list[dict[str, Any]] = []
     seen: set[str] = set()
+    seen_targets: set[str] = set()
     legacy_ingest_dependencies: list[str] = []
     for raw in objects:
         if not isinstance(raw, dict):
@@ -236,6 +362,15 @@ def build_manifest(audit: dict[str, Any], audit_sha256: str) -> dict[str, Any]:
             raise DispositionError("audit_object_identity_invalid")
         seen.add(identity)
         disposition, baseline_action, reason = _object_decision(raw)
+        target_identity, target_owner = _object_target(
+            identity,
+            classification,
+            baseline_action,
+        )
+        if target_identity is not None:
+            if target_identity in seen_targets:
+                raise DispositionError("target_object_identity_duplicate")
+            seen_targets.add(target_identity)
         if identity.startswith("memory_ingest_private.") and classification == "database_internal_reachable":
             legacy_ingest_dependencies.append(identity)
         entry = {
@@ -246,6 +381,8 @@ def build_manifest(audit: dict[str, Any], audit_sha256: str) -> dict[str, Any]:
             "identity": identity,
             "object_type": str(raw.get("object_type") or ""),
             "reason_code": reason,
+            "target_identity": target_identity,
+            "target_owner": target_owner,
         }
         if identity in counts_by_relation:
             entry["exact_row_count"] = counts_by_relation[identity]
@@ -287,6 +424,7 @@ def build_manifest(audit: dict[str, Any], audit_sha256: str) -> dict[str, Any]:
     if not isinstance(memberships, list):
         raise DispositionError("governance_memberships_invalid")
     membership_entries: list[dict[str, Any]] = []
+    rebuilt_memberships: set[tuple[str, str]] = set()
     for membership in memberships:
         if not isinstance(membership, dict):
             raise DispositionError("governance_membership_invalid")
@@ -296,7 +434,10 @@ def build_manifest(audit: dict[str, Any], audit_sha256: str) -> dict[str, Any]:
             raise DispositionError("governance_membership_role_missing")
         target_member = role_targets.get(member) or ""
         target_granted = role_targets.get(granted) or ""
-        rebuild = bool(target_member and target_granted)
+        target_pair = (target_member, target_granted)
+        rebuild = target_pair in TARGET_MEMBERSHIPS
+        if rebuild:
+            rebuilt_memberships.add(target_pair)
         membership_entries.append({
             "action": "rebuild" if rebuild else "exclude",
             "admin_option": bool(membership.get("admin_option")),
@@ -305,6 +446,8 @@ def build_manifest(audit: dict[str, Any], audit_sha256: str) -> dict[str, Any]:
             "target_granted": target_granted or None,
             "target_member": target_member or None,
         })
+    if rebuilt_memberships != TARGET_MEMBERSHIPS:
+        raise DispositionError("required_target_membership_missing")
 
     extensions = governance["sections"].get("extensions")
     if not isinstance(extensions, list):
@@ -377,6 +520,12 @@ def build_manifest(audit: dict[str, Any], audit_sha256: str) -> dict[str, Any]:
         },
         "status": "candidate_baseline_ready" if not blockers else "candidate_review_gate",
         "table_rows_by_disposition": dict(sorted(table_rows_by_disposition.items())),
+        "target_memberships": [
+            {"granted": granted, "member": member}
+            for member, granted in sorted(TARGET_MEMBERSHIPS)
+        ],
+        "target_roles": list(TARGET_ROLE_CONTRACTS),
+        "target_schemas": list(TARGET_SCHEMA_CONTRACTS),
     }
 
 

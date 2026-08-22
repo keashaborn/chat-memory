@@ -37,7 +37,18 @@ def object_entry(
 def audit_fixture() -> dict[str, object]:
     objects = [
         object_entry("public.chat_log", "application_direct"),
+        object_entry("public.telemetry_event", "application_direct"),
+        object_entry("public.voice_session_lease", "application_direct"),
         object_entry("chat_history_private.helper()", "database_internal_reachable", object_type="function"),
+        object_entry("chat_integrity.attestation", "application_direct"),
+        object_entry("lifeswitch_usage.ai_usage_event_v1", "application_direct"),
+        object_entry(
+            "lifeswitch_usage.current_actor_user_id()",
+            "database_internal_reachable",
+            object_type="function",
+        ),
+        object_entry("trusted_web.cache", "application_direct"),
+        object_entry("user_settings.preference", "application_direct"),
         object_entry("memory.old_table", "unproven"),
         object_entry("memory_ingest_private.old_outbox", "database_internal_reachable"),
         object_entry("catalog_dev.exercise", "migration_only"),
@@ -73,6 +84,7 @@ def audit_fixture() -> dict[str, object]:
     ]
     memberships = [
         {"member": "brains_app", "granted": "lifeswitch_usage_writer_v1", "admin_option": False},
+        {"member": "brains_app", "granted": "lifeswitch_usage_admin_v1", "admin_option": False},
         {"member": "brains_app", "granted": "memory_ingest_writer", "admin_option": False},
     ]
     sections = {
@@ -149,6 +161,46 @@ class PlatformDatabaseDispositionV1Tests(unittest.TestCase):
         self.assertEqual(objects["public.gen_random_uuid()"]["baseline_action"], "include")
         self.assertEqual(objects["public.citextin(cstring)"]["extension"], "citext")
         self.assertEqual(objects["public.citextin(cstring)"]["baseline_action"], "exclude")
+        self.assertEqual(objects["public.chat_log"]["target_identity"], "conversation.chat_log")
+        self.assertEqual(
+            objects["public.telemetry_event"]["target_identity"],
+            "telemetry.telemetry_event",
+        )
+        self.assertEqual(
+            objects["public.voice_session_lease"]["target_identity"],
+            "voice.voice_session_lease",
+        )
+        self.assertEqual(
+            objects["lifeswitch_usage.ai_usage_event_v1"]["target_identity"],
+            "usage.ai_usage_event_v1",
+        )
+        self.assertEqual(
+            objects["chat_history_private.helper()"]["target_identity"],
+            "conversation_private.helper()",
+        )
+
+        target_schemas = {item["name"]: item for item in manifest["target_schemas"]}
+        self.assertEqual(target_schemas["trusted_web"]["owner"], "seebx_trusted_web_owner_v1")
+        self.assertEqual(target_schemas["usage"]["source"], "lifeswitch_usage")
+        target_roles = {item["name"]: item for item in manifest["target_roles"]}
+        self.assertTrue(target_roles["seebx_platform_app_v1"]["can_login"])
+        self.assertFalse(target_roles["seebx_platform_owner_v1"]["can_login"])
+        self.assertEqual(
+            manifest["target_memberships"],
+            [{"granted": "seebx_usage_writer_v1", "member": "seebx_platform_app_v1"}],
+        )
+        membership_actions = {
+            (item["member"], item["granted"]): item["action"]
+            for item in manifest["memberships"]
+        }
+        self.assertEqual(
+            membership_actions[("brains_app", "lifeswitch_usage_writer_v1")],
+            "rebuild",
+        )
+        self.assertEqual(
+            membership_actions[("brains_app", "lifeswitch_usage_admin_v1")],
+            "exclude",
+        )
 
         extensions = {item["name"]: item for item in manifest["extensions"]}
         self.assertEqual(extensions["pgcrypto"]["action"], "include")
@@ -160,11 +212,11 @@ class PlatformDatabaseDispositionV1Tests(unittest.TestCase):
 
     def test_unknown_object_and_role_fail_closed(self) -> None:
         audit = audit_fixture()
-        audit["objects"].append(object_entry("public.unknown", "unproven"))
+        audit["objects"].append(object_entry("public.unknown", "application_direct"))
         audit["object_count"] = len(audit["objects"])
         with self.assertRaisesRegex(
             module.DispositionError,
-            "unresolved_object_without_exact_disposition",
+            "public_retained_object_target_missing",
         ):
             module.build_manifest(audit, "c" * 64)
         audit = audit_fixture()
