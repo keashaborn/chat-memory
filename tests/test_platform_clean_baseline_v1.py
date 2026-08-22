@@ -167,11 +167,37 @@ class PlatformCleanBaselineV1Tests(unittest.TestCase):
             name = remainder.split("(", 1)[0]
             lines.append(f"{number}; 1255 {number} FUNCTION {schema} {name}() owner")
             number += 1
+        lines.append(f"{number}; 1259 {number} INDEX public chat_log_owner_uq owner")
+        number += 1
         lines.append(f"{number}; 1259 {number} TABLE memory retired owner")
-        filtered, summary = module.filter_restore_list("\n".join(lines), plan)
+        filtered, summary = module.filter_restore_list(
+            "\n".join(lines),
+            plan,
+            {("public", "chat_log_owner_uq"): ("public", "chat_log")},
+        )
         self.assertNotIn("memory retired", filtered)
         self.assertEqual(summary["ignored_toc_entries"], 1)
-        self.assertEqual(summary["retained_toc_entries"], 21 * 2 + 17)
+        self.assertEqual(summary["retained_index_entries"], 1)
+        self.assertEqual(summary["retained_toc_entries"], 21 * 2 + 17 + 1)
+
+    def test_archive_index_map_binds_indexes_to_retained_relations(self):
+        raw = "\n".join([
+            "1; 1259 10 INDEX public chat_log_owner_uq owner",
+            "2; 1259 11 INDEX memory retired_idx owner",
+        ])
+        sql = "\n".join([
+            "CREATE UNIQUE INDEX chat_log_owner_uq ON public.chat_log USING btree (id, owner_user_id);",
+            "CREATE INDEX retired_idx ON memory.retired USING btree (id);",
+        ])
+        mapping = module.extract_index_relation_map(raw, sql)
+        self.assertEqual(mapping[("public", "chat_log_owner_uq")], ("public", "chat_log"))
+        plan = module.validate_disposition(disposition_fixture())
+        retained = module.build_retained_index_map(plan, mapping)
+        self.assertEqual(len(retained["indexes"]), 1)
+        self.assertEqual(
+            retained["indexes"][0]["target_relation"],
+            "conversation.chat_log",
+        )
 
     def test_restore_filter_rejects_data_acl_or_missing_object(self):
         plan = module.validate_disposition(disposition_fixture())

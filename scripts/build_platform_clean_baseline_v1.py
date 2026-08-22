@@ -12,7 +12,7 @@ import stat
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 try:
     from build_platform_database_disposition_v1 import (
@@ -317,7 +317,40 @@ def _source_bases(plan: dict[str, Any], key: str) -> set[tuple[str, str]]:
     return values
 
 
-def filter_restore_list(raw: str, plan: dict[str, Any]) -> tuple[str, dict[str, int]]:
+def extract_index_relation_map(
+    raw_toc: str,
+    post_data_sql: str,
+) -> dict[tuple[str, str], tuple[str, str]]:
+    expected: set[tuple[str, str]] = set()
+    for raw_line in raw_toc.splitlines():
+        payload = _toc_payload(raw_line.strip())
+        if payload is None:
+            continue
+        match = re.match(r"^INDEX (\S+) (\S+)(?:\s+.*)?$", payload)
+        if match:
+            expected.add((match.group(1), match.group(2)))
+    observed: dict[tuple[str, str], tuple[str, str]] = {}
+    for match in re.finditer(
+        r"(?im)^CREATE\s+(?:UNIQUE\s+)?INDEX\s+"
+        r"([a-z_][a-z0-9_]*)\s+ON\s+(?:ONLY\s+)?"
+        r"([a-z_][a-z0-9_]*)\.([a-z_][a-z0-9_]*)\b",
+        post_data_sql,
+    ):
+        key = (match.group(2), match.group(1))
+        relation = (match.group(2), match.group(3))
+        if key in observed and observed[key] != relation:
+            raise BaselineContractError("archive_index_identity_ambiguous")
+        observed[key] = relation
+    if set(observed) != expected:
+        raise BaselineContractError("archive_index_relation_map_incomplete")
+    return observed
+
+
+def filter_restore_list(
+    raw: str,
+    plan: dict[str, Any],
+    index_relations: Mapping[tuple[str, str], tuple[str, str]] | None = None,
+) -> tuple[str, dict[str, int]]:
     relations = _source_bases(plan, "source_relations")
     functions = _source_bases(plan, "source_functions")
     seen_relations: set[tuple[str, str]] = set()
@@ -364,8 +397,17 @@ def filter_restore_list(raw: str, plan: dict[str, Any]) -> tuple[str, dict[str, 
             if match:
                 keep = (match.group(1), match.group(2).split(".", 1)[0]) in relations
         if not keep:
+            match = re.match(r"^INDEX (\S+) (\S+)(?:\s+.*)?$", payload)
+            if match:
+                if index_relations is None:
+                    raise BaselineContractError("archive_index_relation_map_missing")
+                relation = index_relations.get((match.group(1), match.group(2)))
+                if relation is None:
+                    raise BaselineContractError("archive_index_relation_mapping_missing")
+                keep = relation in relations
+        if not keep:
             match = re.match(
-                r"^(?:CONSTRAINT|FK CONSTRAINT|INDEX|TRIGGER|POLICY|ROW SECURITY|DEFAULT|RULE) (\S+) (\S+)",
+                r"^(?:CONSTRAINT|FK CONSTRAINT|TRIGGER|POLICY|ROW SECURITY|DEFAULT|RULE) (\S+) (\S+)",
                 payload,
             )
             if match:
@@ -380,7 +422,39 @@ def filter_restore_list(raw: str, plan: dict[str, Any]) -> tuple[str, dict[str, 
         raise BaselineContractError("retained_function_missing_from_archive")
     return "\n".join(entries) + "\n", {
         "ignored_toc_entries": ignored,
+        "retained_index_entries": sum(
+            1
+            for line in entries
+            if (_toc_payload(line) or "").startswith("INDEX ")
+        ),
         "retained_toc_entries": len(entries),
+    }
+
+
+def build_retained_index_map(
+    plan: dict[str, Any],
+    index_relations: Mapping[tuple[str, str], tuple[str, str]],
+) -> dict[str, Any]:
+    relation_targets = {
+        tuple(str(item["source_identity"]).split(".", 1)): str(item["target_identity"])
+        for item in plan["targets"]
+        if item["object_type"] == "relation"
+    }
+    indexes = []
+    for (source_schema, index_name), relation in sorted(index_relations.items()):
+        target_relation = relation_targets.get(relation)
+        if target_relation is None:
+            continue
+        target_schema = target_relation.split(".", 1)[0]
+        indexes.append({
+            "source_identity": f"{source_schema}.{index_name}",
+            "source_relation": ".".join(relation),
+            "target_identity": f"{target_schema}.{index_name}",
+            "target_relation": target_relation,
+        })
+    return {
+        "indexes": indexes,
+        "schema_version": "seebx-platform-clean-index-map-v1",
     }
 
 
@@ -619,6 +693,7 @@ def execute(
     plan = validate_disposition(manifest)
     _read_hash_bound(schema_archive, schema_archive_sha256, label="schema_archive")
     output = _prepare_output(output)
+    index_map_path = output / "platform-clean-index-map-v1.json"
     restore_list_path = output / "platform-clean-restore-v1.list"
     source_sql_path = output / "platform-clean-source-schema-v1.sql"
     schema_sql_path = output / "platform-clean-schema-v1.sql"
@@ -630,7 +705,24 @@ def execute(
     receipt_path = output / "platform-clean-baseline-receipt-v1.json"
 
     raw_list = _run_text([PG_RESTORE, "--list", str(schema_archive)], label="archive_list")
-    filtered, toc_summary = filter_restore_list(raw_list, plan)
+    post_data_sql = _run_text(
+        [
+            PG_RESTORE,
+            "--schema-only",
+            "--section=post-data",
+            "--no-owner",
+            "--no-privileges",
+            "--file=-",
+            str(schema_archive),
+        ],
+        label="archive_post_data_render",
+    )
+    index_relations = extract_index_relation_map(raw_list, post_data_sql)
+    retained_index_map = build_retained_index_map(plan, index_relations)
+    _write_exclusive(index_map_path, canonical_bytes(retained_index_map) + b"\n")
+    filtered, toc_summary = filter_restore_list(raw_list, plan, index_relations)
+    if toc_summary["retained_index_entries"] != len(retained_index_map["indexes"]):
+        raise BaselineContractError("retained_index_count_mismatch")
     _write_exclusive(restore_list_path, filtered.encode())
     rendered = _run_text(
         [
@@ -662,6 +754,7 @@ COMMIT;
     _write_exclusive(install_path, install_sql.encode())
 
     artifact_paths = (
+        index_map_path,
         restore_list_path,
         source_sql_path,
         schema_sql_path,

@@ -44,7 +44,7 @@
     },
     "platform_clean_baseline": {
       "path": "scripts/build_platform_clean_baseline_v1.py",
-      "sha256": "3ad08a730b40064105ec84d38609dcbb9608f68a8680adad96a2bc7cbc71df02"
+      "sha256": "30363101d11f9b1fd29b645c50aca15ea4a8bd49fc651d3e615bd57d6e9d84cd"
     },
     "platform_database_audit": {
       "path": "scripts/audit_platform_database_consumers_v1.py",
