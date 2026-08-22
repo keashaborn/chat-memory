@@ -1,0 +1,64 @@
+{
+  "schema_version": "seebx-lifeswitch-clean-baseline-verification-v1",
+  "status": "pass",
+  "evidence_date": "2026-08-22",
+  "candidate_commit": "37770d0b32f180a7ffd4cd8613a0cd426681283d",
+  "disposition_sha256": "ff8a8dc0ef313dc9717744c5610258e7e440bbc6c8479b86abc60fc85887524a",
+  "baseline_receipt_sha256": "7b83831e64eb3cde208bf2d598da9c912fe7926cf790ca6fc5e3570469b7aab5",
+  "schema_sql_sha256": "e2289fa6ce093c4449978897d4ad6c8d2a70e9d51b1573ebcb45bd617968671a",
+  "postgres_image": {
+    "reference": "docker.io/library/postgres:16",
+    "digest": "sha256:e17e86066e5ef83e0952a9347f5c792b7ece00972e2aa787a6986f471b3dd3d5"
+  },
+  "sandbox": {
+    "host": "lifeswitch-work-runner",
+    "rootless": true,
+    "network_mode": "none",
+    "published_ports": 0,
+    "service_uid": 999,
+    "read_only_root": true,
+    "privileged": false,
+    "pids_limit": 256,
+    "memory_bytes": 4294967296
+  },
+  "schema_restore": {
+    "status": "pass",
+    "schema_only": true,
+    "production_database_writes": 0,
+    "baseline_roles_nologin": 7,
+    "canonical_muscle_tables_present": 3,
+    "excluded_relations_present": 0,
+    "excluded_functions_present": 0
+  },
+  "synthetic_adapter_proof": {
+    "status": "pass",
+    "muscle_catalog_contract_version": "seebx_normalized_muscle_catalog_v1",
+    "exercise_contract_version": "seebx_exercise_muscle_profile_v1",
+    "canonical_muscle_slug": "pectoralis_major",
+    "mapping_count": 3,
+    "normalized_relationships_authoritative": true,
+    "legacy_arrays_authoritative": false,
+    "app_role": "lifeswitch_app_login"
+  },
+  "candidate_tests": {
+    "focused_baseline_tests": 9,
+    "complete_backend_tests": 1385,
+    "status": "pass"
+  },
+  "fail_closed_corrections": [
+    "plain schema validation was narrowed from unqualified text fragments to exact retired identities after rejecting retained function bodies",
+    "the first disposable PostgreSQL socket layout exited before schema installation and was replaced by a separate disposable socket volume"
+  ],
+  "cleanup": {
+    "container_absent": true,
+    "data_volume_absent": true,
+    "socket_volume_absent": true,
+    "workspace_absent": true,
+    "status": "pass"
+  },
+  "authority": {
+    "deployment_authority": false,
+    "production_change_authority": false,
+    "retirement_authority": false
+  }
+}

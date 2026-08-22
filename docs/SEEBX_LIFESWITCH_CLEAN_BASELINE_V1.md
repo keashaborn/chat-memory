@@ -2,7 +2,7 @@
 
 Date: 2026-08-22
 
-Status: candidate generator; no production schema, data, role, service,
+Status: candidate baseline and disposable restore verified; no production schema, data, role, service,
 deployment, retirement, or deletion authority
 
 ## Purpose
@@ -49,10 +49,28 @@ exists only to reproduce extension ownership and schema authority.
 These are baseline exclusions, not production-removal instructions. Archive
 and restore evidence is still required before any production retirement.
 
+## Verified Work Runner proof
+
+Candidate commit `37770d0b32f180a7ffd4cd8613a0cd426681283d` produced a
+schema-only package bound to disposition SHA-256
+`ff8a8dc0ef313dc9717744c5610258e7e440bbc6c8479b86abc60fc85887524a`.
+The package restored successfully into the digest-pinned PostgreSQL 16 image
+on rootless Work Runner with no network or published port. The proof found all
+seven baseline roles as `NOLOGIN`, all three canonical muscle tables, and zero
+excluded relations or functions.
+
+The exact candidate PostgreSQL adapter and both versioned muscle contracts ran
+under `lifeswitch_app_login` against synthetic rows. Alias `chest` resolved to
+canonical `pectoralis_major`; normalized mappings were authoritative and the
+deliberately stale legacy arrays were non-authoritative. The complete 1,385-test
+backend suite passed. The container, data volume, socket volume, and disposable
+workspace were then proved absent.
+
+Machine-readable evidence is
+`ops/database/lifeswitch_clean_baseline_verification_v1.json`.
+
 ## Next gate
 
-Build the package from the exact candidate commit containing this generator,
-transfer only schema artifacts to Work Runner, restore into a fresh digest-pinned
-PostgreSQL 16 container, load synthetic exercise-muscle fixtures, run the real
-candidate adapter and versioned contract, prove expected objects and grants,
-and destroy the complete disposable environment.
+Use this baseline for the real signed-session paired frontend/backend proof,
+including Plan-to-Nutrition behavior and owner/RLS enforcement. Production
+installation, migration, retirement, or cutover remains separately authorized.

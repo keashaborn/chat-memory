@@ -1,6 +1,6 @@
 # SeeBx current residual ledger v1
 
-Date: 2026-08-21
+Date: 2026-08-22
 
 Status: candidate evidence; no deployment or retirement authority
 
@@ -32,6 +32,12 @@ Status: candidate evidence; no deployment or retirement authority
   and five remain unproven. The eleven review-gated objects are preserved and
   listed in `SEEBX_LIFESWITCH_DATABASE_CONSUMER_AUDIT_V1.md`; the audit grants
   no deletion authority.
+- The exact 218-object disposition now retains three normalized muscle
+  relations as canonical product data and excludes seven reviewed relations
+  plus one retired function from the clean baseline. Candidate commit
+  `37770d0b32f180a7ffd4cd8613a0cd426681283d` generated the schema/role package;
+  its Work Runner restore, app-role adapter proof, 1,385-test backend suite,
+  and complete disposable cleanup pass. Production remains unchanged.
 - The separate failed voice-canary unit and active timer remain outside this
   cleanup batch.
 
@@ -70,11 +76,13 @@ Status: candidate evidence; no deployment or retirement authority
    forwarding are now consistent. A real signed-session frontend/backend/
    disposable-database proof and enabled delegation, if approved, remain
    required before producing the final release bundle.
-2. The isolated LifeSwitch database has no canonical clean-install baseline.
-   Its exact restore is proven, but ten catalog/snapshot relations or functions
-   lack verified active consumers and 113 historical SQL files are not a safe
-   installation order. Resolve the ten explicit dispositions, then generate
-   and disposable-test a retained-object schema/role baseline.
+2. The isolated LifeSwitch database now has a hash-bound canonical schema/role
+   clean-install baseline. It preserves owners and ACLs, creates all baseline
+   roles `NOLOGIN`, contains no table data, omits the exact eight reviewed
+   legacy/recovery objects, and passed a digest-pinned Work Runner restore plus
+   synthetic candidate-adapter proof. It does not yet replace environment
+   credential provisioning, reference-data migration, or a signed-session
+   paired frontend/backend proof.
 3. Immutable release control is installed on SeeBx and Verbal Sage at exact
    package release `08322acd1ff738c88cc83c2361ffdb4c35e5b29d`. The current
    cleanup candidate postdates the sealed backend build, so final application
@@ -112,17 +120,17 @@ Status: candidate evidence; no deployment or retirement authority
 
 ## Next cleanup order
 
-1. Resolve the ten catalog/snapshot database objects without verified active
-   consumers, then build and disposable-test the canonical clean-install
-   LifeSwitch schema/role baseline.
-2. Run a real signed-session paired frontend/backend proof against the
+1. Run a real signed-session paired frontend/backend proof against the
    verified disposable database, including Plan-to-Nutrition application
    behavior; only test delegated People access if separately enabled. Plan
    targets remain independent of retired page-level AI helpers.
-3. Bind exact database schema, owner/RLS, delegated-access, migration, rollback,
+2. Bind exact database schema, owner/RLS, delegated-access, migration, rollback,
    and paired frontend evidence before regenerating any release package.
-4. Run the Forms schema, exact valid/quarantine reconciliation, rollback, and
+3. Run the Forms schema, exact valid/quarantine reconciliation, rollback, and
    cross-owner denial proof only in a separately authorized disposable restore.
+4. Audit every retained admin/operations route, timer, incident table, and
+   frontend caller against current infrastructure; consolidate only proven-live
+   operations and retire stale memory/Qdrant/RESSE dependencies in a separate batch.
 5. Prove Zep owner/thread isolation, deletion, export/retention, outage, and
    provenance behavior before declaring the old memory paths fully replaced.
 6. Regenerate immutable backend/frontend bundles and release manifests from the
