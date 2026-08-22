@@ -10,10 +10,12 @@ class CatalogRetiredRoutesV1Tests(unittest.TestCase):
     def test_only_named_product_catalog_routes_remain(self) -> None:
         source = CATALOG.read_text(encoding="utf-8")
         retained = (
-            "/exercises/search",
-            "/exercises/browse",
-            "/foods/usda/barcode",
-            "/foods/usda/guide",
+            '@router.get("/exercises/search")',
+            '@router.get("/exercises/browse")',
+            '@router.get("/exercises/{exercise_id}/muscles")',
+            '@router.get("/muscles")',
+            '@router.get("/foods/usda/barcode")',
+            '@router.get("/foods/usda/guide")',
         )
         retired = (
             "/foods/search",
@@ -22,8 +24,8 @@ class CatalogRetiredRoutesV1Tests(unittest.TestCase):
             "/foods/usda/import",
             "/foods/approve",
         )
-        for route in retained:
-            self.assertEqual(source.count(route), 1, route)
+        for decorator in retained:
+            self.assertEqual(source.count(decorator), 1, decorator)
         for route in retired:
             self.assertNotIn(route, source, route)
         self.assertEqual(source.count("@router."), len(retained))

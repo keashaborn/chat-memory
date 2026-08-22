@@ -11,6 +11,12 @@ import datetime as _dt
 from seebx.adapters.lifeswitch_catalog_postgres import (
     lifeswitch_catalog_reader,
 )
+from seebx.capabilities.catalog.exercise_muscles import (
+    ExerciseMuscleContractError,
+    ExerciseMuscleNotFoundError,
+    build_exercise_muscle_profile,
+    build_muscle_catalog_response,
+)
 
 from seebx.adapters.usda_fdc import (
     UsdaFdcError,
@@ -108,6 +114,58 @@ async def browse_exercises(
         )
 
     return JSONResponse(families)
+
+
+@router.get("/muscles")
+async def list_muscles(
+    q: str = Query("", max_length=120),
+    region: str = Query("", max_length=80),
+    locale: str = Query("en", min_length=2, max_length=10),
+    limit: int = Query(100, ge=1, le=200),
+):
+    clean_q = str(q or "").strip()
+    clean_region = str(region or "").strip().lower()
+    clean_locale = str(locale or "en").strip().lower()
+    async with lifeswitch_catalog_reader() as catalog:
+        rows = await catalog.list_muscles(
+            clean_q,
+            clean_region,
+            clean_locale,
+            limit,
+        )
+    try:
+        payload = build_muscle_catalog_response(
+            rows,
+            query=clean_q,
+            region=clean_region,
+            locale=clean_locale,
+        )
+    except ExerciseMuscleContractError as error:
+        raise HTTPException(
+            status_code=503,
+            detail="canonical muscle catalog unavailable",
+        ) from error
+    return JSONResponse(payload.model_dump(mode="json"))
+
+
+@router.get("/exercises/{exercise_id}/muscles")
+async def exercise_muscles(
+    exercise_id: uuid.UUID,
+    locale: str = Query("en", min_length=2, max_length=10),
+):
+    clean_locale = str(locale or "en").strip().lower()
+    async with lifeswitch_catalog_reader() as catalog:
+        rows = await catalog.read_exercise_muscles(exercise_id, clean_locale)
+    try:
+        payload = build_exercise_muscle_profile(rows, locale=clean_locale)
+    except ExerciseMuscleNotFoundError as error:
+        raise HTTPException(status_code=404, detail="exercise not found") from error
+    except ExerciseMuscleContractError as error:
+        raise HTTPException(
+            status_code=503,
+            detail="canonical exercise muscle profile unavailable",
+        ) from error
+    return JSONResponse(payload.model_dump(mode="json"))
 
 
 def _usda_guide_tokens(text: str) -> list[str]:

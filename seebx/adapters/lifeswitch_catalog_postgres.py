@@ -28,7 +28,29 @@ with selected_families as (
     f.kind,
     f.movement_group,
     f.movement_pattern,
-    f.primary_muscles,
+    coalesce(
+      array(
+        select canonical_m.display_name
+        from catalog_dev.exercise_family_member canonical_fm
+        join catalog_dev.exercise canonical_e
+          on canonical_e.exercise_id=canonical_fm.exercise_id
+         and canonical_e.is_active=true
+         and canonical_e.is_public=true
+        join catalog_dev.exercise_muscle canonical_em
+          on canonical_em.exercise_id=canonical_e.exercise_id
+         and canonical_em.role='primary'
+        join catalog_dev.muscle canonical_m
+          on canonical_m.muscle_slug=canonical_em.muscle_slug
+        where canonical_fm.exercise_family_id=f.exercise_family_id
+          and canonical_fm.is_active=true
+        group by canonical_m.muscle_slug, canonical_m.display_name
+        order by
+          max(canonical_em.weight) desc nulls last,
+          lower(canonical_m.display_name),
+          canonical_m.muscle_slug
+      ),
+      array[]::text[]
+    ) as primary_muscles,
     f.description,
     f.sort_order
   from catalog_dev.exercise_family f
@@ -71,7 +93,21 @@ select
   e.slug as exercise_slug,
   e.display_name,
   e.modality,
-  e.primary_muscles,
+  coalesce(
+    array(
+      select variant_m.display_name
+      from catalog_dev.exercise_muscle variant_em
+      join catalog_dev.muscle variant_m
+        on variant_m.muscle_slug=variant_em.muscle_slug
+      where variant_em.exercise_id=e.exercise_id
+        and variant_em.role='primary'
+      order by
+        variant_em.weight desc nulls last,
+        lower(variant_m.display_name),
+        variant_m.muscle_slug
+    ),
+    array[]::text[]
+  ) as primary_muscles,
   e.equipment_required,
   e.unilateral
 from selected_families f
@@ -88,6 +124,76 @@ order by
   fm.is_default desc,
   fm.sort_order asc,
   lower(e.display_name) asc
+"""
+
+MUSCLE_CATALOG_SQL = """
+select
+  m.muscle_slug,
+  m.display_name,
+  m.parent_slug,
+  m.region,
+  coalesce(
+    array(
+      select ma.alias
+      from catalog_dev.muscle_alias ma
+      where ma.muscle_slug=m.muscle_slug
+        and ma.locale=$3
+      order by lower(ma.alias), ma.alias
+    ),
+    array[]::text[]
+  ) as aliases
+from catalog_dev.muscle m
+where (
+    $1=''
+    or lower(m.display_name) like ('%' || lower($1) || '%')
+    or lower(m.muscle_slug) like ('%' || lower($1) || '%')
+    or exists (
+      select 1
+      from catalog_dev.muscle_alias search_alias
+      where search_alias.muscle_slug=m.muscle_slug
+        and search_alias.locale=$3
+        and lower(search_alias.alias) like ('%' || lower($1) || '%')
+    )
+  )
+  and ($2='' or lower(coalesce(m.region, ''))=lower($2))
+order by lower(m.display_name), m.muscle_slug
+limit $4
+"""
+
+EXERCISE_MUSCLES_SQL = """
+select
+  e.exercise_id,
+  e.slug as exercise_slug,
+  e.display_name as exercise_display_name,
+  em.muscle_slug,
+  m.display_name as muscle_display_name,
+  m.parent_slug,
+  m.region,
+  em.role,
+  em.weight,
+  coalesce(
+    array(
+      select ma.alias
+      from catalog_dev.muscle_alias ma
+      where ma.muscle_slug=em.muscle_slug
+        and ma.locale=$2
+      order by lower(ma.alias), ma.alias
+    ),
+    array[]::text[]
+  ) as aliases
+from catalog_dev.exercise e
+left join catalog_dev.exercise_muscle em
+  on em.exercise_id=e.exercise_id
+left join catalog_dev.muscle m
+  on m.muscle_slug=em.muscle_slug
+where e.exercise_id=$1
+  and e.is_active=true
+  and e.is_public=true
+order by
+  case em.role when 'primary' then 0 when 'secondary' then 1 when 'stabilizer' then 2 else 3 end,
+  em.weight desc nulls last,
+  lower(m.display_name) nulls last,
+  em.muscle_slug nulls last
 """
 
 
@@ -134,6 +240,36 @@ class PostgresLifeSwitchCatalogReader:
             )
         return list(rows)
 
+    async def list_muscles(
+        self,
+        query: str,
+        region: str,
+        locale: str,
+        limit: int,
+    ) -> list[Any]:
+        async with self._connection.transaction(readonly=True):
+            rows = await self._connection.fetch(
+                MUSCLE_CATALOG_SQL,
+                query,
+                region,
+                locale,
+                limit,
+            )
+        return list(rows)
+
+    async def read_exercise_muscles(
+        self,
+        exercise_id: Any,
+        locale: str,
+    ) -> list[Any]:
+        async with self._connection.transaction(readonly=True):
+            rows = await self._connection.fetch(
+                EXERCISE_MUSCLES_SQL,
+                exercise_id,
+                locale,
+            )
+        return list(rows)
+
 
 @asynccontextmanager
 async def lifeswitch_catalog_reader(
@@ -148,6 +284,8 @@ async def lifeswitch_catalog_reader(
 
 
 __all__ = [
+    "EXERCISE_MUSCLES_SQL",
+    "MUSCLE_CATALOG_SQL",
     "PostgresLifeSwitchCatalogReader",
     "connect_lifeswitch_catalog",
     "lifeswitch_catalog_reader",
