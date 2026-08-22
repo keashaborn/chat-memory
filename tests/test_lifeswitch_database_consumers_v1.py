@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "scripts" / "audit_lifeswitch_database_consumers_v1.py"
+SCRIPT = ROOT / "scripts" / "database_consumer_audit_v1.py"
 SPEC = importlib.util.spec_from_file_location("database_consumers", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 module = importlib.util.module_from_spec(SPEC)
