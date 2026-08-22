@@ -7,6 +7,8 @@ from uuid import UUID
 from seebx.adapters.lifeswitch_openai_chat import OpenAIChatCompletionsAdapterV3
 from seebx.adapters.openai_chat import OpenAIChatCompletionsAdapterV1
 from seebx.adapters.usage_postgres import (
+    USAGE_EVENT_TABLE,
+    USAGE_WRITER_ROLE,
     UsagePersistenceError,
     persist_openai_chat_usage,
 )
@@ -53,7 +55,7 @@ class FakeConnection:
 
     async def fetchrow(self, query: str, *args: Any) -> dict[str, Any] | None:
         self.fetchrow_calls.append((query, args))
-        if "insert into lifeswitch_usage.ai_usage_event_v1" in query:
+        if "insert into usage.ai_usage_event_v1" in query:
             return self.insert_row
         return self.existing_row
 
@@ -81,6 +83,10 @@ async def chat_response_v3():
 
 
 class UsagePostgresTests(unittest.IsolatedAsyncioTestCase):
+    def test_uses_clean_platform_database_contract(self) -> None:
+        self.assertEqual(USAGE_EVENT_TABLE, "usage.ai_usage_event_v1")
+        self.assertEqual(USAGE_WRITER_ROLE, "seebx_usage_writer_v1")
+
     async def test_v3_response_uses_the_same_canonical_writer(self) -> None:
         response = await chat_response_v3()
         conn = FakeConnection(insert_row={"ai_usage_event_id": ANSWER})
@@ -109,10 +115,11 @@ class UsagePostgresTests(unittest.IsolatedAsyncioTestCase):
             provider_response=response,
         )
 
-        self.assertIn("set local role lifeswitch_usage_writer_v1", conn.execute_calls[0][0])
+        self.assertIn("set local role seebx_usage_writer_v1", conn.execute_calls[0][0])
         self.assertEqual(conn.execute_calls[1][1], (str(ACTOR),))
         insert = conn.fetchrow_calls[0]
-        self.assertIn("lifeswitch_usage.ai_usage_event_v1", insert[0])
+        self.assertIn("usage.ai_usage_event_v1", insert[0])
+        self.assertNotIn("lifeswitch_usage", insert[0])
         self.assertNotIn(response.content or "", insert[0])
         self.assertEqual(
             insert[1],

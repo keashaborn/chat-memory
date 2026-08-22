@@ -11,7 +11,8 @@ from seebx.adapters.openai_chat import OpenAIChatResponseV1
 
 EVENT_SCHEMA_VERSION = 1
 USAGE_HELPER = "openai_chat_completions_v1"
-USAGE_WRITER_ROLE = "lifeswitch_usage_writer_v1"
+USAGE_EVENT_TABLE = "usage.ai_usage_event_v1"
+USAGE_WRITER_ROLE = "seebx_usage_writer_v1"
 
 
 class UsagePersistenceError(RuntimeError):
@@ -55,8 +56,8 @@ async def persist_openai_chat_usage(
                 str(owner_user_id),
             )
             inserted = await conn.fetchrow(
-                """
-                insert into lifeswitch_usage.ai_usage_event_v1 (
+                f"""
+                insert into {USAGE_EVENT_TABLE} (
                   owner_user_id, answer_id, provider, operation, helper,
                   source_channel, provider_response_id, requested_model,
                   returned_model, input_tokens, cached_input_tokens,
@@ -94,14 +95,14 @@ async def persist_openai_chat_usage(
                 return
 
             existing = await conn.fetchrow(
-                """
+                f"""
                 select
                   owner_user_id, answer_id, source_channel,
                   provider_response_id, requested_model, returned_model,
                   input_tokens, cached_input_tokens, output_tokens,
                   reasoning_output_tokens, total_tokens, helper,
                   idempotency_key, event_schema_version
-                from lifeswitch_usage.ai_usage_event_v1
+                from {USAGE_EVENT_TABLE}
                 where provider='openai' and provider_response_id=$1
                 """,
                 response.response_id,
