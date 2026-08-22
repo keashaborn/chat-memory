@@ -32,7 +32,7 @@ def audit_fixture() -> dict[str, object]:
         object_entry("lifeswitch_plan.plan_version", "database_internal_reachable"),
         object_entry("public.spatial_ref_sys", "extension_owned"),
     ]
-    for identity, decision in module.REVIEW_DISPOSITIONS.items():
+    for identity, decision in module.EXPLICIT_DISPOSITIONS.items():
         objects.append(object_entry(identity, decision[0]))
     return {
         "candidate_commit": "a" * 40,
@@ -50,22 +50,23 @@ def audit_fixture() -> dict[str, object]:
 
 
 class LifeSwitchDatabaseDispositionV1Tests(unittest.TestCase):
-    def test_exact_review_objects_and_proven_objects_are_partitioned(self) -> None:
+    def test_exact_explicit_objects_and_proven_objects_are_partitioned(self) -> None:
         manifest = module.build_manifest(audit_fixture(), "d" * 64)
-        self.assertFalse(manifest["baseline_generation_allowed"])
+        self.assertTrue(manifest["baseline_generation_allowed"])
         self.assertFalse(manifest["deletion_authority"])
         self.assertFalse(manifest["production_change_authority"])
         self.assertEqual(
             manifest["disposition_counts"],
             {
-                "archive_candidate": 5,
+                "archive_candidate": 6,
                 "recovery_only": 2,
                 "retained_active": 1,
+                "retained_canonical_product_data": 3,
                 "retained_dependency": 1,
                 "retained_extension": 1,
-                "review_hold": 4,
             },
         )
+        self.assertEqual(manifest["status"], "candidate_baseline_ready")
 
     def test_unknown_unresolved_object_fails_closed(self) -> None:
         audit = audit_fixture()

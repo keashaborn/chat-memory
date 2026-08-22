@@ -26,30 +26,30 @@ PROVEN_DISPOSITIONS = {
     "extension_owned": ("retained_extension", "include", "extension_owned"),
 }
 
-REVIEW_DISPOSITIONS = {
+EXPLICIT_DISPOSITIONS = {
     "catalog_dev.exercise_muscle": (
         "unproven",
-        "review_hold",
-        "hold",
-        "richer_normalized_muscle_model_unconsumed",
+        "retained_canonical_product_data",
+        "include",
+        "approved_normalized_muscle_relationship_authority",
     ),
     "catalog_dev.exercise_muscle_rule": (
         "unproven",
-        "review_hold",
-        "hold",
-        "normalized_muscle_rule_surface_unconsumed",
+        "archive_candidate",
+        "exclude",
+        "empty_rule_surface_unconsumed",
     ),
     "catalog_dev.muscle": (
         "unproven",
-        "review_hold",
-        "hold",
-        "normalized_muscle_catalog_unconsumed",
+        "retained_canonical_product_data",
+        "include",
+        "approved_normalized_muscle_identity_authority",
     ),
     "catalog_dev.muscle_alias": (
         "unproven",
-        "review_hold",
-        "hold",
-        "normalized_muscle_aliases_unconsumed",
+        "retained_canonical_product_data",
+        "include",
+        "approved_normalized_muscle_alias_authority",
     ),
     "catalog_dev.food_alias": (
         "migration_only",
@@ -153,7 +153,7 @@ def build_manifest(audit: dict[str, Any], audit_sha256: str) -> dict[str, Any]:
         if classification in PROVEN_DISPOSITIONS:
             disposition, baseline_action, reason = PROVEN_DISPOSITIONS[classification]
         else:
-            decision = REVIEW_DISPOSITIONS.get(identity)
+            decision = EXPLICIT_DISPOSITIONS.get(identity)
             if decision is None or decision[0] != classification:
                 raise DispositionError("unresolved_object_without_exact_disposition")
             _, disposition, baseline_action, reason = decision
@@ -168,9 +168,9 @@ def build_manifest(audit: dict[str, Any], audit_sha256: str) -> dict[str, Any]:
             }
         )
 
-    expected_review = set(REVIEW_DISPOSITIONS)
-    if not expected_review.issubset(seen):
-        raise DispositionError("expected_review_object_missing")
+    expected_explicit = set(EXPLICIT_DISPOSITIONS)
+    if not expected_explicit.issubset(seen):
+        raise DispositionError("expected_explicit_object_missing")
     entries.sort(key=lambda item: item["identity"])
     counts: dict[str, int] = {}
     for entry in entries:
@@ -191,7 +191,7 @@ def build_manifest(audit: dict[str, Any], audit_sha256: str) -> dict[str, Any]:
             "report_sha256": audit_sha256,
             "source_manifest_sha256": str(audit.get("source_manifest_sha256") or ""),
         },
-        "status": "candidate_review_gate",
+        "status": "candidate_baseline_ready" if holds == 0 else "candidate_review_gate",
     }
 
 

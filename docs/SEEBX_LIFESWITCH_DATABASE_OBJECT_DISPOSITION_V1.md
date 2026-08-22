@@ -2,7 +2,7 @@
 
 Date: 2026-08-21
 
-Status: candidate review gate; no production migration, database write, object
+Status: candidate baseline-ready disposition; no production migration, database write, object
 retirement, deployment, restart, or deletion authority
 
 ## Purpose
@@ -25,7 +25,7 @@ content-free and contains database object identities and classifications only.
 - source object catalog SHA-256:
   `e55ee06cd5733be20175450857b7c8b58eb2c974fcd8873350c3f467df22426b`;
 - generated disposition manifest SHA-256:
-  `8e3a421442bd88a5fa77d1e3eafeca4b707b3bc2182a498c6633d3ba46d80aec`;
+  `ff8a8dc0ef313dc9717744c5610258e7e440bbc6c8479b86abc60fc85887524a`;
 - 218 objects accounted for exactly once;
 - five focused disposition tests pass.
 
@@ -36,15 +36,20 @@ content-free and contains database object identities and classifications only.
 | retained active | 57 | include active application surface |
 | retained dependency | 32 | include database dependency reachable from active code |
 | retained extension | 118 | recreate the owning extension, not copied object-level DDL |
+| retained canonical product data | 3 | include the approved normalized muscle identity, alias, and relationship model |
 | recovery only | 2 | exclude from runtime baseline only after encrypted recovery evidence is bound |
-| archive candidate | 5 | exclude only after exact archive and restoration proof |
-| review hold | 4 | block baseline generation pending an explicit product decision |
+| archive candidate | 6 | exclude only after exact archive and restoration proof |
 
-`baseline_generation_allowed` is therefore `false`. The hold is deliberate:
-the normalized muscle model has 1,058 weighted mappings across 154 exercises
-and may be valuable as a canonical SeeBx exercise capability even though no
-current runtime consumes it. It must be integrated deliberately or archived;
-the builder will not guess.
+`baseline_generation_allowed` is therefore `true`. The approved normalized
+muscle model has 1,058 weighted mappings across 154 exercises. The
+`catalog_dev.muscle`, `muscle_alias`, and `exercise_muscle` relations are
+retained as canonical product data. This decision authorizes candidate baseline
+generation and capability development only; it does not activate a route or
+change production.
+
+The empty, unconsumed `catalog_dev.exercise_muscle_rule` relation is the sixth
+archive candidate. It is not part of the canonical model and still requires an
+exact archive and restore proof before any production retirement.
 
 The dormant internal food-search subtree is an archive candidate. The active
 `catalog_dev.food` relation is retained because current application code still
@@ -57,19 +62,17 @@ runtime baseline requires an encrypted archive/count/hash receipt first.
 ## Authority boundary
 
 The manifest sets both `deletion_authority` and `production_change_authority`
-to `false`. `archive_candidate`, `recovery_only`, and `review_hold` are review
+to `false`. `archive_candidate` and `recovery_only` are review
 states, not execution instructions. Nothing in this batch changes production
 schema, data, roles, services, environment, routing, or deployment state.
 
 ## Next gate
 
-1. Decide whether the normalized muscle model becomes a canonical exercise
-   capability or an archived data asset.
-2. Produce encrypted, restore-tested receipts for the five food archive
-   candidates and two recovery-only snapshot relations.
-3. Resolve all four review holds and regenerate the manifest with
-   `baseline_generation_allowed=true`.
-4. Generate the canonical clean-install schema/role baseline from that exact
+1. Define one versioned normalized exercise-muscle capability and PostgreSQL
+   adapter, retaining the arrays only as temporary compatibility projections.
+2. Produce encrypted, restore-tested receipts for the six archive candidates
+   and two recovery-only snapshot relations.
+3. Generate the canonical clean-install schema/role baseline from this exact
    manifest.
-5. Install it only into a fresh disposable Work Runner database and run owner,
+4. Install it only into a fresh disposable Work Runner database and run owner,
    RLS, migration, application-contract, and teardown tests.

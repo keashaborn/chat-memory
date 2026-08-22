@@ -1,0 +1,73 @@
+{
+  "activation_authority": false,
+  "audit_scope": "aggregate_counts_and_catalog_metadata_only",
+  "canonical_model_decision": "approved_for_candidate_development",
+  "data_integrity": {
+    "alias_duplicate_locale_norm_count": 0,
+    "alias_missing_locale_count": 0,
+    "alias_missing_norm_count": 0,
+    "mapping_blank_notes_count": 0,
+    "mapping_invalid_weight_count": 0,
+    "mapping_null_weight_count": 0,
+    "muscle_missing_norm_count": 0,
+    "muscle_missing_region_count": 0
+  },
+  "deletion_authority": false,
+  "legacy_array_comparison": {
+    "distinct_array_label_count": 22,
+    "exact_primary_display_name_set_matches": 35,
+    "exact_secondary_display_name_set_matches": 74,
+    "exercises_compared": 188,
+    "noncanonical_array_label_occurrences": 142
+  },
+  "model_counts": {
+    "alias_count": 20,
+    "exercise_count": 188,
+    "mapped_exercise_count": 154,
+    "mapping_count": 1058,
+    "muscle_count": 83,
+    "rule_count": 0,
+    "unmapped_exercise_count": 34
+  },
+  "dispositions": {
+    "catalog_dev.exercise_muscle": "retained_canonical_product_data",
+    "catalog_dev.exercise_muscle_rule": "archive_candidate",
+    "catalog_dev.exercise.primary_muscles": "temporary_compatibility_projection",
+    "catalog_dev.exercise.secondary_muscles": "temporary_compatibility_projection",
+    "catalog_dev.muscle": "retained_canonical_product_data",
+    "catalog_dev.muscle_alias": "retained_canonical_product_data",
+    "unmapped_exercises": "curation_required"
+  },
+  "role_counts": {
+    "primary": {
+      "exercise_count": 153,
+      "mapping_count": 563,
+      "maximum_weight": "1.000",
+      "minimum_weight": "0.050",
+      "muscle_count": 48
+    },
+    "secondary": {
+      "exercise_count": 114,
+      "mapping_count": 364,
+      "maximum_weight": "1.000",
+      "minimum_weight": "0.100",
+      "muscle_count": 42
+    },
+    "stabilizer": {
+      "exercise_count": 71,
+      "mapping_count": 131,
+      "maximum_weight": "1.000",
+      "minimum_weight": "0.250",
+      "muscle_count": 10
+    }
+  },
+  "schema_version": "seebx-lifeswitch-exercise-muscle-review-v1",
+  "source": {
+    "candidate_commit": "ab3c9d95204934e1d141989e96ace1c1395322a5",
+    "consumer_report_sha256": "085fe940aa18c3e15c04685d281f84416303aa88a022d8fbc627fc68cd30d066",
+    "database_manifest_sha256": "fd71e52ac0825661df33f36c9bff1b595e0cf333221b8bd0ba090ad6dac4ad67",
+    "object_catalog_sha256": "e55ee06cd5733be20175450857b7c8b58eb2c974fcd8873350c3f467df22426b"
+  },
+  "runtime_integration_ready": false,
+  "status": "candidate_model_approved"
+}
