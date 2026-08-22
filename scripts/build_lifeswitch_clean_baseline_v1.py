@@ -301,16 +301,16 @@ def run_pg_restore(archive: Path, restore_list: Path, output: Path) -> None:
 def validate_plain_schema(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
     lowered = text.lower()
+    if re.search(r"(?m)^copy\s", lowered):
+        raise BaselineContractError("plain_schema_forbidden_content")
     for forbidden in (
-        "copy ",
-        "insert into ",
-        "exercise_muscle_rule",
-        "food_alias",
-        "food_nutrient",
-        "food_portion",
+        "catalog_dev.exercise_muscle_rule",
+        "catalog_dev.food_alias",
+        "catalog_dev.food_nutrient",
+        "catalog_dev.food_portion",
         "catalog_dev.nutrient",
-        "lifeswitch_snapshot",
-        "search_foods(",
+        "lifeswitch_snapshot.",
+        "catalog_dev.search_foods(",
     ):
         if forbidden in lowered:
             raise BaselineContractError("plain_schema_forbidden_content")

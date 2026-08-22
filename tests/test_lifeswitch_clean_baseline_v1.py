@@ -141,17 +141,35 @@ class LifeSwitchCleanBaselineV1Tests(unittest.TestCase):
         self.assertIn("GRANT LIFESWITCH_APP TO LIFESWITCH_APP_LOGIN", upper)
         self.assertIn("GRANT LIFESWITCH_CHAT_READER TO LIFESWITCH_CHAT_LOGIN", upper)
 
-    def test_plain_schema_validation_rejects_data_and_retired_objects(self):
+    def test_plain_schema_validation_allows_function_dml_and_similar_names(self):
         with tempfile.TemporaryDirectory() as raw:
             path = Path(raw) / "schema.sql"
             path.write_text(
                 "CREATE TABLE catalog_dev.exercise_muscle ();\n"
                 "CREATE TABLE catalog_dev.muscle ();\n"
-                "CREATE TABLE catalog_dev.muscle_alias ();\n",
+                "CREATE TABLE catalog_dev.muscle_alias ();\n"
+                "CREATE FUNCTION retained_writer() RETURNS void AS $$\n"
+                "BEGIN\n"
+                "  INSERT INTO retained_table VALUES (1);\n"
+                "END\n"
+                "$$ LANGUAGE plpgsql;\n"
+                "ALTER TABLE retained_table ADD CONSTRAINT ck_my_food_nutrient_source_nonempty CHECK (true);\n",
                 encoding="utf-8",
             )
             module.validate_plain_schema(path)
-            path.write_text(path.read_text() + "INSERT INTO catalog_dev.muscle VALUES ();\n")
+
+    def test_plain_schema_validation_rejects_copy_and_exact_retired_objects(self):
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "schema.sql"
+            canonical = (
+                "CREATE TABLE catalog_dev.exercise_muscle ();\n"
+                "CREATE TABLE catalog_dev.muscle ();\n"
+                "CREATE TABLE catalog_dev.muscle_alias ();\n"
+            )
+            path.write_text(canonical + "COPY catalog_dev.muscle FROM stdin;\n", encoding="utf-8")
+            with self.assertRaisesRegex(module.BaselineContractError, "forbidden_content"):
+                module.validate_plain_schema(path)
+            path.write_text(canonical + "ALTER TABLE catalog_dev.food_nutrient OWNER TO lifeswitch_owner;\n")
             with self.assertRaisesRegex(module.BaselineContractError, "forbidden_content"):
                 module.validate_plain_schema(path)
 
