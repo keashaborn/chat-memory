@@ -9,7 +9,7 @@ service restart, timer change, or production deployment.
 | Surface | Production | Isolated candidate |
 | --- | --- | --- |
 | SeeBx backend | `49f9e60cf4321c8e42c359845c1a62a8c987614d` | `e18b54125fb903f685e9eea35dd422d9ac30a105` |
-| LifeSwitch frontend | `858b61527186571cabb5580dc5159fdf6b69ae2e` | `6826f8e3e6e55f9937dc112f91a1e9bedc8a5fdb` |
+| LifeSwitch frontend | `858b61527186571cabb5580dc5159fdf6b69ae2e` | `00c9671a1e0c14ab6c7dbd97ea1d8718858317bc` |
 
 Both candidates were clean. The production frontend retained six untracked
 `.next.rollback-*` directories; they were treated as protected recovery
@@ -27,7 +27,7 @@ artifacts and were not changed.
 | Clear recent or all chat history while retaining memory | `/api/admin/forget_recent`, `/api/admin/clear_chat_history` | `POST /chat-history/clear` | retain; exact owner identity and bearer required |
 | Clear all chat plus Zep memory | `/api/admin/delete_all` | `DELETE /memory/chat-and-zep/clear` | retain behind `VS_ALLOW_DELETE_ALL=true`; production currently omits the flag and therefore fails closed |
 | Voice health | `/api/admin/voice-health` | `GET /metrics/voice-slo` | retain; current synthetic canary defect must be corrected by candidate cutover |
-| Response inspector session | `/api/admin/debug_cookie` | signed, host-bound inspector session cookie plus `inspector.view` | retain behavior, rename misleading route in candidate |
+| Response inspector session | `/api/admin/inspector-session` | signed, host-bound inspector session cookie plus `inspector.view` | retained and explicitly named in frontend candidate `00c9671` |
 | Development-history archive | admin panel only | quarantined, non-authoritative archive status | retain inert until separately approved archive backend exists |
 
 ## Proven retired or dormant paths
@@ -104,14 +104,11 @@ controls.
 
 ## Open cleanup gates
 
-1. Rename `/api/admin/debug_cookie` to a capability-named inspector session
-   endpoint in the isolated frontend candidate and preserve test coverage.
-2. Keep the candidate export repair and dead Vantage inspector retirement in
+1. Keep the candidate export repair, inspector-session rename, and dead Vantage inspector retirement in
    the frontend release set.
-3. Verify the repaired voice canary in a disposable or installed immutable
+2. Verify the repaired voice canary in a disposable or installed immutable
    candidate before production activation.
-4. Decide and execute the retained `memory` database migration only after a
+3. Decide and execute the retained `memory` database migration only after a
    table/function/role/RLS/data reconciliation package and rollback proof exist.
-5. Install release-integrity monitoring and retire Git synchronization only as
+4. Install release-integrity monitoring and retire Git synchronization only as
    part of the immutable release cutover.
-

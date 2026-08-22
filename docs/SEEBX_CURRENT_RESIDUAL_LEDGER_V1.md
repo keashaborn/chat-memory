@@ -129,9 +129,9 @@ Status: candidate evidence; no deployment or retirement authority
 3. Run the Forms schema, exact valid/quarantine reconciliation, rollback, and
    cross-owner denial proof only in a separately authorized disposable restore.
 4. Use `SEEBX_ADMIN_OPERATIONS_INVENTORY_V1.md` as the controlling admin and
-   operations audit. Rename the misleading inspector-session route, preserve
-   the canonical export and dead Vantage-route repairs, and verify the repaired
-   voice canary before cutover. Migrate the retained platform PostgreSQL
+   operations audit. Preserve the completed inspector-session rename, canonical
+   export, and dead Vantage-route repairs, and verify the repaired voice canary
+   before cutover. Migrate the retained platform PostgreSQL
    authorities only through a separate reconciliation and rollback package.
 5. Prove Zep owner/thread isolation, deletion, export/retention, outage, and
    provenance behavior before declaring the old memory paths fully replaced.

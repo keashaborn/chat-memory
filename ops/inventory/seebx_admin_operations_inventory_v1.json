@@ -10,7 +10,7 @@
   "revisions": {
     "backend_candidate": "e18b54125fb903f685e9eea35dd422d9ac30a105",
     "backend_production": "49f9e60cf4321c8e42c359845c1a62a8c987614d",
-    "frontend_candidate": "6826f8e3e6e55f9937dc112f91a1e9bedc8a5fdb",
+    "frontend_candidate": "00c9671a1e0c14ab6c7dbd97ea1d8718858317bc",
     "frontend_production": "858b61527186571cabb5580dc5159fdf6b69ae2e"
   },
   "database_authorities": [
@@ -94,9 +94,10 @@
       "disposition": "retain"
     },
     {
-      "path": "/api/admin/debug_cookie",
+      "path": "/api/admin/inspector-session",
       "authority": "inspector_view_capability",
-      "disposition": "rename_candidate"
+      "candidate_commit": "00c9671a1e0c14ab6c7dbd97ea1d8718858317bc",
+      "disposition": "retain_explicit_name"
     },
     {
       "path": "/api/chat/inspect",
@@ -158,7 +159,6 @@
     "qdrant_resse_vantage_or_retired_memory_timers": 0
   },
   "open_gates": [
-    "rename_inspector_session_route_in_frontend_candidate",
     "verify_repaired_voice_canary_in_disposable_or_installed_candidate",
     "migrate_retained_memory_database_authorities_with_full_reconciliation",
     "install_release_integrity_during_immutable_cutover",
