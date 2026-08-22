@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ROUTER = ROOT / "seebx" / "capabilities" / "training" / "routes.py"
 SERVICE = ROOT / "seebx" / "adapters" / "lifeswitch_training_writes_postgres.py"
 CONDITIONING = ROOT / "seebx" / "adapters" / "lifeswitch_training_conditioning_postgres.py"
+SESSIONS = ROOT / "seebx" / "adapters" / "lifeswitch_training_sessions_postgres.py"
 
 
 class TrainingImmutableRoutingTest(unittest.TestCase):
@@ -19,6 +20,8 @@ class TrainingImmutableRoutingTest(unittest.TestCase):
         cls.service = SERVICE.read_text(encoding="utf-8")
         cls.service_lower = cls.service.lower()
         cls.conditioning = CONDITIONING.read_text(encoding="utf-8")
+        cls.sessions = SESSIONS.read_text(encoding="utf-8")
+        cls.sessions_lower = cls.sessions.lower()
 
     def test_router_has_no_raw_observation_mutations(self) -> None:
         observation_tables = (
@@ -50,7 +53,7 @@ class TrainingImmutableRoutingTest(unittest.TestCase):
 
     def test_normal_reads_use_current_roots_and_canonical_roles(self) -> None:
         self.assertGreaterEqual(
-            self.router.count("training_session_current_v"),
+            self.sessions.count("training_session_current_v"),
             5,
         )
         self.assertGreaterEqual(
@@ -58,7 +61,7 @@ class TrainingImmutableRoutingTest(unittest.TestCase):
             3,
         )
         self.assertGreaterEqual(
-            self.router.count("training_set_effective_role_v1"),
+            self.sessions.count("training_set_effective_role_v1"),
             3,
         )
         self.assertNotIn(
@@ -68,15 +71,15 @@ class TrainingImmutableRoutingTest(unittest.TestCase):
         self.assertIn(
             "coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown') "
             "as exercise_role",
-            self.router,
+            self.sessions,
         )
         self.assertNotRegex(
-            self.router_lower,
+            self.sessions_lower,
             r"coalesce\([^\n]*exercise_role[^\n]*'strength'\)",
         )
 
     def test_session_summary_groups_every_projected_view_column(self) -> None:
-        session_rollup = self.router.split("session_rollup as (", 1)[1].split(
+        session_rollup = self.sessions.split("session_rollup as (", 1)[1].split(
             "), classified as (", 1
         )[0]
         grouping = session_rollup.rsplit("group by", 1)[1]

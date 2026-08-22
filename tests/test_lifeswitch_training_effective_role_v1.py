@@ -20,6 +20,7 @@ CHAT_ROLLBACK = (
 )
 PLAN_CONTEXT = ROOT / "seebx" / "adapters" / "plan_observation_postgres.py"
 TRAINING_ROUTER = ROOT / "seebx" / "capabilities" / "training" / "routes.py"
+TRAINING_SESSIONS = ROOT / "seebx" / "adapters" / "lifeswitch_training_sessions_postgres.py"
 
 
 class TrainingEffectiveRoleV1ContractTests(unittest.TestCase):
@@ -34,6 +35,7 @@ class TrainingEffectiveRoleV1ContractTests(unittest.TestCase):
         cls.chat_rollback = CHAT_ROLLBACK.read_text(encoding="utf-8").lower()
         cls.plan = PLAN_CONTEXT.read_text(encoding="utf-8").lower()
         cls.router = TRAINING_ROUTER.read_text(encoding="utf-8").lower()
+        cls.sessions = TRAINING_SESSIONS.read_text(encoding="utf-8").lower()
 
     def test_projection_is_owner_paired_and_non_mutating(self) -> None:
         self.assertIn(
@@ -116,23 +118,23 @@ class TrainingEffectiveRoleV1ContractTests(unittest.TestCase):
 
     def test_plan_and_router_reference_projection_not_fallback_expression(self) -> None:
         self.assertIn("training_set_effective_role_v1", self.plan)
-        self.assertIn("training_set_effective_role_v1", self.router)
+        self.assertIn("training_set_effective_role_v1", self.sessions)
         fallback = (
             "coalesce(nullif(l.capture_role, 'unknown'), "
             "nullif(l.exercise_role_snapshot, 'unknown')"
         )
-        self.assertNotIn(fallback, self.router)
+        self.assertNotIn(fallback, self.sessions)
 
     def test_set_wire_keeps_raw_fields_and_adds_effective_provenance(self) -> None:
-        self.assertIn("l.exercise_role_snapshot, l.capture_role", self.router)
+        self.assertIn("l.exercise_role_snapshot, l.capture_role", self.sessions)
         self.assertIn(
             "coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown') "
             "as exercise_role",
-            self.router,
+            self.sessions,
         )
-        self.assertIn("role_resolution.effective_role", self.router)
-        self.assertIn("role_resolution.resolution_source", self.router)
-        self.assertIn("role_resolution.role_conflict", self.router)
+        self.assertIn("role_resolution.effective_role", self.sessions)
+        self.assertIn("role_resolution.resolution_source", self.sessions)
+        self.assertIn("role_resolution.role_conflict", self.sessions)
 
     def test_rollbacks_are_bounded_and_restore_raw_gateway_logic(self) -> None:
         self.assertIn(

@@ -8,10 +8,8 @@ import datetime as _dt
 import hashlib
 import secrets
 import math
-import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Body, Header, Request
 from seebx.core.ownership import require_actor_matches_owner
-from seebx.adapters.lifeswitch_postgres import connect_lifeswitch
 from seebx.adapters.lifeswitch_training_exercises_postgres import (
     lifeswitch_training_exercises_repository,
 )
@@ -29,19 +27,16 @@ from seebx.adapters.lifeswitch_training_templates_postgres import (
     TemplateUpsertError,
     lifeswitch_training_templates_repository,
 )
+from seebx.adapters.lifeswitch_training_sessions_postgres import (
+    lifeswitch_training_sessions_repository,
+)
 from seebx.adapters.lifeswitch_training_writes_postgres import (
     TrainingWriterError,
-    correct_training_session as write_training_correction,
-    create_training_session as write_training_session,
-    set_transaction_actor,
-    void_training_session as write_training_void,
 )
 from seebx.capabilities.training.write_errors import training_writer_http_error
 from fastapi.responses import JSONResponse
 
 router = APIRouter()
-
-SCHEMA = os.getenv("LIFESWITCH_TRAINING_SCHEMA", "lifeswitch_training")
 
 def _json_safe(v):
     if isinstance(v, uuid.UUID):
@@ -111,9 +106,6 @@ def _without_token_hash(row):
         out.pop("token_hash", None)
     return out
 
-
-async def _db(req: Request):
-    return await connect_lifeswitch(req)
 
 
 async def _resolve_training_view_target(req: Request, viewer_user_id: str, target_user_id: str = "") -> tuple[str, bool]:
@@ -1118,45 +1110,28 @@ async def complete_training_session(
             }
         )
 
-    conn = await _db(req)
+    intent = {
+        "day": day_val.isoformat(),
+        "workout_template_id": wid,
+        "name": name,
+        "notes": notes,
+        "started_at": started.isoformat(),
+        "finished_at": finished.isoformat(),
+        "load_unit": load_unit,
+        "sets": normalized_sets,
+    }
     try:
-        async with conn.transaction():
-            await set_transaction_actor(conn, actor_user_id=owner)
-            intent = {
-                "day": day_val.isoformat(),
-                "workout_template_id": wid,
-                "name": name,
-                "notes": notes,
-                "started_at": started.isoformat(),
-                "finished_at": finished.isoformat(),
-                "load_unit": load_unit,
-                "sets": normalized_sets,
-            }
-            session_id = await write_training_session(
-                conn,
+        async with lifeswitch_training_sessions_repository(req) as repository:
+            session = await repository.complete_session(
+                owner=owner,
                 intent=intent,
                 idempotency_key=write_key,
             )
-            session = await conn.fetchrow(
-                f"""
-                select
-                  training_session_id, owner_user_id, day, workout_template_id,
-                  name, notes, started_at, finished_at, is_active,
-                  created_at, updated_at
-                from {SCHEMA}.training_session
-                where training_session_id=$1::uuid
-                  and owner_user_id=$2::uuid
-                """,
-                session_id,
-                owner,
-            )
-            result = _row_to_jsonable(session)
-            result["set_count"] = len(normalized_sets)
-            return JSONResponse(result)
+        result = _row_to_jsonable(session)
+        result["set_count"] = len(normalized_sets)
+        return JSONResponse(result)
     except TrainingWriterError as error:
         raise training_writer_http_error(error) from error
-    finally:
-        await conn.close()
 
 
 @router.post("/sessions/create")
@@ -1189,137 +1164,18 @@ async def list_training_sessions(
         except Exception:
             raise HTTPException(status_code=400, detail="invalid day")
 
-    conn = await _db(req)
-    try:
-        owner, delegated = await _resolve_training_view_target(req, viewer, target_user_id)
-        session_source = (
-            "training_session"
-            if include_inactive
-            else "training_session_current_v"
+    owner, delegated = await _resolve_training_view_target(
+        req, viewer, target_user_id
+    )
+    async with lifeswitch_training_sessions_repository(req) as repository:
+        rows = await repository.list_sessions(
+            owner=owner,
+            delegated=delegated,
+            day_val=day_val,
+            include_inactive=bool(include_inactive),
+            limit=limit,
         )
-
-        where = ["s.owner_user_id=$1::uuid"]
-        args = [owner, delegated]
-        if day_val:
-            args.append(day_val)
-            where.append(f"s.day=${len(args)}::date")
-        if not include_inactive:
-            where.append("s.is_active=true")
-            where.append("s.finished_at is not null")
-
-        having = (
-            "having count(l.training_set_log_id) filter (where l.is_active=true) > 0"
-            if not include_inactive
-            else ""
-        )
-
-        rows = await conn.fetch(
-            f"""
-            with session_rollup as (
-              select
-                s.training_session_id, s.owner_user_id, s.day, s.workout_template_id,
-                s.name, s.notes, s.started_at, s.finished_at, s.is_active,
-                s.created_at, s.updated_at,
-                base.workout_role_snapshot,
-                role_event.assigned_role as historical_workout_role,
-                coalesce(count(l.training_set_log_id) filter (where l.is_active=true), 0)::int as set_count,
-                coalesce(count(distinct l.exercise_id) filter (where l.is_active=true), 0)::int as exercise_count,
-                coalesce(sum(l.volume) filter (where l.is_active=true), 0)::float as volume,
-                coalesce(count(l.training_set_log_id) filter (
-                  where l.is_active=true
-                    and role_resolution.effective_role='strength'
-                ), 0)::int as strength_set_count,
-                coalesce(count(distinct l.exercise_id) filter (
-                  where l.is_active=true
-                    and role_resolution.effective_role='strength'
-                ), 0)::int as strength_exercise_count,
-                coalesce(sum(l.volume) filter (
-                  where l.is_active=true
-                    and role_resolution.effective_role='strength'
-                ), 0)::float as strength_volume,
-                coalesce(count(l.training_set_log_id) filter (
-                  where l.is_active=true
-                    and role_resolution.effective_role='rehab'
-                ), 0)::int as rehab_set_count,
-                coalesce(count(distinct l.exercise_id) filter (
-                  where l.is_active=true
-                    and role_resolution.effective_role='rehab'
-                ), 0)::int as rehab_exercise_count,
-                coalesce(sum(l.volume) filter (
-                  where l.is_active=true
-                    and role_resolution.effective_role='rehab'
-                ), 0)::float as rehab_volume,
-                coalesce(count(l.training_set_log_id) filter (
-                  where l.is_active=true
-                    and role_resolution.effective_role='unknown'
-                ), 0)::int as unknown_role_set_count,
-                coalesce(count(l.training_set_log_id) filter (
-                  where l.is_active=true and role_resolution.role_conflict
-                ), 0)::int as role_conflict_set_count,
-                coalesce(count(l.training_set_log_id) filter (
-                  where l.is_active=true
-                    and role_resolution.resolution_source='capture_role'
-                ), 0)::int as capture_role_resolved_set_count,
-                coalesce(count(l.training_set_log_id) filter (
-                  where l.is_active=true
-                    and role_resolution.resolution_source='exercise_role_snapshot'
-                ), 0)::int as exercise_role_snapshot_resolved_set_count,
-                coalesce(count(l.training_set_log_id) filter (
-                  where l.is_active=true
-                    and role_resolution.resolution_source='training_session_role_event'
-                ), 0)::int as training_session_role_event_resolved_set_count,
-                coalesce(count(l.training_set_log_id) filter (
-                  where l.is_active=true
-                    and role_resolution.resolution_source='workout_role_snapshot'
-                ), 0)::int as workout_role_snapshot_resolved_set_count,
-                coalesce(count(l.training_set_log_id) filter (
-                  where l.is_active=true
-                    and role_resolution.resolution_source='unresolved'
-                ), 0)::int as unresolved_role_set_count
-              from {SCHEMA}.{session_source} s
-              join {SCHEMA}.training_session base
-                on base.training_session_id=s.training_session_id
-               and base.owner_user_id=s.owner_user_id
-              left join {SCHEMA}.training_session_role_event role_event
-                on role_event.training_session_id=s.training_session_id
-               and role_event.owner_user_id=s.owner_user_id
-              left join {SCHEMA}.training_set_log l
-                on l.training_session_id=s.training_session_id
-               and l.owner_user_id=s.owner_user_id
-              left join {SCHEMA}.training_set_effective_role_v1 role_resolution
-                on role_resolution.training_set_log_id=l.training_set_log_id
-               and role_resolution.training_session_id=l.training_session_id
-               and role_resolution.owner_user_id=l.owner_user_id
-              where {' and '.join(where)}
-              group by
-                s.training_session_id, s.owner_user_id, s.day,
-                s.workout_template_id, s.name, s.notes, s.started_at,
-                s.finished_at, s.is_active, s.created_at, s.updated_at,
-                base.workout_role_snapshot, role_event.assigned_role
-              {having}
-            ), classified as (
-              select session_rollup.*,
-                case
-                  when strength_set_count > 0 and rehab_set_count > 0 then 'mixed'
-                  when strength_set_count > 0 then 'strength'
-                  when rehab_set_count > 0 then 'rehab'
-                  else 'unclassified'
-                end as session_role
-              from session_rollup
-            )
-            select classified.*,
-              $1::uuid as _target_user_id,
-              $2::boolean as _delegated_view,
-              session_role in ('strength', 'mixed') as counts_toward_strength
-            from classified
-            order by day desc, created_at desc
-            limit {int(limit)}
-            """,
-            *args,
-        )
-        return JSONResponse([_row_to_jsonable(r) for r in rows])
-    finally:
-        await conn.close()
+    return JSONResponse([_row_to_jsonable(row) for row in rows])
 
 
 @router.get("/sessions/{training_session_id}")
@@ -1332,31 +1188,18 @@ async def get_training_session(
     sid = _as_uuid(training_session_id, "training_session_id")
     viewer = require_actor_matches_owner(req, owner_user_id)
 
-    conn = await _db(req)
-    try:
-        owner, delegated = await _resolve_training_view_target(req, viewer, target_user_id)
-
-        row = await conn.fetchrow(
-            f"""
-            select
-              training_session_id, owner_user_id, day, workout_template_id,
-              name, notes, started_at, finished_at, is_active, created_at, updated_at,
-              $3::uuid as _target_user_id,
-              $4::boolean as _delegated_view
-            from {SCHEMA}.training_session_current_v
-            where training_session_id=$1::uuid
-              and owner_user_id=$2::uuid
-            """,
-            sid,
-            owner,
-            owner,
-            delegated,
+    owner, delegated = await _resolve_training_view_target(
+        req, viewer, target_user_id
+    )
+    async with lifeswitch_training_sessions_repository(req) as repository:
+        row = await repository.get_session(
+            sid=sid,
+            owner=owner,
+            delegated=delegated,
         )
-        if not row:
-            raise HTTPException(status_code=404, detail="session not found")
-        return JSONResponse(_row_to_jsonable(row))
-    finally:
-        await conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="session not found")
+    return JSONResponse(_row_to_jsonable(row))
 
 
 @router.get("/progression")
@@ -1381,70 +1224,18 @@ async def list_strength_progression(
     if (end_date - start_date).days > 366:
         raise HTTPException(status_code=400, detail="progression range cannot exceed 367 days")
 
-    conn = await _db(req)
-    try:
-        owner, delegated = await _resolve_training_view_target(req, viewer, target_user_id)
-        rows = await conn.fetch(
-            f"""
-            select
-              s.training_session_id,
-              s.day,
-              s.name as session_name,
-              l.exercise_id,
-              max(l.exercise_name) as exercise_name,
-              count(l.training_set_log_id)::int as set_count,
-              coalesce(sum(l.reps), 0)::int as total_reps,
-              coalesce(max(l.weight), 0)::float as max_load,
-              coalesce(sum(l.volume), 0)::float as total_volume,
-              array_agg(distinct role_resolution.resolution_source
-                order by role_resolution.resolution_source
-              ) as role_resolution_sources,
-              case
-                when count(distinct nullif(trim(l.load_unit), '')) = 0 then null
-                when count(distinct nullif(trim(l.load_unit), '')) = 1
-                  then max(nullif(trim(l.load_unit), ''))
-                else 'mixed'
-              end as load_unit,
-              $4::uuid as _target_user_id,
-              $5::boolean as _delegated_view
-            from {SCHEMA}.training_session_current_v s
-            join {SCHEMA}.training_set_log l
-              on l.training_session_id=s.training_session_id
-             and l.owner_user_id=s.owner_user_id
-            join {SCHEMA}.training_set_effective_role_v1 role_resolution
-              on role_resolution.training_set_log_id=l.training_set_log_id
-             and role_resolution.training_session_id=l.training_session_id
-             and role_resolution.owner_user_id=l.owner_user_id
-            where s.owner_user_id=$1::uuid
-              and s.day between $2::date and $3::date
-              and s.is_active=true
-              and s.finished_at is not null
-              and l.is_active=true
-              and role_resolution.effective_role='strength'
-            group by
-              s.training_session_id,
-              s.day,
-              s.name,
-              s.created_at,
-              l.exercise_id,
-              l.exercise_sort_order
-            order by
-              s.day desc,
-              s.created_at desc,
-              l.exercise_sort_order asc,
-              exercise_name asc
-            limit {int(limit)}
-            """,
-            owner,
-            start_date,
-            end_date,
-            owner,
-            delegated,
+    owner, delegated = await _resolve_training_view_target(
+        req, viewer, target_user_id
+    )
+    async with lifeswitch_training_sessions_repository(req) as repository:
+        rows = await repository.list_strength_progression(
+            owner=owner,
+            delegated=delegated,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
         )
-        return JSONResponse([_row_to_jsonable(row) for row in rows])
-    finally:
-        await conn.close()
-
+    return JSONResponse([_row_to_jsonable(row) for row in rows])
 
 
 @router.post("/sessions/{training_session_id}/deactivate")
@@ -1457,13 +1248,11 @@ async def deactivate_training_session(
     sid = _as_uuid(training_session_id, "training_session_id")
     owner = require_actor_matches_owner(req, owner_user_id)
 
-    conn = await _db(req)
     try:
-        async with conn.transaction():
-            await set_transaction_actor(conn, actor_user_id=owner)
-            voided_id = await write_training_void(
-                conn,
-                training_session_id=sid,
+        async with lifeswitch_training_sessions_repository(req) as repository:
+            voided_id = await repository.deactivate_session(
+                sid=sid,
+                owner=owner,
                 reason=_clean_text(reason, 1000) or "user_deleted",
             )
         return JSONResponse(
@@ -1476,8 +1265,6 @@ async def deactivate_training_session(
         )
     except TrainingWriterError as error:
         raise training_writer_http_error(error) from error
-    finally:
-        await conn.close()
 
 
 @router.post("/sessions/{training_session_id}/correct")
@@ -1494,39 +1281,23 @@ async def correct_training_session(
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="JSON object required")
 
-    conn = await _db(req)
     try:
-        async with conn.transaction():
-            await set_transaction_actor(conn, actor_user_id=owner)
-            replacement_id = await write_training_correction(
-                conn,
-                training_session_id=sid,
+        async with lifeswitch_training_sessions_repository(req) as repository:
+            row = await repository.correct_session(
+                sid=sid,
+                owner=owner,
                 intent=payload,
                 idempotency_key=write_key,
             )
-            row = await conn.fetchrow(
-                f"""
-                select
-                  training_session_id, owner_user_id, day,
-                  workout_template_id, name, notes, started_at, finished_at,
-                  supersedes_training_session_id, is_active,
-                  created_at, updated_at
-                from {SCHEMA}.training_session_current_v
-                where training_session_id=$1::uuid
-                  and owner_user_id=$2::uuid
-                """,
-                replacement_id,
-                owner,
-            )
         if not row:
-            raise HTTPException(status_code=500, detail="training correction unavailable")
+            raise HTTPException(
+                status_code=500, detail="training correction unavailable"
+            )
         result = _row_to_jsonable(row)
         result["set_count"] = len(payload.get("sets") or [])
         return JSONResponse(result)
     except TrainingWriterError as error:
         raise training_writer_http_error(error) from error
-    finally:
-        await conn.close()
 
 
 @router.get("/sessions/{training_session_id}/sets")
@@ -1540,53 +1311,17 @@ async def list_training_session_sets(
     sid = _as_uuid(training_session_id, "training_session_id")
     viewer = require_actor_matches_owner(req, owner_user_id)
 
-    conn = await _db(req)
-    try:
-        owner, delegated = await _resolve_training_view_target(req, viewer, target_user_id)
-
-        where_active = "" if include_inactive else "and l.is_active=true"
-        current_parent = "" if include_inactive else f"""
-              and exists (
-                select 1
-                from {SCHEMA}.training_session_current_v current_session
-                where current_session.training_session_id=l.training_session_id
-                  and current_session.owner_user_id=l.owner_user_id
-              )
-        """
-        rows = await conn.fetch(
-            f"""
-            select
-              l.training_set_log_id, l.training_session_id, l.owner_user_id,
-              l.workout_template_id, l.exercise_id, l.exercise_name,
-              l.set_type, l.exercise_role_snapshot, l.capture_role,
-              coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown') as exercise_role,
-              role_resolution.effective_role,
-              role_resolution.resolution_source,
-              role_resolution.role_conflict,
-              l.exercise_sort_order, l.set_index, l.weight, l.reps, l.volume,
-              l.load_unit,
-              l.flags, l.notes, l.is_active, l.created_at, l.updated_at,
-              $3::uuid as _target_user_id,
-              $4::boolean as _delegated_view
-            from {SCHEMA}.training_set_log l
-            join {SCHEMA}.training_set_effective_role_v1 role_resolution
-              on role_resolution.training_set_log_id=l.training_set_log_id
-             and role_resolution.training_session_id=l.training_session_id
-             and role_resolution.owner_user_id=l.owner_user_id
-            where l.training_session_id=$1::uuid
-              and l.owner_user_id=$2::uuid
-              {where_active}
-              {current_parent}
-            order by l.exercise_sort_order asc, l.set_index asc, l.created_at asc
-            """,
-            sid,
-            owner,
-            owner,
-            delegated,
+    owner, delegated = await _resolve_training_view_target(
+        req, viewer, target_user_id
+    )
+    async with lifeswitch_training_sessions_repository(req) as repository:
+        rows = await repository.list_session_sets(
+            sid=sid,
+            owner=owner,
+            delegated=delegated,
+            include_inactive=bool(include_inactive),
         )
-        return JSONResponse([_row_to_jsonable(r) for r in rows])
-    finally:
-        await conn.close()
+    return JSONResponse([_row_to_jsonable(row) for row in rows])
 
 
 @router.post("/sessions/{training_session_id}/sets/add")
@@ -1630,55 +1365,19 @@ async def list_training_set_log_segments(
     sid = _as_uuid(training_session_id, "training_session_id")
     setid = _as_uuid(training_set_log_id, "training_set_log_id")
     viewer = require_actor_matches_owner(req, owner_user_id)
-    conn = await _db(req)
-    try:
-        owner, delegated = await _resolve_training_view_target(req, viewer, target_user_id)
-
-        parent = await conn.fetchrow(
-            f"""
-            select l.training_set_log_id
-            from {SCHEMA}.training_set_log l
-            join {SCHEMA}.training_session_current_v s
-              on s.training_session_id=l.training_session_id
-             and s.owner_user_id=l.owner_user_id
-            where l.training_set_log_id=$1::uuid
-              and l.training_session_id=$2::uuid
-              and l.owner_user_id=$3::uuid
-              and l.is_active=true
-            """,
-            setid,
-            sid,
-            owner,
+    owner, delegated = await _resolve_training_view_target(
+        req, viewer, target_user_id
+    )
+    async with lifeswitch_training_sessions_repository(req) as repository:
+        rows = await repository.list_set_segments(
+            sid=sid,
+            setid=setid,
+            owner=owner,
+            delegated=delegated,
         )
-        if not parent:
-            raise HTTPException(status_code=404, detail="set not found")
-
-        rows = await conn.fetch(
-            f"""
-            select
-              training_set_log_segment_id,
-              training_set_log_id,
-              segment_index,
-              label,
-              weight,
-              reps,
-              volume,
-              notes,
-              created_at,
-              updated_at,
-              $2::uuid as _target_user_id,
-              $3::boolean as _delegated_view
-            from {SCHEMA}.training_set_log_segment
-            where training_set_log_id=$1::uuid
-            order by segment_index asc, created_at asc
-            """,
-            setid,
-            owner,
-            delegated,
-        )
-        return JSONResponse([_row_to_jsonable(r) for r in rows])
-    finally:
-        await conn.close()
+    if rows is None:
+        raise HTTPException(status_code=404, detail="set not found")
+    return JSONResponse([_row_to_jsonable(row) for row in rows])
 
 
 @router.post("/sessions/{training_session_id}/sets/{training_set_log_id}/segments/add")

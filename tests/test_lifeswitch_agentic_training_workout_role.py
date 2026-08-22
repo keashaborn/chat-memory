@@ -11,6 +11,9 @@ ROUTER = ROOT / "seebx" / "capabilities" / "training" / "routes.py"
 TEMPLATES = (
     ROOT / "seebx" / "adapters" / "lifeswitch_training_templates_postgres.py"
 )
+SESSIONS = (
+    ROOT / "seebx" / "adapters" / "lifeswitch_training_sessions_postgres.py"
+)
 
 
 class TrainingWorkoutRoleContractTest(unittest.TestCase):
@@ -20,6 +23,7 @@ class TrainingWorkoutRoleContractTest(unittest.TestCase):
         cls.writer = WRITER.read_text(encoding="utf-8").lower()
         cls.router = ROUTER.read_text(encoding="utf-8").lower()
         cls.templates = TEMPLATES.read_text(encoding="utf-8").lower()
+        cls.sessions = SESSIONS.read_text(encoding="utf-8").lower()
 
     def test_migration_adds_bounded_roles_and_append_only_audit(self) -> None:
         self.assertIn("add column if not exists workout_role text", self.sql)
@@ -55,7 +59,7 @@ class TrainingWorkoutRoleContractTest(unittest.TestCase):
         self.assertIn("idempotency-key", self.router)
 
     def test_session_role_is_derived_from_canonical_set_roles(self) -> None:
-        classification = self.router.split("), classified as (", 1)[1].split(
+        classification = self.sessions.split("), classified as (", 1)[1].split(
             "select classified.*", 1
         )[0]
         self.assertNotIn("when historical_workout_role", classification)
@@ -64,26 +68,26 @@ class TrainingWorkoutRoleContractTest(unittest.TestCase):
             "when strength_set_count > 0 and rehab_set_count > 0 then 'mixed'",
             classification,
         )
-        self.assertIn("role_event.assigned_role as historical_workout_role", self.router)
-        self.assertIn("base.workout_role_snapshot", self.router)
-        self.assertIn("session_role in ('strength', 'mixed') as counts_toward_strength", self.router)
+        self.assertIn("role_event.assigned_role as historical_workout_role", self.sessions)
+        self.assertIn("base.workout_role_snapshot", self.sessions)
+        self.assertIn("session_role in ('strength', 'mixed') as counts_toward_strength", self.sessions)
 
     def test_session_summary_uses_canonical_effective_role_projection(self) -> None:
-        self.assertIn("training_set_effective_role_v1", self.router)
+        self.assertIn("training_set_effective_role_v1", self.sessions)
         self.assertGreaterEqual(
-            self.router.count("role_resolution.effective_role='strength'"),
+            self.sessions.count("role_resolution.effective_role='strength'"),
             4,
         )
         self.assertGreaterEqual(
-            self.router.count("role_resolution.effective_role='rehab'"),
+            self.sessions.count("role_resolution.effective_role='rehab'"),
             3,
         )
         self.assertNotIn(
             "coalesce(nullif(l.capture_role, 'unknown')", self.router
         )
-        self.assertIn("role_conflict_set_count", self.router)
-        self.assertIn("unknown_role_set_count", self.router)
-        self.assertIn("training_session_role_event_resolved_set_count", self.router)
+        self.assertIn("role_conflict_set_count", self.sessions)
+        self.assertIn("unknown_role_set_count", self.sessions)
+        self.assertIn("training_session_role_event_resolved_set_count", self.sessions)
 
 
 if __name__ == "__main__":

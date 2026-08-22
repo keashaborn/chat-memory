@@ -9,6 +9,7 @@ MIGRATION = ROOT / "ops" / "sql" / "20260720_lifeswitch_training_exercise_role.s
 WRITER = ROOT / "ops" / "sql" / "20260723_lifeswitch_training_writer_api.sql"
 ROUTER = ROOT / "seebx" / "capabilities" / "training" / "routes.py"
 EXERCISES_ADAPTER = ROOT / "seebx" / "adapters" / "lifeswitch_training_exercises_postgres.py"
+SESSIONS_ADAPTER = ROOT / "seebx" / "adapters" / "lifeswitch_training_sessions_postgres.py"
 
 
 class TrainingExerciseRoleContractTest(unittest.TestCase):
@@ -18,6 +19,7 @@ class TrainingExerciseRoleContractTest(unittest.TestCase):
         cls.writer = WRITER.read_text(encoding="utf-8").lower()
         cls.router = ROUTER.read_text(encoding="utf-8")
         cls.exercises_adapter = EXERCISES_ADAPTER.read_text(encoding="utf-8")
+        cls.sessions_adapter = SESSIONS_ADAPTER.read_text(encoding="utf-8")
 
     def test_migration_adds_bounded_roles_without_deleting_logs(self) -> None:
         self.assertIn("add column if not exists exercise_role text", self.sql)
@@ -39,26 +41,26 @@ class TrainingExerciseRoleContractTest(unittest.TestCase):
         self.assertNotIn('raw_set.get("exercise_role")', self.router)
 
     def test_session_list_publishes_deterministic_role_summaries(self) -> None:
-        self.assertIn("as strength_set_count", self.router)
-        self.assertIn("as strength_exercise_count", self.router)
-        self.assertIn("as strength_volume", self.router)
-        self.assertIn("as rehab_set_count", self.router)
-        self.assertIn("as rehab_exercise_count", self.router)
-        self.assertIn("as rehab_volume", self.router)
-        self.assertIn("end as session_role", self.router)
-        self.assertIn("as counts_toward_strength", self.router)
-        self.assertIn("training_set_effective_role_v1", self.router)
-        self.assertIn("role_resolution.effective_role='strength'", self.router)
-        self.assertIn("role_resolution.effective_role='rehab'", self.router)
+        self.assertIn("as strength_set_count", self.sessions_adapter)
+        self.assertIn("as strength_exercise_count", self.sessions_adapter)
+        self.assertIn("as strength_volume", self.sessions_adapter)
+        self.assertIn("as rehab_set_count", self.sessions_adapter)
+        self.assertIn("as rehab_exercise_count", self.sessions_adapter)
+        self.assertIn("as rehab_volume", self.sessions_adapter)
+        self.assertIn("end as session_role", self.sessions_adapter)
+        self.assertIn("as counts_toward_strength", self.sessions_adapter)
+        self.assertIn("training_set_effective_role_v1", self.sessions_adapter)
+        self.assertIn("role_resolution.effective_role='strength'", self.sessions_adapter)
+        self.assertIn("role_resolution.effective_role='rehab'", self.sessions_adapter)
 
     def test_session_set_list_preserves_raw_role_and_adds_effective_role(self) -> None:
         self.assertIn(
             "coalesce(l.capture_role, l.exercise_role_snapshot, 'unknown') as exercise_role",
-            self.router,
+            self.sessions_adapter,
         )
-        self.assertIn("role_resolution.effective_role", self.router)
-        self.assertIn("role_resolution.resolution_source", self.router)
-        self.assertIn("role_resolution.role_conflict", self.router)
+        self.assertIn("role_resolution.effective_role", self.sessions_adapter)
+        self.assertIn("role_resolution.resolution_source", self.sessions_adapter)
+        self.assertIn("role_resolution.role_conflict", self.sessions_adapter)
 
 
 if __name__ == "__main__":

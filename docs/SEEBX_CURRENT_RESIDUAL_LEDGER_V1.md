@@ -10,16 +10,14 @@ Status: candidate evidence; no deployment or retirement authority
   `49f9e60cf4321c8e42c359845c1a62a8c987614d`; its Git status is empty and
   `brains.service` is active with zero restarts.
 - The cleanup integration candidate and GitHub branch began the Training
-  templates/exercises/segments batch at `b8102efaa48a05be8c2deae03f41452678ae8409`; the
-  worktree was clean and matched its remote before candidate-only changes.
-- The candidate has 138 routes and 124 OpenAPI paths. Route SHA-256 remains
-  `dacb3665272ec6720fb477340c9d84d977a6af55fae4f061972526eabe10353d`
-  and OpenAPI SHA-256 remains
-  `44e8aa5f364f85aef4d4fb4fa2596af4ab3eb219a2a82e21d54fbd2768c71091`.
-- The complete candidate suite passes 1,320/1,320 after the candidate-only
-  Training templates/exercises/segments extraction. All 21 normalized SQL
-  effects match the parent at SHA-256
-  `7f359426e314b19abf6347bbcf2ff6c586fce4a59e379491c13db908430dd417`.
+  strength-session/set-log batch at `13dc3f8bc0bf06097cf4148550fe08d8aecae264`; the worktree was clean
+  and matched its remote before candidate-only changes.
+- The candidate has 138 routes and 124 OpenAPI paths. Exact parent/candidate
+  route and OpenAPI structures match; the established route SHA-256 remains
+  `dacb3665272ec6720fb477340c9d84d977a6af55fae4f061972526eabe10353d` and OpenAPI SHA-256 remains `44e8aa5f364f85aef4d4fb4fa2596af4ab3eb219a2a82e21d54fbd2768c71091`.
+- The complete candidate suite passes 1,328/1,328 after the candidate-only
+  Training strength-session/set-log extraction. All eight normalized SQL
+  effects match the parent at SHA-256 `e2d72b4f49c2c61efafea0023b6f6c4960257ce2b00334a07a376e2bc3aaee89`.
 - The separate failed voice-canary unit and active timer remain outside this
   cleanup batch.
 
@@ -46,15 +44,12 @@ Status: candidate evidence; no deployment or retirement authority
 
 ## Remaining architectural debt
 
-1. One capability module still contains direct SQL execution or transaction
-   ownership: `training/routes.py`, with eight direct query/write calls, three
-   transactions, and eight request-owned connection closes. Conversation,
-   search, preferences, voice, AI Operations, observability, Plans,
-   Measurements, Conditioning, workout sharing, templates/exercises/segments,
-   and all retained Nutrition capability modules now place database effects
-   behind named adapters. Connection acquisition and close are tracked
-   separately from query/transaction effects. Only the Training strength
-   session/log aggregate remains to move behind a named adapter.
+1. No retained LifeSwitch capability handler owns a raw PostgreSQL query or
+   request-owned connection lifetime. `training/routes.py` is still a mixed
+   1,430-line, 41-route module and `nutrition/routes.py` remains a mixed
+   effect-free module with three adapter-mediated transaction scopes. Split
+   both by logical aggregate without changing route order, wire contracts, or
+   adapter authority before producing the final release bundle.
 2. Immutable release control is installed on SeeBx and Verbal Sage at exact
    package release `08322acd1ff738c88cc83c2361ffdb4c35e5b29d`. The current
    cleanup candidate postdates the sealed backend build, so final application
