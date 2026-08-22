@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-"""Build a content-free consumer map for the transitional platform database."""
+"""Build a content-free consumer and governance map for the platform database."""
 
 import argparse
 import json
@@ -39,6 +39,7 @@ PLATFORM_SPEC = AuditSpec(
     operational_roots=(Path("scripts"),),
     migration_roots=(Path("ops/sql"),),
     require_source_manifest=False,
+    include_governance_manifest=True,
 )
 
 

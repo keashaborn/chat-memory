@@ -25,6 +25,7 @@ class PlatformDatabaseConsumersV1Tests(unittest.TestCase):
         self.assertEqual(spec.database, "memory")
         self.assertEqual(spec.admin_role, "sage")
         self.assertFalse(spec.require_source_manifest)
+        self.assertTrue(spec.include_governance_manifest)
         self.assertEqual(
             spec.scoped_schemas,
             (

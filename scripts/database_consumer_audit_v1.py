@@ -54,6 +54,7 @@ class AuditSpec:
     operational_roots: tuple[Path, ...]
     migration_roots: tuple[Path, ...]
     require_source_manifest: bool = True
+    include_governance_manifest: bool = False
 
 
 DEFAULT_SPEC = AuditSpec(
@@ -192,6 +193,182 @@ from (
 """
 
 
+GOVERNANCE_SCHEMAS_SQL = r"""
+select coalesce(jsonb_agg(jsonb_build_object(
+  'name',n.nspname,'owner',pg_get_userbyid(n.nspowner),
+  'acl',coalesce((select jsonb_agg(item::text order by item::text)
+                  from unnest(coalesce(n.nspacl,acldefault('n',n.nspowner))) item),
+                 '[]'::jsonb)
+) order by n.nspname),'[]'::jsonb)
+from pg_namespace n
+where n.nspname = any(array[{schemas}]::text[])
+"""
+
+
+GOVERNANCE_RELATIONS_SQL = r"""
+select coalesce(jsonb_agg(jsonb_build_object(
+  'schema',n.nspname,'name',c.relname,'kind',c.relkind::text,
+  'persistence',c.relpersistence::text,'owner',pg_get_userbyid(c.relowner),
+  'acl',coalesce((select jsonb_agg(item::text order by item::text)
+                  from unnest(coalesce(c.relacl,acldefault(
+                    (case when c.relkind='S' then 'S' else 'r' end)::"char",
+                    c.relowner
+                  ))) item),'[]'::jsonb),
+  'rls_enabled',c.relrowsecurity,'rls_forced',c.relforcerowsecurity,
+  'replica_identity',c.relreplident::text,'is_partition',c.relispartition,
+  'definition',case when c.relkind in ('v','m') then pg_get_viewdef(c.oid,true) else '' end
+) order by n.nspname,c.relname),'[]'::jsonb)
+from pg_class c join pg_namespace n on n.oid=c.relnamespace
+where n.nspname = any(array[{schemas}]::text[])
+  and c.relkind in ('r','p','v','m','S','f')
+"""
+
+
+GOVERNANCE_COLUMNS_SQL = r"""
+select coalesce(jsonb_agg(jsonb_build_object(
+  'schema',n.nspname,'relation',c.relname,'name',a.attname,
+  'ordinal',a.attnum,'type',pg_catalog.format_type(a.atttypid,a.atttypmod),
+  'not_null',a.attnotnull,'identity',a.attidentity::text,
+  'generated',a.attgenerated::text,'dropped',a.attisdropped,
+  'collation',case when a.attcollation=0 then '' else coalesce(coll.collname,'') end,
+  'acl',coalesce((select jsonb_agg(item::text order by item::text)
+                  from unnest(coalesce(a.attacl,'{}'::aclitem[])) item),'[]'::jsonb),
+  'default_definition',coalesce(pg_get_expr(ad.adbin,ad.adrelid),'')
+) order by n.nspname,c.relname,a.attnum),'[]'::jsonb)
+from pg_attribute a
+join pg_class c on c.oid=a.attrelid
+join pg_namespace n on n.oid=c.relnamespace
+left join pg_attrdef ad on ad.adrelid=a.attrelid and ad.adnum=a.attnum
+left join pg_collation coll on coll.oid=a.attcollation
+where n.nspname = any(array[{schemas}]::text[])
+  and c.relkind in ('r','p','v','m','f') and a.attnum>0
+"""
+
+
+GOVERNANCE_FUNCTIONS_SQL = r"""
+select coalesce(jsonb_agg(jsonb_build_object(
+  'schema',n.nspname,'name',p.proname,'kind',p.prokind::text,
+  'identity_arguments',pg_get_function_identity_arguments(p.oid),
+  'result',pg_get_function_result(p.oid),'language',l.lanname,
+  'owner',pg_get_userbyid(p.proowner),
+  'acl',coalesce((select jsonb_agg(item::text order by item::text)
+                  from unnest(coalesce(p.proacl,acldefault('f',p.proowner))) item),
+                 '[]'::jsonb),
+  'security_definer',p.prosecdef,'leakproof',p.proleakproof,
+  'strict',p.proisstrict,'volatility',p.provolatile::text,
+  'parallel',p.proparallel::text,'configuration',coalesce(p.proconfig::text,''),
+  'definition',case when p.prokind in ('f','p') then pg_get_functiondef(p.oid)
+                    else concat_ws('|',p.prosrc,coalesce(p.probin,''),
+                                   pg_get_function_result(p.oid)) end
+) order by n.nspname,p.proname,pg_get_function_identity_arguments(p.oid)),'[]'::jsonb)
+from pg_proc p
+join pg_namespace n on n.oid=p.pronamespace
+join pg_language l on l.oid=p.prolang
+where n.nspname = any(array[{schemas}]::text[])
+"""
+
+
+GOVERNANCE_POLICIES_SQL = r"""
+select coalesce(jsonb_agg(jsonb_build_object(
+  'schema',schemaname,'relation',tablename,'name',policyname,
+  'permissive',permissive,'roles',roles,'command',cmd,
+  'using_definition',coalesce(qual,''),'check_definition',coalesce(with_check,'')
+) order by schemaname,tablename,policyname),'[]'::jsonb)
+from pg_policies
+where schemaname = any(array[{schemas}]::text[])
+"""
+
+
+GOVERNANCE_TRIGGERS_SQL = r"""
+select coalesce(jsonb_agg(jsonb_build_object(
+  'schema',n.nspname,'relation',c.relname,'name',t.tgname,
+  'enabled',t.tgenabled::text,
+  'function',pn.nspname||'.'||p.proname||'('||pg_get_function_identity_arguments(p.oid)||')',
+  'definition',pg_get_triggerdef(t.oid,true)
+) order by n.nspname,c.relname,t.tgname),'[]'::jsonb)
+from pg_trigger t
+join pg_class c on c.oid=t.tgrelid
+join pg_namespace n on n.oid=c.relnamespace
+join pg_proc p on p.oid=t.tgfoid
+join pg_namespace pn on pn.oid=p.pronamespace
+where not t.tgisinternal and n.nspname = any(array[{schemas}]::text[])
+"""
+
+
+GOVERNANCE_CONSTRAINTS_SQL = r"""
+select coalesce(jsonb_agg(jsonb_build_object(
+  'schema',n.nspname,'relation',c.relname,'name',k.conname,
+  'type',k.contype::text,'validated',k.convalidated,
+  'deferrable',k.condeferrable,'deferred',k.condeferred,
+  'definition',pg_get_constraintdef(k.oid,true)
+) order by n.nspname,c.relname,k.conname),'[]'::jsonb)
+from pg_constraint k
+join pg_class c on c.oid=k.conrelid
+join pg_namespace n on n.oid=c.relnamespace
+where n.nspname = any(array[{schemas}]::text[])
+"""
+
+
+GOVERNANCE_INDEXES_SQL = r"""
+select coalesce(jsonb_agg(jsonb_build_object(
+  'schema',n.nspname,'relation',table_class.relname,'name',index_class.relname,
+  'unique',i.indisunique,'primary',i.indisprimary,'valid',i.indisvalid,
+  'ready',i.indisready,'live',i.indislive,'replica_identity',i.indisreplident,
+  'definition',pg_get_indexdef(i.indexrelid)
+) order by n.nspname,table_class.relname,index_class.relname),'[]'::jsonb)
+from pg_index i
+join pg_class table_class on table_class.oid=i.indrelid
+join pg_class index_class on index_class.oid=i.indexrelid
+join pg_namespace n on n.oid=table_class.relnamespace
+where n.nspname = any(array[{schemas}]::text[])
+"""
+
+
+GOVERNANCE_EXTENSIONS_SQL = r"""
+select coalesce(jsonb_agg(jsonb_build_object(
+  'name',e.extname,'version',e.extversion,'schema',n.nspname,
+  'relocatable',e.extrelocatable
+) order by e.extname),'[]'::jsonb)
+from pg_extension e join pg_namespace n on n.oid=e.extnamespace
+"""
+
+
+GOVERNANCE_ROLES_SQL = r"""
+select coalesce(jsonb_agg(jsonb_build_object(
+  'name',rolname,'superuser',rolsuper,'inherit',rolinherit,
+  'create_role',rolcreaterole,'create_db',rolcreatedb,'can_login',rolcanlogin,
+  'replication',rolreplication,'bypass_rls',rolbypassrls,
+  'connection_limit',rolconnlimit,'valid_until',coalesce(rolvaliduntil::text,''),
+  'configuration',coalesce(rolconfig::text,'')
+) order by rolname),'[]'::jsonb)
+from pg_roles where rolname !~ '^pg_'
+"""
+
+
+GOVERNANCE_MEMBERSHIPS_SQL = r"""
+select coalesce(jsonb_agg(jsonb_build_object(
+  'member',member_role.rolname,'granted',granted_role.rolname,
+  'grantor',grantor_role.rolname,'admin_option',m.admin_option
+) order by member_role.rolname,granted_role.rolname,grantor_role.rolname),'[]'::jsonb)
+from pg_auth_members m
+join pg_roles member_role on member_role.oid=m.member
+join pg_roles granted_role on granted_role.oid=m.roleid
+join pg_roles grantor_role on grantor_role.oid=m.grantor
+where member_role.rolname !~ '^pg_' or granted_role.rolname !~ '^pg_'
+"""
+
+
+GOVERNANCE_SEQUENCES_SQL = r"""
+select coalesce(jsonb_agg(jsonb_build_object(
+  'schema',schemaname,'name',sequencename,'owner',sequenceowner,
+  'type',data_type,'start',start_value,'minimum',min_value,'maximum',max_value,
+  'increment',increment_by,'cycle',cycle,'cache',cache_size,'last_value',last_value
+) order by schemaname,sequencename),'[]'::jsonb)
+from pg_sequences
+where schemaname = any(array[{schemas}]::text[])
+"""
+
+
 def canonical_bytes(value: Any) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
 
@@ -229,7 +406,9 @@ def rendered_sql(
     scoped_schemas: tuple[str, ...] = SCOPED_SCHEMAS,
 ) -> str:
     schemas = ",".join(sql_literal(schema) for schema in scoped_schemas)
-    return template.format(schemas=schemas)
+    if "{schemas}" not in template:
+        return template
+    return template.replace("{schemas}", schemas)
 
 
 def run_text(command: list[str], *, label: str, timeout: int = 180) -> str:
@@ -285,6 +464,151 @@ def psql_json(
     if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
         raise AuditExecutionError(f"{label}_shape_invalid")
     return value
+
+
+def psql_scalar(
+    sql: str,
+    *,
+    label: str,
+    spec: AuditSpec = DEFAULT_SPEC,
+) -> str:
+    wrapped = "begin isolation level repeatable read read only;" + sql + ";rollback;"
+    return run_text(
+        [
+            DOCKER,
+            "exec",
+            spec.container,
+            "psql",
+            "-X",
+            "--no-psqlrc",
+            "-qAt",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-U",
+            spec.admin_role,
+            "-d",
+            spec.database,
+            "-c",
+            wrapped,
+        ],
+        label=label,
+    )
+
+
+def quote_identifier(value: str) -> str:
+    if not value or "\x00" in value:
+        raise AuditContractError("identifier_invalid")
+    return '"' + value.replace('"', '""') + '"'
+
+
+def hash_definition_fields(
+    rows: Iterable[dict[str, Any]],
+    fields: Iterable[str],
+) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        for field in fields:
+            if field not in item:
+                continue
+            value = item.pop(field)
+            if not isinstance(value, str):
+                raise AuditExecutionError("governance_definition_invalid")
+            item[field + "_sha256"] = sha256_bytes(value.encode("utf-8"))
+        result.append(item)
+    return result
+
+
+def collect_exact_table_counts(
+    relations: Iterable[dict[str, Any]],
+    *,
+    spec: AuditSpec = DEFAULT_SPEC,
+) -> list[dict[str, Any]]:
+    counts: list[dict[str, Any]] = []
+    for relation in relations:
+        if str(relation.get("kind") or "") not in {"r", "p"}:
+            continue
+        schema = str(relation.get("schema") or "")
+        name = str(relation.get("name") or "")
+        if schema not in spec.scoped_schemas:
+            raise AuditExecutionError("governance_relation_schema_invalid")
+        raw = psql_scalar(
+            "select count(*)::text from "
+            + quote_identifier(schema)
+            + "."
+            + quote_identifier(name),
+            label="governance_table_count",
+            spec=spec,
+        )
+        try:
+            count = int(raw)
+        except ValueError as error:
+            raise AuditExecutionError("governance_table_count_invalid") from error
+        if count < 0:
+            raise AuditExecutionError("governance_table_count_invalid")
+        counts.append({"schema": schema, "relation": name, "row_count": count})
+    return sorted(counts, key=lambda item: (item["schema"], item["relation"]))
+
+
+def collect_governance_manifest(
+    *,
+    spec: AuditSpec = DEFAULT_SPEC,
+) -> dict[str, Any]:
+    queries = (
+        ("schemas", GOVERNANCE_SCHEMAS_SQL, ()),
+        ("relations", GOVERNANCE_RELATIONS_SQL, ("definition",)),
+        ("columns", GOVERNANCE_COLUMNS_SQL, ("default_definition",)),
+        ("functions", GOVERNANCE_FUNCTIONS_SQL, ("definition",)),
+        (
+            "policies",
+            GOVERNANCE_POLICIES_SQL,
+            ("using_definition", "check_definition"),
+        ),
+        ("triggers", GOVERNANCE_TRIGGERS_SQL, ("definition",)),
+        ("constraints", GOVERNANCE_CONSTRAINTS_SQL, ("definition",)),
+        ("indexes", GOVERNANCE_INDEXES_SQL, ("definition",)),
+        ("extensions", GOVERNANCE_EXTENSIONS_SQL, ()),
+        ("roles", GOVERNANCE_ROLES_SQL, ()),
+        ("memberships", GOVERNANCE_MEMBERSHIPS_SQL, ()),
+        ("sequences", GOVERNANCE_SEQUENCES_SQL, ()),
+    )
+    sections: dict[str, list[dict[str, Any]]] = {}
+    raw_relations: list[dict[str, Any]] = []
+    for name, query, definition_fields in queries:
+        rows = psql_json(
+            rendered_sql(query, spec.scoped_schemas),
+            label="governance_" + name,
+            spec=spec,
+        )
+        if name == "relations":
+            raw_relations = rows
+        sections[name] = hash_definition_fields(rows, definition_fields)
+    sections["table_counts"] = collect_exact_table_counts(
+        raw_relations,
+        spec=spec,
+    )
+    section_hashes = {
+        name: sha256_bytes(canonical_bytes(rows))
+        for name, rows in sorted(sections.items())
+    }
+    document = {
+        "schema_version": "seebx-database-governance-manifest-v1",
+        "database": {"container": spec.container, "name": spec.database},
+        "scope": {
+            "schemas": list(spec.scoped_schemas),
+            "row_content_included": False,
+            "definitions_included": False,
+            "definition_hash_algorithm": "sha256",
+            "table_counts_exact": True,
+            "password_verifiers_included": False,
+        },
+        "section_hashes": section_hashes,
+        "sections": sections,
+    }
+    return {
+        **document,
+        "manifest_sha256": sha256_bytes(canonical_bytes(document)),
+    }
 
 
 def current_source_manifest_sha256(
@@ -636,6 +960,11 @@ def execute(
         migration["matches"],
         database_edges,
     )
+    governance_manifest = (
+        collect_governance_manifest(spec=spec)
+        if spec.include_governance_manifest
+        else None
+    )
     counts: dict[str, int] = {}
     for item in classified:
         counts[item["classification"]] = counts.get(item["classification"], 0) + 1
@@ -666,6 +995,7 @@ def execute(
             "schema_bound_template_references_are_evidence": True,
             "overload_resolution": "conservative_all_matching_overloads",
             "operational_references_are_retention_seeds": False,
+            "governance_manifest_included": spec.include_governance_manifest,
             "deletion_authority": False,
         },
         "source_trees": {
@@ -679,11 +1009,13 @@ def execute(
         "classification_counts": dict(sorted(counts.items())),
         "objects": classified,
     }
+    if governance_manifest is not None:
+        document["governance_manifest"] = governance_manifest
     output = prepare_output(run_id, spec.output_root)
     report = output / "consumer-audit.json"
     report_bytes = canonical_bytes(document) + b"\n"
     atomic_write(report, report_bytes)
-    return {
+    result = {
         "status": "pass",
         "report": str(report),
         "report_sha256": sha256_bytes(report_bytes),
@@ -693,6 +1025,13 @@ def execute(
         "classification_counts": document["classification_counts"],
         "deletion_authority": False,
     }
+    if governance_manifest is not None:
+        result["governance_manifest_sha256"] = governance_manifest["manifest_sha256"]
+        result["governance_section_counts"] = {
+            name: len(rows)
+            for name, rows in governance_manifest["sections"].items()
+        }
+    return result
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -189,6 +189,72 @@ class LifeSwitchDatabaseConsumersV1Tests(unittest.TestCase):
                     module.current_source_manifest_sha256(verifier), "c" * 64
                 )
 
+    def test_governance_manifest_hashes_definitions_and_preserves_controls(self) -> None:
+        fixtures = {
+            "governance_schemas": [{"name": "lifeswitch_plan", "owner": "owner", "acl": []}],
+            "governance_relations": [{
+                "schema": "lifeswitch_plan",
+                "name": "plan_profile",
+                "kind": "r",
+                "owner": "owner",
+                "rls_enabled": True,
+                "rls_forced": True,
+                "definition": "secret relation definition",
+            }],
+            "governance_columns": [{
+                "schema": "lifeswitch_plan",
+                "relation": "plan_profile",
+                "name": "id",
+                "default_definition": "gen_random_uuid()",
+            }],
+            "governance_functions": [{"name": "protect", "definition": "function body"}],
+            "governance_policies": [{
+                "name": "owner_policy",
+                "using_definition": "owner_user_id = current_user",
+                "check_definition": "owner_user_id = current_user",
+            }],
+            "governance_triggers": [{"name": "protect_history", "definition": "trigger body"}],
+            "governance_constraints": [{"name": "owner_required", "definition": "not null"}],
+            "governance_indexes": [{"name": "plan_profile_pkey", "definition": "create index"}],
+            "governance_extensions": [{"name": "pgcrypto", "version": "1.3"}],
+            "governance_roles": [{"name": "lifeswitch_app", "bypass_rls": False}],
+            "governance_memberships": [{"member": "lifeswitch_app", "granted": "reader"}],
+            "governance_sequences": [{"schema": "lifeswitch_plan", "name": "example_seq", "last_value": 7}],
+        }
+
+        def fake_psql_json(_sql: str, *, label: str, spec: object) -> list[dict]:
+            del spec
+            return fixtures[label]
+
+        with patch.object(module, "psql_json", side_effect=fake_psql_json), patch.object(
+            module,
+            "collect_exact_table_counts",
+            return_value=[{"schema": "lifeswitch_plan", "relation": "plan_profile", "row_count": 3}],
+        ):
+            manifest = module.collect_governance_manifest()
+        encoded = json.dumps(manifest, sort_keys=True)
+        self.assertNotIn("secret relation definition", encoded)
+        self.assertNotIn("function body", encoded)
+        self.assertNotIn("owner_user_id = current_user", encoded)
+        self.assertTrue(manifest["sections"]["relations"][0]["rls_enabled"])
+        self.assertTrue(manifest["sections"]["relations"][0]["rls_forced"])
+        self.assertEqual(manifest["sections"]["table_counts"][0]["row_count"], 3)
+        self.assertRegex(manifest["manifest_sha256"], r"^[0-9a-f]{64}$")
+        self.assertRegex(
+            manifest["sections"]["functions"][0]["definition_sha256"],
+            r"^[0-9a-f]{64}$",
+        )
+
+    def test_exact_table_counts_quote_identifiers_and_reject_bad_counts(self) -> None:
+        relations = [{"schema": "lifeswitch_plan", "name": "plan_profile", "kind": "r"}]
+        with patch.object(module, "psql_scalar", return_value="12") as scalar:
+            counts = module.collect_exact_table_counts(relations)
+        self.assertEqual(counts[0]["row_count"], 12)
+        self.assertIn('"lifeswitch_plan"."plan_profile"', scalar.call_args.args[0])
+        with patch.object(module, "psql_scalar", return_value="not-a-count"):
+            with self.assertRaises(module.AuditExecutionError):
+                module.collect_exact_table_counts(relations)
+
     def test_main_failure_is_content_free(self) -> None:
         with patch.object(
             module,
