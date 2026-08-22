@@ -151,10 +151,14 @@ class LifeSwitchDatabaseConsumersV1Tests(unittest.TestCase):
         migration = relation(3, "plan_history")
         unknown = relation(4, "abandoned")
         extension = relation(5, "extension_table", extension="example")
+        operational = relation(6, "verification_evidence")
         classified = module.classify_objects(
-            [direct, helper, migration, unknown, extension],
+            [direct, helper, migration, unknown, extension, operational],
             {direct.identity: ["seebx/adapters/plan.py"]},
-            {},
+            {
+                helper.identity: ["scripts/verify.py"],
+                operational.identity: ["scripts/verify.py"],
+            },
             {migration.identity: ["ops/sql/old.sql"]},
             [{"consumer": direct.identity, "referenced": helper.identity, "evidence": "trigger"}],
         )
@@ -164,6 +168,7 @@ class LifeSwitchDatabaseConsumersV1Tests(unittest.TestCase):
         self.assertEqual(actual[migration.identity], "migration_only")
         self.assertEqual(actual[unknown.identity], "unproven")
         self.assertEqual(actual[extension.identity], "extension_owned")
+        self.assertEqual(actual[operational.identity], "operational_reference_only")
 
     def test_psql_is_read_only_and_never_uses_a_shell(self) -> None:
         source = SCRIPT.read_text(encoding="utf-8")

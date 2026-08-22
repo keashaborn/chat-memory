@@ -436,7 +436,7 @@ def classify_objects(
     seeds = {
         item.identity
         for item in objects
-        if item.extension or runtime_matches.get(item.identity) or operational_matches.get(item.identity)
+        if item.extension or runtime_matches.get(item.identity)
     }
     adjacency: dict[str, set[str]] = {}
     incoming: dict[str, list[dict[str, str]]] = {}
@@ -457,10 +457,10 @@ def classify_objects(
             classification = "extension_owned"
         elif runtime_matches.get(item.identity):
             classification = "application_direct"
-        elif operational_matches.get(item.identity):
-            classification = "operational_direct"
         elif item.identity in reachable:
             classification = "database_internal_reachable"
+        elif operational_matches.get(item.identity):
+            classification = "operational_reference_only"
         elif migration_matches.get(item.identity):
             classification = "migration_only"
         else:
@@ -588,6 +588,7 @@ def execute(
             "unqualified_source_references_are_evidence": False,
             "schema_bound_template_references_are_evidence": True,
             "overload_resolution": "conservative_all_matching_overloads",
+            "operational_references_are_retention_seeds": False,
             "deletion_authority": False,
         },
         "source_trees": {
