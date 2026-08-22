@@ -388,6 +388,31 @@ def _replace_identifier(text: str, source: str, target: str) -> str:
     return re.sub(rf"(?<![A-Za-z0-9_]){re.escape(source)}(?![A-Za-z0-9_])", target, text)
 
 
+def _replace_policy_admin_grantee(text: str) -> str:
+    owners = {
+        str(item["name"]): str(item["owner"])
+        for item in TARGET_SCHEMA_CONTRACTS
+    }
+    policy = re.compile(
+        r"(?im)(^\s*CREATE\s+POLICY\b.*?\bON\s+"
+        r"(?P<schema>[a-z_][a-z0-9_]*)\.[a-z_][a-z0-9_]*\b.*?\bTO\s+)"
+        r"(?P<roles>[a-z_][a-z0-9_]*(?:\s*,\s*[a-z_][a-z0-9_]*)*)"
+        r"(?=\s+(?:USING|WITH\s+CHECK)\b|\s*;)"
+    )
+
+    def replace(match: re.Match[str]) -> str:
+        roles = [item.strip() for item in match.group("roles").split(",")]
+        if "sage" not in roles:
+            return match.group(0)
+        owner = owners.get(match.group("schema").lower())
+        if owner is None:
+            raise BaselineContractError("source_admin_policy_schema_invalid")
+        rewritten = [owner if item == "sage" else item for item in roles]
+        return match.group(1) + ", ".join(dict.fromkeys(rewritten))
+
+    return policy.sub(replace, text)
+
+
 def canonicalize_schema_sql(source_sql: str, plan: dict[str, Any]) -> tuple[str, dict[str, str]]:
     if re.search(r"(?im)^\s*COPY\s", source_sql):
         raise BaselineContractError("plain_schema_contains_row_data")
@@ -398,6 +423,7 @@ def canonicalize_schema_sql(source_sql: str, plan: dict[str, Any]) -> tuple[str,
     for source_schema, (target_schema, _) in sorted(SOURCE_SCHEMA_TARGETS.items(), key=lambda item: -len(item[0])):
         if source_schema != target_schema:
             text = _replace_identifier(text, source_schema, target_schema)
+    text = _replace_policy_admin_grantee(text)
     for source_role, target_role in sorted(ROLE_NAME_MAP.items(), key=lambda item: -len(item[0])):
         text = _replace_identifier(text, source_role, target_role)
 

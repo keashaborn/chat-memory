@@ -206,6 +206,12 @@ class PlatformCleanBaselineV1Tests(unittest.TestCase):
             "COMMENT ON TABLE user_settings.assistant_response_preference_v1 "
             "IS 'Explicit preferences; separate from governed memory.';"
         )
+        source.extend([
+            "CREATE POLICY private_owner ON chat_history_private.clear_receipt "
+            "TO sage USING (true);",
+            "CREATE POLICY conversation_owner ON public.threads "
+            "TO sage, brains_app USING (true);",
+        ])
         canonical, kinds = module.canonicalize_schema_sql("\n".join(source), plan)
         self.assertIn("CREATE TABLE conversation.threads", canonical)
         self.assertIn("CREATE TABLE usage.ai_usage_event_v1", canonical)
@@ -213,6 +219,15 @@ class PlatformCleanBaselineV1Tests(unittest.TestCase):
         self.assertIn("CREATE TABLE voice.voice_session_lease", canonical)
         self.assertIn("'seebx_platform_app_v1'", canonical)
         self.assertIn("INSERT INTO trusted_web.synthetic_relation_12", canonical)
+        self.assertIn(
+            "ON conversation_private.clear_receipt TO seebx_platform_owner_v1 USING",
+            canonical,
+        )
+        self.assertIn(
+            "ON conversation.threads TO seebx_platform_owner_v1, seebx_platform_app_v1 USING",
+            canonical,
+        )
+        self.assertNotIn("TO sage", canonical)
         self.assertNotIn("chat_history_private.", canonical)
         self.assertEqual(kinds["trusted_web.retrieval_monitor_hourly_v1"], "VIEW")
 
