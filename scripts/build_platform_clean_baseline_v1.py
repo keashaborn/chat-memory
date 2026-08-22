@@ -403,7 +403,7 @@ def canonicalize_schema_sql(source_sql: str, plan: dict[str, Any]) -> tuple[str,
 
     lowered = text.lower()
     for schema in FORBIDDEN_SCHEMAS | {"chat_history_private", "chat_integrity", "lifeswitch_usage"}:
-        if re.search(rf"\b{re.escape(schema)}\s*\.", lowered):
+        if re.search(rf"\b{re.escape(schema)}\s*\.\s*[a-z_]", lowered):
             raise BaselineContractError("legacy_schema_remains_in_baseline")
     for name in FORBIDDEN_PUBLIC_OBJECTS:
         if re.search(rf"\bpublic\s*\.\s*{re.escape(name)}\b", lowered):

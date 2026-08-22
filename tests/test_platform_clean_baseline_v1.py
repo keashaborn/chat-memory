@@ -202,6 +202,10 @@ class PlatformCleanBaselineV1Tests(unittest.TestCase):
                 f"CREATE FUNCTION {base}() RETURNS text LANGUAGE sql AS $$\n"
                 f"{function_body}SELECT 'brains_app'::text\n$$;"
             )
+        source.append(
+            "COMMENT ON TABLE user_settings.assistant_response_preference_v1 "
+            "IS 'Explicit preferences; separate from governed memory.';"
+        )
         canonical, kinds = module.canonicalize_schema_sql("\n".join(source), plan)
         self.assertIn("CREATE TABLE conversation.threads", canonical)
         self.assertIn("CREATE TABLE usage.ai_usage_event_v1", canonical)
@@ -218,6 +222,8 @@ class PlatformCleanBaselineV1Tests(unittest.TestCase):
             module.canonicalize_schema_sql("COPY public.threads FROM stdin;", plan)
         with self.assertRaisesRegex(module.BaselineContractError, "excluded_public_object"):
             module.canonicalize_schema_sql("CREATE TABLE public.vs_profiles ();", plan)
+        with self.assertRaisesRegex(module.BaselineContractError, "legacy_schema"):
+            module.canonicalize_schema_sql("SELECT memory.legacy_table;", plan)
 
     def test_bootstrap_has_six_least_privilege_roles_and_writer_only_membership(self):
         sql = module.build_roles_sql()
