@@ -7,12 +7,20 @@ import argparse
 import json
 from pathlib import Path
 
-from database_consumer_audit_v1 import (
-    AuditContractError,
-    AuditExecutionError,
-    AuditSpec,
-    execute as execute_audit,
-)
+try:
+    from database_consumer_audit_v1 import (
+        AuditContractError,
+        AuditExecutionError,
+        AuditSpec,
+        execute as execute_audit,
+    )
+except ModuleNotFoundError:
+    from scripts.database_consumer_audit_v1 import (
+        AuditContractError,
+        AuditExecutionError,
+        AuditSpec,
+        execute as execute_audit,
+    )
 
 
 PLATFORM_SPEC = AuditSpec(

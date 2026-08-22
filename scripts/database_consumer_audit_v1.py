@@ -431,6 +431,39 @@ def run_text(command: list[str], *, label: str, timeout: int = 180) -> str:
     return completed.stdout.strip()
 
 
+def verify_repository_state(repository: Path, candidate_commit: str) -> None:
+    actual_commit = run_text(
+        [
+            "/usr/bin/git",
+            "-c",
+            f"safe.directory={repository}",
+            "-C",
+            str(repository),
+            "rev-parse",
+            "HEAD",
+        ],
+        label="candidate_commit",
+    )
+    if actual_commit != candidate_commit:
+        raise AuditContractError("candidate_commit_mismatch")
+    worktree_status = run_text(
+        [
+            "/usr/bin/git",
+            "-c",
+            f"safe.directory={repository}",
+            "-C",
+            str(repository),
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=all",
+            "--ignore-submodules=none",
+        ],
+        label="candidate_worktree",
+    )
+    if worktree_status:
+        raise AuditContractError("candidate_worktree_not_clean")
+
+
 def psql_json(
     sql: str,
     *,
@@ -915,20 +948,7 @@ def execute(
         )
     elif source_manifest_sha256 is not None:
         raise AuditContractError("source_manifest_not_supported")
-    actual_commit = run_text(
-        [
-            "/usr/bin/git",
-            "-c",
-            f"safe.directory={repository}",
-            "-C",
-            str(repository),
-            "rev-parse",
-            "HEAD",
-        ],
-        label="candidate_commit",
-    )
-    if actual_commit != candidate_commit:
-        raise AuditContractError("candidate_commit_mismatch")
+    verify_repository_state(repository, candidate_commit)
     if run_text(
         [DOCKER, "inspect", "--format", "{{.State.Running}}", spec.container],
         label="container_state",

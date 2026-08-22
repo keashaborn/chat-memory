@@ -202,6 +202,28 @@ class LifeSwitchDatabaseConsumersV1Tests(unittest.TestCase):
         self.assertNotIn("shell=True", source)
         self.assertNotIn("os.system", source)
 
+    def test_repository_state_requires_exact_commit_and_clean_worktree(self) -> None:
+        repository = Path("/tmp/candidate")
+        with patch.object(module, "run_text", side_effect=["a" * 40, ""]) as run:
+            module.verify_repository_state(repository, "a" * 40)
+        self.assertEqual(run.call_count, 2)
+        self.assertIn("--porcelain=v1", run.call_args_list[1].args[0])
+        with patch.object(module, "run_text", side_effect=["a" * 40, " M app.py"]):
+            with self.assertRaisesRegex(
+                module.AuditContractError,
+                "candidate_worktree_not_clean",
+            ):
+                module.verify_repository_state(repository, "a" * 40)
+
+    def test_repository_state_rejects_commit_mismatch_before_status(self) -> None:
+        with patch.object(module, "run_text", return_value="b" * 40) as run:
+            with self.assertRaisesRegex(
+                module.AuditContractError,
+                "candidate_commit_mismatch",
+            ):
+                module.verify_repository_state(Path("/tmp/candidate"), "a" * 40)
+        run.assert_called_once()
+
     def test_source_manifest_hash_is_collected_from_existing_verifier(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             verifier = Path(raw) / "verifier.py"

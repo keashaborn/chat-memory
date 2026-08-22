@@ -15,6 +15,7 @@ from scripts.verify_zep_chat_history_migration import (
     build_psql_command,
     main,
     validate_forward_state,
+    validate_forward_platform_disposition,
     validate_rollback_state,
     verify_package,
     verify_recovery_source,
@@ -50,7 +51,7 @@ def baseline_state() -> dict[str, object]:
 
 class ZepChatHistoryMigrationToolTests(unittest.TestCase):
     def test_package_binds_exact_tool_and_migration_bytes(self) -> None:
-        package, paths = verify_package(ROOT)
+        package, paths, dependencies = verify_package(ROOT)
         self.assertEqual(
             package["tool"]["sha256"],
             hashlib.sha256(TOOL.read_bytes()).hexdigest(),
@@ -58,6 +59,19 @@ class ZepChatHistoryMigrationToolTests(unittest.TestCase):
         for name, path in paths.items():
             self.assertEqual(
                 package["inputs"][name]["sha256"],
+                hashlib.sha256(path.read_bytes()).hexdigest(),
+            )
+        self.assertEqual(
+            set(dependencies),
+            {
+                "database_consumer_audit",
+                "platform_database_audit",
+                "platform_database_disposition",
+            },
+        )
+        for name, path in dependencies.items():
+            self.assertEqual(
+                package["tool_dependencies"][name]["sha256"],
                 hashlib.sha256(path.read_bytes()).hexdigest(),
             )
 
@@ -157,6 +171,51 @@ class ZepChatHistoryMigrationToolTests(unittest.TestCase):
         with self.assertRaisesRegex(MigrationExecutionError, "rollback_state_mismatch"):
             validate_rollback_state(baseline, drift)
 
+    def test_forward_platform_disposition_requires_zero_legacy_dependencies(self) -> None:
+        audit = {
+            "status": "pass",
+            "candidate_commit": "a" * 40,
+            "database": {
+                "name": "ls_zep_test",
+                "transaction_read_only": True,
+            },
+            "object_count": 2,
+            "objects": [
+                {
+                    "identity": "memory_ingest_private.retired_table",
+                    "classification": "unproven",
+                },
+                {
+                    "identity": "chat_history_private.clear_history(uuid,text,uuid,integer)",
+                    "classification": "application_direct",
+                },
+            ],
+        }
+        disposition = {
+            "status": "candidate_baseline_ready",
+            "baseline_generation_allowed": True,
+            "baseline_blockers": [],
+            "object_count": 2,
+        }
+        summary = validate_forward_platform_disposition(
+            audit,
+            disposition,
+            temporary_database="ls_zep_test",
+            candidate_commit="a" * 40,
+        )
+        self.assertEqual(summary["legacy_ingest_reachable_dependency_count"], 0)
+        audit["objects"][0]["classification"] = "database_internal_reachable"
+        with self.assertRaisesRegex(
+            MigrationExecutionError,
+            "forward_platform_legacy_ingest_dependencies_present",
+        ):
+            validate_forward_platform_disposition(
+                audit,
+                disposition,
+                temporary_database="ls_zep_test",
+                candidate_commit="a" * 40,
+            )
+
     def test_function_lookups_cast_regprocedure_to_numeric_oid(self) -> None:
         source = TOOL.read_text(encoding="utf-8")
         self.assertEqual(
@@ -182,6 +241,7 @@ class ZepChatHistoryMigrationToolTests(unittest.TestCase):
                     "--recovery-receipt", "/secure/receipt.json",
                     "--output-root", "/secure/output",
                     "--run-id", "zep-test-20260819",
+                    "--candidate-commit", "a" * 40,
                 ]
             )
         self.assertEqual(exit_code, 0)

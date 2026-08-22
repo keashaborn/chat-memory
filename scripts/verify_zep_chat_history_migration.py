@@ -9,11 +9,29 @@ import json
 import os
 import stat
 import subprocess
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Mapping
 
 import asyncpg
+
+try:
+    from audit_platform_database_consumers_v1 import PLATFORM_SPEC
+    from build_platform_database_disposition_v1 import (
+        build_manifest as build_disposition_manifest,
+        read_audit as read_disposition_audit,
+        write_exclusive as write_disposition_exclusive,
+    )
+    from database_consumer_audit_v1 import execute as execute_database_audit
+except ModuleNotFoundError:
+    from scripts.audit_platform_database_consumers_v1 import PLATFORM_SPEC
+    from scripts.build_platform_database_disposition_v1 import (
+        build_manifest as build_disposition_manifest,
+        read_audit as read_disposition_audit,
+        write_exclusive as write_disposition_exclusive,
+    )
+    from scripts.database_consumer_audit_v1 import execute as execute_database_audit
 
 try:
     from prepare_legacy_memory_retirement_recovery import (
@@ -74,6 +92,11 @@ LEGACY_TRIGGER_NAMES = (
     "threads_serialize_source_erasure",
     "response_transcript_serialize_source_erasure",
 )
+TOOL_DEPENDENCY_NAMES = {
+    "database_consumer_audit",
+    "platform_database_audit",
+    "platform_database_disposition",
+}
 
 
 class MigrationContractError(RuntimeError):
@@ -151,7 +174,31 @@ def _resolve_package_file(repository_root: Path, raw_path: object) -> Path:
     return path
 
 
-def verify_package(repository_root: Path) -> tuple[dict[str, Any], dict[str, Path]]:
+def _verify_bound_files(
+    repository_root: Path,
+    records: object,
+    *,
+    expected_names: set[str],
+    shape_error: str,
+    record_error: str,
+    hash_error: str,
+) -> dict[str, Path]:
+    if not isinstance(records, dict) or set(records) != expected_names:
+        raise MigrationContractError(shape_error)
+    resolved: dict[str, Path] = {}
+    for name, record in records.items():
+        if not isinstance(record, dict) or set(record) != {"path", "sha256"}:
+            raise MigrationContractError(record_error)
+        path = _resolve_package_file(repository_root, record.get("path"))
+        if record.get("sha256") != sha256_file(path):
+            raise MigrationContractError(hash_error)
+        resolved[name] = path
+    return resolved
+
+
+def verify_package(
+    repository_root: Path,
+) -> tuple[dict[str, Any], dict[str, Path], dict[str, Path]]:
     package_path = repository_root / PACKAGE_RELATIVE_PATH
     package = _read_json(package_path)
     if package.get("schema_version") != PACKAGE_SCHEMA_VERSION:
@@ -163,31 +210,82 @@ def verify_package(repository_root: Path) -> tuple[dict[str, Any], dict[str, Pat
         "execution_role": EXPECTED_ROLE,
     }:
         raise MigrationContractError("migration_package_target_invalid")
-    inputs = package.get("inputs")
-    if not isinstance(inputs, dict) or set(inputs) != {
+    input_names = {
         "telemetry_forward",
         "zep_outbox_forward",
         "chat_history_forward",
         "chat_history_rollback",
         "zep_outbox_rollback",
         "telemetry_rollback",
-    }:
-        raise MigrationContractError("migration_package_inputs_invalid")
-    resolved: dict[str, Path] = {}
-    for name, record in inputs.items():
-        if not isinstance(record, dict):
-            raise MigrationContractError("migration_package_input_invalid")
-        path = _resolve_package_file(repository_root, record.get("path"))
-        if record.get("sha256") != sha256_file(path):
-            raise MigrationContractError("migration_package_hash_mismatch")
-        resolved[name] = path
+    }
+    resolved = _verify_bound_files(
+        repository_root,
+        package.get("inputs"),
+        expected_names=input_names,
+        shape_error="migration_package_inputs_invalid",
+        record_error="migration_package_input_invalid",
+        hash_error="migration_package_hash_mismatch",
+    )
     tool_record = package.get("tool")
     if not isinstance(tool_record, dict):
         raise MigrationContractError("migration_package_tool_invalid")
     tool_path = _resolve_package_file(repository_root, tool_record.get("path"))
     if tool_record.get("sha256") != sha256_file(tool_path):
         raise MigrationContractError("migration_package_tool_hash_mismatch")
-    return package, resolved
+    dependencies = _verify_bound_files(
+        repository_root,
+        package.get("tool_dependencies"),
+        expected_names=TOOL_DEPENDENCY_NAMES,
+        shape_error="migration_package_tool_dependencies_invalid",
+        record_error="migration_package_tool_dependency_invalid",
+        hash_error="migration_package_tool_dependency_hash_mismatch",
+    )
+    return package, resolved, dependencies
+
+
+def validate_forward_platform_disposition(
+    audit: Mapping[str, Any],
+    disposition: Mapping[str, Any],
+    *,
+    temporary_database: str,
+    candidate_commit: str,
+) -> dict[str, Any]:
+    database = audit.get("database")
+    if (
+        audit.get("status") != "pass"
+        or audit.get("candidate_commit") != candidate_commit
+        or not isinstance(database, dict)
+        or database.get("name") != temporary_database
+        or database.get("transaction_read_only") is not True
+    ):
+        raise MigrationExecutionError("forward_platform_audit_binding_invalid")
+    objects = audit.get("objects")
+    if not isinstance(objects, list):
+        raise MigrationExecutionError("forward_platform_audit_objects_invalid")
+    reachable_legacy_ingest = sorted(
+        str(item.get("identity") or "")
+        for item in objects
+        if isinstance(item, dict)
+        and str(item.get("identity") or "").startswith("memory_ingest_private.")
+        and item.get("classification") == "database_internal_reachable"
+    )
+    if reachable_legacy_ingest:
+        raise MigrationExecutionError(
+            "forward_platform_legacy_ingest_dependencies_present"
+        )
+    if (
+        disposition.get("status") != "candidate_baseline_ready"
+        or disposition.get("baseline_generation_allowed") is not True
+        or disposition.get("baseline_blockers") != []
+        or disposition.get("object_count") != audit.get("object_count")
+    ):
+        raise MigrationExecutionError("forward_platform_disposition_blocked")
+    return {
+        "baseline_generation_allowed": True,
+        "baseline_blockers": [],
+        "legacy_ingest_reachable_dependency_count": 0,
+        "object_count": int(audit["object_count"]),
+    }
 
 
 def build_psql_command(
@@ -455,7 +553,7 @@ async def execute(arguments: argparse.Namespace) -> dict[str, Any]:
             raise MigrationContractError("postgres_client_binary_invalid")
 
     repository_root = Path(__file__).resolve().parents[1]
-    package, migration_paths = verify_package(repository_root)
+    package, migration_paths, tool_dependency_paths = verify_package(repository_root)
     recovery = verify_recovery_source(arguments.backup, arguments.recovery_receipt)
     output = prepare_output_directory(arguments.output_root, arguments.run_id)
     receipt_path = output / "migration-verification-receipt.json"
@@ -545,6 +643,48 @@ async def execute(arguments: argparse.Namespace) -> dict[str, Any]:
             await connection.close()
         forward_summary = validate_forward_state(baseline, forward_state)
 
+        audit_spec = replace(
+            PLATFORM_SPEC,
+            database=temporary_database,
+            output_root=output / "forward-platform-audit",
+        )
+        audit_result = await asyncio.to_thread(
+            execute_database_audit,
+            repository_root,
+            "forward-state",
+            arguments.candidate_commit,
+            None,
+            spec=audit_spec,
+        )
+        audit_path = Path(str(audit_result["report"]))
+        audit, verified_audit_sha256 = read_disposition_audit(
+            audit_path,
+            str(audit_result["report_sha256"]),
+        )
+        disposition = build_disposition_manifest(
+            audit,
+            verified_audit_sha256,
+        )
+        disposition_path = output / "forward-platform-disposition.json"
+        write_disposition_exclusive(disposition_path, disposition)
+        platform_summary = validate_forward_platform_disposition(
+            audit,
+            disposition,
+            temporary_database=temporary_database,
+            candidate_commit=arguments.candidate_commit,
+        )
+        forward_summary["platform_database"] = {
+            **platform_summary,
+            "audit_report_sha256": verified_audit_sha256,
+            "disposition_sha256": sha256_file(disposition_path),
+            "governance_manifest_sha256": str(
+                audit_result["governance_manifest_sha256"]
+            ),
+            "object_catalog_sha256": str(
+                audit_result["object_catalog_sha256"]
+            ),
+        }
+
         await asyncio.to_thread(
             run_checked,
             build_psql_command(
@@ -618,6 +758,10 @@ async def execute(arguments: argparse.Namespace) -> dict[str, Any]:
             "bindings": {
                 "package_sha256": sha256_file(repository_root / PACKAGE_RELATIVE_PATH),
                 "tool_sha256": sha256_file(Path(__file__).resolve()),
+                "tool_dependencies": {
+                    name: sha256_file(path)
+                    for name, path in sorted(tool_dependency_paths.items())
+                },
                 "migrations": {
                     name: sha256_file(path)
                     for name, path in sorted(migration_paths.items())
@@ -633,6 +777,12 @@ async def execute(arguments: argparse.Namespace) -> dict[str, Any]:
             "receipt_sha256": sha256_bytes(receipt_bytes),
             "baseline_table_manifest_sha256": baseline["table_manifest_sha256"],
             "forward_table_manifest_sha256": forward_state["table_manifest_sha256"],
+            "forward_platform_audit_sha256": str(
+                verified_audit_sha256
+            ),
+            "forward_platform_disposition_sha256": sha256_file(
+                disposition_path
+            ),
         }
     except Exception:
         if created:
@@ -660,6 +810,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--recovery-receipt", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--run-id", required=True)
+    parser.add_argument("--candidate-commit", required=True)
     parser.add_argument("--timeout", type=int, default=3600)
     arguments = parser.parse_args(argv)
     exit_code = 0
