@@ -52,7 +52,7 @@ async def is_active(owner_user_id: str, session_id: UUID) -> bool:
                     """
                     SELECT EXISTS(
                       SELECT 1
-                      FROM public.voice_session_lease
+                      FROM voice.voice_session_lease
                       WHERE owner_user_id=$1::uuid
                         AND session_id=$2::uuid
                         AND expires_at > clock_timestamp()
@@ -76,7 +76,7 @@ async def acquire(owner_user_id: str, session_id: UUID) -> VoiceSessionLease:
             )
             row = await conn.fetchrow(
                 """
-                INSERT INTO public.voice_session_lease(
+                INSERT INTO voice.voice_session_lease(
                   owner_user_id,
                   session_id,
                   acquired_at,
@@ -127,7 +127,7 @@ async def heartbeat(
             )
             row = await conn.fetchrow(
                 """
-                UPDATE public.voice_session_lease
+                UPDATE voice.voice_session_lease
                 SET
                   renewed_at=clock_timestamp(),
                   expires_at=clock_timestamp() + make_interval(secs => $3)
@@ -160,7 +160,7 @@ async def release(owner_user_id: str, session_id: UUID) -> bool:
             )
             result = await conn.execute(
                 """
-                DELETE FROM public.voice_session_lease
+                DELETE FROM voice.voice_session_lease
                 WHERE owner_user_id=$1::uuid
                   AND session_id=$2::uuid
                 """,

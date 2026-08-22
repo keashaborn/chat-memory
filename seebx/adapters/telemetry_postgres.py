@@ -14,7 +14,7 @@ from seebx.capabilities.observability.telemetry_contracts import (
 
 SET_ACTOR_SQL = "SELECT set_config('app.user_id',$1,true)"
 TELEMETRY_EVENT_INSERT_SQL = """
-INSERT INTO telemetry_event (
+INSERT INTO telemetry.telemetry_event (
 event_id, event_type,
 subject_type, subject_id,
 target_model_id, target_model_version,
@@ -38,7 +38,7 @@ ON CONFLICT (event_id) DO NOTHING
 """
 CONDITION_BASE_SQL = """
 SELECT condition_id, occurred_at, payload
-FROM telemetry_event
+FROM telemetry.telemetry_event
 WHERE subject_type=$1 AND subject_id=$2 AND actor_user_id=$3
 AND event_type='condition.set' AND occurred_at < $4
 ORDER BY occurred_at DESC
@@ -46,7 +46,7 @@ LIMIT 1
 """
 CONDITION_WITHIN_SQL = """
 SELECT condition_id, occurred_at, payload
-FROM telemetry_event
+FROM telemetry.telemetry_event
 WHERE subject_type=$1 AND subject_id=$2 AND actor_user_id=$3
 AND event_type='condition.set'
 AND occurred_at >= $4 AND occurred_at < $5
@@ -89,7 +89,7 @@ WITH voice AS (
         0
       )
     END AS end_of_speech_to_first_audio_ms
-  FROM public.telemetry_event
+  FROM telemetry.telemetry_event
   WHERE event_type='voice.turn.trace'
     AND actor_user_id=$1
     AND occurred_at >=
@@ -347,7 +347,7 @@ class PostgresTelemetryRepository:
               date_trunc('{dt_unit}', occurred_at) AS t,
               AVG({expr}) AS v,
               COUNT({expr}) AS n
-            FROM telemetry_event
+            FROM telemetry.telemetry_event
             WHERE {where_sql}
             GROUP BY 1
             ORDER BY 1

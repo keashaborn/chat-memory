@@ -76,7 +76,7 @@ class TelemetryPostgresAdapterV1Tests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("set_config('app.user_id'", connection.execute_calls[0][0])
         self.assertEqual(connection.execute_calls[0][1], (ACTOR,))
-        self.assertIn("INSERT INTO telemetry_event", connection.execute_calls[1][0])
+        self.assertIn("INSERT INTO telemetry.telemetry_event", connection.execute_calls[1][0])
         self.assertEqual(connection.execute_calls[1][1][11], ACTOR)
         self.assertTrue(connection.closed)
 
@@ -111,9 +111,9 @@ class TelemetryPostgresAdapterV1Tests(unittest.IsolatedAsyncioTestCase):
         adapter = (ROOT / "seebx/adapters/telemetry_postgres.py").read_text()
         for forbidden in ("import asyncpg", "asyncpg.connect", "conn.close"):
             self.assertNotIn(forbidden, capability)
-        self.assertNotIn("INSERT INTO telemetry_event", capability)
+        self.assertNotIn("INSERT INTO telemetry.telemetry_event", capability)
         self.assertNotIn("WITH voice AS", capability)
-        self.assertIn("INSERT INTO telemetry_event", adapter)
+        self.assertIn("INSERT INTO telemetry.telemetry_event", adapter)
         self.assertIn("WITH voice AS", adapter)
         for required in (
             "actor_user_id=$1",

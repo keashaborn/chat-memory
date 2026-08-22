@@ -43,13 +43,13 @@ class FakeConnection:
 
     async def execute(self, sql: str, *args: object) -> str:
         self.calls.append((sql, args))
-        if "DELETE FROM public.voice_session_lease" in sql:
+        if "DELETE FROM voice.voice_session_lease" in sql:
             return "DELETE 1"
         return "SELECT 1"
 
     async def fetchrow(self, sql: str, *args: object) -> dict[str, object] | None:
         self.calls.append((sql, args))
-        if "UPDATE public.voice_session_lease" in sql and not self.heartbeat_active:
+        if "UPDATE voice.voice_session_lease" in sql and not self.heartbeat_active:
             return None
         return {
             "session_id": UUID(SESSION),
@@ -148,7 +148,7 @@ class VoiceSessionLeaseTests(unittest.TestCase):
         self.assertEqual(response.json()["session_id"], SESSION)
         self.assertTrue(connection.closed)
         sql = "\n".join(call[0] for call in connection.calls)
-        self.assertIn("FROM public.voice_session_lease", sql)
+        self.assertIn("FROM voice.voice_session_lease", sql)
         self.assertIn("set_config('app.user_id'", sql)
 
     def test_superseded_heartbeat_returns_conflict(self) -> None:
@@ -205,7 +205,7 @@ class VoiceSessionLeaseTests(unittest.TestCase):
         self.assertEqual(response.headers["cache-control"].split(",")[0], "private")
         self.assertTrue(connection.closed)
         sql = "\n".join(call[0] for call in connection.calls)
-        self.assertIn("DELETE FROM public.voice_session_lease", sql)
+        self.assertIn("DELETE FROM voice.voice_session_lease", sql)
 
     def test_migration_forces_owner_rls_and_has_rollback(self) -> None:
         migration = (
