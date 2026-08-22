@@ -115,6 +115,30 @@ class LifeSwitchDatabaseConsumersV1Tests(unittest.TestCase):
             ["seebx/selector.py"],
         )
 
+    def test_source_scan_excludes_other_database_adapters_exactly(self) -> None:
+        objects = [relation(1, "plan_profile")]
+        with tempfile.TemporaryDirectory() as raw:
+            repository = Path(raw)
+            (repository / "seebx").mkdir()
+            (repository / "seebx" / "platform.py").write_text(
+                "SQL = 'select * from lifeswitch_plan.plan_profile'\n",
+                encoding="utf-8",
+            )
+            (repository / "seebx" / "other_database.py").write_text(
+                "SQL = 'select * from lifeswitch_plan.plan_profile'\n",
+                encoding="utf-8",
+            )
+            result = module.scan_sources(
+                repository,
+                (Path("seebx"),),
+                objects,
+                (Path("seebx/other_database.py"),),
+            )
+        self.assertEqual(
+            result["matches"],
+            {"lifeswitch_plan.plan_profile": ["seebx/platform.py"]},
+        )
+
     def test_definition_and_explicit_edges_use_object_identities(self) -> None:
         objects = [relation(1, "plan_profile"), function(2, "enforce_owner")]
         definitions = [{

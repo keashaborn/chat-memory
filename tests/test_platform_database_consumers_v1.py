@@ -27,6 +27,14 @@ class PlatformDatabaseConsumersV1Tests(unittest.TestCase):
         self.assertFalse(spec.require_source_manifest)
         self.assertTrue(spec.include_governance_manifest)
         self.assertEqual(
+            spec.runtime_excluded_paths,
+            (
+                Path("seebx/adapters/lifeswitch_catalog_postgres.py"),
+                Path("seebx/adapters/lifeswitch_foods_postgres.py"),
+                Path("seebx/adapters/lifeswitch_meal_plans_postgres.py"),
+            ),
+        )
+        self.assertEqual(
             spec.scoped_schemas,
             (
                 "ai_operations",

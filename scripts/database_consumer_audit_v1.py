@@ -55,6 +55,7 @@ class AuditSpec:
     migration_roots: tuple[Path, ...]
     require_source_manifest: bool = True
     include_governance_manifest: bool = False
+    runtime_excluded_paths: tuple[Path, ...] = ()
 
 
 DEFAULT_SPEC = AuditSpec(
@@ -663,13 +664,24 @@ def parse_objects(
     return sorted(objects, key=lambda item: item.identity)
 
 
-def _regular_source_files(repository: Path, roots: Iterable[Path]) -> list[Path]:
+def _regular_source_files(
+    repository: Path,
+    roots: Iterable[Path],
+    excluded_paths: Iterable[Path] = (),
+) -> list[Path]:
+    excluded: set[Path] = set()
+    for path in excluded_paths:
+        if path.is_absolute() or ".." in path.parts:
+            raise AuditContractError("source_exclusion_invalid")
+        excluded.add(path)
     files: list[Path] = []
     for relative_root in roots:
         root = repository / relative_root
         candidates = [root] if root.is_file() else root.rglob("*") if root.is_dir() else []
         for path in candidates:
             if path.suffix not in SOURCE_SUFFIXES or "__pycache__" in path.parts:
+                continue
+            if path.relative_to(repository) in excluded:
                 continue
             if path.is_symlink() or not path.is_file():
                 raise AuditContractError("source_path_not_regular")
@@ -679,7 +691,12 @@ def _regular_source_files(repository: Path, roots: Iterable[Path]) -> list[Path]
     return sorted(set(files))
 
 
-def scan_sources(repository: Path, roots: Iterable[Path], objects: list[DatabaseObject]) -> dict[str, Any]:
+def scan_sources(
+    repository: Path,
+    roots: Iterable[Path],
+    objects: list[DatabaseObject],
+    excluded_paths: Iterable[Path] = (),
+) -> dict[str, Any]:
     matches: dict[str, list[str]] = {item.identity: [] for item in objects}
     file_hashes: list[dict[str, str]] = []
     exact_patterns = {
@@ -711,7 +728,7 @@ def scan_sources(repository: Path, roots: Iterable[Path], objects: list[Database
         item.identity: re.compile(rf"['\"]{re.escape(item.name)}['\"]", re.IGNORECASE)
         for item in objects
     }
-    for path in _regular_source_files(repository, roots):
+    for path in _regular_source_files(repository, roots, excluded_paths):
         data = path.read_bytes()
         try:
             text = data.decode("utf-8")
@@ -950,7 +967,12 @@ def execute(
     database_edges = [dict(item) for item in {tuple(sorted(edge.items())) for edge in database_edges}]
     database_edges.sort(key=lambda edge: (edge["consumer"], edge["referenced"], edge["evidence"]))
 
-    runtime = scan_sources(repository, spec.runtime_roots, objects)
+    runtime = scan_sources(
+        repository,
+        spec.runtime_roots,
+        objects,
+        spec.runtime_excluded_paths,
+    )
     operational = scan_sources(repository, spec.operational_roots, objects)
     migration = scan_sources(repository, spec.migration_roots, objects)
     classified = classify_objects(
@@ -999,7 +1021,10 @@ def execute(
             "deletion_authority": False,
         },
         "source_trees": {
-            "runtime": {key: value for key, value in runtime.items() if key != "matches"},
+            "runtime": {
+                **{key: value for key, value in runtime.items() if key != "matches"},
+                "excluded_paths": [path.as_posix() for path in spec.runtime_excluded_paths],
+            },
             "operational": {key: value for key, value in operational.items() if key != "matches"},
             "migration": {key: value for key, value in migration.items() if key != "matches"},
         },

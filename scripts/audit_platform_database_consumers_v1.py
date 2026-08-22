@@ -40,6 +40,11 @@ PLATFORM_SPEC = AuditSpec(
     migration_roots=(Path("ops/sql"),),
     require_source_manifest=False,
     include_governance_manifest=True,
+    runtime_excluded_paths=(
+        Path("seebx/adapters/lifeswitch_catalog_postgres.py"),
+        Path("seebx/adapters/lifeswitch_foods_postgres.py"),
+        Path("seebx/adapters/lifeswitch_meal_plans_postgres.py"),
+    ),
 )
 
 
