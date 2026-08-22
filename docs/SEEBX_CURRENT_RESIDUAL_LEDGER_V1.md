@@ -128,17 +128,19 @@ Status: candidate evidence; no deployment or retirement authority
 
 ## Next cleanup order
 
-1. Generate the explicit retained platform object/role manifest, replace the
-   chat-clear dependency on `memory_ingest_private`, and resolve the Forms
-   disposition in a disposable database.
-2. Run a real signed-session paired frontend/backend proof against the
+1. Apply and verify the existing Zep-outbox chat-history migration in a
+   disposable platform database, remove the remaining 12-object dependency on
+   `memory_ingest_private`, and rebuild the exact disposition receipt with zero
+   blockers.
+2. Run the decided Forms valid-row migration, invalid-owner quarantine,
+   rollback, and cross-owner denial proof only in a separately isolated
+   disposable LifeSwitch database.
+3. Run a real signed-session paired frontend/backend proof against the
    verified disposable database, including Plan-to-Nutrition application
    behavior; only test delegated People access if separately enabled. Plan
    targets remain independent of retired page-level AI helpers.
-3. Bind exact database schema, owner/RLS, delegated-access, migration, rollback,
+4. Bind exact database schema, owner/RLS, delegated-access, migration, rollback,
    and paired frontend evidence before regenerating any release package.
-4. Run the Forms schema, exact valid/quarantine reconciliation, rollback, and
-   cross-owner denial proof only in a separately authorized disposable restore.
 5. Use `SEEBX_ADMIN_OPERATIONS_INVENTORY_V1.md` as the controlling admin and
    operations audit. Preserve the completed inspector-session rename, canonical
    export, and dead Vantage-route repairs, and verify the repaired voice canary

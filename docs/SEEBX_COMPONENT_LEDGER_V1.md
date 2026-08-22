@@ -143,7 +143,7 @@ Source commit: `49f9e60cf4321c8e42c359845c1a62a8c987614d`
 | old `memory` | 160 tables/35,118 rows plus six views; audit `fdffcbe0` proves zero candidate runtime consumer and classifies 566 relations/functions unproven | FINAL BACKUP/RESTORE, Zep/attestation proof, then retire with exact fail-closed package |
 | five old Vantage schemas | removed from production after exact dump, temporary restore, count verification, and manifest receipt | RETIRED WITH RECOVERY EVIDENCE |
 | five unmounted legacy public tables | `chat_messages`, `chat_sessions`, `feedback_signals`, `vantage_answer_trace`, and `vs_profiles`; 1,260 total rows; no candidate SQL caller or database dependency | FINAL BACKUP/RESTORE, then retire with exact non-cascading package |
-| three old Forms tables | `vb_form_entries`, `vb_form_templates`, and `vb_form_versions`; 338 total rows; only the migration utility references them | PRODUCT DECISION REQUIRED before retain/migrate/archive disposition |
+| three old Forms tables | `vb_form_entries`, `vb_form_templates`, and `vb_form_versions`; 338 total rows; only the owner-bound migration utility references them | MIGRATE valid owner-bound rows to isolated LifeSwitch Forms, QUARANTINE invalid-owner rows, verify rollback/reconciliation, then RETIRE source tables |
 | isolated `lifeswitch_*` schemas | live canonical domain data | KEEP |
 | isolated `catalog_dev` | live canonical domain catalog candidate | KEEP and become sole catalog |
 

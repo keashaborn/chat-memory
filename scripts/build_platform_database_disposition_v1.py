@@ -47,11 +47,27 @@ REQUIRED_EXPLICIT_OBJECTS = (
 )
 
 EXTENSION_DECISIONS = {
-    "citext": ("review_hold_extension", "hold", "extension_dependency_unresolved"),
-    "pg_trgm": ("review_hold_extension", "hold", "extension_dependency_unresolved"),
-    "pgcrypto": ("retained_extension", "include", "retained_uuid_and_hash_authority"),
+    "citext": (
+        "exclude_platform_extension",
+        "exclude",
+        "no_nonextension_platform_object_dependency",
+    ),
+    "pg_trgm": (
+        "exclude_platform_extension",
+        "exclude",
+        "only_duplicate_catalog_indexes_depend",
+    ),
+    "pgcrypto": (
+        "retained_extension",
+        "include",
+        "retained_ai_operations_digest_dependency",
+    ),
     "plpgsql": ("retained_extension", "include", "retained_procedural_language"),
-    "unaccent": ("review_hold_extension", "hold", "extension_dependency_unresolved"),
+    "unaccent": (
+        "exclude_platform_extension",
+        "exclude",
+        "only_retired_catalog_and_memory_functions_depend",
+    ),
 }
 
 ROLE_TARGETS = {
@@ -225,6 +241,7 @@ def build_manifest(audit: dict[str, Any], audit_sha256: str) -> dict[str, Any]:
             "baseline_action": baseline_action,
             "classification": classification,
             "disposition": disposition,
+            "extension": str(raw.get("extension") or "") or None,
             "identity": identity,
             "object_type": str(raw.get("object_type") or ""),
             "reason_code": reason,

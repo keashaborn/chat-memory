@@ -110,13 +110,40 @@ The following remain outside the canonical platform target:
   `public.vantage_answer_trace`, `public.vs_profiles`, and their sequence:
   archive/retire after exact recovery proof;
 - `public.vb_form_entries`, `public.vb_form_templates`, and
-  `public.vb_form_versions`: explicit product decision required because only a
-  migration utility references them.
+  `public.vb_form_versions`: migrate valid owner-bound rows into the isolated
+  LifeSwitch Forms schema, quarantine invalid-owner rows, verify exact
+  reconciliation and rollback, then retire the old source tables.
 
 The 26 database-internal objects are transitional retention, not an assertion
 that every object belongs in the final clean database. Twelve are in
 `memory_ingest_private` because the current chat-clear functions still depend
 on the legacy outbox boundary.
+
+## Exact disposition receipt
+
+The fail-closed disposition builder verified every object, role, membership,
+extension, table count, governance-section hash, and source-audit hash before
+writing this private immutable receipt:
+
+- receipt:
+  `/var/backups/seebx-cleanup/platform-database-disposition-v1/20260822t092028z/disposition.json`;
+- receipt SHA-256:
+  `08055f709d63fb8eb40a41efddd9a3606e90b8b5a85a99df431fe334875e8b10`;
+- owner/mode: `root:root` / `0600`;
+- objects dispositioned: 794;
+- deletion authority: `false`;
+- production-change authority: `false`;
+- clean-baseline generation: blocked only by 12 current
+  `memory_ingest_private` dependencies, object-set SHA-256
+  `341dd2f6c9ad3a5296bb3e758efc6edd9f1cb266890a6dee75e2d783793e3d9a`.
+
+The extension review found no non-extension platform column dependency on
+`citext`; all four `pg_trgm` indexes belong to the duplicate `catalog_dev`; and
+the only `unaccent` callers belong to `catalog_dev` or retired `memory`.
+Those three extensions are excluded from the clean platform target.
+`pgcrypto` remains because the retained
+`ai_operations.record_monitor_observation_v1` function calls `public.digest`.
+`plpgsql` remains because retained platform functions use it.
 
 ## Governance findings
 
@@ -143,11 +170,12 @@ Two security-normalization items remain before clean installation:
 
 ## Required next gate
 
-1. Generate an explicit retained platform object/role manifest from this
-   receipt.
-2. Replace the chat-clear functions so no dependency reaches
+1. Apply and verify the existing Zep-outbox chat-history migration in a
+   disposable platform database so no chat-clear dependency reaches
    `memory_ingest_private`.
-3. Resolve the Forms disposition.
+2. Run the already-decided Forms valid/quarantine migration and rollback proof
+   against a separately isolated disposable LifeSwitch database.
+3. Rebuild the disposition receipt and require zero baseline blockers.
 4. Build a clean platform database from versioned migrations in a disposable
    PostgreSQL instance.
 5. Copy only approved rows and verify exact counts, keys, sequence state,

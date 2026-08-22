@@ -266,7 +266,14 @@ sequence. Definitions are stored only as SHA-256 values. The governance
 manifest SHA-256 is
 `3394fc40c3fe29e3d4b4bd029acbb76059b02c45bae8e1a9bd7f8a8e0d121cb8`.
 
-This closes the current platform inventory gate. It does not close retained
-object selection, Forms disposition, chat-clear/outbox decoupling, clean
-installation, disposable restore, paired application verification, migration,
-or retirement. See `SEEBX_PLATFORM_DATABASE_INVENTORY_V1.md`.
+This closes the current platform inventory and exact disposition-selection
+gates. The root-owned mode-0600 disposition receipt has SHA-256
+`08055f709d63fb8eb40a41efddd9a3606e90b8b5a85a99df431fe334875e8b10`.
+It establishes the Forms valid-row migration/invalid-row quarantine decision,
+retains only `pgcrypto` and `plpgsql`, and excludes `citext`, `pg_trgm`, and
+`unaccent` from the clean platform target. The sole remaining clean-baseline
+blocker is the 12-object chat-clear dependency on `memory_ingest_private`.
+
+This does not close chat-clear/outbox decoupling, Forms migration execution,
+clean installation, disposable restore, paired application verification,
+migration, or retirement. See `SEEBX_PLATFORM_DATABASE_INVENTORY_V1.md`.

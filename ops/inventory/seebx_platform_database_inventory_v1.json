@@ -88,7 +88,31 @@
     "old_memory_runtime_consumers": 0,
     "memory_ingest_private_final_state": "retire_after_chat_clear_decoupling_and_recovery_proof",
     "memory_final_state": "retire_after_zep_and_recovery_proof",
-    "forms_state": "product_decision_required"
+    "forms_state": "migrate_valid_owner_bound_rows_to_isolated_lifeswitch_quarantine_invalid_then_retire_source",
+    "clean_platform_extensions": [
+      "pgcrypto",
+      "plpgsql"
+    ],
+    "excluded_platform_extensions": [
+      "citext",
+      "pg_trgm",
+      "unaccent"
+    ]
+  },
+  "disposition_receipt": {
+    "path": "/var/backups/seebx-cleanup/platform-database-disposition-v1/20260822t092028z/disposition.json",
+    "sha256": "08055f709d63fb8eb40a41efddd9a3606e90b8b5a85a99df431fe334875e8b10",
+    "owner": "root:root",
+    "mode": "0600",
+    "object_count": 794,
+    "baseline_generation_allowed": false,
+    "baseline_blockers": [
+      {
+        "code": "legacy_ingest_dependencies_present",
+        "count": 12,
+        "object_set_sha256": "341dd2f6c9ad3a5296bb3e758efc6edd9f1cb266890a6dee75e2d783793e3d9a"
+      }
+    ]
   },
   "row_content_included": false,
   "password_verifiers_included": false,

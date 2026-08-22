@@ -131,10 +131,7 @@ class PlatformDatabaseDispositionV1Tests(unittest.TestCase):
         self.assertFalse(manifest["production_change_authority"])
         self.assertEqual(manifest["status"], "candidate_review_gate")
         blocker_codes = {item["code"] for item in manifest["baseline_blockers"]}
-        self.assertEqual(
-            blocker_codes,
-            {"extension_dependencies_unresolved", "legacy_ingest_dependencies_present"},
-        )
+        self.assertEqual(blocker_codes, {"legacy_ingest_dependencies_present"})
         dispositions = {item["identity"]: item["disposition"] for item in manifest["objects"]}
         self.assertEqual(dispositions["public.chat_log"], "retained_active")
         self.assertEqual(dispositions["memory.old_table"], "archive_legacy_memory")
@@ -143,6 +140,19 @@ class PlatformDatabaseDispositionV1Tests(unittest.TestCase):
             "archive_legacy_ingest",
         )
         self.assertEqual(dispositions["public.vb_form_entries"], "migrate_lifeswitch_forms")
+        objects = {item["identity"]: item for item in manifest["objects"]}
+        self.assertEqual(objects["public.gen_random_uuid()"]["extension"], "pgcrypto")
+        self.assertEqual(objects["public.gen_random_uuid()"]["baseline_action"], "include")
+        self.assertEqual(objects["public.citextin(cstring)"]["extension"], "citext")
+        self.assertEqual(objects["public.citextin(cstring)"]["baseline_action"], "exclude")
+
+        extensions = {item["name"]: item for item in manifest["extensions"]}
+        self.assertEqual(extensions["pgcrypto"]["action"], "include")
+        self.assertEqual(extensions["plpgsql"]["action"], "include")
+        self.assertEqual(extensions["citext"]["action"], "exclude")
+        self.assertEqual(extensions["pg_trgm"]["action"], "exclude")
+        self.assertEqual(extensions["unaccent"]["action"], "exclude")
+        self.assertNotIn("hold", {item["action"] for item in manifest["extensions"]})
 
     def test_unknown_object_and_role_fail_closed(self) -> None:
         audit = audit_fixture()
