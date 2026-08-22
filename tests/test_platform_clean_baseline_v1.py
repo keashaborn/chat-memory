@@ -285,6 +285,26 @@ class PlatformCleanBaselineV1Tests(unittest.TestCase):
         for item in module.TARGET_SCHEMA_CONTRACTS:
             self.assertIn(f"CREATE SCHEMA {item['name']} AUTHORIZATION {item['owner']};", sql)
 
+    def test_relation_privileges_use_postgres_table_syntax_for_views(self):
+        plan = module.validate_disposition(disposition_fixture())
+        relation_kinds = {
+            str(item["target_identity"]): "TABLE"
+            for item in plan["targets"]
+            if item["object_type"] == "relation"
+        }
+        relation_kinds["trusted_web.retrieval_monitor_hourly_v1"] = "VIEW"
+        sql = module.build_privileges_sql(plan, relation_kinds)
+        self.assertIn(
+            "REVOKE ALL ON TABLE trusted_web.retrieval_monitor_hourly_v1 FROM PUBLIC;",
+            sql,
+        )
+        self.assertIn(
+            "GRANT SELECT ON TABLE trusted_web.retrieval_monitor_hourly_v1 TO seebx_platform_app_v1;",
+            sql,
+        )
+        self.assertNotIn(" ON VIEW ", sql)
+        self.assertNotIn(" ON MATERIALIZED VIEW ", sql)
+
 
 if __name__ == "__main__":
     unittest.main()

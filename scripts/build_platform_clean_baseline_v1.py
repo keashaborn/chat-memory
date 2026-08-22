@@ -617,7 +617,7 @@ def build_privileges_sql(plan: dict[str, Any], relation_kinds: dict[str, str]) -
             elif schema == "usage":
                 statements.append(f"GRANT EXECUTE ON FUNCTION {identity} TO {writer};")
             continue
-        statements.append(f"REVOKE ALL ON {('TABLE' if relation_kinds[identity] == 'TABLE' else relation_kinds[identity])} {identity} FROM PUBLIC;")
+        statements.append(f"REVOKE ALL ON TABLE {identity} FROM PUBLIC;")
         if schema == "conversation":
             statements.append(f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE {identity} TO {app};")
         elif schema == "conversation_integrity":
@@ -631,7 +631,7 @@ def build_privileges_sql(plan: dict[str, Any], relation_kinds: dict[str, str]) -
             statements.append(f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE {identity} TO {app};")
         elif schema == "trusted_web":
             if relation_kinds[identity] in {"VIEW", "MATERIALIZED VIEW"}:
-                statements.append(f"GRANT SELECT ON {relation_kinds[identity]} {identity} TO {app};")
+                statements.append(f"GRANT SELECT ON TABLE {identity} TO {app};")
             else:
                 statements.append(f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE {identity} TO {app};")
     return "\n".join(statements) + "\n"
