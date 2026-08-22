@@ -1,0 +1,84 @@
+{
+  "schema_version": "seebx-platform-clean-install-evidence-v1",
+  "status": "pass",
+  "evidence_date": "2026-08-22",
+  "source_candidate": {
+    "branch": "codex/seebx-cleanup-integration-20260818",
+    "baseline_generator_commit": "7b1a000d4fb60cba85b77eb0250a8cf330348755",
+    "verifier_commit": "7350f529ba8f14f88af1119b5fa038ac3234351a"
+  },
+  "disposable_migration": {
+    "run_id": "zep-clean-baseline-20260822t162621z",
+    "receipt_sha256": "518074686436444173d33168cdae1a833bfe2aee80b651c50e31ddf0d12a228c",
+    "baseline_table_manifest_sha256": "8cd000e7f540587a85bf4e49401ba18064e5bad9792fdf0629a24c023d8884ef",
+    "forward_table_manifest_sha256": "7831bf0777dc2c51da018aa493139d2a1c4b9c14bd957be05d2035ffc2360a12",
+    "forward_platform_audit_sha256": "ac2561e55799b5eab6ceade77f3a6753ecc0960b9d2dcd680119afd693ce5b00",
+    "forward_platform_disposition_sha256": "ecdec3fe92e1ee1a28d80a7b6c73b6fcf654cd95476380ec5c94ffac64de0061",
+    "exact_baseline_restored": true,
+    "temporary_database_dropped": true
+  },
+  "clean_baseline": {
+    "receipt_sha256": "df73868ecde4c5c1f9c7b28ec09e28257da501a859f3c99aca14f66fcdee7fbc",
+    "canonical_schema_sha256": "471af9ddfdc22eeee56cf9a8a476e7e3f1cd545fb51ba7509f3a9efa0f57b184",
+    "schema_only": true,
+    "retained_index_entries": 39,
+    "product_object_count": 38
+  },
+  "work_runner_install": {
+    "run_id": "platform-clean-install-20260822t1645z",
+    "receipt_sha256": "0c170fd73147005393e79c9b3ac53225787d7c9e358d2f8cd39f5744bcb73862",
+    "tool_sha256": "a9fd150abc7578fcd205534cd7b3b311f994079987c41c6f7912c6083ddbbfa1",
+    "catalog_sha256": "0ac7cd81079bc459e379da909626c8d5127fe39bed306a5811d116fe32b32e63",
+    "postgres_image_digest": "sha256:e17e86066e5ef83e0952a9347f5c792b7ece00972e2aa787a6986f471b3dd3d5",
+    "catalog": {
+      "schema_count": 9,
+      "role_count": 6,
+      "membership_count": 1,
+      "relation_count": 21,
+      "function_count": 17,
+      "policy_count": 20,
+      "rls_enabled_count": 17,
+      "rls_forced_count": 17,
+      "extension_count": 2,
+      "table_row_count": 0
+    },
+    "sandbox": {
+      "rootless": true,
+      "cgroup_version": "v2",
+      "network_mode": "none",
+      "published_ports": 0,
+      "read_only_root": true,
+      "privileged": false,
+      "no_new_privileges": true,
+      "capabilities_dropped": "all",
+      "service_user": "999:999",
+      "schema_installer_user": "0:0 (rootless user namespace)",
+      "pids_limit": 256,
+      "memory_bytes": 4294967296,
+      "cpus": 2
+    }
+  },
+  "fail_closed_corrections": [
+    "retained only indexes bound to approved relations so composite foreign keys can install",
+    "rendered PostgreSQL relation privileges with TABLE syntax for tables and views",
+    "accepted pg_dump RLS statements with and without the optional ONLY keyword"
+  ],
+  "cleanup": {
+    "temporary_database_absent": true,
+    "container_absent": true,
+    "data_volume_absent": true,
+    "socket_volume_absent": true,
+    "status": "pass"
+  },
+  "production_health": {
+    "brains_service": "active",
+    "postgres_container": "running",
+    "production_database_writes": 0
+  },
+  "authority": {
+    "data_copy_authority": false,
+    "deployment_authority": false,
+    "production_change_authority": false,
+    "retirement_authority": false
+  }
+}
