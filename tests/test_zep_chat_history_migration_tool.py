@@ -12,6 +12,7 @@ from scripts.prepare_legacy_memory_retirement_recovery import parse_postgres_dsn
 from scripts.verify_zep_chat_history_migration import (
     MigrationContractError,
     MigrationExecutionError,
+    build_schema_dump_command,
     build_psql_command,
     main,
     validate_forward_state,
@@ -65,6 +66,7 @@ class ZepChatHistoryMigrationToolTests(unittest.TestCase):
             set(dependencies),
             {
                 "database_consumer_audit",
+                "platform_clean_baseline",
                 "platform_database_audit",
                 "platform_database_disposition",
             },
@@ -89,6 +91,29 @@ class ZepChatHistoryMigrationToolTests(unittest.TestCase):
         self.assertIn("ON_ERROR_STOP=1", command)
         self.assertIn("--single-transaction", command)
         self.assertNotIn("secret", command)
+
+    def test_schema_dump_is_schema_only_and_disposable_target_bound(self) -> None:
+        settings = parse_postgres_dsn(
+            "postgresql://sage:secret@127.0.0.1:5432/memory"
+        )
+        command = build_schema_dump_command(
+            settings,
+            "ls_zep_test",
+            Path("/secure/forward-schema.pgcustom"),
+        )
+        self.assertIn("--schema-only", command)
+        self.assertIn("--no-owner", command)
+        self.assertIn("--no-privileges", command)
+        self.assertNotIn("secret", command)
+        with self.assertRaisesRegex(
+            MigrationContractError,
+            "schema_dump_database_identity_invalid",
+        ):
+            build_schema_dump_command(
+                settings,
+                "memory",
+                Path("/secure/forward-schema.pgcustom"),
+            )
 
     def test_recovery_source_requires_full_hash_bound_success_receipt(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

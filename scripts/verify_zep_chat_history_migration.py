@@ -23,6 +23,9 @@ try:
         read_audit as read_disposition_audit,
         write_exclusive as write_disposition_exclusive,
     )
+    from build_platform_clean_baseline_v1 import (
+        execute as execute_platform_clean_baseline,
+    )
     from database_consumer_audit_v1 import execute as execute_database_audit
 except ModuleNotFoundError:
     from scripts.audit_platform_database_consumers_v1 import PLATFORM_SPEC
@@ -30,6 +33,9 @@ except ModuleNotFoundError:
         build_manifest as build_disposition_manifest,
         read_audit as read_disposition_audit,
         write_exclusive as write_disposition_exclusive,
+    )
+    from scripts.build_platform_clean_baseline_v1 import (
+        execute as execute_platform_clean_baseline,
     )
     from scripts.database_consumer_audit_v1 import execute as execute_database_audit
 
@@ -80,6 +86,7 @@ SCHEMA_VERSION = "seebx-zep-chat-history-migration-receipt-v1"
 PACKAGE_SCHEMA_VERSION = "seebx-zep-chat-history-migration-package-v1"
 RECOVERY_SCHEMA_VERSION = "seebx-legacy-memory-recovery-receipt-v1"
 PSQL = "/usr/bin/psql"
+PG_DUMP = "/usr/bin/pg_dump"
 PACKAGE_RELATIVE_PATH = Path(
     "ops/migrations/20260819_zep_chat_history_cutover_v1/package.json"
 )
@@ -94,6 +101,7 @@ LEGACY_TRIGGER_NAMES = (
 )
 TOOL_DEPENDENCY_NAMES = {
     "database_consumer_audit",
+    "platform_clean_baseline",
     "platform_database_audit",
     "platform_database_disposition",
 }
@@ -309,6 +317,35 @@ def build_psql_command(
         command.append("--single-transaction")
     command.extend(("--file", str(sql_path)))
     return command
+
+
+def build_schema_dump_command(
+    settings: Any,
+    database: str,
+    output: Path,
+) -> list[str]:
+    if not database.startswith("ls_zep_") or len(database) > 63:
+        raise MigrationContractError("schema_dump_database_identity_invalid")
+    if output.is_symlink() or output.exists():
+        raise MigrationContractError("schema_dump_output_already_exists")
+    return [
+        PG_DUMP,
+        "--host",
+        settings.host,
+        "--port",
+        str(settings.port),
+        "--username",
+        settings.user,
+        "--dbname",
+        database,
+        "--schema-only",
+        "--format=custom",
+        "--compress=6",
+        "--no-owner",
+        "--no-privileges",
+        "--file",
+        str(output),
+    ]
 
 
 def run_checked(
@@ -548,7 +585,7 @@ async def execute(arguments: argparse.Namespace) -> dict[str, Any]:
         raise MigrationContractError("dsn_target_identity_mismatch")
     if not 60 <= arguments.timeout <= 7200:
         raise MigrationContractError("timeout_out_of_range")
-    for raw_path in (PSQL, PG_RESTORE, CREATEDB, DROPDB):
+    for raw_path in (PSQL, PG_DUMP, PG_RESTORE, CREATEDB, DROPDB):
         if not Path(raw_path).is_file() or not os.access(raw_path, os.X_OK):
             raise MigrationContractError("postgres_client_binary_invalid")
 
@@ -673,10 +710,45 @@ async def execute(arguments: argparse.Namespace) -> dict[str, Any]:
             temporary_database=temporary_database,
             candidate_commit=arguments.candidate_commit,
         )
+        schema_archive = output / "forward-platform-schema-v1.pgcustom"
+        await asyncio.to_thread(
+            run_checked,
+            build_schema_dump_command(
+                settings,
+                temporary_database,
+                schema_archive,
+            ),
+            environment,
+            label="forward_platform_schema_dump",
+            timeout=arguments.timeout,
+        )
+        if not schema_archive.is_file() or schema_archive.stat().st_size == 0:
+            raise MigrationExecutionError("forward_platform_schema_archive_missing")
+        os.chmod(schema_archive, 0o600)
+        disposition_sha256 = sha256_file(disposition_path)
+        schema_archive_sha256 = sha256_file(schema_archive)
+        clean_baseline = await asyncio.to_thread(
+            execute_platform_clean_baseline,
+            disposition_path=disposition_path,
+            disposition_sha256=disposition_sha256,
+            schema_archive=schema_archive,
+            schema_archive_sha256=schema_archive_sha256,
+            candidate_commit=arguments.candidate_commit,
+            output=output / "platform-clean-baseline",
+        )
+        if clean_baseline.get("status") != "candidate_schema_ready":
+            raise MigrationExecutionError("platform_clean_baseline_not_ready")
         forward_summary["platform_database"] = {
             **platform_summary,
             "audit_report_sha256": verified_audit_sha256,
-            "disposition_sha256": sha256_file(disposition_path),
+            "clean_schema_baseline": {
+                "canonical_schema_sha256": clean_baseline["canonical_schema_sha256"],
+                "receipt_sha256": clean_baseline["baseline_receipt_sha256"],
+                "retained_product_objects": clean_baseline["retained_product_objects"],
+                "schema_archive_sha256": schema_archive_sha256,
+                "status": clean_baseline["status"],
+            },
+            "disposition_sha256": disposition_sha256,
             "governance_manifest_sha256": str(
                 audit_result["governance_manifest_sha256"]
             ),
@@ -782,6 +854,9 @@ async def execute(arguments: argparse.Namespace) -> dict[str, Any]:
             ),
             "forward_platform_disposition_sha256": sha256_file(
                 disposition_path
+            ),
+            "platform_clean_baseline_receipt_sha256": str(
+                clean_baseline["baseline_receipt_sha256"]
             ),
         }
     except Exception:
