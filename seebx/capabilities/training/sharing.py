@@ -11,7 +11,7 @@ from seebx.adapters.lifeswitch_training_sharing_postgres import (
     WorkoutShareImportError,
     lifeswitch_training_sharing_repository,
 )
-from seebx.core.ownership import require_actor_matches_owner
+from seebx.core.identity import require_actor
 
 from .common import _as_uuid, _clean_text, _row_to_jsonable
 
@@ -38,7 +38,7 @@ async def create_workout_template_share(
     label: str = Body(""),
     notes: str = Body(""),
 ):
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
     wid = _as_uuid(workout_template_id, "workout_template_id")
     token = _new_share_token()
     token_hash = _token_hash(token)
@@ -64,7 +64,7 @@ async def list_workout_template_shares(
     owner_user_id: str = Query(..., min_length=1),
     include_inactive: int = Query(0, ge=0, le=1),
 ):
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
     async with lifeswitch_training_sharing_repository(req) as repository:
         rows = await repository.list_shares(
             owner_user_id=owner,
@@ -111,7 +111,7 @@ async def import_workout_template_share(
     owner_user_id: str = Query(..., min_length=1),
     token: str = Query(..., min_length=10),
 ):
-    importer = require_actor_matches_owner(req, owner_user_id)
+    importer = await require_actor(req, owner_user_id)
     token_hash = _token_hash(token)
 
     try:
@@ -142,7 +142,7 @@ async def revoke_workout_template_share(
     share_id = _as_uuid(
         workout_template_share_id, "workout_template_share_id"
     )
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
     async with lifeswitch_training_sharing_repository(req) as repository:
         row = await repository.revoke_share(
             workout_template_share_id=share_id,

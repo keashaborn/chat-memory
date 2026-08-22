@@ -13,7 +13,7 @@ from seebx.adapters.lifeswitch_measurements_postgres import (
     MeasurementEntryWrite,
     lifeswitch_measurements_repository,
 )
-from seebx.core.ownership import require_actor_matches_owner
+from seebx.core.identity import require_actor
 
 
 router = APIRouter()
@@ -115,7 +115,7 @@ async def list_measurement_entries(
     include_inactive: int = Query(0, ge=0, le=1),
     target_user_id: str = Query("", max_length=80),
 ):
-    viewer = require_actor_matches_owner(req, owner_user_id)
+    viewer = await require_actor(req, owner_user_id)
     async with lifeswitch_measurements_repository(req) as measurements:
         owner, delegated = await _resolve_measurements_view_target(
             measurements,
@@ -158,7 +158,7 @@ async def create_measurement_entry(
     skinfolds_json: dict | None = Body(None),
     scan_json: dict | None = Body(None),
 ):
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
     day = _clean_date(local_date)
 
     measured_at_val = None
@@ -215,7 +215,7 @@ async def deactivate_measurement_entry(
     owner_user_id: str = Query(..., min_length=1),
 ):
     entry_id = _as_uuid(measurement_entry_id, "measurement_entry_id")
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
 
     async with lifeswitch_measurements_repository(req) as measurements:
         row = await measurements.deactivate_entry(

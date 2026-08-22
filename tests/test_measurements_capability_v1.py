@@ -74,7 +74,7 @@ class MeasurementsCapabilityTests(unittest.IsolatedAsyncioTestCase):
         repository_factory = Mock()
         denied = HTTPException(status_code=403, detail="owner_mismatch")
         with (
-            patch.object(routes, "require_actor_matches_owner", Mock(side_effect=denied)),
+            patch.object(routes, "require_actor", AsyncMock(side_effect=denied)),
             patch.object(routes, "lifeswitch_measurements_repository", repository_factory),
         ):
             with self.assertRaises(HTTPException) as caught:
@@ -100,7 +100,7 @@ class MeasurementsCapabilityTests(unittest.IsolatedAsyncioTestCase):
             "created_at": now,
         }])
         with (
-            patch.object(routes, "require_actor_matches_owner", Mock(return_value=OWNER)),
+            patch.object(routes, "require_actor", AsyncMock(return_value=OWNER)),
             patch.object(
                 routes,
                 "lifeswitch_measurements_repository",
@@ -157,7 +157,7 @@ class MeasurementsCapabilityTests(unittest.IsolatedAsyncioTestCase):
         repository = Mock()
         repository.deactivate_entry = AsyncMock(return_value=None)
         with (
-            patch.object(routes, "require_actor_matches_owner", Mock(return_value=OWNER)),
+            patch.object(routes, "require_actor", AsyncMock(return_value=OWNER)),
             patch.object(
                 routes,
                 "lifeswitch_measurements_repository",

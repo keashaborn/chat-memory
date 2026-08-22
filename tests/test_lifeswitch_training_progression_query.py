@@ -30,7 +30,7 @@ class TrainingProgressionQueryContractTest(unittest.TestCase):
         cls.query = SESSIONS.read_text(encoding="utf-8").lower()
 
     def test_query_is_owner_scoped_and_uses_current_completed_sessions(self) -> None:
-        self.assertIn("require_actor_matches_owner(req, owner_user_id)", self.route)
+        self.assertIn("await require_actor(req, owner_user_id)", self.route)
         self.assertIn("_resolve_training_view_target(", self.route)
         self.assertIn("req, viewer, target_user_id", self.route)
         self.assertIn("from {self._schema}.training_session_current_v s", self.query)

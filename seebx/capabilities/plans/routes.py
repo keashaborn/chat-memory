@@ -11,7 +11,7 @@ from seebx.adapters.lifeswitch_plan_postgres import (
     lifeswitch_plan_repository,
     plan_row_to_jsonable,
 )
-from seebx.core.ownership import require_actor_matches_owner
+from seebx.core.identity import require_actor
 
 
 router = APIRouter()
@@ -64,7 +64,7 @@ async def get_plan_profile(
     create_if_missing: int = Query(1, ge=0, le=1),
     target_user_id: str = Query("", max_length=80),
 ):
-    viewer = require_actor_matches_owner(req, owner_user_id)
+    viewer = await require_actor(req, owner_user_id)
     target, delegated = await _resolve_plan_target(viewer, target_user_id)
     async with lifeswitch_plan_repository(req) as repository:
         row = await repository.get_or_create_profile(
@@ -103,7 +103,7 @@ async def upsert_plan_profile(
     monitoring_rules: dict = Body(default_factory=dict),
     coach_notes: str = Body(""),
 ):
-    viewer = require_actor_matches_owner(req, owner_user_id)
+    viewer = await require_actor(req, owner_user_id)
     cleaned_phase = _clean_text(phase, 40)
     if cleaned_phase not in VALID_PHASES:
         raise HTTPException(
@@ -149,7 +149,7 @@ async def list_plan_comments(
     target_user_id: str = Query("", max_length=80),
     limit: int = Query(50, ge=1, le=200),
 ):
-    viewer = require_actor_matches_owner(req, owner_user_id)
+    viewer = await require_actor(req, owner_user_id)
     target, _ = await _resolve_plan_target(viewer, target_user_id)
     async with lifeswitch_plan_repository(req) as repository:
         rows = await repository.list_comments(owner_user_id=target, limit=int(limit))
@@ -164,7 +164,7 @@ async def create_plan_comment(
     comment_text: str = Body(...),
     comment_kind: str = Body("comment"),
 ):
-    viewer = require_actor_matches_owner(req, owner_user_id)
+    viewer = await require_actor(req, owner_user_id)
     text = _clean_text(comment_text, 4000)
     kind = _clean_text(comment_kind, 80) or "comment"
     if not text:
@@ -194,7 +194,7 @@ async def list_plan_profile_history(
     owner_user_id: str = Query(..., min_length=1),
     limit: int = Query(20, ge=1, le=100),
 ):
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
     async with lifeswitch_plan_repository(req) as repository:
         rows = await repository.list_history(owner_user_id=owner, limit=int(limit))
     return JSONResponse([plan_row_to_jsonable(row) for row in rows])

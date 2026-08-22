@@ -19,6 +19,12 @@ Status: candidate evidence; no deployment or retirement authority
   over five explicit aggregate modules. All moved handler ASTs and all 41
   Training routes match the parent; all 103 focused Training tests and the
   complete 1,334-test candidate suite pass.
+- All eleven retained LifeSwitch domain route modules now consume verified
+  Supabase or owner-bound voice-session identity before owner/RLS access.
+  Seventy owner-bound calls, eight owner-independent verified-actor calls,
+  and eight database-owner callbacks replace the raw header boundary. Raw-
+  header-only requests are rejected before repository access in all four
+  domain groups; the full 1,354-test suite passes.
 - The separate failed voice-canary unit and active timer remain outside this
   cleanup batch.
 
@@ -53,8 +59,10 @@ Status: candidate evidence; no deployment or retirement authority
    root. The canonical disposable restore now proves exact database-manifest
    equality, five self-owner boundaries across 33 protected surfaces,
    fail-closed disabled delegation, denied cross-owner writes, and cleanup.
-   Enabled delegation and paired authenticated frontend parity remain required
-   before producing the final release bundle.
+   The code-level Supabase/voice identity boundary and paired frontend bearer
+   forwarding are now consistent. A real signed-session frontend/backend/
+   disposable-database proof and enabled delegation, if approved, remain
+   required before producing the final release bundle.
 2. Immutable release control is installed on SeeBx and Verbal Sage at exact
    package release `08322acd1ff738c88cc83c2361ffdb4c35e5b29d`. The current
    cleanup candidate postdates the sealed backend build, so final application
@@ -92,10 +100,10 @@ Status: candidate evidence; no deployment or retirement authority
 
 ## Next cleanup order
 
-1. Use the verified disposable database path to prove Plan-to-Nutrition
-   application behavior and, only if enabled by an approved configuration,
-   delegated People access; Plan targets remain independent of retired
-   page-level AI helpers.
+1. Run a real signed-session paired frontend/backend proof against the
+   verified disposable database, including Plan-to-Nutrition application
+   behavior; only test delegated People access if separately enabled. Plan
+   targets remain independent of retired page-level AI helpers.
 2. Bind exact database schema, owner/RLS, delegated-access, migration, rollback,
    and paired frontend evidence before regenerating any release package.
 3. Run the Forms schema, exact valid/quarantine reconciliation, rollback, and

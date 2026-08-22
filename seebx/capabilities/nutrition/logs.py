@@ -5,7 +5,7 @@ import uuid
 import decimal
 import datetime as _dt
 from fastapi import APIRouter, HTTPException, Query, Request
-from seebx.core.ownership import require_actor_matches_owner
+from seebx.core.identity import require_actor
 from seebx.adapters.lifeswitch_nutrition_log_postgres import (
     LifeSwitchNutritionLogRepository,
     NutritionLogBatchEntryWrite,
@@ -149,7 +149,7 @@ async def create_log_entry(
     sort_order: int = Query(0),
     notes: str | None = Query(None, max_length=500),
 ):
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
     parsed_day = _parse_day(day)
 
     if (meal_id is None) == (my_food_id is None):
@@ -204,7 +204,7 @@ async def create_log_entries_batch(
     owner_user_id: str = Query(..., min_length=1),
 ):
     """Create several food entries in one transaction or create none."""
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
     day = _parse_day(body.day)
     prepared = []
     for index, item in enumerate(body.items):
@@ -258,7 +258,7 @@ async def update_log_entry(
     sort_order: int | None = Query(None),
     notes: str | None = Query(None, max_length=500),
 ):
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
     entry_id = _as_uuid(nutrition_entry_id, "nutrition_entry_id")
     use_grams = qty_g is not None
     use_serving = my_food_serving_id is not None or qty_servings is not None
@@ -296,7 +296,7 @@ async def delete_log_entry(
     owner_user_id: str = Query(..., min_length=1),
     nutrition_entry_id: str = Query(..., min_length=1),
 ):
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
     entry_id = _as_uuid(nutrition_entry_id, "nutrition_entry_id")
     async with lifeswitch_nutrition_log_repository(req) as repository:
         row = await repository.delete_entry(
@@ -317,7 +317,7 @@ async def get_log_range(
     include_entries: int = Query(0, ge=0, le=1),
     target_user_id: str = Query("", max_length=80),
 ):
-    viewer = require_actor_matches_owner(req, owner_user_id)
+    viewer = await require_actor(req, owner_user_id)
     start = _parse_day(start_day)
     end = _parse_day(end_day)
     if start > end:
@@ -382,7 +382,7 @@ async def get_log_day(
     day: str = Query(..., min_length=10, max_length=10),
     target_user_id: str = Query("", max_length=80),
 ):
-    viewer = require_actor_matches_owner(req, owner_user_id)
+    viewer = await require_actor(req, owner_user_id)
     parsed_day = _parse_day(day)
 
     async with lifeswitch_nutrition_log_repository(req) as repository:
@@ -419,7 +419,7 @@ async def set_log_day_completion(
     owner_user_id: str = Query(..., min_length=1),
     day: str = Query(..., min_length=10, max_length=10),
 ):
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
     parsed_day = _parse_day(day)
     try:
         async with lifeswitch_nutrition_log_repository(req) as repository:

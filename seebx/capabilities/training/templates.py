@@ -7,7 +7,11 @@ from seebx.adapters.lifeswitch_training_templates_postgres import (
     TemplateUpsertError,
     lifeswitch_training_templates_repository,
 )
-from seebx.core.ownership import require_actor_matches_owner
+from seebx.core.identity import (
+    require_actor,
+    require_request_actor,
+    require_verified_actor_matches_owner,
+)
 
 from .common import _as_uuid, _clean_text, _require_idempotency_key, _row_to_jsonable
 
@@ -17,7 +21,7 @@ async def list_workout_templates(
     owner_user_id: str = Query(..., min_length=1),
     include_inactive: int = Query(0, ge=0, le=1),
 ):
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
     async with lifeswitch_training_templates_repository(req) as repository:
         rows = await repository.list_templates(
             owner_user_id=owner,
@@ -34,7 +38,7 @@ async def upsert_workout_template(
     workout_role: str | None = Query(None),
     idempotency_key: str = Header(..., alias="Idempotency-Key"),
 ):
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
     template_id = (
         _as_uuid(workout_template_id, "workout_template_id")
         if workout_template_id
@@ -74,7 +78,7 @@ async def classify_historical_workout_sessions(
     reason: str | None = Query(None, max_length=240),
     idempotency_key: str = Header(..., alias="Idempotency-Key"),
 ):
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
     template_id = _as_uuid(workout_template_id, "workout_template_id")
     role = _clean_text(workout_role, 16).lower()
     if role not in {"strength", "rehab"}:
@@ -99,7 +103,7 @@ async def deactivate_workout_template(
     owner_user_id: str = Query(..., min_length=1),
 ):
     template_id = _as_uuid(workout_template_id, "workout_template_id")
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
     async with lifeswitch_training_templates_repository(req) as repository:
         row = await repository.deactivate_template(
             workout_template_id=template_id,
@@ -111,10 +115,13 @@ async def deactivate_workout_template(
 
 async def list_workout_template_exercises(workout_template_id: str, req: Request):
     template_id = _as_uuid(workout_template_id, "workout_template_id")
+    verified_actor = await require_request_actor(req)
     async with lifeswitch_training_templates_repository(req) as repository:
         result = await repository.list_template_exercises(
             workout_template_id=template_id,
-            authorize_owner=lambda owner: require_actor_matches_owner(req, owner),
+            authorize_owner=lambda owner: require_verified_actor_matches_owner(
+                verified_actor, owner
+            ),
         )
     if result is None:
         raise HTTPException(status_code=404, detail="workout_template not found")
@@ -133,6 +140,7 @@ async def upsert_workout_template_exercise(
     flags: str | None = Query(None, max_length=240),
 ):
     template_id = _as_uuid(workout_template_id, "workout_template_id")
+    verified_actor = await require_request_actor(req)
     async with lifeswitch_training_templates_repository(req) as repository:
         result = await repository.upsert_template_exercise(
             workout_template_id=template_id,
@@ -144,7 +152,9 @@ async def upsert_workout_template_exercise(
             default_weight=float(default_weight),
             default_reps=int(default_reps),
             flags=(flags or "").strip(),
-            authorize_owner=lambda owner: require_actor_matches_owner(req, owner),
+            authorize_owner=lambda owner: require_verified_actor_matches_owner(
+                verified_actor, owner
+            ),
         )
     if result is None:
         raise HTTPException(
@@ -162,11 +172,14 @@ async def delete_workout_template_exercise(
     exercise_id = _as_uuid(
         workout_template_exercise_id, "workout_template_exercise_id"
     )
+    verified_actor = await require_request_actor(req)
     async with lifeswitch_training_templates_repository(req) as repository:
         result = await repository.delete_template_exercise(
             workout_template_id=template_id,
             workout_template_exercise_id=exercise_id,
-            authorize_owner=lambda owner: require_actor_matches_owner(req, owner),
+            authorize_owner=lambda owner: require_verified_actor_matches_owner(
+                verified_actor, owner
+            ),
         )
     if result is None:
         raise HTTPException(status_code=404, detail="workout_template not found")
@@ -178,10 +191,13 @@ async def list_workout_template_exercise_segments(
     exercise_id = _as_uuid(
         workout_template_exercise_id, "workout_template_exercise_id"
     )
+    verified_actor = await require_request_actor(req)
     async with lifeswitch_training_templates_repository(req) as repository:
         result = await repository.list_exercise_segments(
             workout_template_exercise_id=exercise_id,
-            authorize_owner=lambda owner: require_actor_matches_owner(req, owner),
+            authorize_owner=lambda owner: require_verified_actor_matches_owner(
+                verified_actor, owner
+            ),
         )
     if result is None:
         raise HTTPException(
@@ -200,6 +216,7 @@ async def upsert_workout_template_exercise_segment(
     exercise_id = _as_uuid(
         workout_template_exercise_id, "workout_template_exercise_id"
     )
+    verified_actor = await require_request_actor(req)
     async with lifeswitch_training_templates_repository(req) as repository:
         result = await repository.upsert_exercise_segment(
             workout_template_exercise_id=exercise_id,
@@ -207,7 +224,9 @@ async def upsert_workout_template_exercise_segment(
             label=(label or "").strip(),
             default_weight=float(default_weight),
             default_reps=int(default_reps),
-            authorize_owner=lambda owner: require_actor_matches_owner(req, owner),
+            authorize_owner=lambda owner: require_verified_actor_matches_owner(
+                verified_actor, owner
+            ),
         )
     if result is None:
         raise HTTPException(
@@ -229,11 +248,14 @@ async def delete_workout_template_exercise_segment(
         workout_template_exercise_segment_id,
         "workout_template_exercise_segment_id",
     )
+    verified_actor = await require_request_actor(req)
     async with lifeswitch_training_templates_repository(req) as repository:
         result = await repository.delete_exercise_segment(
             workout_template_exercise_id=exercise_id,
             workout_template_exercise_segment_id=segment_id,
-            authorize_owner=lambda owner: require_actor_matches_owner(req, owner),
+            authorize_owner=lambda owner: require_verified_actor_matches_owner(
+                verified_actor, owner
+            ),
         )
     if result is None:
         raise HTTPException(

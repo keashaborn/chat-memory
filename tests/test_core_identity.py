@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import AsyncMock, patch
 import uuid
 
+from fastapi import HTTPException
 from starlette.requests import Request
 
 from seebx.adapters.supabase import VerifiedSupabaseIdentity
@@ -16,6 +17,7 @@ from seebx.core.identity import (
     require_actor,
     require_request_actor,
     require_actor_context,
+    require_verified_actor_matches_owner,
 )
 
 
@@ -155,6 +157,20 @@ class ActorAuthorizationTest(unittest.IsolatedAsyncioTestCase):
             context.authentication_manifest_sha256,
             hashlib.sha256(material).hexdigest(),
         )
+
+
+class VerifiedDatabaseOwnerBindingTests(unittest.TestCase):
+    def test_verified_actor_can_bind_to_database_derived_owner(self) -> None:
+        self.assertEqual(
+            require_verified_actor_matches_owner(OWNER, OWNER),
+            OWNER,
+        )
+
+    def test_verified_actor_cannot_bind_to_another_owner(self) -> None:
+        with self.assertRaises(HTTPException) as mismatch:
+            require_verified_actor_matches_owner(OWNER, SESSION)
+        self.assertEqual(mismatch.exception.status_code, 403)
+        self.assertEqual(mismatch.exception.detail, "actor_owner_mismatch")
 
 
 if __name__ == "__main__":

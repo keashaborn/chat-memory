@@ -7,13 +7,17 @@ from seebx.adapters.lifeswitch_meal_plans_postgres import (
     MealPlansRepositoryError,
     lifeswitch_meal_plans_repository,
 )
-from seebx.core.ownership import require_actor_matches_owner
+from seebx.core.identity import (
+    require_actor,
+    require_request_actor,
+    require_verified_actor_matches_owner,
+)
 
 from .common import _as_uuid, _row_to_jsonable
 
 
 async def list_meal_plans(req: Request, owner_user_id: str = Query(...)):
-    uid = require_actor_matches_owner(req, owner_user_id)
+    uid = await require_actor(req, owner_user_id)
     async with lifeswitch_meal_plans_repository(req) as repository:
         rows = await repository.list_plans(owner_user_id=uid)
     return JSONResponse([_row_to_jsonable(row) for row in rows])
@@ -28,7 +32,7 @@ async def create_meal_plan(
     target_carbs_g: float | None = Query(None),
     target_fat_g: float | None = Query(None),
 ):
-    uid = require_actor_matches_owner(req, owner_user_id)
+    uid = await require_actor(req, owner_user_id)
     if goal not in ("cut", "bulk", "maintain"):
         raise HTTPException(status_code=400, detail="goal must be cut|bulk|maintain")
     async with lifeswitch_meal_plans_repository(req) as repository:
@@ -75,7 +79,7 @@ async def add_item(
         owner = await repository.active_plan_owner(meal_plan_id=mpid)
         if not owner:
             raise HTTPException(status_code=404, detail="meal_plan not found or inactive")
-        owner = require_actor_matches_owner(req, str(owner))
+        owner = await require_actor(req, str(owner))
         mfid = None
         fid = None
         sid = None
@@ -126,8 +130,12 @@ async def update_meal_plan_item(
     if use_serving and (my_food_serving_id is None or qty_servings is None):
         raise HTTPException(status_code=400, detail="serving mode requires my_food_serving_id and qty_servings")
 
+    verified_actor = await require_request_actor(req)
+
     def authorize_item(item):
-        require_actor_matches_owner(req, str(item["owner_user_id"]))
+        require_verified_actor_matches_owner(
+            verified_actor, str(item["owner_user_id"])
+        )
         if item["food_id"] is not None and use_serving:
             raise HTTPException(status_code=400, detail="legacy catalog foods support grams only")
 
@@ -160,7 +168,7 @@ async def delete_meal_plan_item(meal_plan_id: str, meal_plan_item_id: str, req: 
         owner = await repository.plan_owner(meal_plan_id=mpid)
         if not owner:
             raise HTTPException(status_code=404, detail="meal plan not found")
-        require_actor_matches_owner(req, str(owner))
+        await require_actor(req, str(owner))
         row = await repository.delete_item(meal_plan_id=mpid, item_id=item_id)
     if not row:
         raise HTTPException(status_code=404, detail="meal plan item not found")
@@ -172,6 +180,6 @@ async def list_items(meal_plan_id: str, req: Request):
         owner = await repository.plan_owner(meal_plan_id=mpid)
         if not owner:
             raise HTTPException(status_code=404, detail="meal_plan not found")
-        require_actor_matches_owner(req, str(owner))
+        await require_actor(req, str(owner))
         rows = await repository.list_items(meal_plan_id=mpid)
     return JSONResponse([_row_to_jsonable(row) for row in rows])

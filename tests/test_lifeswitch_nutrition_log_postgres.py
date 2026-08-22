@@ -6,7 +6,7 @@ import os
 import unittest
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 
@@ -381,7 +381,7 @@ class NutritionLogReadRouteTests(unittest.IsolatedAsyncioTestCase):
             },),
         )
         with (
-            patch.object(nutrition_logs, "require_actor_matches_owner", return_value=OWNER),
+            patch.object(nutrition_logs, "require_actor", new_callable=AsyncMock, return_value=OWNER),
             patch.object(
                 nutrition_logs,
                 "lifeswitch_nutrition_log_repository",
@@ -422,7 +422,7 @@ class NutritionLogReadRouteTests(unittest.IsolatedAsyncioTestCase):
             entries=(entry,),
         )
         with (
-            patch.object(nutrition_logs, "require_actor_matches_owner", return_value=OWNER),
+            patch.object(nutrition_logs, "require_actor", new_callable=AsyncMock, return_value=OWNER),
             patch.object(
                 nutrition_logs,
                 "lifeswitch_nutrition_log_repository",
@@ -447,7 +447,7 @@ class NutritionLogReadRouteTests(unittest.IsolatedAsyncioTestCase):
     async def test_delegated_read_fails_before_projection_when_disabled(self) -> None:
         repository = FakeReadRepository()
         with (
-            patch.object(nutrition_logs, "require_actor_matches_owner", return_value=VIEWER),
+            patch.object(nutrition_logs, "require_actor", new_callable=AsyncMock, return_value=VIEWER),
             patch.object(
                 nutrition_logs,
                 "lifeswitch_nutrition_log_repository",
@@ -471,7 +471,7 @@ class NutritionLogReadRouteTests(unittest.IsolatedAsyncioTestCase):
     async def test_delegated_read_uses_exact_permission_tuple(self) -> None:
         repository = FakeReadRepository(allowed=False)
         with (
-            patch.object(nutrition_logs, "require_actor_matches_owner", return_value=VIEWER),
+            patch.object(nutrition_logs, "require_actor", new_callable=AsyncMock, return_value=VIEWER),
             patch.object(
                 nutrition_logs,
                 "lifeswitch_nutrition_log_repository",

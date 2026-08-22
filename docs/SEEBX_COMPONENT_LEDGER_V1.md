@@ -213,3 +213,21 @@ mutation batch is approved.
 - The hash-bound evidence and explicit remaining gates are recorded in
   `docs/SEEBX_LIFESWITCH_DISPOSABLE_DATABASE_VERIFICATION_V1.md`. Production
   source, database, configuration, and services were unchanged.
+
+## Candidate LifeSwitch verified-identity boundary (2026-08-21)
+
+- The paired frontend already forwarded the original bearer, but 70 direct
+  LifeSwitch domain checks and eight database-derived owner paths still relied
+  on the raw actor-header helper. The candidate now routes all of them through
+  `seebx.core.identity`, with eight database-owner callbacks bound only to an
+  already verified actor.
+- Zero raw actor-header helper references remain in the eleven retained
+  Measurements, Nutrition, Plans, and Training capability modules. Raw-header-
+  only requests are rejected before repository access in all four domain
+  groups.
+- Forty-six focused tests and the complete 1,354-test backend suite pass.
+  Parent/candidate route and OpenAPI structures remain exact. The paired
+  frontend passes four bearer/wiring and ten Plan-driven four-macro tests.
+- Exact authority, evidence, and remaining end-to-end gates are recorded in
+  `docs/SEEBX_LIFESWITCH_DOMAIN_IDENTITY_BOUNDARY_V1.md`. Production is
+  unchanged.

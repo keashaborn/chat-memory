@@ -13,7 +13,7 @@ from seebx.adapters.usda_fdc import (
     nutrient_summary as usda_nutrient_summary,
     usda_fdc_client,
 )
-from seebx.core.ownership import require_actor_matches_owner
+from seebx.core.identity import require_actor
 
 from .common import _as_uuid, _row_to_jsonable
 
@@ -107,7 +107,7 @@ async def create_my_food_from_usda(
     fdc_id: int = Query(..., ge=1),
     variant: str | None = Query(None, max_length=120),
 ):
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
 
     try:
         j = await usda_fdc_client().detail(fdc_id)
@@ -214,7 +214,7 @@ async def list_my_foods(
     q: str | None = Query(None, min_length=1, max_length=120),
     include_inactive: int = Query(0, ge=0, le=1),
 ):
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
     async with lifeswitch_foods_repository(req) as repository:
         rows = await repository.list_foods(
             owner_user_id=owner,
@@ -231,7 +231,7 @@ async def create_my_food_from_catalog(
     display_name: str | None = Query(None, max_length=200),
     brand: str | None = Query(None, max_length=200),
 ):
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
     fid = _as_uuid(food_id, "food_id")
 
     async with lifeswitch_foods_repository(req) as repository:
@@ -286,7 +286,7 @@ async def update_my_food(
             current = await repository.lock_food(my_food_id=fid)
             if not current:
                 raise HTTPException(status_code=404, detail="my_food not found")
-            require_actor_matches_owner(req, str(current["owner_user_id"]))
+            await require_actor(req, str(current["owner_user_id"]))
 
             display_name = current["display_name"]
             if "display_name" in fields:
@@ -395,7 +395,7 @@ async def deactivate_my_food(my_food_id: str, req: Request):
         owner = await repository.food_owner(my_food_id=fid)
         if not owner:
             raise HTTPException(status_code=404, detail="my_food not found")
-        require_actor_matches_owner(req, str(owner))
+        await require_actor(req, str(owner))
 
         row = await repository.deactivate_food(my_food_id=fid)
         if not row:
@@ -408,7 +408,7 @@ async def list_my_food_servings(my_food_id: str, req: Request):
         owner = await repository.food_owner(my_food_id=fid)
         if not owner:
             raise HTTPException(status_code=404, detail="my_food not found")
-        require_actor_matches_owner(req, str(owner))
+        await require_actor(req, str(owner))
 
         rows = await repository.list_active_servings(my_food_id=fid)
     return JSONResponse([_row_to_jsonable(row) for row in rows])
@@ -429,7 +429,7 @@ async def create_my_food_serving(
         food = await repository.food_owner_and_active(my_food_id=fid)
         if not food or food["is_active"] is not True:
             raise HTTPException(status_code=404, detail="my_food not found or inactive")
-        require_actor_matches_owner(req, str(food["owner_user_id"]))
+        await require_actor(req, str(food["owner_user_id"]))
 
         row = await repository.find_serving_record_by_name(my_food_id=fid, name=nm)
         if row:
@@ -481,7 +481,7 @@ async def update_my_food_serving(
                 current = await repository.lock_serving(serving_id=sid, my_food_id=fid)
                 if not current:
                     raise HTTPException(status_code=404, detail="serving not found")
-                require_actor_matches_owner(req, str(current["owner_user_id"]))
+                await require_actor(req, str(current["owner_user_id"]))
 
                 name = current["name"]
                 if "name" in fields:
@@ -534,7 +534,7 @@ async def list_my_food_overrides(
     req: Request,
     owner_user_id: str = Query(..., min_length=1),
 ):
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
     async with lifeswitch_foods_repository(req) as repository:
         rows = await repository.list_overrides(owner_user_id=owner)
     return JSONResponse([_row_to_jsonable(row) for row in rows])
@@ -547,7 +547,7 @@ async def upsert_my_food_override(
     default_grams: float | None = Query(None, gt=0),
     sort_order: int = Query(0),
 ):
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
     fid = _as_uuid(my_food_id, "my_food_id")
 
     al = (alias or "").strip() if alias is not None else None
@@ -573,7 +573,7 @@ async def delete_my_food_override(
     owner_user_id: str = Query(..., min_length=1),
     my_food_id: str = Query(..., min_length=1),
 ):
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
     fid = _as_uuid(my_food_id, "my_food_id")
     async with lifeswitch_foods_repository(req) as repository:
         row = await repository.delete_override(owner_user_id=owner, my_food_id=fid)

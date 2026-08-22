@@ -39,7 +39,7 @@ class UsdaProviderBoundaryTests(unittest.TestCase):
 
     def test_owner_scoped_import_authenticates_before_provider_and_database(self):
         route = function_source(NUTRITION, "create_my_food_from_usda")
-        actor = route.index("require_actor_matches_owner")
+        actor = route.index("await require_actor")
         provider = route.index("usda_fdc_client")
         database = route.index("lifeswitch_foods_repository")
         self.assertLess(actor, provider)

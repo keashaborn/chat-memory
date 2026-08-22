@@ -4,7 +4,7 @@ from fastapi import HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 from seebx.adapters.lifeswitch_training_exercises_postgres import lifeswitch_training_exercises_repository
-from seebx.core.ownership import require_actor_matches_owner
+from seebx.core.identity import require_actor
 
 from .common import _as_uuid, _clean_text, _row_to_jsonable
 
@@ -14,7 +14,7 @@ async def list_my_exercises(
     owner_user_id: str = Query(..., min_length=1),
     include_inactive: int = Query(0, ge=0, le=1),
 ):
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
     async with lifeswitch_training_exercises_repository(req) as repository:
         rows = await repository.list_exercises(
             owner_user_id=owner,
@@ -35,7 +35,7 @@ async def upsert_my_exercise(
     matched_source: str | None = Query(None, max_length=120),
     exercise_role: str | None = Query(None, max_length=20),
 ):
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
     clean_role = _clean_text(exercise_role, 20).lower()
     if clean_role and clean_role not in {"strength", "rehab"}:
         raise HTTPException(status_code=400, detail="exercise_role must be strength or rehab")
@@ -60,7 +60,7 @@ async def deactivate_my_exercise(
     owner_user_id: str = Query(..., min_length=1),
 ):
     mid = _as_uuid(my_exercise_id, "my_exercise_id")
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
     async with lifeswitch_training_exercises_repository(req) as repository:
         row = await repository.deactivate_exercise(
             my_exercise_id=mid,

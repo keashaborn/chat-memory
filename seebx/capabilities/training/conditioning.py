@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 
 from seebx.adapters.lifeswitch_training_conditioning_postgres import lifeswitch_training_conditioning_repository
 from seebx.adapters.lifeswitch_training_writes_postgres import TrainingWriterError
-from seebx.core.ownership import require_actor_matches_owner
+from seebx.core.identity import require_actor
 
 from .access import _resolve_training_view_target
 from .common import _as_uuid, _clean_text, _require_idempotency_key, _row_to_jsonable
@@ -43,7 +43,7 @@ async def list_my_conditioning_prescriptions(
     owner_user_id: str = Query(..., min_length=1),
     include_inactive: int = Query(0, ge=0, le=1),
 ):
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
     async with lifeswitch_training_conditioning_repository(req) as repository:
         rows = await repository.list_prescriptions(
             owner_user_id=owner,
@@ -73,7 +73,7 @@ async def upsert_my_conditioning_prescription(
     dose_type: str = Query("open", max_length=40),
     dose_config: str = Query("{}", max_length=12000),
 ):
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
     pid = (
         _as_uuid(
             my_conditioning_prescription_id,
@@ -154,7 +154,7 @@ async def deactivate_my_conditioning_prescription(
     owner_user_id: str = Query(..., min_length=1),
 ):
     pid = _as_uuid(my_conditioning_prescription_id, "my_conditioning_prescription_id")
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
 
     async with lifeswitch_training_conditioning_repository(req) as repository:
         row = await repository.deactivate_prescription(
@@ -187,7 +187,7 @@ async def create_conditioning_session(
     dose_type: str = Query("open", max_length=40),
     dose_config: str = Query("{}", max_length=12000),
 ):
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
     write_key = _require_idempotency_key(idempotency_key)
 
     pid = (
@@ -276,7 +276,7 @@ async def list_conditioning_sessions(
     limit: int = Query(100, ge=1, le=500),
     target_user_id: str = Query("", max_length=80),
 ):
-    viewer = require_actor_matches_owner(req, owner_user_id)
+    viewer = await require_actor(req, owner_user_id)
 
     day_val = None
     if day:
@@ -304,7 +304,7 @@ async def get_conditioning_session(
     owner_user_id: str = Query(..., min_length=1),
 ):
     sid = _as_uuid(conditioning_session_log_id, "conditioning_session_log_id")
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
 
     async with lifeswitch_training_conditioning_repository(req) as repository:
         row = await repository.get_session(
@@ -322,7 +322,7 @@ async def deactivate_conditioning_session(
     reason: str = Body("user_deleted", embed=True),
 ):
     sid = _as_uuid(conditioning_session_log_id, "conditioning_session_log_id")
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
 
     try:
         async with lifeswitch_training_conditioning_repository(req) as repository:
@@ -350,7 +350,7 @@ async def correct_conditioning_session(
     payload: dict = Body(...),
 ):
     sid = _as_uuid(conditioning_session_log_id, "conditioning_session_log_id")
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
     write_key = _require_idempotency_key(idempotency_key)
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="JSON object required")

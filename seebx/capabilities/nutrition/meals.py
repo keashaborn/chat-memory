@@ -11,7 +11,11 @@ from seebx.adapters.lifeswitch_meals_postgres import (
     MealsRepositoryError,
     lifeswitch_meals_repository,
 )
-from seebx.core.ownership import require_actor_matches_owner
+from seebx.core.identity import (
+    require_actor,
+    require_request_actor,
+    require_verified_actor_matches_owner,
+)
 
 
 router = APIRouter()
@@ -45,7 +49,7 @@ async def list_meals(
     owner_user_id: str = Query(..., min_length=1),
     include_inactive: int = Query(0, ge=0, le=1),
 ):
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
     async with lifeswitch_meals_repository(req) as repository:
         rows = await repository.list_meals(
             owner_user_id=owner,
@@ -61,7 +65,7 @@ async def create_meal(
     name: str = Query(..., min_length=1, max_length=120),
     meal_type: str = Query("other"),
 ):
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
     if meal_type not in ("breakfast", "lunch", "dinner", "snack", "other"):
         raise HTTPException(status_code=400, detail="meal_type must be breakfast|lunch|dinner|snack|other")
     async with lifeswitch_meals_repository(req) as repository:
@@ -80,7 +84,7 @@ async def deactivate_meal(
     owner_user_id: str = Query(..., min_length=1),
 ):
     mid = _as_uuid(meal_id, "meal_id")
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
     async with lifeswitch_meals_repository(req) as repository:
         row = await repository.deactivate_meal(meal_id=mid, owner_user_id=owner)
     if not row:
@@ -120,7 +124,7 @@ async def add_meal_item(
         owner = await repository.active_meal_owner(meal_id=mid)
         if not owner:
             raise HTTPException(status_code=404, detail="meal not found or inactive")
-        owner = require_actor_matches_owner(req, str(owner))
+        owner = await require_actor(req, str(owner))
         if not await repository.food_is_active(my_food_id=fid, owner_user_id=owner):
             raise HTTPException(status_code=404, detail="my_food not found or inactive")
         if sid and not await repository.serving_is_active(serving_id=sid, my_food_id=fid):
@@ -158,6 +162,7 @@ async def update_meal_item(
     if use_serving and (my_food_serving_id is None or qty_servings is None):
         raise HTTPException(status_code=400, detail="servings mode requires my_food_serving_id and qty_servings")
     sid = _as_uuid(my_food_serving_id, "my_food_serving_id") if my_food_serving_id else None
+    verified_actor = await require_request_actor(req)
     try:
         async with lifeswitch_meals_repository(req) as repository:
             row = await repository.update_item(
@@ -166,7 +171,9 @@ async def update_meal_item(
                 qty_g=qty_g,
                 serving_id=sid,
                 qty_servings=qty_servings,
-                authorize_owner=lambda owner: require_actor_matches_owner(req, owner),
+                authorize_owner=lambda owner: require_verified_actor_matches_owner(
+                    verified_actor, owner
+                ),
             )
     except MealsRepositoryError as error:
         details = {
@@ -184,7 +191,7 @@ async def list_meal_items(meal_id: str, req: Request):
         owner = await repository.meal_owner(meal_id=mid)
         if not owner:
             raise HTTPException(status_code=404, detail="meal not found")
-        require_actor_matches_owner(req, str(owner))
+        await require_actor(req, str(owner))
         rows = await repository.list_items(meal_id=mid)
     return JSONResponse([_row_to_jsonable(row) for row in rows])
 
@@ -196,7 +203,7 @@ async def delete_meal_item(
     req: Request,
     owner_user_id: str = Query(..., min_length=1),
 ):
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
     mid = _as_uuid(meal_id, "meal_id")
     iid = _as_uuid(meal_item_id, "meal_item_id")
     async with lifeswitch_meals_repository(req) as repository:

@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 
 from seebx.adapters.lifeswitch_training_sessions_postgres import lifeswitch_training_sessions_repository
 from seebx.adapters.lifeswitch_training_writes_postgres import TrainingWriterError
-from seebx.core.ownership import require_actor_matches_owner
+from seebx.core.identity import require_actor
 
 from .access import _resolve_training_view_target
 from .common import _as_uuid, _clean_text, _require_idempotency_key, _row_to_jsonable
@@ -21,7 +21,7 @@ async def complete_training_session(
     idempotency_key: str = Header(..., alias="Idempotency-Key"),
     payload: dict = Body(...),
 ):
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
     write_key = _require_idempotency_key(idempotency_key)
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="JSON object required")
@@ -190,7 +190,7 @@ async def create_training_session(
     req: Request,
     owner_user_id: str = Query(..., min_length=1),
 ):
-    require_actor_matches_owner(req, owner_user_id)
+    await require_actor(req, owner_user_id)
     raise HTTPException(
         status_code=410,
         detail="session creation moved to atomic /sessions/complete",
@@ -204,7 +204,7 @@ async def list_training_sessions(
     limit: int = Query(100, ge=1, le=500),
     target_user_id: str = Query("", max_length=80),
 ):
-    viewer = require_actor_matches_owner(req, owner_user_id)
+    viewer = await require_actor(req, owner_user_id)
 
     day_val = None
     if day:
@@ -233,7 +233,7 @@ async def get_training_session(
     target_user_id: str = Query("", max_length=80),
 ):
     sid = _as_uuid(training_session_id, "training_session_id")
-    viewer = require_actor_matches_owner(req, owner_user_id)
+    viewer = await require_actor(req, owner_user_id)
 
     owner, delegated = await _resolve_training_view_target(
         req, viewer, target_user_id
@@ -256,7 +256,7 @@ async def list_strength_progression(
     limit: int = Query(2000, ge=1, le=5000),
     target_user_id: str = Query("", max_length=80),
 ):
-    viewer = require_actor_matches_owner(req, owner_user_id)
+    viewer = await require_actor(req, owner_user_id)
 
     try:
         start_date = _dt.date.fromisoformat(start_day)
@@ -289,7 +289,7 @@ async def deactivate_training_session(
     reason: str = Body("user_deleted", embed=True),
 ):
     sid = _as_uuid(training_session_id, "training_session_id")
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
 
     try:
         async with lifeswitch_training_sessions_repository(req) as repository:
@@ -317,7 +317,7 @@ async def correct_training_session(
     payload: dict = Body(...),
 ):
     sid = _as_uuid(training_session_id, "training_session_id")
-    owner = require_actor_matches_owner(req, owner_user_id)
+    owner = await require_actor(req, owner_user_id)
     write_key = _require_idempotency_key(idempotency_key)
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="JSON object required")
@@ -348,7 +348,7 @@ async def list_training_session_sets(
     target_user_id: str = Query("", max_length=80),
 ):
     sid = _as_uuid(training_session_id, "training_session_id")
-    viewer = require_actor_matches_owner(req, owner_user_id)
+    viewer = await require_actor(req, owner_user_id)
 
     owner, delegated = await _resolve_training_view_target(
         req, viewer, target_user_id
@@ -368,7 +368,7 @@ async def add_training_set_log(
     owner_user_id: str = Query(..., min_length=1),
 ):
     _as_uuid(training_session_id, "training_session_id")
-    require_actor_matches_owner(req, owner_user_id)
+    await require_actor(req, owner_user_id)
     raise HTTPException(
         status_code=410,
         detail="completed sessions are immutable; submit an aggregate correction",
@@ -382,7 +382,7 @@ async def update_training_set_log(
 ):
     _as_uuid(training_session_id, "training_session_id")
     _as_uuid(training_set_log_id, "training_set_log_id")
-    require_actor_matches_owner(req, owner_user_id)
+    await require_actor(req, owner_user_id)
     raise HTTPException(
         status_code=410,
         detail="completed sessions are immutable; submit an aggregate correction",
@@ -397,7 +397,7 @@ async def list_training_set_log_segments(
 ):
     sid = _as_uuid(training_session_id, "training_session_id")
     setid = _as_uuid(training_set_log_id, "training_set_log_id")
-    viewer = require_actor_matches_owner(req, owner_user_id)
+    viewer = await require_actor(req, owner_user_id)
     owner, delegated = await _resolve_training_view_target(
         req, viewer, target_user_id
     )
@@ -420,7 +420,7 @@ async def add_training_set_log_segment(
 ):
     _as_uuid(training_session_id, "training_session_id")
     _as_uuid(training_set_log_id, "training_set_log_id")
-    require_actor_matches_owner(req, owner_user_id)
+    await require_actor(req, owner_user_id)
     raise HTTPException(
         status_code=410,
         detail="completed sessions are immutable; submit an aggregate correction",
@@ -436,7 +436,7 @@ async def delete_training_set_log_segment(
     _as_uuid(training_session_id, "training_session_id")
     _as_uuid(training_set_log_id, "training_set_log_id")
     _as_uuid(training_set_log_segment_id, "training_set_log_segment_id")
-    require_actor_matches_owner(req, owner_user_id)
+    await require_actor(req, owner_user_id)
     raise HTTPException(
         status_code=410,
         detail="completed sessions are immutable; submit an aggregate correction",
@@ -450,7 +450,7 @@ async def delete_training_set_log(
 ):
     _as_uuid(training_session_id, "training_session_id")
     _as_uuid(training_set_log_id, "training_set_log_id")
-    require_actor_matches_owner(req, owner_user_id)
+    await require_actor(req, owner_user_id)
     raise HTTPException(
         status_code=410,
         detail="completed sessions are immutable; submit an aggregate correction",

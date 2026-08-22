@@ -143,6 +143,27 @@ async def require_verified_supabase_actor(
     return identity.actor_user_id
 
 
+
+def require_verified_actor_matches_owner(
+    verified_actor_user_id: str,
+    owner_user_id: str,
+) -> str:
+    """Bind a previously verified request actor to a database-derived owner."""
+    actor = _request_uuid(
+        verified_actor_user_id,
+        status_code=401,
+        detail="invalid_verified_actor_user_id",
+    )
+    owner = _request_uuid(
+        owner_user_id,
+        status_code=400,
+        detail="invalid_owner_user_id",
+    )
+    if actor != owner:
+        raise HTTPException(status_code=403, detail="actor_owner_mismatch")
+    return owner
+
+
 def actor_authority(request: Request) -> str:
     if voice_turn_id_from_request(request) is not None:
         return VOICE_AUTHORITY
@@ -216,4 +237,5 @@ __all__ = [
     "require_verified_supabase_actor",
     "require_verified_supabase_identity",
     "require_verified_supabase_request_identity",
+    "require_verified_actor_matches_owner",
 ]
