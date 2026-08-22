@@ -191,10 +191,16 @@ class PlatformCleanBaselineV1Tests(unittest.TestCase):
                 source.append(f"CREATE VIEW {schema}.{name} AS SELECT 1 AS value;")
             else:
                 source.append(f"CREATE TABLE {schema}.{name} (owner_user_id uuid);")
-        for identity in plan["source_functions"]:
+        for index, identity in enumerate(plan["source_functions"]):
             base = identity.split("(", 1)[0]
+            function_body = (
+                "INSERT INTO trusted_web.synthetic_relation_12 DEFAULT VALUES;\n"
+                if index == 0
+                else ""
+            )
             source.append(
-                f"CREATE FUNCTION {base}() RETURNS text LANGUAGE sql AS $$ SELECT 'brains_app'::text $$;"
+                f"CREATE FUNCTION {base}() RETURNS text LANGUAGE sql AS $$\n"
+                f"{function_body}SELECT 'brains_app'::text\n$$;"
             )
         canonical, kinds = module.canonicalize_schema_sql("\n".join(source), plan)
         self.assertIn("CREATE TABLE conversation.threads", canonical)
@@ -202,6 +208,7 @@ class PlatformCleanBaselineV1Tests(unittest.TestCase):
         self.assertIn("CREATE TABLE telemetry.telemetry_event", canonical)
         self.assertIn("CREATE TABLE voice.voice_session_lease", canonical)
         self.assertIn("'seebx_platform_app_v1'", canonical)
+        self.assertIn("INSERT INTO trusted_web.synthetic_relation_12", canonical)
         self.assertNotIn("chat_history_private.", canonical)
         self.assertEqual(kinds["trusted_web.retrieval_monitor_hourly_v1"], "VIEW")
 

@@ -389,7 +389,7 @@ def _replace_identifier(text: str, source: str, target: str) -> str:
 
 
 def canonicalize_schema_sql(source_sql: str, plan: dict[str, Any]) -> tuple[str, dict[str, str]]:
-    if re.search(r"(?im)^\s*(?:COPY|INSERT\s+INTO)\s", source_sql):
+    if re.search(r"(?im)^\s*COPY\s", source_sql):
         raise BaselineContractError("plain_schema_contains_row_data")
     text = source_sql
     for source_identity, target_schema in sorted(PUBLIC_TARGET_SCHEMAS.items(), key=lambda item: -len(item[0])):
