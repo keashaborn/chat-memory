@@ -25,6 +25,13 @@ Status: candidate evidence; no deployment or retirement authority
   and eight database-owner callbacks replace the raw header boundary. Raw-
   header-only requests are rejected before repository access in all four
   domain groups; the full 1,354-test suite passes.
+- The committed read-only LifeSwitch database consumer auditor inventories 218
+  relations/functions and 211 dependency edges against the exact isolated-
+  database manifest. It proves 208 objects are application-, database-,
+  operations-, or extension-owned; five are migration-only and five remain
+  unproven. The unresolved ten are preserved and listed in
+  `SEEBX_LIFESWITCH_DATABASE_CONSUMER_AUDIT_V1.md`; the audit grants no deletion
+  authority.
 - The separate failed voice-canary unit and active timer remain outside this
   cleanup batch.
 
@@ -63,24 +70,29 @@ Status: candidate evidence; no deployment or retirement authority
    forwarding are now consistent. A real signed-session frontend/backend/
    disposable-database proof and enabled delegation, if approved, remain
    required before producing the final release bundle.
-2. Immutable release control is installed on SeeBx and Verbal Sage at exact
+2. The isolated LifeSwitch database has no canonical clean-install baseline.
+   Its exact restore is proven, but ten catalog/snapshot relations or functions
+   lack verified active consumers and 113 historical SQL files are not a safe
+   installation order. Resolve the ten explicit dispositions, then generate
+   and disposable-test a retained-object schema/role baseline.
+3. Immutable release control is installed on SeeBx and Verbal Sage at exact
    package release `08322acd1ff738c88cc83c2361ffdb4c35e5b29d`. The current
    cleanup candidate postdates the sealed backend build, so final application
    bundles and manifests must be regenerated only after code consolidation.
-3. Production still runs the unused `brains-redis-1` container on loopback
+4. Production still runs the unused `brains-redis-1` container on loopback
    port 6379 with 203 persistent idle keys. The reversible stop plan is ready;
    deletion is a later decision after observation.
-4. Production still injects `QDRANT_URL`, although no Python reader or Qdrant runtime exists. The immutable candidate now explicitly unsets it; production changes only through a separately approved release cutover.
-5. `voice-synthetic-canary.service` is failed while its timer remains active.
+5. Production still injects `QDRANT_URL`, although no Python reader or Qdrant runtime exists. The immutable candidate now explicitly unsets it; production changes only through a separately approved release cutover.
+6. `voice-synthetic-canary.service` is failed while its timer remains active.
    Repair belongs to the separate voice worktree and must not be folded into
    backend cleanup.
-6. Platform PostgreSQL still contains the legacy `memory` and `memory_ingest_private` schemas and clone databases; the five Vantage schemas are absent. The old retirement package is blocked because 32 attestations require canonical migration and 158 require encrypted quarantine. Recovery and disposable-restore evidence exists, but migrations,
+7. Platform PostgreSQL still contains the legacy `memory` and `memory_ingest_private` schemas and clone databases; the five Vantage schemas are absent. The old retirement package is blocked because 32 attestations require canonical migration and 158 require encrypted quarantine. Recovery and disposable-restore evidence exists, but migrations,
    schema retirement, and database drops remain separate production batches.
-7. The production service still runs the mutable checkout with weak systemd
+8. The production service still runs the mutable checkout with weak systemd
    hardening. Its mutable virtual environment also lacks declared
    `jsonschema==4.25.1`; the sealed candidate runtime contains the exact locked
    dependency. Correct this through immutable cutover, not an ad hoc live install.
-8. The candidate has multiple historical worktrees. Remove them only
+9. The candidate has multiple historical worktrees. Remove them only
    after the integrated branch, Git bundle, release artifacts, and rollback
    evidence are independently recoverable.
 
@@ -100,23 +112,26 @@ Status: candidate evidence; no deployment or retirement authority
 
 ## Next cleanup order
 
-1. Run a real signed-session paired frontend/backend proof against the
+1. Resolve the ten catalog/snapshot database objects without verified active
+   consumers, then build and disposable-test the canonical clean-install
+   LifeSwitch schema/role baseline.
+2. Run a real signed-session paired frontend/backend proof against the
    verified disposable database, including Plan-to-Nutrition application
    behavior; only test delegated People access if separately enabled. Plan
    targets remain independent of retired page-level AI helpers.
-2. Bind exact database schema, owner/RLS, delegated-access, migration, rollback,
+3. Bind exact database schema, owner/RLS, delegated-access, migration, rollback,
    and paired frontend evidence before regenerating any release package.
-3. Run the Forms schema, exact valid/quarantine reconciliation, rollback, and
+4. Run the Forms schema, exact valid/quarantine reconciliation, rollback, and
    cross-owner denial proof only in a separately authorized disposable restore.
-4. Prove Zep owner/thread isolation, deletion, export/retention, outage, and
+5. Prove Zep owner/thread isolation, deletion, export/retention, outage, and
    provenance behavior before declaring the old memory paths fully replaced.
-5. Regenerate immutable backend/frontend bundles and release manifests from the
+6. Regenerate immutable backend/frontend bundles and release manifests from the
    final candidate commits.
-6. Execute the paired frontend/backend cutover with fresh authorization and
+7. Execute the paired frontend/backend cutover with fresh authorization and
    automatic rollback evidence.
-7. Observe, then retire Redis, stale Qdrant configuration, and legacy
+8. Observe, then retire Redis, stale Qdrant configuration, and legacy
    schemas/databases in independent rollback-safe production batches.
-8. Create encrypted clean-state snapshots, enforce the two-backup policy,
+9. Create encrypted clean-state snapshots, enforce the two-backup policy,
    and only then remove superseded worktrees and older snapshots.
 
 This ledger authorizes no deployment, restart, database change, cache stop,
