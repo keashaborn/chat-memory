@@ -56,6 +56,7 @@ class AuditSpec:
     require_source_manifest: bool = True
     include_governance_manifest: bool = False
     runtime_excluded_paths: tuple[Path, ...] = ()
+    runtime_identity_aliases: tuple[tuple[str, str], ...] = ()
 
 
 DEFAULT_SPEC = AuditSpec(
@@ -729,13 +730,33 @@ def scan_sources(
     roots: Iterable[Path],
     objects: list[DatabaseObject],
     excluded_paths: Iterable[Path] = (),
+    identity_aliases: Iterable[tuple[str, str]] = (),
 ) -> dict[str, Any]:
+    alias_map: dict[str, list[str]] = {}
+    known_qualified_names = {item.qualified_name for item in objects}
+    seen_aliases: set[str] = set()
+    for raw in identity_aliases:
+        if not isinstance(raw, tuple) or len(raw) != 2:
+            raise AuditContractError("runtime_identity_alias_invalid")
+        source, alias = raw
+        if (
+            source not in known_qualified_names
+            or not re.fullmatch(r"[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*", alias)
+            or source == alias
+            or alias in seen_aliases
+        ):
+            raise AuditContractError("runtime_identity_alias_invalid")
+        seen_aliases.add(alias)
+        alias_map.setdefault(source, []).append(alias)
     matches: dict[str, list[str]] = {item.identity: [] for item in objects}
     file_hashes: list[dict[str, str]] = []
     exact_patterns = {
-        item.identity: re.compile(
-            rf"(?<![A-Za-z0-9_]){re.escape(item.qualified_name)}(?![A-Za-z0-9_])",
-            re.IGNORECASE,
+        item.identity: tuple(
+            re.compile(
+                rf"(?<![A-Za-z0-9_]){re.escape(identity)}(?![A-Za-z0-9_])",
+                re.IGNORECASE,
+            )
+            for identity in (item.qualified_name, *alias_map.get(item.qualified_name, []))
         )
         for item in objects
     }
@@ -771,7 +792,7 @@ def scan_sources(
         file_hashes.append({"path": relative, "sha256": sha256_bytes(data)})
         for item in objects:
             identity = item.identity
-            exact = exact_patterns[identity].search(text) is not None
+            exact = any(pattern.search(text) is not None for pattern in exact_patterns[identity])
             bound_template = (
                 template_patterns[identity].search(text) is not None
                 and schema_bindings[identity].search(text) is not None
@@ -992,6 +1013,7 @@ def execute(
         spec.runtime_roots,
         objects,
         spec.runtime_excluded_paths,
+        spec.runtime_identity_aliases,
     )
     operational = scan_sources(repository, spec.operational_roots, objects)
     migration = scan_sources(repository, spec.migration_roots, objects)
@@ -1035,6 +1057,9 @@ def execute(
             "object_types": ["relation", "function"],
             "unqualified_source_references_are_evidence": False,
             "schema_bound_template_references_are_evidence": True,
+            "runtime_identity_aliases_are_evidence": bool(
+                spec.runtime_identity_aliases
+            ),
             "overload_resolution": "conservative_all_matching_overloads",
             "operational_references_are_retention_seeds": False,
             "governance_manifest_included": spec.include_governance_manifest,
@@ -1044,6 +1069,10 @@ def execute(
             "runtime": {
                 **{key: value for key, value in runtime.items() if key != "matches"},
                 "excluded_paths": [path.as_posix() for path in spec.runtime_excluded_paths],
+                "identity_aliases": [
+                    {"source": source, "canonical": canonical}
+                    for source, canonical in spec.runtime_identity_aliases
+                ],
             },
             "operational": {key: value for key, value in operational.items() if key != "matches"},
             "migration": {key: value for key, value in migration.items() if key != "matches"},

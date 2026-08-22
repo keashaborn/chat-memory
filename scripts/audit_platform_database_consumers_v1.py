@@ -23,6 +23,27 @@ except ModuleNotFoundError:
     )
 
 
+RUNTIME_IDENTITY_ALIASES = tuple(sorted({
+    "chat_history_private.clear_history": "conversation_private.clear_history",
+    "chat_history_private.clear_message_tail": "conversation_private.clear_message_tail",
+    "chat_history_private.clear_receipt": "conversation_private.clear_receipt",
+    "chat_history_private.guard_receipt_immutable": "conversation_private.guard_receipt_immutable",
+    "chat_history_private.message_tail_receipt": "conversation_private.message_tail_receipt",
+    "chat_integrity.assistant_transcript_attestation_v1": "conversation_integrity.assistant_transcript_attestation_v1",
+    "lifeswitch_usage.ai_usage_event_v1": "usage.ai_usage_event_v1",
+    "lifeswitch_usage.current_actor_user_id": "usage.current_actor_user_id",
+    "lifeswitch_usage.protect_ai_usage_event_v1": "usage.protect_ai_usage_event_v1",
+    "public.active_thread_selection": "conversation.active_thread_selection",
+    "public.chat_attachments": "conversation.chat_attachments",
+    "public.chat_log": "conversation.chat_log",
+    "public.guard_canonical_owner": "conversation.guard_canonical_owner",
+    "public.guard_chat_log_immutable": "conversation.guard_chat_log_immutable",
+    "public.telemetry_event": "telemetry.telemetry_event",
+    "public.threads": "conversation.threads",
+    "public.voice_session_lease": "voice.voice_session_lease",
+}.items()))
+
+
 PLATFORM_SPEC = AuditSpec(
     schema_version="seebx-platform-database-consumer-audit-v1",
     container="brains-postgres-1",
@@ -53,6 +74,7 @@ PLATFORM_SPEC = AuditSpec(
         Path("seebx/adapters/lifeswitch_foods_postgres.py"),
         Path("seebx/adapters/lifeswitch_meal_plans_postgres.py"),
     ),
+    runtime_identity_aliases=RUNTIME_IDENTITY_ALIASES,
 )
 
 

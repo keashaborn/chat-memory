@@ -34,6 +34,19 @@ class PlatformDatabaseConsumersV1Tests(unittest.TestCase):
                 Path("seebx/adapters/lifeswitch_meal_plans_postgres.py"),
             ),
         )
+        self.assertEqual(spec.runtime_identity_aliases, module.RUNTIME_IDENTITY_ALIASES)
+        self.assertEqual(len(spec.runtime_identity_aliases), 17)
+        self.assertIn(
+            ("public.threads", "conversation.threads"),
+            spec.runtime_identity_aliases,
+        )
+        self.assertIn(
+            (
+                "chat_history_private.clear_history",
+                "conversation_private.clear_history",
+            ),
+            spec.runtime_identity_aliases,
+        )
         self.assertEqual(
             spec.scoped_schemas,
             (

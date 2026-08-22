@@ -40,7 +40,7 @@
   "tool_dependencies": {
     "database_consumer_audit": {
       "path": "scripts/database_consumer_audit_v1.py",
-      "sha256": "911914a8730d7aed846abdab3a5335756a0539eac498d2a20e5803509c4dfad0"
+      "sha256": "27710e0178b76d4c3b10ba505b7b0c63e0aa0e016e4221ccb6236c0b21f105ae"
     },
     "platform_clean_baseline": {
       "path": "scripts/build_platform_clean_baseline_v1.py",
@@ -48,7 +48,7 @@
     },
     "platform_database_audit": {
       "path": "scripts/audit_platform_database_consumers_v1.py",
-      "sha256": "5f9c7a6ee9ce343a5939468bbe1d8e833a7eb298e18549217af143b724f94d6e"
+      "sha256": "0ee3814ff813cd3eef0a9dce6fd202f3cd204876bd0821f3810467502458db4b"
     },
     "platform_database_disposition": {
       "path": "scripts/build_platform_database_disposition_v1.py",

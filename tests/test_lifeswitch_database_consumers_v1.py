@@ -67,6 +67,36 @@ class LifeSwitchDatabaseConsumersV1Tests(unittest.TestCase):
         self.assertRegex(result["tree_sha256"], r"^[0-9a-f]{64}$")
         self.assertNotIn("select", json.dumps(result))
 
+    def test_source_scan_maps_only_explicit_canonical_identity_aliases(self) -> None:
+        objects = [relation(1, "plan_profile"), relation(2, "plan_comment")]
+        with tempfile.TemporaryDirectory() as raw:
+            repository = Path(raw)
+            (repository / "seebx").mkdir()
+            (repository / "seebx" / "adapter.py").write_text(
+                "SQL = 'select * from plan.plan_profile'\n",
+                encoding="utf-8",
+            )
+            result = module.scan_sources(
+                repository,
+                (Path("seebx"),),
+                objects,
+                identity_aliases=(("lifeswitch_plan.plan_profile", "plan.plan_profile"),),
+            )
+        self.assertEqual(
+            result["matches"],
+            {"lifeswitch_plan.plan_profile": ["seebx/adapter.py"]},
+        )
+        with self.assertRaisesRegex(
+            module.AuditContractError,
+            "runtime_identity_alias_invalid",
+        ):
+            module.scan_sources(
+                Path("/tmp"),
+                (),
+                objects,
+                identity_aliases=(("lifeswitch_plan.unknown", "plan.unknown"),),
+            )
+
     def test_source_scan_recognizes_only_schema_bound_templates(self) -> None:
         objects = [
             module.DatabaseObject(
