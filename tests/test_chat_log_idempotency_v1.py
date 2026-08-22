@@ -73,7 +73,7 @@ class FakeConnection:
     async def fetchrow(self, query: str, *args: object) -> object | None:
         if "FROM threads" in query:
             return {"owner_user_id": OWNER}
-        if "FROM public.chat_log" in query:
+        if "FROM conversation.chat_log" in query:
             submission = UUID(str(args[0]))
             row = self.rows.get(submission)
             if row is None:

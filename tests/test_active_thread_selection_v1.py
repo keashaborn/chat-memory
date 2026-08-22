@@ -52,13 +52,13 @@ class FakeConnection:
 
     async def fetchrow(self, query: str, *args: Any) -> Any:
         normalized = " ".join(query.split())
-        if "FROM public.active_thread_selection" in normalized:
+        if "FROM conversation.active_thread_selection" in normalized:
             if self.selection is ABSENT:
                 return None
             return self.selection
-        if "FROM public.threads" in normalized and "AND id=$2" in normalized:
+        if "FROM conversation.threads" in normalized and "AND id=$2" in normalized:
             return self.selected_thread
-        if "FROM public.threads" in normalized and "ORDER BY updated_at" in normalized:
+        if "FROM conversation.threads" in normalized and "ORDER BY updated_at" in normalized:
             return self.fallback_thread
         raise AssertionError(f"unexpected fetchrow: {normalized}")
 
@@ -70,7 +70,7 @@ class ActiveThreadSelectionV1Tests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["thread_id"], str(THREAD))
         self.assertEqual(conn.execute_calls[0][1], (str(OWNER),))
         self.assertNotIn(
-            "INSERT INTO public.active_thread_selection",
+            "INSERT INTO conversation.active_thread_selection",
             "\n".join(query for query, _ in conn.execute_calls),
         )
 
@@ -79,7 +79,7 @@ class ActiveThreadSelectionV1Tests(unittest.IsolatedAsyncioTestCase):
         result = await get_active_thread_v1(conn, owner_user_id=OWNER)
         self.assertIsNone(result)
         self.assertNotIn(
-            "INSERT INTO public.active_thread_selection",
+            "INSERT INTO conversation.active_thread_selection",
             "\n".join(query for query, _ in conn.execute_calls),
         )
 
@@ -90,7 +90,7 @@ class ActiveThreadSelectionV1Tests(unittest.IsolatedAsyncioTestCase):
         write = next(
             args
             for query, args in conn.execute_calls
-            if "INSERT INTO public.active_thread_selection" in query
+            if "INSERT INTO conversation.active_thread_selection" in query
         )
         self.assertEqual(write, (OWNER, THREAD))
 
@@ -124,7 +124,7 @@ class ActiveThreadSelectionV1Tests(unittest.IsolatedAsyncioTestCase):
         write = next(
             args
             for query, args in conn.execute_calls
-            if "INSERT INTO public.active_thread_selection" in query
+            if "INSERT INTO conversation.active_thread_selection" in query
         )
         self.assertEqual(write, (OWNER, THREAD))
 
@@ -134,7 +134,7 @@ class ActiveThreadSelectionV1Tests(unittest.IsolatedAsyncioTestCase):
         write = next(
             args
             for query, args in conn.execute_calls
-            if "INSERT INTO public.active_thread_selection" in query
+            if "INSERT INTO conversation.active_thread_selection" in query
         )
         self.assertEqual(write, (OWNER, None))
 

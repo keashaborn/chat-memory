@@ -73,7 +73,7 @@ class SnapshotConn:
         raise AssertionError(f"unexpected fetchval: {query}")
 
     async def fetch(self, query: str, *args: Any) -> list[Any]:
-        if "FROM public.chat_log" in query:
+        if "FROM conversation.chat_log" in query:
             return []
         raise AssertionError(f"unexpected fetch: {query}")
 
@@ -144,7 +144,7 @@ class BoundProvenanceConn(SnapshotConn):
                     ],
                 }
             ]
-        if "FROM public.chat_log" in query:
+        if "FROM conversation.chat_log" in query:
             return [
                 {
                     "id": CURRENT_LOG,
@@ -530,7 +530,7 @@ class ConversationCompositionTests(unittest.IsolatedAsyncioTestCase):
             root / "rag_engine/lifeswitch_answer_provenance_receipt_v1.py",
             root / "rag_engine/lifeswitch_response_context_provider_v1.py",
             root / "rag_engine/lifeswitch_chat_runtime_v1.py",
-            root / "rag_engine/chat_integrity.py",
+            root / "rag_engine/conversation_integrity.py",
             root / "rag_engine/active_thread_selection_v1.py",
             root / "rag_engine/response_persistence_v1.py",
             root / "rag_engine/response_persistence_v3.py",

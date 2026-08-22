@@ -14,8 +14,8 @@ OWNER_CONTEXT_SQL = "SELECT set_config('app.user_id', $1, false)"
 READY_MESSAGE_ATTACHMENTS_SQL = """
 SELECT attachment.id,attachment.filename,attachment.media_type,
        attachment.content,attachment.content_sha256,attachment.byte_size
-FROM public.chat_attachments AS attachment
-JOIN public.chat_log AS message
+FROM conversation.chat_attachments AS attachment
+JOIN conversation.chat_log AS message
   ON message.id=attachment.message_id
  AND message.owner_user_id=attachment.owner_user_id
  AND message.thread_id=attachment.thread_id
@@ -31,12 +31,12 @@ ORDER BY array_position($4::uuid[], attachment.id)
 
 
 CREATE_ATTACHMENT_SQL = """
-INSERT INTO public.chat_attachments(
+INSERT INTO conversation.chat_attachments(
     id,owner_user_id,thread_id,filename,media_type,content,
     content_sha256,byte_size,status
 )
 SELECT $1,$2,thread.id,$4,$5,$6,$7,$8,'ready'
-FROM public.threads AS thread
+FROM conversation.threads AS thread
 WHERE thread.id=$3 AND thread.owner_user_id=$2
 RETURNING id,thread_id,filename,media_type,content_sha256,byte_size,
           status,created_at
@@ -44,22 +44,22 @@ RETURNING id,thread_id,filename,media_type,content_sha256,byte_size,
 FETCH_ATTACHMENT_STATUS_SQL = """
 SELECT id,thread_id,message_id,filename,media_type,content_sha256,
        byte_size,status,created_at,updated_at,deleted_at
-FROM public.chat_attachments
+FROM conversation.chat_attachments
 WHERE id=$1 AND owner_user_id=$2
 """
 FETCH_RETRY_CANDIDATE_SQL = """
 SELECT id,content,content_sha256,byte_size
-FROM public.chat_attachments
+FROM conversation.chat_attachments
 WHERE id=$1 AND owner_user_id=$2 AND deleted_at IS NULL
 """
 UPDATE_RETRY_STATUS_SQL = """
-UPDATE public.chat_attachments
+UPDATE conversation.chat_attachments
 SET status=$3,updated_at=now()
 WHERE id=$1 AND owner_user_id=$2 AND deleted_at IS NULL
 RETURNING id,status
 """
 DELETE_ATTACHMENT_SQL = """
-UPDATE public.chat_attachments
+UPDATE conversation.chat_attachments
 SET content=NULL,status='deleted',deleted_at=COALESCE(deleted_at,now()),
     updated_at=now()
 WHERE id=$1 AND owner_user_id=$2
@@ -68,12 +68,12 @@ RETURNING id,deleted_at
 
 FETCH_ATTACHMENT_BINDINGS_SQL = """
 SELECT id,message_id,status,deleted_at
-FROM public.chat_attachments
+FROM conversation.chat_attachments
 WHERE owner_user_id=$1 AND thread_id=$2 AND id=ANY($3::uuid[])
 ORDER BY array_position($3::uuid[],id)
 """
 BIND_ATTACHMENTS_TO_MESSAGE_SQL = """
-UPDATE public.chat_attachments
+UPDATE conversation.chat_attachments
 SET message_id=$1,updated_at=now()
 WHERE owner_user_id=$2 AND thread_id=$3
   AND id=ANY($4::uuid[]) AND message_id IS NULL

@@ -42,7 +42,7 @@ class Conn:
 
     async def fetchval(self, sql: str, *args: Any):
         lower = sql.lower()
-        if "from public.threads" in lower:
+        if "from conversation.threads" in lower:
             return True
         if "final_answer_lifeswitch_provenance_receipt_v1" in lower:
             return self.receipt_manifest
@@ -51,7 +51,7 @@ class Conn:
         raise AssertionError(sql)
 
     async def fetchrow(self, sql: str, *args: Any):
-        if "from public.threads" in sql.lower():
+        if "from conversation.threads" in sql.lower():
             return {"id": THREAD, "title": "Thread", "updated_at": NOW}
         raise AssertionError(sql)
 
@@ -79,7 +79,7 @@ class ConversationPersistenceLifeSwitchTests(unittest.IsolatedAsyncioTestCase):
         sql = "\n".join(item[0].lower() for item in conn.calls)
         self.assertNotIn("final_answer_lifeswitch_binding_v1", sql)
         self.assertNotIn("final_answer_lifeswitch_provenance_receipt_v1", sql)
-        self.assertIn("chat_integrity.assistant_transcript_attestation_v1", sql)
+        self.assertIn("conversation_integrity.assistant_transcript_attestation_v1", sql)
         self.assertNotIn("memory.assistant_transcript_attestation_v1", sql)
 
     async def test_request_mismatch_fails_before_transaction(self) -> None:

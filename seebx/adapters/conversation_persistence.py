@@ -40,18 +40,18 @@ CREATE_USER_TRANSCRIPT_THREAD_SQL = (
     "VALUES($1, $2, $3, $4)"
 )
 FETCH_ATTACHMENT_REPLAY_SQL = """
-SELECT id FROM public.chat_log
+SELECT id FROM conversation.chat_log
 WHERE id=$1 AND owner_user_id=$2 AND thread_id=$3
   AND source=$4 AND text=$5
 """
 FETCH_EXACT_SUBMISSION_SQL = """
-SELECT id FROM public.chat_log
+SELECT id FROM conversation.chat_log
 WHERE id=$1 AND owner_user_id=$2
   AND thread_id IS NOT DISTINCT FROM $3
   AND source=$4 AND text=$5
 """
 FETCH_CONFLICTING_SUBMISSION_SQL = """
-SELECT id FROM public.chat_log
+SELECT id FROM conversation.chat_log
 WHERE id=$1 AND owner_user_id=$2
 """
 INSERT_USER_TRANSCRIPT_SQL = (
@@ -282,7 +282,7 @@ async def persist_conversation_response(
             owns_thread = await conn.fetchval(
                 """
                 SELECT EXISTS(
-                  SELECT 1 FROM public.threads
+                  SELECT 1 FROM conversation.threads
                   WHERE owner_user_id=$1 AND id=$2
                 )
                 """,
@@ -295,7 +295,7 @@ async def persist_conversation_response(
             stage = "chat_log_insert"
             await conn.execute(
                 """
-                INSERT INTO public.chat_log(
+                INSERT INTO conversation.chat_log(
                   id,owner_user_id,user_id,user_id_alias,source,text,tags,
                   thread_id,request_id,created_at
                 )
@@ -326,7 +326,7 @@ async def persist_conversation_response(
 
             stage = "thread_touch"
             await conn.execute(
-                "UPDATE public.threads SET updated_at=now() "
+                "UPDATE conversation.threads SET updated_at=now() "
                 "WHERE owner_user_id=$1 AND id=$2",
                 owner_user_id,
                 thread_id,
@@ -374,7 +374,7 @@ async def persist_search_exchange(
             owns_thread = await conn.fetchval(
                 """
                 SELECT EXISTS(
-                  SELECT 1 FROM public.threads
+                  SELECT 1 FROM conversation.threads
                   WHERE owner_user_id=$1 AND id=$2
                 )
                 """,
@@ -385,7 +385,7 @@ async def persist_search_exchange(
                 raise ValueError("owner thread is absent")
             await conn.execute(
                 """
-                INSERT INTO public.chat_log(
+                INSERT INTO conversation.chat_log(
                   id,owner_user_id,user_id,user_id_alias,source,text,tags,
                   thread_id,request_id,created_at
                 )
@@ -440,7 +440,7 @@ async def persist_search_exchange(
             )
             await conn.execute(
                 """
-                UPDATE public.threads
+                UPDATE conversation.threads
                 SET updated_at=clock_timestamp()
                 WHERE owner_user_id=$1 AND id=$2
                 """,

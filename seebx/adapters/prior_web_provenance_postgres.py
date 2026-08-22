@@ -13,7 +13,7 @@ _LOAD_CANDIDATES_SQL = """
            web.response_id,web.assistant_chat_log_id,
            web.search_id,web.route,web.policy_version,web.decision,
            web.answer_sha256,web.cited_sources,web.admitted_sources
-    FROM public.chat_log AS log
+    FROM conversation.chat_log AS log
     JOIN trusted_web.response_transcript_v1 AS web
       ON web.owner_user_id=log.owner_user_id
      AND web.thread_id=log.thread_id
@@ -76,7 +76,7 @@ class PostgresPriorWebProvenanceRepository:
                     await self._connection.fetchval(
                         """
                         SELECT EXISTS(
-                          SELECT 1 FROM public.threads
+                          SELECT 1 FROM conversation.threads
                           WHERE owner_user_id=$1 AND id=$2
                         )
                         """,

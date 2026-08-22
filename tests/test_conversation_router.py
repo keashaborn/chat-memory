@@ -67,10 +67,10 @@ class ConversationRouterTests(unittest.TestCase):
         adapter = (
             ROOT / "seebx/adapters/conversation_attachments.py"
         ).read_text()
-        self.assertNotIn("public.chat_attachments", source)
+        self.assertNotIn("conversation.chat_attachments", source)
         self.assertNotIn("set_config('app.user_id'", source)
         self.assertIn("fetch_ready_message_attachments(", source)
-        self.assertIn("public.chat_attachments", adapter)
+        self.assertIn("conversation.chat_attachments", adapter)
         self.assertIn("set_config('app.user_id'", adapter)
 
     def test_public_request_rejects_client_policy_controls(self) -> None:

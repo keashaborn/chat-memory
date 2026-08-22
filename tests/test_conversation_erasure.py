@@ -79,7 +79,7 @@ class ConversationErasureAdapterTests(unittest.IsolatedAsyncioTestCase):
             (authorization_manifest_sha256(AUTHORIZATION),),
         )
         self.assertIn(
-            "chat_history_private.clear_history",
+            "conversation_private.clear_history",
             connection.fetchrow_calls[0][0],
         )
         self.assertEqual(
@@ -126,7 +126,7 @@ class ConversationErasureAdapterTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(connection.fetchrow_calls[0][1], (OPERATION, THREAD))
         self.assertIn(
-            "chat_history_private.clear_message_tail",
+            "conversation_private.clear_message_tail",
             connection.fetchrow_calls[0][0],
         )
         self.assertEqual(result.scope, "message_tail")

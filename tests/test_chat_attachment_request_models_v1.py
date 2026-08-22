@@ -144,7 +144,7 @@ class ChatAttachmentRequestModelV1Tests(unittest.TestCase):
         for direct_database_effect in (
             "import asyncpg",
             "POSTGRES_DSN",
-            "public.chat_attachments",
+            "conversation.chat_attachments",
         ):
             self.assertNotIn(direct_database_effect, route_source)
         self.assertIn("app.include_router(conversation_attachment_router)", app_source)

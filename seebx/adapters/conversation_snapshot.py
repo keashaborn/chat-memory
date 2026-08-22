@@ -82,7 +82,7 @@ async def load_conversation_snapshot_v1(
                 await conn.fetchval(
                     """
                     SELECT EXISTS(
-                      SELECT 1 FROM public.threads
+                      SELECT 1 FROM conversation.threads
                       WHERE owner_user_id=$1 AND id=$2
                     )
                     """,
@@ -96,7 +96,7 @@ async def load_conversation_snapshot_v1(
                 await conn.fetch(
                     """
                     SELECT id,owner_user_id,thread_id,source,request_id,text,created_at
-                    FROM public.chat_log
+                    FROM conversation.chat_log
                     WHERE owner_user_id=$1
                       AND thread_id=$2
                       AND request_id=$3
@@ -175,8 +175,8 @@ async def load_conversation_snapshot_v1(
                            web_binding.response_id AS web_response_id,
                            web_binding.query_sha256 AS web_query_sha256,
                            web_binding.answer_sha256 AS web_answer_sha256
-                    FROM public.chat_log AS log
-                    LEFT JOIN chat_integrity.assistant_transcript_attestation_v1
+                    FROM conversation.chat_log AS log
+                    LEFT JOIN conversation_integrity.assistant_transcript_attestation_v1
                       AS attestation
                       ON attestation.owner_user_id=log.owner_user_id
                      AND attestation.thread_id=log.thread_id

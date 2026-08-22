@@ -16,7 +16,7 @@ async def insert_assistant_transcript_attestation_v1(
     )
     await conn.execute(
         """
-        INSERT INTO chat_integrity.assistant_transcript_attestation_v1(
+        INSERT INTO conversation_integrity.assistant_transcript_attestation_v1(
           answer_id,owner_user_id,thread_id,chat_log_id,
           request_id_sha256,conversation_snapshot_sha256,
           trusted_plan_sha256,provider_request_sha256,

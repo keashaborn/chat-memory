@@ -111,7 +111,7 @@ class FakeConnection:
             return self.read_only
         if "current_user" in sql:
             return self.role
-        if "FROM public.threads" in sql:
+        if "FROM conversation.threads" in sql:
             return self.owns_thread
         raise AssertionError(f"unexpected fetchval query: {sql}")
 
@@ -341,7 +341,7 @@ class ConversationSnapshotTests(unittest.IsolatedAsyncioTestCase):
         )
         history_query, args = conn.fetch_calls[1]
         self.assertIn(
-            "chat_integrity.assistant_transcript_attestation_v1",
+            "conversation_integrity.assistant_transcript_attestation_v1",
             history_query,
         )
         self.assertNotIn("memory.assistant_transcript_attestation", history_query)

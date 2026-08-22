@@ -123,7 +123,7 @@ class ConversationAttachmentAdapterTests(unittest.IsolatedAsyncioTestCase):
             root / "seebx/adapters/conversation_persistence.py"
         ).read_text(encoding="utf-8")
 
-        self.assertNotIn("public.chat_attachments", log_route)
+        self.assertNotIn("conversation.chat_attachments", log_route)
         self.assertNotIn("fetch_attachment_bindings(", log_route)
         self.assertNotIn("bind_attachments_to_message(", log_route)
         self.assertIn("persist_user_transcript(", log_route)

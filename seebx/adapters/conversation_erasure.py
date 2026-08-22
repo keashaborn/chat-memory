@@ -99,14 +99,14 @@ async def _clear_history_on_connection(
             )
             if scope == "message_tail":
                 value = await connection.fetchrow(
-                    "SELECT * FROM chat_history_private.clear_message_tail("
+                    "SELECT * FROM conversation_private.clear_message_tail("
                     "$1::uuid,$2::uuid)",
                     operation_id,
                     thread_id,
                 )
             else:
                 value = await connection.fetchrow(
-                    "SELECT * FROM chat_history_private.clear_history("
+                    "SELECT * FROM conversation_private.clear_history("
                     "$1::uuid,$2::text,$3::uuid,$4::integer)",
                     operation_id,
                     scope,

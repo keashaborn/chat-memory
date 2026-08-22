@@ -58,7 +58,7 @@ async def _visible_thread(
     return await conn.fetchrow(
         """
         SELECT id, title, updated_at
-        FROM public.threads
+        FROM conversation.threads
         WHERE owner_user_id=$1
           AND id=$2
           AND archived=false
@@ -75,7 +75,7 @@ async def _newest_visible_thread(
     return await conn.fetchrow(
         """
         SELECT id, title, updated_at
-        FROM public.threads
+        FROM conversation.threads
         WHERE owner_user_id=$1
           AND archived=false
         ORDER BY updated_at DESC, id DESC
@@ -92,7 +92,7 @@ async def _write_selection(
 ) -> None:
     await conn.execute(
         """
-        INSERT INTO public.active_thread_selection(
+        INSERT INTO conversation.active_thread_selection(
           owner_user_id,
           thread_id,
           selected_at,
@@ -120,7 +120,7 @@ async def get_active_thread_v1(
         selection = await conn.fetchrow(
             """
             SELECT thread_id
-            FROM public.active_thread_selection
+            FROM conversation.active_thread_selection
             WHERE owner_user_id=$1
             FOR UPDATE
             """,

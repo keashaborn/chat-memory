@@ -15,8 +15,8 @@ INSERT INTO conversation_sync_private.zep_turn_outbox(
   job_id, owner_user_id, thread_id, user_message_id, assistant_message_id
 )
 SELECT assistant.id, $1::uuid, $2::uuid, user_message.id, assistant.id
-FROM public.chat_log AS user_message
-JOIN public.chat_log AS assistant
+FROM conversation.chat_log AS user_message
+JOIN conversation.chat_log AS assistant
   ON assistant.id=$4::uuid
  AND assistant.owner_user_id=$1::uuid
  AND assistant.thread_id=$2::uuid
@@ -40,7 +40,7 @@ CLAIM_NEXT_ZEP_TURN_SQL = """
 WITH candidate AS (
   SELECT item.job_id
   FROM conversation_sync_private.zep_turn_outbox AS item
-  JOIN public.chat_log AS item_user
+  JOIN conversation.chat_log AS item_user
     ON item_user.id=item.user_message_id
    AND item_user.owner_user_id=item.owner_user_id
    AND item_user.thread_id=item.thread_id
@@ -56,7 +56,7 @@ WITH candidate AS (
     AND NOT EXISTS (
       SELECT 1
       FROM conversation_sync_private.zep_turn_outbox AS prior
-      JOIN public.chat_log AS prior_user
+      JOIN conversation.chat_log AS prior_user
         ON prior_user.id=prior.user_message_id
        AND prior_user.owner_user_id=prior.owner_user_id
        AND prior_user.thread_id=prior.thread_id
@@ -94,11 +94,11 @@ SELECT claimed.job_id,claimed.lease_token,claimed.owner_user_id,
        user_message.created_at AS user_created_at,
        assistant.created_at AS assistant_created_at
 FROM claimed
-JOIN public.chat_log AS user_message
+JOIN conversation.chat_log AS user_message
   ON user_message.id=claimed.user_message_id
  AND user_message.owner_user_id=claimed.owner_user_id
  AND user_message.thread_id=claimed.thread_id
-JOIN public.chat_log AS assistant
+JOIN conversation.chat_log AS assistant
   ON assistant.id=claimed.assistant_message_id
  AND assistant.owner_user_id=claimed.owner_user_id
  AND assistant.thread_id=claimed.thread_id

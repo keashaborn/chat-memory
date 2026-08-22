@@ -55,7 +55,7 @@ class ConversationPersistenceTests(unittest.IsolatedAsyncioTestCase):
         generic_chat_call = next(
             call
             for call in generic_conn.execute_calls
-            if "INSERT INTO public.chat_log" in call[0]
+            if "INSERT INTO conversation.chat_log" in call[0]
         )
         self.assertEqual(
             generic_chat_call[1][5],
@@ -85,7 +85,7 @@ class ConversationPersistenceTests(unittest.IsolatedAsyncioTestCase):
         lifeswitch_chat_call = next(
             call
             for call in lifeswitch_conn.calls
-            if "INSERT INTO public.chat_log" in call[0]
+            if "INSERT INTO conversation.chat_log" in call[0]
         )
         self.assertEqual(
             lifeswitch_chat_call[1][5],
@@ -94,9 +94,9 @@ class ConversationPersistenceTests(unittest.IsolatedAsyncioTestCase):
 
         for calls in (generic_conn.execute_calls, lifeswitch_conn.calls):
             sql = "\n".join(query for query, _ in calls)
-            self.assertEqual(sql.count("INSERT INTO public.chat_log"), 1)
+            self.assertEqual(sql.count("INSERT INTO conversation.chat_log"), 1)
             self.assertEqual(
-                sql.count("chat_integrity.assistant_transcript_attestation_v1"),
+                sql.count("conversation_integrity.assistant_transcript_attestation_v1"),
                 1,
             )
             self.assertNotIn("final_answer_lifeswitch_binding_v1", sql)

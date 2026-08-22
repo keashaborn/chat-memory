@@ -67,11 +67,11 @@ class FakeConnection:
 
     async def fetch(self, query: str, *args: object):
         self.queries.append((query, args))
-        if "FROM public.threads" in query:
+        if "FROM conversation.threads" in query:
             return [{"id": THREAD, "title": "T", "created_at": NOW}]
-        if "FROM public.chat_log" in query:
+        if "FROM conversation.chat_log" in query:
             return [{"id": MESSAGE, "thread_id": THREAD, "text": "hello"}]
-        if "FROM public.chat_attachments" in query:
+        if "FROM conversation.chat_attachments" in query:
             return [
                 {
                     "id": UUID("dddddddd-dddd-4ddd-8ddd-dddddddddddd"),

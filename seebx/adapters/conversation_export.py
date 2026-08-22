@@ -45,11 +45,11 @@ class PostgresConversationExportRepository:
                         await conn.fetchrow(
                             """
                             SELECT
-                              (SELECT count(*) FROM public.threads
+                              (SELECT count(*) FROM conversation.threads
                                WHERE owner_user_id=$1) AS threads,
-                              (SELECT count(*) FROM public.chat_log
+                              (SELECT count(*) FROM conversation.chat_log
                                WHERE owner_user_id=$1) AS messages,
-                              (SELECT count(*) FROM public.chat_attachments
+                              (SELECT count(*) FROM conversation.chat_attachments
                                WHERE owner_user_id=$1) AS attachments,
                               (SELECT count(*)
                                FROM trusted_web.response_transcript_v1
@@ -79,8 +79,8 @@ class PostgresConversationExportRepository:
                                thread.created_at,thread.updated_at,
                                thread.archived,thread.pinned_at,
                                (selection.thread_id IS NOT NULL) AS active
-                        FROM public.threads AS thread
-                        LEFT JOIN public.active_thread_selection AS selection
+                        FROM conversation.threads AS thread
+                        LEFT JOIN conversation.active_thread_selection AS selection
                           ON selection.owner_user_id=thread.owner_user_id
                          AND selection.thread_id=thread.id
                         WHERE thread.owner_user_id=$1
@@ -92,7 +92,7 @@ class PostgresConversationExportRepository:
                         """
                         SELECT id,thread_id,source,text,tags,request_id,
                                created_at
-                        FROM public.chat_log
+                        FROM conversation.chat_log
                         WHERE owner_user_id=$1
                         ORDER BY created_at,id
                         """,
@@ -103,7 +103,7 @@ class PostgresConversationExportRepository:
                         SELECT id,thread_id,message_id,filename,media_type,
                                content,content_sha256,byte_size,status,
                                created_at,updated_at,deleted_at
-                        FROM public.chat_attachments
+                        FROM conversation.chat_attachments
                         WHERE owner_user_id=$1
                         ORDER BY created_at,id
                         """,

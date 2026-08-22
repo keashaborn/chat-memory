@@ -57,12 +57,12 @@ class FakeConnection:
         return "INSERT 0 1"
 
     async def fetchval(self, query: str, *args: Any) -> bool:
-        if "FROM public.threads" not in query:
+        if "FROM conversation.threads" not in query:
             raise AssertionError(f"unexpected fetchval: {query}")
         return self.owns_thread
 
     async def fetchrow(self, query: str, *args: Any) -> dict[str, Any] | None:
-        if "FROM public.threads" not in query:
+        if "FROM conversation.threads" not in query:
             raise AssertionError(f"unexpected fetchrow: {query}")
         if not self.visible_thread:
             return None
@@ -102,24 +102,24 @@ class ConversationPersistenceGenericTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual((conn.entered, conn.exited), (1, 1))
         sql = "\n".join(query for query, _ in conn.execute_calls)
-        self.assertIn("INSERT INTO public.chat_log", sql)
+        self.assertIn("INSERT INTO conversation.chat_log", sql)
         self.assertNotIn("vantage_id", sql)
         self.assertNotIn("'RESSE'", sql)
-        self.assertIn("chat_integrity.assistant_transcript_attestation_v1", sql)
+        self.assertIn("conversation_integrity.assistant_transcript_attestation_v1", sql)
         self.assertNotIn("memory.assistant_transcript_attestation_v1", sql)
         self.assertNotIn("memory.final_answer_memory_binding_v1", sql)
-        self.assertIn("UPDATE public.threads", sql)
-        self.assertIn("INSERT INTO public.active_thread_selection", sql)
+        self.assertIn("UPDATE conversation.threads", sql)
+        self.assertIn("INSERT INTO conversation.active_thread_selection", sql)
         self.assertEqual(conn.execute_calls[0][1], (str(ACTOR),))
         chat_call = next(
-            call for call in conn.execute_calls if "INSERT INTO public.chat_log" in call[0]
+            call for call in conn.execute_calls if "INSERT INTO conversation.chat_log" in call[0]
         )
         self.assertEqual(chat_call[1][1], ACTOR)
         self.assertEqual(chat_call[1][2], str(ACTOR))
         selection_call = next(
             call
             for call in conn.execute_calls
-            if "INSERT INTO public.active_thread_selection" in call[0]
+            if "INSERT INTO conversation.active_thread_selection" in call[0]
         )
         self.assertEqual(selection_call[1], (ACTOR, THREAD))
 
@@ -142,7 +142,7 @@ class ConversationPersistenceGenericTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raised.exception.stage, "thread_owner_check")
 
         sql = "\n".join(query for query, _ in conn.execute_calls)
-        self.assertNotIn("INSERT INTO public.chat_log", sql)
+        self.assertNotIn("INSERT INTO conversation.chat_log", sql)
 
     async def test_request_mismatch_fails_before_transaction(self) -> None:
         conn = FakeConnection()
@@ -174,7 +174,7 @@ class ConversationPersistenceGenericTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(raised.exception.stage, "resume_target_promotion")
         sql = "\n".join(query for query, _ in conn.execute_calls)
-        self.assertNotIn("INSERT INTO public.active_thread_selection", sql)
+        self.assertNotIn("INSERT INTO conversation.active_thread_selection", sql)
 
 
 if __name__ == "__main__":

@@ -27,7 +27,7 @@ LEFT JOIN LATERAL (
              'deleted_at',attachment.deleted_at
            ) ORDER BY attachment.created_at,attachment.id
          ) AS attachments
-  FROM public.chat_attachments AS attachment
+  FROM conversation.chat_attachments AS attachment
   WHERE attachment.owner_user_id=log.owner_user_id
     AND attachment.thread_id=log.thread_id
     AND attachment.message_id=log.id

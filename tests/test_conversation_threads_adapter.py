@@ -71,7 +71,7 @@ class CreateAndSelectConnection:
         self.fetchrow_calls.append((query, args))
         if query == CREATE_THREAD_SQL:
             return self.created
-        if "FROM public.threads" in query and "AND id=$2" in query:
+        if "FROM conversation.threads" in query and "AND id=$2" in query:
             return {
                 "id": THREAD,
                 "title": "New chat",
@@ -100,7 +100,7 @@ class ConversationThreadsAdapterTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(
             any(
-                "INSERT INTO public.active_thread_selection" in query
+                "INSERT INTO conversation.active_thread_selection" in query
                 for query, _args in connection.execute_calls
             )
         )

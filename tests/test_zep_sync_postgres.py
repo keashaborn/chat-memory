@@ -112,7 +112,7 @@ class ZepSyncPostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("FOR UPDATE OF item SKIP LOCKED", sql)
         self.assertIn("prior_user.created_at", sql)
         self.assertIn("'failed_terminal'", sql)
-        self.assertIn("public.chat_log", sql)
+        self.assertIn("conversation.chat_log", sql)
 
     async def test_lost_lease_fails_closed(self) -> None:
         repository = PostgresZepSyncRepository(

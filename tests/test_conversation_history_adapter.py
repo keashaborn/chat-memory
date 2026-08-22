@@ -74,12 +74,12 @@ class ConversationHistoryAdapterTests(unittest.IsolatedAsyncioTestCase):
         )[0]
 
         self.assertIn("await fetch_thread_message_rows(", route)
-        self.assertNotIn("public.chat_attachments", route)
+        self.assertNotIn("conversation.chat_attachments", route)
         self.assertNotIn("trusted_web.response_transcript_v1", route)
         self.assertNotIn("SELECT ", route)
         self.assertIn("WEB_ASSISTANT_SOURCE", route)
         self.assertIn('"attachments": r["attachments"] or []', route)
-        self.assertNotIn("public.chat_attachments", source)
+        self.assertNotIn("conversation.chat_attachments", source)
 
 
 if __name__ == "__main__":

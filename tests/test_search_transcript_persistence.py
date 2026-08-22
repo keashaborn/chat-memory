@@ -76,14 +76,14 @@ class SearchTranscriptPersistenceTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsInstance(answer_id, UUID)
         statements = "\n".join(sql for sql, _ in conn.execute_calls)
-        self.assertIn("INSERT INTO public.chat_log", statements)
+        self.assertIn("INSERT INTO conversation.chat_log", statements)
         self.assertNotIn("vantage_id", statements)
         self.assertIn(
             "INSERT INTO trusted_web.response_transcript_v1",
             statements,
         )
         self.assertIn("interval '1 microsecond'", statements)
-        self.assertIn("INSERT INTO public.active_thread_selection", statements)
+        self.assertIn("INSERT INTO conversation.active_thread_selection", statements)
         self.assertNotIn("qdrant", statements.lower())
         chat_args = conn.execute_calls[1][1]
         self.assertEqual(chat_args[3], WEB_USER_SOURCE)
@@ -93,7 +93,7 @@ class SearchTranscriptPersistenceTests(unittest.IsolatedAsyncioTestCase):
         selection_call = next(
             call
             for call in conn.execute_calls
-            if "INSERT INTO public.active_thread_selection" in call[0]
+            if "INSERT INTO conversation.active_thread_selection" in call[0]
         )
         self.assertEqual(selection_call[1], (OWNER, THREAD))
 
@@ -135,7 +135,7 @@ class SearchTranscriptPersistenceTests(unittest.IsolatedAsyncioTestCase):
                 consulted_source_count=0,
             )
         statements = "\n".join(sql for sql, _ in conn.execute_calls)
-        self.assertNotIn("INSERT INTO public.active_thread_selection", statements)
+        self.assertNotIn("INSERT INTO conversation.active_thread_selection", statements)
 
 
 if __name__ == "__main__":
