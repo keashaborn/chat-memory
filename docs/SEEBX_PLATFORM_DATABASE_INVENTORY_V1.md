@@ -114,10 +114,12 @@ The following remain outside the canonical platform target:
   LifeSwitch Forms schema, quarantine invalid-owner rows, verify exact
   reconciliation and rollback, then retire the old source tables.
 
-The 26 database-internal objects are transitional retention, not an assertion
-that every object belongs in the final clean database. Twelve are in
-`memory_ingest_private` because the current chat-clear functions still depend
-on the legacy outbox boundary.
+The production audit's 26 database-internal objects are transitional
+retention, not an assertion that every object belongs in the final clean
+database. Twelve are in `memory_ingest_private` because the production
+chat-clear functions still depend on the legacy outbox boundary. The verified
+disposable forward migration reduces the internal-reachable set to 14 and the
+`memory_ingest_private` subset to zero; production remains unchanged.
 
 ## Exact disposition receipt
 
@@ -145,6 +147,28 @@ Those three extensions are excluded from the clean platform target.
 `ai_operations.record_monitor_observation_v1` function calls `public.digest`.
 `plpgsql` remains because retained platform functions use it.
 
+## Forward-state zero-blocker receipt
+
+The exact clean candidate commit
+`0ee2b9fc07ebc63ef7acfa919ff63545296847fb` was restored and migrated only in
+disposable database `ls_zep_zep_audit_20260822t1058z`. Its complete 794-object
+audit produced:
+
+- audit SHA-256:
+  `8ba29409fcaf5acb8a686d4fbd892a796c50399ba0314e36a4d18984d40bf2eb`;
+- governance manifest SHA-256:
+  `a5aa06018328e2baf1e5179641f06834168cc5cd56121b5798c931af02e5e130`;
+- object catalog SHA-256:
+  `4c34b82a22bef7d92a845e69ee796f73c15f5049632bb9ced795844207f52647`;
+- disposition SHA-256:
+  `0a810208224f56f369462d0faf73c642766acb8723763a5a2b607cbf0ad14042`;
+- `baseline_generation_allowed: true`, `baseline_blockers: []`, and zero
+  database-internal-reachable objects under `memory_ingest_private`.
+
+Rollback restored the exact source baseline and the disposable database was
+deleted. This supersedes the 12-object blocker for candidate baseline design,
+but it does not alter or authorize production.
+
 ## Governance findings
 
 The governance manifest freezes 10 schemas, 218 relations, 2,867 columns, 576
@@ -170,17 +194,15 @@ Two security-normalization items remain before clean installation:
 
 ## Required next gate
 
-1. Apply and verify the existing Zep-outbox chat-history migration in a
-   disposable platform database so no chat-clear dependency reaches
-   `memory_ingest_private`.
-2. Run the already-decided Forms valid/quarantine migration and rollback proof
+1. Run the already-decided Forms valid/quarantine migration and rollback proof
    against a separately isolated disposable LifeSwitch database.
-3. Rebuild the disposition receipt and require zero baseline blockers.
-4. Build a clean platform database from versioned migrations in a disposable
+2. Generate the clean platform baseline only from the verified zero-blocker
+   forward-state disposition.
+3. Build a clean platform database from versioned migrations in a disposable
    PostgreSQL instance.
-5. Copy only approved rows and verify exact counts, keys, sequence state,
+4. Copy only approved rows and verify exact counts, keys, sequence state,
    owners, grants, RLS, function, policy, trigger, constraint, and index hashes.
-6. Run application contracts, cross-owner denial, deletion/export, search,
+5. Run application contracts, cross-owner denial, deletion/export, search,
    voice, admin, and paired frontend tests.
 
 No passing result in this document authorizes a production database change.

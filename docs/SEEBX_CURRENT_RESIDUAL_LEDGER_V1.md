@@ -98,12 +98,14 @@ Status: candidate evidence; no deployment or retirement authority
    `memory_ingest_private` schemas and clone databases; the five Vantage schemas
    are absent. Candidate audit `fdffcbe0` proves zero candidate runtime consumer
    for `memory` and the duplicate platform `catalog_dev`, while the current
-   chat-clear functions still retain 12 `memory_ingest_private` dependency
-   objects. The exact governance receipt covers 210 tables and 42,930 rows. The
-   retirement package remains blocked until chat-clear decoupling, attestation
-   reconciliation/quarantine, final backup/restore, and a fresh zero-dependency
-   proof. Migrations, schema retirement, and database drops remain separate
-   production batches.
+   production chat-clear functions still retain 12 `memory_ingest_private`
+   dependency objects. Candidate `0ee2b9fc` now has an exact disposable
+   forward-state proof covering 794 objects with zero reachable legacy-ingest
+   dependencies and zero disposition blockers, followed by exact rollback and
+   temporary-database deletion. Production remains unchanged. The retirement
+   package remains blocked on attestation reconciliation/quarantine, the final
+   cutover backup, and separate production authorization. Migrations, schema
+   retirement, and database drops remain separate production batches.
 8. The production service still runs the mutable checkout with weak systemd
    hardening. Its mutable virtual environment also lacks declared
    `jsonschema==4.25.1`; the sealed candidate runtime contains the exact locked
@@ -128,13 +130,12 @@ Status: candidate evidence; no deployment or retirement authority
 
 ## Next cleanup order
 
-1. Apply and verify the existing Zep-outbox chat-history migration in a
-   disposable platform database, remove the remaining 12-object dependency on
-   `memory_ingest_private`, and rebuild the exact disposition receipt with zero
-   blockers.
-2. Run the decided Forms valid-row migration, invalid-owner quarantine,
+1. Run the decided Forms valid-row migration, invalid-owner quarantine,
    rollback, and cross-owner denial proof only in a separately isolated
    disposable LifeSwitch database.
+2. Generate and verify the clean platform baseline from the hash-bound
+   zero-blocker forward disposition; do not copy the production database
+   wholesale.
 3. Run a real signed-session paired frontend/backend proof against the
    verified disposable database, including Plan-to-Nutrition application
    behavior; only test delegated People access if separately enabled. Plan
