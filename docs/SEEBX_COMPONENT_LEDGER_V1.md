@@ -200,3 +200,16 @@ mutation batch is approved.
 - Candidate Training templates/exercises/segments boundary: all 21 retained SQL effects, both existing transactions, strict Training schema identifier, and ten handler connection lifetimes move into `adapters.lifeswitch_training_templates_postgres`. Capability-supplied owner callbacks preserve authorization between parent lookup and child access; HTTP handlers retain actor/owner authority, role and idempotency validation, normalization, serialization, and stable errors with zero direct database calls. The workout-role contract test now follows SQL authority to the adapter while retaining route-contract assertions. Exact normalized SQL parity SHA-256 is `7f359426e314b19abf6347bbcf2ff6c586fce4a59e379491c13db908430dd417`. Thirty-three focused tests and all 1,320 backend tests pass; the preserved-parent verifier reports identical 138-route, route-table SHA-256 `dacb3665272ec6720fb477340c9d84d977a6af55fae4f061972526eabe10353d`, and OpenAPI SHA-256 `44e8aa5f364f85aef4d4fb4fa2596af4ab3eb219a2a82e21d54fbd2768c71091`. Production is unchanged.
 
 - Candidate Training strength-session/set-log boundary: all eight retained SQL effects, all three existing transaction boundaries, strict Training schema identifier, and eight handler connection lifetimes move into `adapters.lifeswitch_training_sessions_postgres`. The eight HTTP handlers retain actor/owner and delegated-read policy, validation, intent normalization, serialization, immutable-child retirement, and stable error mapping with zero direct database calls. The protected stored-function writer remains the only write authority and is invoked inside adapter-owned transactions. Exact normalized SQL parity SHA-256 is `e2d72b4f49c2c61efafea0023b6f6c4960257ce2b00334a07a376e2bc3aaee89`. Thirty focused tests and all 1,328 backend tests pass; the preserved-parent verifier reports identical 138 routes and 124 OpenAPI paths, retaining route-table SHA-256 `dacb3665272ec6720fb477340c9d84d977a6af55fae4f061972526eabe10353d` and OpenAPI SHA-256 `44e8aa5f364f85aef4d4fb4fa2596af4ab3eb219a2a82e21d54fbd2768c71091`. Production is unchanged.
+
+## Candidate LifeSwitch disposable-database evidence (2026-08-21)
+
+- `scripts/verify_lifeswitch_disposable_restore_v1.py` is the single canonical
+  isolated-LifeSwitch database verifier. It replaces the zero-caller live-only
+  verifier and fails closed around a unique template0 clone.
+- Run `20260822t0250z` matched 48 tables, 5,590 exact rows, schema/ACL/RLS/
+  function/policy/extension manifests, five owners, 33 protected surfaces, and
+  165 application-visibility comparisons; it denied three cross-owner writes
+  and snapshot access, preserved catalog reads, and proved clone cleanup.
+- The hash-bound evidence and explicit remaining gates are recorded in
+  `docs/SEEBX_LIFESWITCH_DISPOSABLE_DATABASE_VERIFICATION_V1.md`. Production
+  source, database, configuration, and services were unchanged.

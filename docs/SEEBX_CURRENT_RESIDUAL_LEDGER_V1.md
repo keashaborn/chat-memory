@@ -50,8 +50,11 @@ Status: candidate evidence; no deployment or retirement authority
    Foods/Servings/Overrides, and Meal Plans modules behind one 48-line
    composition root. Training is separated into Exercises, Conditioning,
    Sharing, Templates, and Sessions modules behind one 78-line composition
-   root. Final disposable database, owner/delegation, and paired frontend parity
-   remain required before producing the final release bundle.
+   root. The canonical disposable restore now proves exact database-manifest
+   equality, five self-owner boundaries across 33 protected surfaces,
+   fail-closed disabled delegation, denied cross-owner writes, and cleanup.
+   Enabled delegation and paired authenticated frontend parity remain required
+   before producing the final release bundle.
 2. Immutable release control is installed on SeeBx and Verbal Sage at exact
    package release `08322acd1ff738c88cc83c2361ffdb4c35e5b29d`. The current
    cleanup candidate postdates the sealed backend build, so final application
@@ -89,9 +92,10 @@ Status: candidate evidence; no deployment or retirement authority
 
 ## Next cleanup order
 
-1. Re-prove the already verified Plan-to-Nutrition projection and all
-   LifeSwitch owner/delegated behavior against the disposable isolated database;
-   Plan targets remain independent of retired page-level AI helpers.
+1. Use the verified disposable database path to prove Plan-to-Nutrition
+   application behavior and, only if enabled by an approved configuration,
+   delegated People access; Plan targets remain independent of retired
+   page-level AI helpers.
 2. Bind exact database schema, owner/RLS, delegated-access, migration, rollback,
    and paired frontend evidence before regenerating any release package.
 3. Run the Forms schema, exact valid/quarantine reconciliation, rollback, and

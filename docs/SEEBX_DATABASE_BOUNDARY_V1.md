@@ -203,3 +203,20 @@ database container remain protected until all of the following return zero:
 - required retention/legal/export obligations;
 - rollback references that have not been superseded by an encrypted clean-state
   backup.
+
+## Disposable restore and owner/RLS proof (2026-08-21)
+
+The canonical root-only verifier created a uniquely named database from
+`template0`, restored the current isolated LifeSwitch database, and matched the
+complete content-free schema/ACL/RLS/function/policy/extension manifest plus
+exact counts for 48 tables and 5,590 rows. Five owners across 33 protected
+surfaces produced 165 administrator-versus-application comparisons. Three
+cross-owner writes and direct snapshot access were denied; catalog access
+succeeded. Delegation and People integration were both configured off and were
+verified fail closed. The clone was dropped and its absence independently
+proved. See `SEEBX_LIFESWITCH_DISPOSABLE_DATABASE_VERIFICATION_V1.md` for exact
+hashes and limitations.
+
+This closes the current-database backup/restore and disabled-delegation RLS
+gate. It does not close clean-install migration, enabled-delegation, paired
+frontend authentication, application-route, release, or cutover gates.
