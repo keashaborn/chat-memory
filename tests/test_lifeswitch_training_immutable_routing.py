@@ -7,6 +7,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ROUTER = ROOT / "seebx" / "capabilities" / "training" / "routes.py"
+ROUTE_MODULES = tuple(
+    ROOT / "seebx" / "capabilities" / "training" / name
+    for name in (
+        "exercises.py", "conditioning.py", "sharing.py",
+        "templates.py", "sessions.py",
+    )
+)
 SERVICE = ROOT / "seebx" / "adapters" / "lifeswitch_training_writes_postgres.py"
 CONDITIONING = ROOT / "seebx" / "adapters" / "lifeswitch_training_conditioning_postgres.py"
 SESSIONS = ROOT / "seebx" / "adapters" / "lifeswitch_training_sessions_postgres.py"
@@ -16,7 +23,10 @@ class TrainingImmutableRoutingTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.router = ROUTER.read_text(encoding="utf-8")
-        cls.router_lower = cls.router.lower()
+        cls.routes = "\n".join(
+            path.read_text(encoding="utf-8") for path in ROUTE_MODULES
+        )
+        cls.routes_lower = cls.routes.lower()
         cls.service = SERVICE.read_text(encoding="utf-8")
         cls.service_lower = cls.service.lower()
         cls.conditioning = CONDITIONING.read_text(encoding="utf-8")
@@ -33,22 +43,22 @@ class TrainingImmutableRoutingTest(unittest.TestCase):
         for table in observation_tables:
             with self.subTest(table=table):
                 self.assertNotRegex(
-                    self.router_lower,
+                    self.routes_lower,
                     rf"\b(?:insert\s+into|update|delete\s+from)\s+"
                     rf"(?:\{{schema\}}\.)?{table}\b",
                 )
 
     def test_writes_require_idempotency_and_explicit_units(self) -> None:
         self.assertGreaterEqual(
-            self.router.count('Header(..., alias="Idempotency-Key")'),
+            self.routes.count('Header(..., alias="Idempotency-Key")'),
             4,
         )
-        self.assertIn('load_unit not in {"lb", "kg"}', self.router)
-        self.assertIn('"distance_value"', self.router)
-        self.assertIn('"distance_unit"', self.router)
+        self.assertIn('load_unit not in {"lb", "kg"}', self.routes)
+        self.assertIn('"distance_value"', self.routes)
+        self.assertIn('"distance_unit"', self.routes)
         self.assertNotIn(
             "name, notes, started_at, finished_at, load_unit, is_active",
-            self.router,
+            self.routes,
         )
 
     def test_normal_reads_use_current_roots_and_canonical_roles(self) -> None:
@@ -104,8 +114,8 @@ class TrainingImmutableRoutingTest(unittest.TestCase):
         retired_message = (
             "completed sessions are immutable; submit an aggregate correction"
         )
-        self.assertGreaterEqual(self.router.count(retired_message), 5)
-        self.assertGreaterEqual(self.router.count("status_code=410"), 6)
+        self.assertGreaterEqual(self.routes.count(retired_message), 5)
+        self.assertGreaterEqual(self.routes.count("status_code=410"), 6)
 
     def test_service_calls_security_definer_contract_only(self) -> None:
         for writer in (

@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "ops" / "sql" / "20260726_lifeswitch_training_workout_role.sql"
 WRITER = ROOT / "ops" / "sql" / "20260723_lifeswitch_training_writer_api.sql"
 ROUTER = ROOT / "seebx" / "capabilities" / "training" / "routes.py"
+TEMPLATE_ROUTES = ROOT / "seebx" / "capabilities" / "training" / "templates.py"
 TEMPLATES = (
     ROOT / "seebx" / "adapters" / "lifeswitch_training_templates_postgres.py"
 )
@@ -22,6 +23,7 @@ class TrainingWorkoutRoleContractTest(unittest.TestCase):
         cls.sql = MIGRATION.read_text(encoding="utf-8").lower()
         cls.writer = WRITER.read_text(encoding="utf-8").lower()
         cls.router = ROUTER.read_text(encoding="utf-8").lower()
+        cls.template_routes = TEMPLATE_ROUTES.read_text(encoding="utf-8").lower()
         cls.templates = TEMPLATES.read_text(encoding="utf-8").lower()
         cls.sessions = SESSIONS.read_text(encoding="utf-8").lower()
 
@@ -56,7 +58,7 @@ class TrainingWorkoutRoleContractTest(unittest.TestCase):
         )
         self.assertIn("set_workout_template_role", self.templates)
         self.assertIn("classify_unclassified_training_sessions", self.templates)
-        self.assertIn("idempotency-key", self.router)
+        self.assertIn("idempotency-key", self.template_routes)
 
     def test_session_role_is_derived_from_canonical_set_roles(self) -> None:
         classification = self.sessions.split("), classified as (", 1)[1].split(

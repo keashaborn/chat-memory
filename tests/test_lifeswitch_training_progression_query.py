@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import re
+import ast
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ROUTER = ROOT / "seebx" / "capabilities" / "training" / "routes.py"
+ROUTER = ROOT / "seebx" / "capabilities" / "training" / "sessions.py"
 SESSIONS = ROOT / "seebx" / "adapters" / "lifeswitch_training_sessions_postgres.py"
 
 
@@ -14,14 +14,19 @@ class TrainingProgressionQueryContractTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         source = ROUTER.read_text(encoding="utf-8")
-        match = re.search(
-            r"async def list_strength_progression\(.*?(?=\n@router\.)",
-            source,
-            flags=re.DOTALL,
+        tree = ast.parse(source)
+        route = next(
+            (
+                node
+                for node in tree.body
+                if isinstance(node, ast.AsyncFunctionDef)
+                and node.name == "list_strength_progression"
+            ),
+            None,
         )
-        if match is None:
+        if route is None:
             raise AssertionError("list_strength_progression route not found")
-        cls.route = match.group(0).lower()
+        cls.route = (ast.get_source_segment(source, route) or "").lower()
         cls.query = SESSIONS.read_text(encoding="utf-8").lower()
 
     def test_query_is_owner_scoped_and_uses_current_completed_sessions(self) -> None:

@@ -10,14 +10,15 @@ Status: candidate evidence; no deployment or retirement authority
   `49f9e60cf4321c8e42c359845c1a62a8c987614d`; its Git status is empty and
   `brains.service` is active with zero restarts.
 - The cleanup integration candidate and GitHub branch began the Training
-  strength-session/set-log batch at `13dc3f8bc0bf06097cf4148550fe08d8aecae264`; the worktree was clean
+  logical-aggregate split at `51746302bdce1ece966f9ac2f4c384e002b259da`; the worktree was clean
   and matched its remote before candidate-only changes.
 - The candidate has 138 routes and 124 OpenAPI paths. Exact parent/candidate
-  route and OpenAPI structures match; the established route SHA-256 remains
-  `dacb3665272ec6720fb477340c9d84d977a6af55fae4f061972526eabe10353d` and OpenAPI SHA-256 remains `44e8aa5f364f85aef4d4fb4fa2596af4ab3eb219a2a82e21d54fbd2768c71091`.
-- The complete candidate suite passes 1,328/1,328 after the candidate-only
-  Training strength-session/set-log extraction. All eight normalized SQL
-  effects match the parent at SHA-256 `e2d72b4f49c2c61efafea0023b6f6c4960257ce2b00334a07a376e2bc3aaee89`.
+  route and OpenAPI structures match; route-table SHA-256 is
+  `35ed7eb9b2c30688234135d182a2a45ea29111904b6149c747265e25e22450d5` and OpenAPI SHA-256 is `0c98736818a52d53797460c1f207f014d9882af64400363ae1fd69c21f54b46a`.
+- The former mixed 1,430-line Training module is a 78-line composition root
+  over five explicit aggregate modules. All moved handler ASTs and all 41
+  Training routes match the parent; all 103 focused Training tests and the
+  complete 1,334-test candidate suite pass.
 - The separate failed voice-canary unit and active timer remain outside this
   cleanup batch.
 
@@ -45,12 +46,12 @@ Status: candidate evidence; no deployment or retirement authority
 ## Remaining architectural debt
 
 1. No retained LifeSwitch capability handler owns a raw PostgreSQL query or
-   request-owned connection lifetime. Nutrition is now separated into Log,
-   Meals, Foods/Servings/Overrides, and Meal Plans modules behind one 48-line
-   route-order composition root. `training/routes.py` remains a mixed
-   1,430-line, 41-route effect-free module; split it by logical aggregate
-   without changing route order, wire contracts, or adapter authority before
-   producing the final release bundle.
+   request-owned connection lifetime. Nutrition is separated into Log, Meals,
+   Foods/Servings/Overrides, and Meal Plans modules behind one 48-line
+   composition root. Training is separated into Exercises, Conditioning,
+   Sharing, Templates, and Sessions modules behind one 78-line composition
+   root. Final disposable database, owner/delegation, and paired frontend parity
+   remain required before producing the final release bundle.
 2. Immutable release control is installed on SeeBx and Verbal Sage at exact
    package release `08322acd1ff738c88cc83c2361ffdb4c35e5b29d`. The current
    cleanup candidate postdates the sealed backend build, so final application
@@ -88,13 +89,11 @@ Status: candidate evidence; no deployment or retirement authority
 
 ## Next cleanup order
 
-1. Split the effect-free Training module by coherent aggregate while
-   preserving its 41-route order, exact wire contracts, owner/delegated checks,
-   and named PostgreSQL adapter authorities.
-2. Re-prove the already verified Plan-to-Nutrition projection and all
-   LifeSwitch owner/delegated behavior against the disposable isolated database
-   after the Training split; Plan targets remain independent of retired
-   page-level AI helpers.
+1. Re-prove the already verified Plan-to-Nutrition projection and all
+   LifeSwitch owner/delegated behavior against the disposable isolated database;
+   Plan targets remain independent of retired page-level AI helpers.
+2. Bind exact database schema, owner/RLS, delegated-access, migration, rollback,
+   and paired frontend evidence before regenerating any release package.
 3. Run the Forms schema, exact valid/quarantine reconciliation, rollback, and
    cross-owner denial proof only in a separately authorized disposable restore.
 4. Prove Zep owner/thread isolation, deletion, export/retention, outage, and

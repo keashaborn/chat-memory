@@ -214,7 +214,7 @@ class TrainingTemplatesPostgresTests(unittest.IsolatedAsyncioTestCase):
 
     def test_template_handlers_have_no_direct_database_calls(self) -> None:
         root = Path(__file__).resolve().parents[1]
-        source = (root / "seebx/capabilities/training/routes.py").read_text()
+        source = (root / "seebx/capabilities/training/templates.py").read_text()
         tree = ast.parse(source)
         names = {
             "list_workout_templates",

@@ -108,15 +108,17 @@ connection close, provider HTTP calls, and the non-database LifeSwitch stage
 
 | Capability module | Mounted routes | Direct SQL/transaction callsites | Current database | Frontend BFF surface |
 |---|---:|---:|---|---|
-| `training/routes.py` | 41 | 0 | isolated LifeSwitch PostgreSQL | training group: 39 route files |
+| `training/routes.py` composition root plus five aggregate modules | 41 | 0 | isolated LifeSwitch PostgreSQL | training group: 39 route files |
 
-No retained Training handler now owns a direct PostgreSQL query, transaction,
-connection acquisition, or close. My Exercises, Conditioning, delegated
-access, workout sharing, templates, strength sessions, set logs, and protected
-writers are behind named adapters. Across the retained capability packages,
-raw PostgreSQL effects are adapter-owned. Nutrition's three explicit
-adapter-mediated transaction scopes are now owned by its Foods aggregate; the
-former mixed router is composition-only.
+No retained Training handler owns a direct PostgreSQL query, transaction,
+connection acquisition, or close. Exercises, Conditioning, Sharing, Templates,
+and Sessions have explicit capability modules behind one composition-only route
+root; delegated access and shared validation have named helper owners. My
+Exercises, Conditioning, delegated access, workout sharing, templates, strength
+sessions, set logs, and protected writers are behind named adapters. Across the
+retained capability packages, raw PostgreSQL effects are adapter-owned.
+Nutrition's three explicit adapter-mediated transaction scopes are owned by its
+Foods aggregate; both former mixed routers are composition-only.
 
 ## Canonical target flow
 
@@ -161,8 +163,8 @@ Forbidden target flows:
    Any divergence stops retirement.
 5. After backup/restore proof and explicit production authorization, remove
    platform catalog grants/schema and retain the isolated copy only.
-6. Split the remaining effect-free Training module by domain aggregate while
-   preserving its already separated isolated PostgreSQL adapter boundaries.
+6. Verify the split Nutrition and Training aggregates against the disposable
+   isolated database, including exact owner/RLS and delegated-access behavior.
 
 Every step preserves Git rollback. No step combines route retirement, data
 migration, security-boundary change, and production activation.

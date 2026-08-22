@@ -12,7 +12,7 @@ from fastapi import HTTPException
 from seebx.adapters import lifeswitch_postgres
 from seebx.capabilities.measurements import routes as measurements
 from seebx.capabilities.nutrition import logs as nutrition
-from seebx.capabilities.training import routes as training
+from seebx.capabilities.training import access as training_access
 
 
 OWNER = "11111111-1111-1111-1111-111111111111"
@@ -143,7 +143,7 @@ class IsolatedPostgresV1Tests(unittest.IsolatedAsyncioTestCase):
         os.environ.pop("LIFESWITCH_DELEGATED_READS_ENABLED", None)
         cases = (
             nutrition._resolve_nutrition_view_target,
-            training._resolve_training_view_target,
+            training_access._resolve_training_view_target,
             measurements._resolve_measurements_view_target,
         )
         for resolver in cases:
@@ -156,7 +156,7 @@ class IsolatedPostgresV1Tests(unittest.IsolatedAsyncioTestCase):
     async def test_every_account_can_read_its_own_records(self):
         cases = (
             nutrition._resolve_nutrition_view_target,
-            training._resolve_training_view_target,
+            training_access._resolve_training_view_target,
             measurements._resolve_measurements_view_target,
         )
         for resolver in cases:

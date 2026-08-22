@@ -177,7 +177,7 @@ class TrainingExercisesPostgresTests(unittest.IsolatedAsyncioTestCase):
 
     def test_three_capability_handlers_have_no_direct_database_calls(self) -> None:
         root = Path(__file__).resolve().parents[1]
-        path = root / "seebx/capabilities/training/routes.py"
+        path = root / "seebx/capabilities/training/exercises.py"
         source = path.read_text()
         tree = ast.parse(source)
         names = {"list_my_exercises", "upsert_my_exercise", "deactivate_my_exercise"}
