@@ -176,7 +176,7 @@ class LifeSwitchFoodsPostgresTests(unittest.IsolatedAsyncioTestCase):
 
     def test_capability_has_no_direct_database_effects(self) -> None:
         root = Path(__file__).resolve().parents[1]
-        path = root / "seebx/capabilities/nutrition/routes.py"
+        path = root / "seebx/capabilities/nutrition/foods.py"
         tree = ast.parse(path.read_text())
         forbidden = {"fetch", "fetchrow", "fetchval", "execute", "close"}
         calls = [

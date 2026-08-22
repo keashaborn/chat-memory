@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 CATALOG = ROOT / "seebx/capabilities/catalog/routes.py"
-NUTRITION = ROOT / "seebx/capabilities/nutrition/routes.py"
+NUTRITION = ROOT / "seebx/capabilities/nutrition/foods.py"
 ADAPTER = ROOT / "seebx/adapters/usda_fdc.py"
 
 

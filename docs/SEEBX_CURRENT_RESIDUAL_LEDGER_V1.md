@@ -45,11 +45,12 @@ Status: candidate evidence; no deployment or retirement authority
 ## Remaining architectural debt
 
 1. No retained LifeSwitch capability handler owns a raw PostgreSQL query or
-   request-owned connection lifetime. `training/routes.py` is still a mixed
-   1,430-line, 41-route module and `nutrition/routes.py` remains a mixed
-   effect-free module with three adapter-mediated transaction scopes. Split
-   both by logical aggregate without changing route order, wire contracts, or
-   adapter authority before producing the final release bundle.
+   request-owned connection lifetime. Nutrition is now separated into Log,
+   Meals, Foods/Servings/Overrides, and Meal Plans modules behind one 48-line
+   route-order composition root. `training/routes.py` remains a mixed
+   1,430-line, 41-route effect-free module; split it by logical aggregate
+   without changing route order, wire contracts, or adapter authority before
+   producing the final release bundle.
 2. Immutable release control is installed on SeeBx and Verbal Sage at exact
    package release `08322acd1ff738c88cc83c2361ffdb4c35e5b29d`. The current
    cleanup candidate postdates the sealed backend build, so final application
@@ -87,13 +88,13 @@ Status: candidate evidence; no deployment or retirement authority
 
 ## Next cleanup order
 
-1. Verify the required Plan-to-Nutrition projection before restructuring the
-   two aggregates: Plan calorie and macro targets must remain authoritative for
-   Nutrition Log daily target comparisons and color states. This product
-   contract is independent of the retired page-level AI helpers.
-2. Continue candidate-only database-effect extraction with one coherent
-   LifeSwitch domain aggregate at a time; preserve the isolated database,
-   route contracts, owner checks, and default-off gates.
+1. Split the effect-free Training module by coherent aggregate while
+   preserving its 41-route order, exact wire contracts, owner/delegated checks,
+   and named PostgreSQL adapter authorities.
+2. Re-prove the already verified Plan-to-Nutrition projection and all
+   LifeSwitch owner/delegated behavior against the disposable isolated database
+   after the Training split; Plan targets remain independent of retired
+   page-level AI helpers.
 3. Run the Forms schema, exact valid/quarantine reconciliation, rollback, and
    cross-owner denial proof only in a separately authorized disposable restore.
 4. Prove Zep owner/thread isolation, deletion, export/retention, outage, and

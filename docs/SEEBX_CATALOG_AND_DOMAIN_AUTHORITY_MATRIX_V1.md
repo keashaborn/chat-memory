@@ -114,8 +114,9 @@ No retained Training handler now owns a direct PostgreSQL query, transaction,
 connection acquisition, or close. My Exercises, Conditioning, delegated
 access, workout sharing, templates, strength sessions, set logs, and protected
 writers are behind named adapters. Across the retained capability packages,
-raw PostgreSQL effects are adapter-owned; Nutrition retains only three
-explicit adapter-mediated transaction scopes pending its logical module split.
+raw PostgreSQL effects are adapter-owned. Nutrition's three explicit
+adapter-mediated transaction scopes are now owned by its Foods aggregate; the
+former mixed router is composition-only.
 
 ## Canonical target flow
 
@@ -160,8 +161,8 @@ Forbidden target flows:
    Any divergence stops retirement.
 5. After backup/restore proof and explicit production authorization, remove
    platform catalog grants/schema and retain the isolated copy only.
-6. Split nutrition and training by domain aggregate, moving one transaction
-   boundary at a time behind isolated PostgreSQL adapters.
+6. Split the remaining effect-free Training module by domain aggregate while
+   preserving its already separated isolated PostgreSQL adapter boundaries.
 
 Every step preserves Git rollback. No step combines route retirement, data
 migration, security-boundary change, and production activation.
