@@ -2,9 +2,12 @@
 
 Status: target and migration constraints; no database-change authority
 
-Evidence date: 2026-08-20 America/Chicago
+Evidence date: 2026-08-22 America/Chicago
 
-Source commit: `49f9e60cf4321c8e42c359845c1a62a8c987614d`
+Production source commit: `49f9e60cf4321c8e42c359845c1a62a8c987614d`
+
+Candidate database-audit commit:
+`fdffcbe0cecb5142d2ebc560e2ea1232394bddff`
 
 ## Current connections
 
@@ -23,28 +26,30 @@ crossing stores.
 
 ## Current database inventory
 
-Row figures are PostgreSQL catalog estimates except where explicitly described
-as exact counts. They are inventory evidence, not deletion authority.
+The platform figures below are exact counts from the content-free 2026-08-22
+governance receipt. They are inventory evidence, not deletion authority, and
+must be frozen again at migration time.
 
 ### Older platform/legacy database: `memory`
 
-| Schema | Tables | Estimated rows | Views |
+| Schema | Tables | Exact rows | Other relations |
 |---|---:|---:|---:|
-| `ai_operations` | 4 | 0 | 0 |
-| `catalog_dev` | 14 | 1,610 | 0 |
-| `chat_history_private` | 2 | 0 | 0 |
-| `chat_integrity` | 1 | 101 exact rows | 0 |
-| `lifeswitch_usage` | 2 | 581 | 0 |
-| `memory` | 160 | 33,014 | 6 |
-| `memory_ingest_private` | 7 | 1,167 | 0 |
-| `public` | 15 | 3,159 | 0 |
-| `trusted_web` | 4 | 307 | 1 |
-| `user_settings` | 2 | 20 exact rows | 0 |
+| `ai_operations` | 4 | 58 | 0 |
+| `catalog_dev` | 14 | 1,711 | 0 |
+| `chat_history_private` | 2 | 22 | 0 |
+| `chat_integrity` | 1 | 101 | 0 |
+| `lifeswitch_usage` | 2 | 708 | 0 |
+| `memory` | 160 | 35,118 | 6 views |
+| `memory_ingest_private` | 7 | 1,216 | 0 |
+| `public` | 14 | 3,676 | 1 sequence |
+| `trusted_web` | 4 | 300 | 1 view |
+| `user_settings` | 2 | 20 | 0 |
+| **Total** | **210** | **42,930** | **8** |
 
 Exact bounded counts verified during the audit:
 
-- `public.chat_log`: 1,045 rows;
-- `public.threads`: 49 rows;
+- `public.chat_log`: 1,117 rows;
+- `public.threads`: 53 rows;
 - `public.chat_attachments`: 0 rows;
 - `memory_ingest_private.memory_ingest_outbox`: 2 rows;
 - nonterminal `memory_ingest_outbox` rows: 0;
@@ -102,6 +107,12 @@ The live graph directly references these isolated LifeSwitch areas:
 No direct live Python SQL reference to the 160-table `memory` schema or the five
 Vantage schemas was verified. String names inside Zep provenance are not SQL
 references.
+
+The committed candidate consumer audit additionally proves that the old
+platform `catalog_dev` has zero candidate runtime consumers. Three LifeSwitch
+catalog/foods adapters were explicitly excluded from platform retention because
+they use only the isolated `LIFESWITCH_POSTGRES_DSN`. See
+`SEEBX_PLATFORM_DATABASE_INVENTORY_V1.md` for the bound evidence.
 
 ## Hidden database-function coupling
 
@@ -237,3 +248,25 @@ retain/archive/retire decisions. See
 `SEEBX_LIFESWITCH_DATABASE_CONSUMER_AUDIT_V1.md` for exact identities, hashes,
 row-count-only evidence, and limitations. A migration-only or unproven result
 is a review gate, not deletion authority.
+
+## Platform database consumer/governance proof (2026-08-22)
+
+The database-aware candidate audit inventoried 794 platform-database
+relations/functions and 3,382 dependency edges. Twenty objects are
+application-direct, 26 are reachable database internals, and 118 are
+extension-owned. Thirteen are migration-only, 18 are
+operational-reference-only, and 599 have no candidate runtime or reachable
+consumer. The 210 exact table counts total 42,930 rows; 165 unproven tables hold
+36,234 of those rows, principally the retired custom-memory attempts.
+
+The same receipt freezes 10 schemas, 218 relations, 2,867 columns, 576
+functions, 315 policies, 232 non-internal triggers, 2,302 constraints, 777
+indexes, five extensions, 42 non-system roles, nine memberships, and one
+sequence. Definitions are stored only as SHA-256 values. The governance
+manifest SHA-256 is
+`3394fc40c3fe29e3d4b4bd029acbb76059b02c45bae8e1a9bd7f8a8e0d121cb8`.
+
+This closes the current platform inventory gate. It does not close retained
+object selection, Forms disposition, chat-clear/outbox decoupling, clean
+installation, disposable restore, paired application verification, migration,
+or retirement. See `SEEBX_PLATFORM_DATABASE_INVENTORY_V1.md`.

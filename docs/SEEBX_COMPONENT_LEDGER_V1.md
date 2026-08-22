@@ -134,15 +134,16 @@ Source commit: `49f9e60cf4321c8e42c359845c1a62a8c987614d`
 | old `public` | chat, threads, attachments, telemetry, voice lease | MIGRATE to clean platform database |
 | old `chat_history_private` | live deletion functions | MIGRATE after outbox decoupling |
 | old `chat_integrity` | response attestation/snapshot | MIGRATE |
-| old `trusted_web` | live search cache/audit/transcripts | MIGRATE |
+| old `trusted_web` | live search cache/audit/transcripts; the candidate governance audit shows the login role `brains_app` still owns the schema and three internal tables lack RLS | MIGRATE through a NOLOGIN owner, least-privilege grants, and forced-RLS transcript parity |
 | old `lifeswitch_usage` | live forced-RLS usage ledger; candidate `c6285574` gives its writer one adapter owner and retires disconnected reporting code | MIGRATE, likely rename platform usage |
 | old `ai_operations` | live admin incident schema; candidate batch 15 moves all six query/transaction effects and capability-session settings behind `adapters.ai_operations_postgres`, leaving the capability SQL-free while preserving inspector/manager authority and HTTP contracts | MIGRATE INTACT into the clean platform database after disposable parity proof |
-| old `catalog_dev` | live catalog router; duplicate of isolated catalog | CONSOLIDATE into isolated catalog |
+| old `catalog_dev` | duplicate of isolated catalog; database-aware candidate audit `fdffcbe0` proves zero candidate runtime consumer across all 20 relations/functions and freezes 14 tables/1,711 rows | CONSOLIDATE into isolated catalog after exact parity and recovery proof |
 | old `user_settings` | production router unmounted; exactly 1 preference row plus 19 compilation candidates; canonical candidate rebuilt | MIGRATE INTACT into the clean platform database after disposable parity proof |
-| old `memory_ingest_private` | seven tables; two terminal outbox rows; candidate `c840afed` removes all external routine and trigger dependencies | FINAL BACKUP/RESTORE, then retire with exact fail-closed package |
-| old `memory` | 160 ordinary tables; no candidate runtime SQL reference; exact clone retirement preserves every retained schema byte | FINAL BACKUP/RESTORE, then retire with exact fail-closed package |
+| old `memory_ingest_private` | seven tables/1,216 rows; current chat-clear functions still make 12 objects database-internal-reachable; candidate `c840afed` removes those external routine/trigger dependencies but remains unapplied | APPLY/VERIFY DECOUPLING in disposable target, final backup/restore, then retire with exact fail-closed package |
+| old `memory` | 160 tables/35,118 rows plus six views; audit `fdffcbe0` proves zero candidate runtime consumer and classifies 566 relations/functions unproven | FINAL BACKUP/RESTORE, Zep/attestation proof, then retire with exact fail-closed package |
 | five old Vantage schemas | removed from production after exact dump, temporary restore, count verification, and manifest receipt | RETIRED WITH RECOVERY EVIDENCE |
 | five unmounted legacy public tables | `chat_messages`, `chat_sessions`, `feedback_signals`, `vantage_answer_trace`, and `vs_profiles`; 1,260 total rows; no candidate SQL caller or database dependency | FINAL BACKUP/RESTORE, then retire with exact non-cascading package |
+| three old Forms tables | `vb_form_entries`, `vb_form_templates`, and `vb_form_versions`; 338 total rows; only the migration utility references them | PRODUCT DECISION REQUIRED before retain/migrate/archive disposition |
 | isolated `lifeswitch_*` schemas | live canonical domain data | KEEP |
 | isolated `catalog_dev` | live canonical domain catalog candidate | KEEP and become sole catalog |
 

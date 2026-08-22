@@ -94,8 +94,16 @@ Status: candidate evidence; no deployment or retirement authority
 6. `voice-synthetic-canary.service` is failed while its timer remains active.
    Repair belongs to the separate voice worktree and must not be folded into
    backend cleanup.
-7. Platform PostgreSQL still contains the legacy `memory` and `memory_ingest_private` schemas and clone databases; the five Vantage schemas are absent. The old retirement package is blocked because 32 attestations require canonical migration and 158 require encrypted quarantine. Recovery and disposable-restore evidence exists, but migrations,
-   schema retirement, and database drops remain separate production batches.
+7. Platform PostgreSQL still contains the legacy `memory` and
+   `memory_ingest_private` schemas and clone databases; the five Vantage schemas
+   are absent. Candidate audit `fdffcbe0` proves zero candidate runtime consumer
+   for `memory` and the duplicate platform `catalog_dev`, while the current
+   chat-clear functions still retain 12 `memory_ingest_private` dependency
+   objects. The exact governance receipt covers 210 tables and 42,930 rows. The
+   retirement package remains blocked until chat-clear decoupling, attestation
+   reconciliation/quarantine, final backup/restore, and a fresh zero-dependency
+   proof. Migrations, schema retirement, and database drops remain separate
+   production batches.
 8. The production service still runs the mutable checkout with weak systemd
    hardening. Its mutable virtual environment also lacks declared
    `jsonschema==4.25.1`; the sealed candidate runtime contains the exact locked
@@ -120,28 +128,31 @@ Status: candidate evidence; no deployment or retirement authority
 
 ## Next cleanup order
 
-1. Run a real signed-session paired frontend/backend proof against the
+1. Generate the explicit retained platform object/role manifest, replace the
+   chat-clear dependency on `memory_ingest_private`, and resolve the Forms
+   disposition in a disposable database.
+2. Run a real signed-session paired frontend/backend proof against the
    verified disposable database, including Plan-to-Nutrition application
    behavior; only test delegated People access if separately enabled. Plan
    targets remain independent of retired page-level AI helpers.
-2. Bind exact database schema, owner/RLS, delegated-access, migration, rollback,
+3. Bind exact database schema, owner/RLS, delegated-access, migration, rollback,
    and paired frontend evidence before regenerating any release package.
-3. Run the Forms schema, exact valid/quarantine reconciliation, rollback, and
+4. Run the Forms schema, exact valid/quarantine reconciliation, rollback, and
    cross-owner denial proof only in a separately authorized disposable restore.
-4. Use `SEEBX_ADMIN_OPERATIONS_INVENTORY_V1.md` as the controlling admin and
+5. Use `SEEBX_ADMIN_OPERATIONS_INVENTORY_V1.md` as the controlling admin and
    operations audit. Preserve the completed inspector-session rename, canonical
    export, and dead Vantage-route repairs, and verify the repaired voice canary
    before cutover. Migrate the retained platform PostgreSQL
    authorities only through a separate reconciliation and rollback package.
-5. Prove Zep owner/thread isolation, deletion, export/retention, outage, and
+6. Prove Zep owner/thread isolation, deletion, export/retention, outage, and
    provenance behavior before declaring the old memory paths fully replaced.
-6. Regenerate immutable backend/frontend bundles and release manifests from the
+7. Regenerate immutable backend/frontend bundles and release manifests from the
    final candidate commits.
-7. Execute the paired frontend/backend cutover with fresh authorization and
+8. Execute the paired frontend/backend cutover with fresh authorization and
    automatic rollback evidence.
-8. Observe, then retire Redis, stale Qdrant configuration, and legacy
+9. Observe, then retire Redis, stale Qdrant configuration, and legacy
    schemas/databases in independent rollback-safe production batches.
-9. Create encrypted clean-state snapshots, enforce the two-backup policy,
+10. Create encrypted clean-state snapshots, enforce the two-backup policy,
    and only then remove superseded worktrees and older snapshots.
 
 This ledger authorizes no deployment, restart, database change, cache stop,

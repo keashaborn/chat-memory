@@ -1,0 +1,97 @@
+{
+  "schema_version": "seebx-platform-database-inventory-v1",
+  "status": "candidate_evidence",
+  "evidence_date": "2026-08-22",
+  "candidate_commit": "fdffcbe0cecb5142d2ebc560e2ea1232394bddff",
+  "database": {
+    "container": "brains-postgres-1",
+    "name": "memory",
+    "transaction_read_only": true
+  },
+  "receipt": {
+    "path": "/var/backups/seebx-cleanup/platform-database-consumers-v1/20260822t083100z/consumer-audit.json",
+    "sha256": "42177da9a230dc28a14651b75e3d500cee6771d96e1f2198df9ae616f3b2bbf3",
+    "owner": "root:root",
+    "mode": "0600",
+    "object_catalog_sha256": "05aa5673634f94a02096795f8d0b40d79b036bd67815dcb482de8763ba6ccc47",
+    "governance_manifest_sha256": "3394fc40c3fe29e3d4b4bd029acbb76059b02c45bae8e1a9bd7f8a8e0d121cb8"
+  },
+  "source_trees": {
+    "runtime": {
+      "file_count": 183,
+      "sha256": "4021f5d92a4d46cf902ccb11731fe53fc10ba4615c23d69a460506a0cf20c186",
+      "excluded_other_database_paths": [
+        "seebx/adapters/lifeswitch_catalog_postgres.py",
+        "seebx/adapters/lifeswitch_foods_postgres.py",
+        "seebx/adapters/lifeswitch_meal_plans_postgres.py"
+      ]
+    },
+    "operational": {
+      "file_count": 29,
+      "sha256": "5985212576f5f3c5dc6c6e54cebf7cf75afe90559d0bcd5024c82c7b76512da0"
+    },
+    "migration": {
+      "file_count": 113,
+      "sha256": "524c799f28453460ca26488699e8a359c81823df1debd91b81fda5a3645c1121"
+    }
+  },
+  "database_totals": {
+    "tables": 210,
+    "exact_rows": 42930,
+    "relations_and_functions": 794,
+    "dependency_edges": 3382
+  },
+  "exact_schema_counts": {
+    "ai_operations": {"tables": 4, "rows": 58},
+    "catalog_dev": {"tables": 14, "rows": 1711},
+    "chat_history_private": {"tables": 2, "rows": 22},
+    "chat_integrity": {"tables": 1, "rows": 101},
+    "lifeswitch_usage": {"tables": 2, "rows": 708},
+    "memory": {"tables": 160, "rows": 35118},
+    "memory_ingest_private": {"tables": 7, "rows": 1216},
+    "public": {"tables": 14, "rows": 3676},
+    "trusted_web": {"tables": 4, "rows": 300},
+    "user_settings": {"tables": 2, "rows": 20}
+  },
+  "classification_counts": {
+    "application_direct": 20,
+    "database_internal_reachable": 26,
+    "extension_owned": 118,
+    "migration_only": 13,
+    "operational_reference_only": 18,
+    "unproven": 599
+  },
+  "classified_table_counts": {
+    "application_direct": {"tables": 14, "rows": 3206},
+    "database_internal_reachable": {"tables": 12, "rows": 1250},
+    "migration_only": {"tables": 6, "rows": 539},
+    "operational_reference_only": {"tables": 13, "rows": 1701},
+    "unproven": {"tables": 165, "rows": 36234}
+  },
+  "governance_section_counts": {
+    "schemas": 10,
+    "relations": 218,
+    "columns": 2867,
+    "functions": 576,
+    "policies": 315,
+    "triggers": 232,
+    "constraints": 2302,
+    "indexes": 777,
+    "extensions": 5,
+    "roles": 42,
+    "memberships": 9,
+    "table_counts": 210,
+    "sequences": 1
+  },
+  "canonical_decisions": {
+    "old_catalog_dev_runtime_consumers": 0,
+    "old_memory_runtime_consumers": 0,
+    "memory_ingest_private_final_state": "retire_after_chat_clear_decoupling_and_recovery_proof",
+    "memory_final_state": "retire_after_zep_and_recovery_proof",
+    "forms_state": "product_decision_required"
+  },
+  "row_content_included": false,
+  "password_verifiers_included": false,
+  "deletion_authority": false,
+  "production_change_authority": false
+}
