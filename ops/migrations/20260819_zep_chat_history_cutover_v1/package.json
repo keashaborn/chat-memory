@@ -48,7 +48,7 @@
     },
     "platform_database_disposition": {
       "path": "scripts/build_platform_database_disposition_v1.py",
-      "sha256": "8645ed77532d67c50d64f96cc0e67770b0d3fe77d6c365d208edf1ae97b0f9e3"
+      "sha256": "7e26a78519afa2ef16b0db889c3a6c781259b7ae65589900f88b7cabf69dc5bc"
     }
   },
   "execution": {

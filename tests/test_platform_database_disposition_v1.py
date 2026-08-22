@@ -134,6 +134,10 @@ class PlatformDatabaseDispositionV1Tests(unittest.TestCase):
         self.assertEqual(blocker_codes, {"legacy_ingest_dependencies_present"})
         dispositions = {item["identity"]: item["disposition"] for item in manifest["objects"]}
         self.assertEqual(dispositions["public.chat_log"], "retained_active")
+        self.assertEqual(
+            dispositions["ai_operations.enforce_telemetry_retention_v1()"],
+            "retained_operations",
+        )
         self.assertEqual(dispositions["memory.old_table"], "archive_legacy_memory")
         self.assertEqual(
             dispositions["memory_ingest_private.old_outbox"],

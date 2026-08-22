@@ -20,6 +20,7 @@ SHA256 = re.compile(r"^[0-9a-f]{64}$")
 ACTIVE_OPERATIONAL_OBJECTS = {
     "ai_operations.claim_monitor_alert_delivery_v1(p_worker_id uuid)",
     "ai_operations.complete_monitor_alert_delivery_v1(p_delivery_id uuid, p_worker_id uuid, p_outcome text, p_provider_message_id text, p_error_code text)",
+    "ai_operations.enforce_telemetry_retention_v1()",
     "ai_operations.record_monitor_observation_v1(p_monitor_name text, p_status text, p_severity text, p_is_drill boolean, p_reason_codes text[], p_window_hours integer, p_request_count bigint, p_completed_count bigint, p_fail_closed_count bigint, p_relevance_fail_closed_count bigint, p_dependency_failure_count bigint, p_fail_closed_rate numeric, p_observed_at timestamp with time zone)",
 }
 FORMS_OBJECTS = {
