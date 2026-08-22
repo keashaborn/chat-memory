@@ -27,11 +27,11 @@ Status: candidate evidence; no deployment or retirement authority
   domain groups; the full 1,354-test suite passes.
 - The committed read-only LifeSwitch database consumer auditor inventories 218
   relations/functions and 211 dependency edges against the exact isolated-
-  database manifest. It proves 208 objects are application-, database-,
-  operations-, or extension-owned; five are migration-only and five remain
-  unproven. The unresolved ten are preserved and listed in
-  `SEEBX_LIFESWITCH_DATABASE_CONSUMER_AUDIT_V1.md`; the audit grants no deletion
-  authority.
+  database manifest. It proves 207 objects are application-, database-, or
+  extension-owned; one is operational-reference-only, five are migration-only,
+  and five remain unproven. The eleven review-gated objects are preserved and
+  listed in `SEEBX_LIFESWITCH_DATABASE_CONSUMER_AUDIT_V1.md`; the audit grants
+  no deletion authority.
 - The separate failed voice-canary unit and active timer remain outside this
   cleanup batch.
 

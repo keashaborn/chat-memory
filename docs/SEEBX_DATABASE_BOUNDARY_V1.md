@@ -226,13 +226,14 @@ frontend authentication, application-route, release, or cutover gates.
 The committed content-free auditor maps the exact isolated-database manifest
 to candidate runtime, operational, migration, and database-internal consumers.
 It inventoried 218 relations/functions and 211 dependency edges. Fifty-seven
-objects are application-direct, 28 are reachable database internals, five are
-operational-direct, and 118 are extension-owned. Five objects are migration-
-only and five have no verified consumer.
+objects are application-direct, 32 are reachable database internals, and 118
+are extension-owned. One object is operational-reference-only, five are
+migration-only, and five have no verified consumer. Operational verifier
+references are informational and never seed runtime retention.
 
-The unresolved set is confined to dormant normalized catalog muscle/food
-surfaces plus `lifeswitch_snapshot.personalization_source_row`. It is preserved
-pending explicit retain/archive/retire decisions. See
+The review-gated set is confined to dormant normalized catalog muscle/food
+surfaces plus two recovery snapshot relations. It is preserved pending explicit
+retain/archive/retire decisions. See
 `SEEBX_LIFESWITCH_DATABASE_CONSUMER_AUDIT_V1.md` for exact identities, hashes,
 row-count-only evidence, and limitations. A migration-only or unproven result
 is a review gate, not deletion authority.

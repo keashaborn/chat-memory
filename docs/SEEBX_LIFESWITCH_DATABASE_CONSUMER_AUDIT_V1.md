@@ -16,16 +16,17 @@ that missing consumer map before a clean-install baseline is designed.
 queries inside a repeatable-read, read-only transaction. It inventories
 relations and functions in the seven retained schemas, scans only controlled
 candidate source roots, maps database-internal dependencies, and propagates
-retention only from verified consumers. It never reads or emits application row
-values. It writes a mode-0600, content-free report and explicitly grants no
-deletion authority.
+retention only from verified runtime consumers and extension ownership.
+Operational-script references remain informational and never seed retention.
+It never reads or emits application row values. It writes a mode-0600,
+content-free report and explicitly grants no deletion authority.
 
 ## Evidence boundary
 
 - isolated database manifest SHA-256:
   `fd71e52ac0825661df33f36c9bff1b595e0cf333221b8bd0ba090ad6dac4ad67`;
 - committed auditor candidate:
-  `3b349034d67dd37f783305136bedd2309e095e61`;
+  `54671375f3068a9d4d76233b2e0e4181a8191680`;
 - database object catalog SHA-256:
   `e55ee06cd5733be20175450857b7c8b58eb2c974fcd8873350c3f467df22426b`;
 - 218 relations/functions inventoried;
@@ -33,30 +34,32 @@ deletion authority.
 - runtime scan: 185 files;
 - operational scan: 25 files;
 - migration scan: 113 files;
-- nine focused auditor tests and eleven disposable-restore contract tests pass.
+- nine focused auditor tests, eleven disposable-restore contract tests, and the
+  complete 1,363-test candidate suite pass.
 
 The committed rerun produced:
 
 - report:
-  `/var/backups/seebx-cleanup/lifeswitch-database-consumers-v1/20260822t033523z/consumer-audit.json`;
+  `/var/backups/seebx-cleanup/lifeswitch-database-consumers-v1/20260822t041100z/consumer-audit.json`;
 - report SHA-256:
-  `9e5e5da28eebb01985323696aa5f629368811b8cb6de82f284f9890f4a34369e`.
+  `085fe940aa18c3e15c04685d281f84416303aa88a022d8fbc627fc68cd30d066`.
 
-Earlier development receipts are superseded because their source trees included
-an uncommitted auditor.
+Earlier development receipts and the first committed report are superseded.
+The first report incorrectly allowed operational verifier references to seed
+retention; the corrected report does not.
 
 ## Classification result
 
 | Classification | Count | Meaning |
 |---|---:|---|
 | application direct | 57 | exact or schema-bound application reference |
-| database internal reachable | 28 | dependency reachable from a verified consumer |
-| operational direct | 5 | retained operational verifier/worker reference |
+| database internal reachable | 32 | dependency reachable from a verified runtime consumer |
 | extension owned | 118 | installed PostgreSQL extension object |
+| operational reference only | 1 | mentioned by an operational verifier but not reachable from runtime |
 | migration only | 5 | found only in historical/installation SQL |
-| unproven | 5 | no verified runtime, operational, or reachable database consumer |
+| unproven | 5 | no verified runtime or reachable database consumer |
 
-The ten unresolved objects are:
+The eleven review-gated objects are:
 
 | Classification | Object | Evidence disposition |
 |---|---|---|
@@ -70,6 +73,7 @@ The ten unresolved objects are:
 | migration only | `catalog_dev.nutrient` | zero rows; historical food model only |
 | migration only | `catalog_dev.search_foods(text,integer,text)` | candidate food routes are retired; USDA is the active provider path |
 | unproven | `lifeswitch_snapshot.personalization_source_row` | one row; no candidate DDL source or caller found |
+| operational reference only | `lifeswitch_snapshot.analysis_source_row` | 20 rows; restore verifier proves application access is denied, but no runtime consumer exists |
 
 The catalog authority matrix previously retained all 14 catalog tables as a
 single canonical schema. This audit narrows that decision: the active exercise
@@ -90,6 +94,8 @@ authorization.
 - Unqualified source identifiers are not accepted as evidence.
 - Schema-bound Python SQL templates are accepted only when the same file binds
   the exact schema name.
+- Operational scripts are inventoried for review evidence but do not make a
+  relation or function runtime-retained.
 - The v1 scope covers relations and functions. Types, constraints, indexes,
   grants, roles, extensions, policies, and triggers are preserved by the exact
   restore manifest and contribute dependency evidence, but need their own
@@ -100,7 +106,7 @@ authorization.
 ## Next gate
 
 1. Bind and publish the exact committed audit receipt.
-2. Create explicit retain/archive/retire decisions for the ten unresolved
+2. Create explicit retain/archive/retire decisions for the eleven review-gated
    objects.
 3. Generate a canonical schema-and-role baseline only from approved retained
    objects.
