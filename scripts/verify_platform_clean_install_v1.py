@@ -479,23 +479,24 @@ def collect_catalog(container: str, plan: Mapping[str, Any], schema_sql: str) ->
         )
         rows.append({"identity": identity, "rows": int(count)})
     catalog["table_rows"] = rows
-    catalog["expected_rls_enabled"] = sorted(
-        set(
-            re.findall(
-                r"(?im)^ALTER TABLE ONLY ([a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*) ENABLE ROW LEVEL SECURITY;",
-                schema_sql,
-            )
-        )
-    )
-    catalog["expected_rls_forced"] = sorted(
-        set(
-            re.findall(
-                r"(?im)^ALTER TABLE ONLY ([a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*) FORCE ROW LEVEL SECURITY;",
-                schema_sql,
-            )
-        )
-    )
+    catalog["expected_rls_enabled"] = expected_rls_relations(schema_sql, "ENABLE")
+    catalog["expected_rls_forced"] = expected_rls_relations(schema_sql, "FORCE")
     return catalog
+
+
+def expected_rls_relations(schema_sql: str, action: str) -> list[str]:
+    if action not in {"ENABLE", "FORCE"}:
+        raise ValueError("rls_action_invalid")
+    return sorted(
+        set(
+            re.findall(
+                r"(?im)^ALTER TABLE (?:ONLY )?([a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*) "
+                + action
+                + r" ROW LEVEL SECURITY;",
+                schema_sql,
+            )
+        )
+    )
 
 
 def validate_catalog(catalog: Mapping[str, Any], plan: Mapping[str, Any]) -> dict[str, Any]:

@@ -103,6 +103,23 @@ def baseline_fixture(root: Path, commit: str) -> tuple[Path, str]:
 
 
 class PlatformCleanInstallV1Tests(unittest.TestCase):
+    def test_rls_inference_accepts_dump_forms_with_and_without_only(self):
+        schema_sql = "\n".join([
+            "ALTER TABLE conversation.threads ENABLE ROW LEVEL SECURITY;",
+            "ALTER TABLE ONLY conversation.chat_log ENABLE ROW LEVEL SECURITY;",
+            "ALTER TABLE ONLY conversation.threads FORCE ROW LEVEL SECURITY;",
+        ])
+        self.assertEqual(
+            module.expected_rls_relations(schema_sql, "ENABLE"),
+            ["conversation.chat_log", "conversation.threads"],
+        )
+        self.assertEqual(
+            module.expected_rls_relations(schema_sql, "FORCE"),
+            ["conversation.threads"],
+        )
+        with self.assertRaisesRegex(ValueError, "rls_action_invalid"):
+            module.expected_rls_relations(schema_sql, "DISABLE")
+
     def test_baseline_is_exact_hash_bound_and_non_authorizing(self) -> None:
         commit = "a" * 40
         with tempfile.TemporaryDirectory() as raw:
