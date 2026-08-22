@@ -1,0 +1,72 @@
+{
+  "schema_version": "seebx-lifeswitch-forms-disposable-package-v1",
+  "migration_id": "lifeswitch_forms_disposable_v1",
+  "status": "candidate_not_applied",
+  "target": {
+    "server": "seebx",
+    "source_database": "memory",
+    "destination_database": "lifeswitch",
+    "execution_target": "temporary_database_only"
+  },
+  "expected": {
+    "source_counts": {
+      "templates": 12,
+      "versions": 13,
+      "entries": 313
+    },
+    "eligible_counts": {
+      "templates": 8,
+      "versions": 9,
+      "entries": 311
+    },
+    "quarantine_count": 10,
+    "sha256": {
+      "source": "397d4205359df2723ebfa3d8eae57fceb48c244952680a1dc6dcad284488b9dd",
+      "valid": "de1e805193453dd069a36d859db64369feed5f6c2c1c4a6286c4308178cd62ae",
+      "quarantine": "8a696d35401f8fee761528628a822da9eae1d0931836a5ac7e55b6b5fda420c5"
+    }
+  },
+  "inputs": {
+    "forward": {
+      "path": "ops/sql/20260819_lifeswitch_forms_v1.sql",
+      "sha256": "95c9aeacaefd234b1365ef7595b8c1d609af7656af68350c52a73da30e1ab35a"
+    },
+    "rollback": {
+      "path": "ops/sql/20260819_lifeswitch_forms_v1_rollback.sql",
+      "sha256": "14068cba046ba46cf207e0c958e507cb078def22f67a4e6ab50a715d88cca34f"
+    }
+  },
+  "tool": {
+    "path": "scripts/verify_lifeswitch_forms_disposable_v1.py",
+    "sha256": "83a64c36d2d4a70cc53b74393315872c171ed7b02caabab7741cdc88f8642271"
+  },
+  "tool_dependencies": {
+    "forms_migration": {
+      "path": "scripts/migrate_lifeswitch_forms_v1.py",
+      "sha256": "815bcd71d9347f9788244ccfbf5fc19241bf10007996e9d25be0ff6a0bbae075"
+    },
+    "disposable_restore": {
+      "path": "scripts/verify_lifeswitch_disposable_restore_v1.py",
+      "sha256": "beb7afbf9d72d34e461ddf06d2ebd0895c69de13f1bb7d1caad4ccac608d2b73"
+    },
+    "repository_state": {
+      "path": "scripts/database_consumer_audit_v1.py",
+      "sha256": "911914a8730d7aed846abdab3a5335756a0539eac498d2a20e5803509c4dfad0"
+    },
+    "forms_model": {
+      "path": "seebx/capabilities/forms/migration.py",
+      "sha256": "efa301c834af215097c1bf393220761b5b8076da7ef943766d1f75c2cb5f1135"
+    }
+  },
+  "execution": {
+    "encrypted_artifact_target_required": true,
+    "temporary_database_required": true,
+    "forward_and_rollback_required": true,
+    "exact_baseline_restoration_required": true,
+    "owner_isolation_required": true,
+    "production_platform_database_mutated": false,
+    "production_lifeswitch_database_mutated": false,
+    "service_restart_authorized": false,
+    "deployment_authorized": false
+  }
+}
