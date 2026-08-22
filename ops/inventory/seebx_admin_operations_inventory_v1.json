@@ -1,0 +1,167 @@
+{
+  "schema_version": "seebx_admin_operations_inventory_v1",
+  "audited_at": "2026-08-22T07:01:15Z",
+  "authorization": {
+    "candidate_changes": false,
+    "database_migration": false,
+    "production_changes": false,
+    "service_restart": false
+  },
+  "revisions": {
+    "backend_candidate": "e18b54125fb903f685e9eea35dd422d9ac30a105",
+    "backend_production": "49f9e60cf4321c8e42c359845c1a62a8c987614d",
+    "frontend_candidate": "6826f8e3e6e55f9937dc112f91a1e9bedc8a5fdb",
+    "frontend_production": "858b61527186571cabb5580dc5159fdf6b69ae2e"
+  },
+  "database_authorities": [
+    {
+      "database": "memory",
+      "dsn_variable": "POSTGRES_DSN",
+      "port": 5432,
+      "retirement_blocked": true,
+      "retained_capabilities": [
+        "conversation",
+        "telemetry",
+        "ai_operations",
+        "trusted_web",
+        "usage_accounting"
+      ]
+    },
+    {
+      "database": "lifeswitch",
+      "dsn_variable": "LIFESWITCH_POSTGRES_DSN",
+      "port": 55433,
+      "retirement_blocked": true,
+      "retained_capabilities": [
+        "catalog",
+        "chat_bindings",
+        "nutrition",
+        "plan",
+        "snapshots",
+        "training"
+      ]
+    }
+  ],
+  "frontend_surfaces": [
+    {
+      "path": "/api/admin/access",
+      "authority": "supabase_fresh_identity",
+      "disposition": "retain"
+    },
+    {
+      "path": "/api/admin/users/**",
+      "authority": "supabase_admin_owner_only_mutations",
+      "disposition": "retain"
+    },
+    {
+      "path": "/api/admin/access-requests/**",
+      "authority": "supabase_access_requests",
+      "disposition": "retain"
+    },
+    {
+      "path": "/api/admin/ai-operations/**",
+      "authority": "seebx_ai_operations",
+      "candidate_state": "verified_bearer_forwarding",
+      "disposition": "retain"
+    },
+    {
+      "path": "/api/admin/export",
+      "authority": "seebx_conversation_export",
+      "candidate_state": "canonical_route_and_verified_bearer",
+      "production_state": "retired_route_without_bearer",
+      "disposition": "retain_candidate_repair"
+    },
+    {
+      "path": "/api/admin/forget_recent",
+      "authority": "seebx_chat_history_clear",
+      "disposition": "retain"
+    },
+    {
+      "path": "/api/admin/clear_chat_history",
+      "authority": "seebx_chat_history_clear",
+      "production_enabled": false,
+      "disposition": "retain_fail_closed"
+    },
+    {
+      "path": "/api/admin/delete_all",
+      "authority": "seebx_chat_and_zep_full_clear",
+      "production_enabled": false,
+      "disposition": "retain_fail_closed"
+    },
+    {
+      "path": "/api/admin/voice-health",
+      "authority": "seebx_voice_slo",
+      "disposition": "retain"
+    },
+    {
+      "path": "/api/admin/debug_cookie",
+      "authority": "inspector_view_capability",
+      "disposition": "rename_candidate"
+    },
+    {
+      "path": "/api/chat/inspect",
+      "authority": "retired_vantage_query",
+      "caller_count": 0,
+      "candidate_state": "deleted",
+      "disposition": "retire"
+    }
+  ],
+  "scheduled_jobs": [
+    {
+      "unit": "ai-operations-alert-delivery-v1.timer",
+      "latest_result": "success",
+      "disposition": "retain"
+    },
+    {
+      "unit": "trusted-web-monitor-v1.timer",
+      "latest_result": "success",
+      "disposition": "retain"
+    },
+    {
+      "unit": "trusted-web-ods-cache.timer",
+      "latest_result": "success",
+      "disposition": "retain"
+    },
+    {
+      "unit": "telemetry-retention-v1.timer",
+      "latest_result": "success",
+      "disposition": "retain"
+    },
+    {
+      "unit": "voice-synthetic-canary.timer",
+      "latest_result": "failed_upstream_http_422_tts",
+      "candidate_state": "contract_repaired_and_tested",
+      "disposition": "retain_candidate_repair"
+    },
+    {
+      "unit": "chat-memory-git-sync.timer",
+      "latest_result": "success",
+      "candidate_state": "retire_on_immutable_cutover",
+      "disposition": "retire_at_cutover"
+    },
+    {
+      "unit": "lifeswitch-release-integrity-v1.timer",
+      "production_state": "not_installed",
+      "candidate_state": "template_present",
+      "disposition": "install_at_cutover"
+    }
+  ],
+  "verification": {
+    "backend_focused_tests": {
+      "count": 47,
+      "result": "pass"
+    },
+    "frontend_focused_tests": {
+      "count": 36,
+      "result": "pass"
+    },
+    "qdrant_resse_vantage_or_retired_memory_timers": 0
+  },
+  "open_gates": [
+    "rename_inspector_session_route_in_frontend_candidate",
+    "verify_repaired_voice_canary_in_disposable_or_installed_candidate",
+    "migrate_retained_memory_database_authorities_with_full_reconciliation",
+    "install_release_integrity_during_immutable_cutover",
+    "retire_git_sync_only_during_immutable_cutover"
+  ]
+}
